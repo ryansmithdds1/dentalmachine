@@ -204,6 +204,7 @@ export async function statementData(db, practiceId, patient, { family = false, s
     practice, patient: addressee, family, since, previous_balance: prior, entries, balance,
     pending_insurance: pending.insurance, pending_write_off: pending.write_off, amount_due: Math.max(0, balance - pending.total), generated_at: new Date().toISOString(),
     aging: await accountAging(db, practiceId, ids, today), plans,
+    also_responsible: addressee.second_responsible_id ? await db.get('SELECT first_name, last_name FROM patients WHERE id = ?', addressee.second_responsible_id) : null,
     pay_url: appUrl ? `${appUrl}/portal/${portalKey(practiceRow)}` : null,
   };
 }

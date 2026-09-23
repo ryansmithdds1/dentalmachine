@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../../api.js';
 import { useApi, useLookup } from '../../hooks.js';
 import { useAuth } from '../../auth.jsx';
-import { money, fmtDate, fmtDateTime, age } from '../../format.js';
+import { money, fmtDate, fmtDateTime, age, label } from '../../format.js';
 import { ErrorBox, Modal, PatientPicker, useSubmit } from '../ui.jsx';
 
 // Household view: everyone the guarantor is responsible for, with balances, visits and recall.
@@ -34,6 +34,11 @@ export default function FamilyTab({ patient, onChange }) {
           <div>
             <h2 style={{ margin: 0 }}>{g.last_name} family</h2>
             <div className="muted">Guarantor: <Link to={`/patients/${g.id}`}>{g.first_name} {g.last_name}</Link> · {[g.address, g.city, g.state].filter(Boolean).join(', ') || 'no address'}</div>
+            <div className="muted" style={{ fontSize: 13 }}>
+              Also responsible: {data.second_responsible ? <Link to={`/patients/${data.second_responsible.id}`}>{data.second_responsible.first_name} {data.second_responsible.last_name}</Link> : 'nobody'}
+              {can('patients:write') && <> · <button className="link" onClick={() => setModal('second')}>{data.second_responsible ? 'change' : 'add'}</button></>}
+              {data.second_responsible && can('patients:write') && <> · <button className="link" onClick={() => act(() => api.put(`/patients/${g.id}/family-responsible`, { patient_id: null }))}>remove</button></>}
+            </div>
           </div>
           <div className="actions">
             <div style={{ textAlign: 'right' }}>
@@ -48,7 +53,7 @@ export default function FamilyTab({ patient, onChange }) {
         </div>
         <div className="table-wrap">
           <table>
-            <thead><tr><th>Name</th><th>Age</th><th>Next visit</th><th>Recall due</th><th className="num">Balance</th><th /></tr></thead>
+            <thead><tr><th>Name</th><th>Relationship</th><th>Age</th><th>Next visit</th><th>Recall due</th><th className="num">Balance</th><th /></tr></thead>
             <tbody>
               {data.members.map((m) => (
                 <tr key={m.id} className="clickable" onClick={() => nav(`/patients/${m.id}`)} style={m.id === patient.id ? { background: 'var(--primary-soft)' } : undefined}>
@@ -56,6 +61,15 @@ export default function FamilyTab({ patient, onChange }) {
                     <strong>{m.first_name} {m.last_name}</strong>
                     {m.id === g.id && <span className="badge ok" style={{ marginLeft: 6 }}>Guarantor</span>}
                     {m.medical_alerts && <span className="alert-chip" style={{ marginLeft: 6 }} title={m.medical_alerts}>⚠</span>}
+                  </td>
+                  <td onClick={(e) => e.stopPropagation()}>
+                    {m.id === g.id ? <span className="muted">Head of household</span> : can('patients:write') ? (
+                      <select aria-label={`${m.first_name}'s relationship`} value={m.family_relationship || ''} style={{ width: 'auto' }}
+                        onChange={(e) => act(() => api.put(`/patients/${g.id}/family/${m.id}`, { relationship: e.target.value || null }))}>
+                        <option value="">—</option>
+                        {data.relationships.map((r) => <option key={r} value={r}>{label(r)}</option>)}
+                      </select>
+                    ) : label(m.family_relationship || '') || '—'}
                   </td>
                   <td>{m.dob ? age(m.dob) : '—'}</td>
                   <td>{m.next_appointment ? fmtDateTime(m.next_appointment) : <span className="muted">None</span>}</td>
@@ -65,7 +79,7 @@ export default function FamilyTab({ patient, onChange }) {
                     {can('patients:write') && m.id !== g.id && (
                       <>
                         <button className="small" onClick={() => act(() => api.post(`/patients/${m.id}/family/guarantor`))}>Make guarantor</button>{' '}
-                        <button className="small danger" onClick={() => confirm(`Remove ${m.first_name} from this family?`) && act(() => api.del(`/patients/${g.id}/family/${m.id}`))}>Remove</button>
+                        <button className="small danger" onClick={() => setModal({ unlink: m })}>Remove</button>
                       </>
                     )}
                   </td>
@@ -86,6 +100,16 @@ export default function FamilyTab({ patient, onChange }) {
           <NewMember guarantor={g} onDone={() => { setModal(null); reload(); }} />
         </Modal>
       )}
+      {modal === 'second' && (
+        <Modal title="Second responsible party" onClose={() => setModal(null)}>
+          <SecondResponsible guarantor={g} onDone={() => { setModal(null); reload(); }} />
+        </Modal>
+      )}
+      {modal?.unlink && (
+        <Modal title={`Remove ${modal.unlink.first_name} from the family`} onClose={() => setModal(null)}>
+          <Unlink guarantor={g} member={modal.unlink} onDone={() => { setModal(null); reload(); onChange?.(); }} />
+        </Modal>
+      )}
       {modal === 'link' && (
         <Modal title="Link an existing patient" onClose={() => setModal(null)}>
           <LinkMember guarantor={g} onDone={() => { setModal(null); reload(); }} />
@@ -95,8 +119,46 @@ export default function FamilyTab({ patient, onChange }) {
   );
 }
 
+// Removing someone from the household: shows what that does to billing before it happens.
+function Unlink({ guarantor, member, onDone }) {
+  const { data: impact } = useApi(`/patients/${guarantor.id}/family/${member.id}/unlink`);
+  const { submit, busy, error } = useSubmit(async () => {
+    await api.del(`/patients/${guarantor.id}/family/${member.id}?confirm=1`);
+    onDone();
+  });
+  if (!impact) return <div className="empty">Checking…</div>;
+  return (
+    <div>
+      <ErrorBox error={error} />
+      <p>{member.first_name} will be their own account: new charges bill to them, not {guarantor.first_name}.</p>
+      <ul>
+        <li>{impact.balance > 0 ? <>Their balance of <strong>{money(impact.balance)}</strong> stays on their own ledger and leaves the family balance.</> : 'They have no balance.'}</li>
+        {impact.plans.length > 0 && impact.balance > 0 && <li>{guarantor.first_name}&apos;s payment plan{impact.plans.length > 1 ? 's' : ''} ({impact.plans.map((p) => money(p.remaining)).join(', ')} left) {impact.plans.length > 1 ? 'stay' : 'stays'} with {guarantor.first_name}. Adjust or transfer the balance first if the plan was meant to cover {member.first_name}&apos;s treatment.</li>}
+        {impact.card_charges.map((c) => <li key={`${c.kind}${c.id}`}>{c.name}: stops charging {guarantor.first_name}&apos;s card and bills {member.first_name}&apos;s account instead (add their own card to keep autopay).</li>)}
+      </ul>
+      <div className="form-actions"><button className="danger" disabled={busy} onClick={submit}>Remove from family</button></div>
+    </div>
+  );
+}
+
+function SecondResponsible({ guarantor, onDone }) {
+  const [p, setP] = useState(null);
+  const { submit, busy, error } = useSubmit(async () => {
+    await api.put(`/patients/${guarantor.id}/family-responsible`, { patient_id: p.id });
+    onDone();
+  });
+  return (
+    <div>
+      <ErrorBox error={error} />
+      <p className="muted">Someone else who shares responsibility for this household's bills (e.g. the other parent). They're shown on the family file and on statements.</p>
+      <PatientPicker value={p} onChange={setP} />
+      <div className="form-actions"><button className="primary" disabled={!p || busy} onClick={submit}>Save</button></div>
+    </div>
+  );
+}
+
 function NewMember({ guarantor, onDone }) {
-  const [form, setForm] = useState({ first_name: '', last_name: guarantor.last_name, dob: '', gender: '' });
+  const [form, setForm] = useState({ first_name: '', last_name: guarantor.last_name, dob: '', gender: '', relationship: 'child' });
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
   const { submit, busy, error } = useSubmit(async () => {
     await api.post(`/patients/${guarantor.id}/family`, form);
@@ -110,6 +172,7 @@ function NewMember({ guarantor, onDone }) {
         <label>Last name<input value={form.last_name} onChange={set('last_name')} /></label>
         <label>Date of birth<input type="date" value={form.dob} onChange={set('dob')} /></label>
         <label>Gender<select value={form.gender} onChange={set('gender')}><option value="">—</option><option value="female">Female</option><option value="male">Male</option><option value="other">Other</option></select></label>
+        <label>Relationship to {guarantor.first_name}<select value={form.relationship} onChange={set('relationship')}>{['spouse', 'child', 'dependent', 'parent', 'other'].map((r) => <option key={r} value={r}>{label(r)}</option>)}</select></label>
       </div>
       <p className="muted" style={{ fontSize: 12 }}>Address, phone and email are copied from the guarantor.</p>
       <div className="form-actions"><button className="primary" disabled={busy}>Add to family</button></div>

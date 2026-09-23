@@ -209,8 +209,8 @@ Works well: drag, resize and create; undo; live updates; conflict checks; open-t
 1. ✅ **P1** Multiple phones (cell, home, work) with a preferred contact method and language.
 2. ✅ **P1** Primary provider and primary hygienist on the patient.
 3. ✅ **P2** Patient photo.
-4. **P2** Relationship types in the family (spouse, child, dependent) and a second responsible party.
-5. **P2** Unlinking a member moves or warns about their payment plans and cards.
+4. ✅ **P2** Relationship types in the family (spouse, child, dependent) and a second responsible party. _(Done: each member's relationship to the head of household; a second responsible party from the patient list, shown on the family file and statements.)_
+5. ✅ **P2** Unlinking a member moves or warns about their payment plans and cards. _(Done: removing a member shows their balance, the household's payment plans and anything charged to the household's card for them; memberships and ortho contracts on that card move to the member's own account.)_
 
 ### Chart
 1. ✅ **P1** Chart larger and touch-first: bigger teeth, and a searchable procedure picker with favourites / "quick buttons" (Open Dental's most used feature).

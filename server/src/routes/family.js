@@ -47,6 +47,13 @@ export async function planStatus(db, plan, today) {
   };
 }
 
+const RELATIONSHIPS = ['spouse', 'child', 'dependent', 'parent', 'other'];
+function relationshipOf(v) {
+  if (!v) return null;
+  if (!RELATIONSHIPS.includes(v)) throw new HttpError(400, `relationship must be one of ${RELATIONSHIPS.join(', ')}`);
+  return v;
+}
+
 export default function familyRoutes({ db }) {
   const r = Router();
   const patientOr404 = async (req, id = req.params.id) => await findOr404(db, 'patients', id, req.user.practice_id, 'Patient');
@@ -59,15 +66,18 @@ export default function familyRoutes({ db }) {
     const g = await guarantorOf(await patientOr404(req));
     const now = await practiceNow(db, pid);
     const members = await db.all(
-      `SELECT p.id, p.first_name, p.last_name, p.preferred_name, p.dob, p.phone, p.status, p.guarantor_id, p.medical_alerts,
+      `SELECT p.id, p.first_name, p.last_name, p.preferred_name, p.dob, p.phone, p.status, p.guarantor_id, p.medical_alerts, p.family_relationship,
         (SELECT COALESCE(SUM(amount),0) FROM ledger_entries l WHERE l.patient_id = p.id) AS balance,
         (SELECT MIN(start_time) FROM appointments a WHERE a.patient_id = p.id AND a.start_time >= ? AND a.status NOT IN ('cancelled','no_show')) AS next_appointment,
         (SELECT MIN(due_date) FROM recalls r WHERE r.patient_id = p.id AND r.status IN ('due','contacted')) AS recall_due
        FROM patients p WHERE p.practice_id = ? AND (p.id = ? OR p.guarantor_id = ?) AND p.status != 'archived'
        ORDER BY p.guarantor_id IS NOT NULL, p.dob`, now, pid, g.id, g.id,
     );
+    const second = g.second_responsible_id ? await db.get('SELECT id, first_name, last_name, phone, email FROM patients WHERE id = ?', g.second_responsible_id) : null;
     res.json({
       guarantor: { id: g.id, first_name: g.first_name, last_name: g.last_name, phone: g.phone, email: g.email, address: g.address, city: g.city, state: g.state, zip: g.zip },
+      second_responsible: second,
+      relationships: RELATIONSHIPS,
       members,
       family_balance: members.reduce((s, m) => s + m.balance, 0),
     });
@@ -83,14 +93,14 @@ export default function familyRoutes({ db }) {
       if (await db.get('SELECT id FROM patients WHERE guarantor_id = ? LIMIT 1', member.id)) {
         throw new HttpError(409, `${member.first_name} is the guarantor of another family; move those members first`);
       }
-      await update(db, 'patients', member.id, req.user.practice_id, { guarantor_id: g.id, updated_at: new Date().toISOString() });
+      await update(db, 'patients', member.id, req.user.practice_id, { guarantor_id: g.id, family_relationship: relationshipOf(req.body.relationship), updated_at: new Date().toISOString() });
       memberId = member.id;
     } else {
       // New family member, inheriting the household's contact details.
       const row = pick(req.body, ['first_name', 'last_name', 'dob', 'gender', 'preferred_name']);
       requireFields(row, ['first_name']);
       memberId = await insert(db, 'patients', {
-        ...row, last_name: row.last_name || g.last_name, practice_id: req.user.practice_id, guarantor_id: g.id,
+        ...row, last_name: row.last_name || g.last_name, practice_id: req.user.practice_id, guarantor_id: g.id, family_relationship: relationshipOf(req.body?.relationship),
         phone: g.phone, email: g.email, address: g.address, city: g.city, state: g.state, zip: g.zip, primary_provider_id: g.primary_provider_id,
       });
     }
@@ -98,13 +108,74 @@ export default function familyRoutes({ db }) {
     res.status(201).json(await db.get('SELECT * FROM patients WHERE id = ?', memberId));
   });
 
+  // A member's relationship to the head of household.
+  r.put('/patients/:id/family/:memberId', requirePermission('patients:write'), async (req, res) => {
+    const head = await guarantorOf(await patientOr404(req));
+    const member = await patientOr404(req, req.params.memberId);
+    if (member.guarantor_id !== head.id) throw new HttpError(400, "That patient isn't a member of this family");
+    await update(db, 'patients', member.id, req.user.practice_id, { family_relationship: relationshipOf(req.body?.relationship), updated_at: new Date().toISOString() });
+    res.json({ ok: true });
+  });
+
+  // A second responsible party for the household (e.g. the other parent), from the patient records.
+  r.put('/patients/:id/family-responsible', requirePermission('patients:write'), async (req, res) => {
+    const head = await guarantorOf(await patientOr404(req));
+    let second = null;
+    if (req.body?.patient_id) {
+      second = await patientOr404(req, req.body.patient_id);
+      if (second.id === head.id) throw new HttpError(400, 'Choose someone other than the head of household');
+    }
+    await update(db, 'patients', head.id, req.user.practice_id, { second_responsible_id: second?.id ?? null, updated_at: new Date().toISOString() });
+    await audit(db, req, 'family.second_responsible', 'patients', head.id, { second_responsible_id: second?.id ?? null });
+    res.json({ ok: true });
+  });
+
+  // What unlinking would leave behind: the member's own balance, the household's payment plans, and
+  // memberships or ortho contracts that charge the household's card for this member.
+  const unlinkImpact = async (head, member) => {
+    const today = (await practiceNow(db, head.practice_id)).slice(0, 10);
+    const plans = [];
+    for (const p of await db.all("SELECT * FROM payment_plans WHERE patient_id = ? AND status = 'active'", head.id)) {
+      const s = await planStatus(db, p, today);
+      plans.push({ id: p.id, remaining: s.remaining, notes: p.notes || null });
+    }
+    const cardCharges = [
+      ...(await db.all(
+        `SELECT m.id, 'membership' AS kind, mp.name AS name FROM memberships m JOIN membership_plans mp ON mp.id = m.plan_id JOIN payment_methods pm ON pm.id = m.payment_method_id
+         WHERE m.patient_id = ? AND m.status IN ('active','past_due') AND pm.patient_id = ?`, member.id, head.id,
+      )),
+      ...(await db.all(
+        `SELECT o.id, 'ortho' AS kind, 'Orthodontic contract' AS name FROM ortho_cases o JOIN payment_methods pm ON pm.id = o.payment_method_id
+         WHERE o.patient_id = ? AND o.status IN ('active','retention') AND pm.patient_id = ?`, member.id, head.id,
+      )),
+    ];
+    const balance = (await db.get('SELECT COALESCE(SUM(amount), 0) AS n FROM ledger_entries WHERE patient_id = ?', member.id)).n;
+    return { balance, plans, card_charges: cardCharges };
+  };
+  r.get('/patients/:id/family/:memberId/unlink', requirePermission('patients:read'), async (req, res) => {
+    const head = await guarantorOf(await patientOr404(req));
+    const member = await patientOr404(req, req.params.memberId);
+    if (member.guarantor_id !== head.id) throw new HttpError(400, "That patient isn't a member of this family");
+    res.json(await unlinkImpact(head, member));
+  });
+
   r.delete('/patients/:id/family/:memberId', requirePermission('patients:write'), async (req, res) => {
     const head = await guarantorOf(await patientOr404(req));
     const member = await patientOr404(req, req.params.memberId);
     if (member.guarantor_id !== head.id) throw new HttpError(400, "That patient isn't a member of this family");
-    await update(db, 'patients', member.id, req.user.practice_id, { guarantor_id: null, updated_at: new Date().toISOString() });
-    await audit(db, req, 'family.unlink', 'patients', member.id);
-    res.json({ ok: true });
+    const impact = await unlinkImpact(head, member);
+    const needsConfirm = impact.card_charges.length || (impact.balance > 0 && impact.plans.length);
+    if (needsConfirm && req.query.confirm !== '1') throw new HttpError(409, 'Unlinking affects billing — review and confirm', { impact });
+    await db.tx(async () => {
+      await update(db, 'patients', member.id, req.user.practice_id, { guarantor_id: null, family_relationship: null, updated_at: new Date().toISOString() });
+      // The household's card stops paying for them: those charges go to the member's own account.
+      for (const c of impact.card_charges) {
+        if (c.kind === 'membership') await db.run('UPDATE memberships SET payment_method_id = NULL WHERE id = ?', c.id);
+        else await db.run('UPDATE ortho_cases SET payment_method_id = NULL, autopay = 0 WHERE id = ?', c.id);
+      }
+    });
+    await audit(db, req, 'family.unlink', 'patients', member.id, { card_charges_moved: impact.card_charges.length, balance: impact.balance });
+    res.json({ ok: true, moved: impact.card_charges });
   });
 
   // Make a member the head of household (e.g. a parent takes over from a grandparent).

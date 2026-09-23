@@ -42,6 +42,7 @@ export default function Statement() {
         <div className="inline" style={{ justifyContent: 'space-between', alignItems: 'flex-start', margin: '20px 0' }}>
           <div>
             <strong>{p.first_name} {p.last_name}</strong>
+            {s.also_responsible && <div className="muted" style={{ fontSize: 13 }}>Also responsible: {s.also_responsible.first_name} {s.also_responsible.last_name}</div>}
             <div>{p.address}</div>
             <div>{[p.city, p.state, p.zip].filter(Boolean).join(', ')}</div>
           </div>
