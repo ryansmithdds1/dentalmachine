@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { HttpError, rateLimit } from '../auth.js';
 import { insert, update, hashToken, practiceNow, normalizeDateTime, audit, mapSeq, publicPractice } from '../util.js';
-import { MEDICAL_CONDITIONS, parseMedicalHistory, patientUpdatesFromHistory } from '../forms.js';
+import { MEDICAL_CONDITIONS, parseMedicalHistory, contactUpdatesFromHistory } from '../forms.js';
 import { openSlots } from './schedule.js';
 import { publish } from '../events.js';
 import { officeHours } from '../hours.js';
@@ -169,8 +169,11 @@ export default function publicRoutes({ db }) {
       const id = await insert(db, 'patient_forms', {
         practice_id: f.practice_id, patient_id: f.patient_id, request_id: f.id, kind: f.kind, data: JSON.stringify(answers),
         signature_name: signatureName, signature_image: signatureImage, ip: req.ip, user_agent: String(req.headers['user-agent'] || '').slice(0, 300),
+        review_status: 'pending',
       });
-      await update(db, 'patients', f.patient_id, f.practice_id, { ...patientUpdatesFromHistory(answers), updated_at: new Date().toISOString() });
+      // Contact details apply now; medical changes wait for a clinician to review them against the chart,
+      // so a rushed "none" on a tablet can't erase an allergy the office recorded.
+      await update(db, 'patients', f.patient_id, f.practice_id, { ...contactUpdatesFromHistory(answers), updated_at: new Date().toISOString() });
       await db.run("UPDATE form_requests SET status = 'completed', completed_at = datetime('now') WHERE id = ?", f.id);
       return id;
     });

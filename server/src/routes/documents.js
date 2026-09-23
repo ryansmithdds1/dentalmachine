@@ -1,6 +1,7 @@
 import express, { Router } from 'express';
 import { requirePermission, HttpError } from '../auth.js';
 import { findOr404, insert, audit, requireOneOf, validTooth } from '../util.js';
+import { sniffMime } from './imaging.js';
 
 const CATEGORIES = ['xray', 'photo', 'document', 'consent', 'insurance_card', 'referral', 'other'];
 const ALLOWED = /^(image\/(png|jpeg|gif|webp|bmp|tiff)|application\/pdf|application\/dicom|text\/plain)$/;
@@ -26,9 +27,12 @@ export default function documentRoutes({ db, storage }) {
     express.raw({ type: () => true, limit: MAX_UPLOAD_BYTES }),
     async (req, res) => {
       const patient = await findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient');
-      const mime = String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
-      if (!ALLOWED.test(mime)) throw new HttpError(415, 'Only images, PDFs, DICOM and text files can be uploaded');
       if (!Buffer.isBuffer(req.body) || !req.body.length) throw new HttpError(400, 'Empty upload');
+      // Go by the file's contents: browsers send DICOM (and often TIFF) as application/octet-stream,
+      // and a declared type isn't proof of what the file is.
+      const declared = String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
+      const mime = sniffMime(req.body, String(req.query.filename || '')) || (declared === 'text/plain' ? declared : null);
+      if (!mime || !ALLOWED.test(mime)) throw new HttpError(415, 'Only images, PDFs, DICOM and text files can be uploaded');
       const category = String(req.query.category || 'document');
       requireOneOf(category, CATEGORIES, 'category');
       const tooth = req.query.tooth ? String(req.query.tooth).toUpperCase() : null;

@@ -6,6 +6,9 @@ import { fmtDate, label } from '../../format.js';
 import { ErrorBox, Modal } from '../ui.jsx';
 import { useLiveEvents } from '../../live.js';
 
+// Browsers can't show TIFF or DICOM; those are offered as downloads instead of a broken preview.
+const previewable = (mime) => /^image\/(png|jpeg|gif|webp|bmp)$/.test(mime);
+
 const CATEGORIES = ['xray', 'photo', 'document', 'consent', 'insurance_card', 'referral', 'other'];
 const catLabel = (c) => (c === 'xray' ? 'X-ray' : label(c));
 
@@ -19,7 +22,7 @@ async function fetchBlob(id) {
 function Thumb({ doc, onOpen }) {
   const [src, setSrc] = useState(null);
   useEffect(() => {
-    if (!doc.mime.startsWith('image/')) return undefined;
+    if (!previewable(doc.mime)) return undefined;
     let url;
     fetchBlob(doc.id).then((u) => setSrc((url = u))).catch(() => {});
     return () => url && URL.revokeObjectURL(url);
@@ -127,9 +130,9 @@ export default function DocumentsTab({ patient }) {
             {catLabel(viewing.doc.category)}{viewing.doc.tooth ? ` · tooth #${viewing.doc.tooth}` : ''} · {viewing.doc.taken_at ? `taken ${fmtDate(viewing.doc.taken_at)} · ` : ''}added {fmtDate(viewing.doc.created_at)}{viewing.doc.uploaded_by_name ? ` by ${viewing.doc.uploaded_by_name}` : viewing.doc.notes ? ` · ${viewing.doc.notes}` : ''}
           </div>
           {!viewing.url && <div className="empty">Loading…</div>}
-          {viewing.url && viewing.doc.mime.startsWith('image/') && <img src={viewing.url} alt={viewing.doc.filename} className="doc-viewer" />}
+          {viewing.url && previewable(viewing.doc.mime) && <img src={viewing.url} alt={viewing.doc.filename} className="doc-viewer" />}
           {viewing.url && viewing.doc.mime === 'application/pdf' && <iframe src={viewing.url} title={viewing.doc.filename} className="doc-viewer" style={{ height: '70vh', width: '100%', border: 0 }} />}
-          {viewing.url && !viewing.doc.mime.startsWith('image/') && viewing.doc.mime !== 'application/pdf' && <p>Preview not available for this file type.</p>}
+          {viewing.url && !previewable(viewing.doc.mime) && viewing.doc.mime !== 'application/pdf' && <p>Preview not available for this file type — <a href={viewing.url} download={viewing.doc.filename}>download it</a> to open in your imaging software.</p>}
           <div className="form-actions">
             {viewing.url && <a href={viewing.url} download={viewing.doc.filename}><button>Download</button></a>}
             {can('clinical:write') && <button className="danger" onClick={() => remove(viewing.doc)}>Remove</button>}

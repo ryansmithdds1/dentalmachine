@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import { requirePermission, HttpError } from '../auth.js';
-import { requireFields, insert, findOr404, audit, practiceNow, mapSeq } from '../util.js';
+import { requireFields, insert, update, findOr404, audit, practiceNow, mapSeq } from '../util.js';
 import { primaryPolicy } from '../services.js';
+import { historyChanges } from '../forms.js';
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const addDays = (d, n) => new Date(Date.parse(`${d}T12:00:00Z`) + n * 86400_000).toISOString().slice(0, 10);
@@ -157,6 +158,33 @@ export default function frontDeskRoutes({ db }) {
     const id = await insert(db, 'followups', { practice_id: req.user.practice_id, patient_id: patient.id, kind, outcome, note: note ? String(note).slice(0, 1000) : null, created_by: req.user.id });
     await audit(db, req, 'followup.create', 'followups', id, { kind, outcome });
     res.status(201).json(await db.get('SELECT * FROM followups WHERE id = ?', id));
+  });
+
+  // Medical histories patients submitted that nobody has reviewed yet, with what would change on the chart.
+  r.get('/patients/:id/history-review', requirePermission('clinical:read'), async (req, res) => {
+    const patient = await findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient');
+    const form = await db.get("SELECT id, data, signed_at, signature_name FROM patient_forms WHERE patient_id = ? AND practice_id = ? AND kind = 'medical_history' AND review_status = 'pending' ORDER BY id DESC LIMIT 1", patient.id, req.user.practice_id);
+    if (!form) return res.json(null);
+    const answers = JSON.parse(form.data);
+    res.json({ form_id: form.id, signed_at: form.signed_at, signature_name: form.signature_name, answers, changes: historyChanges(patient, answers) });
+  });
+
+  // A clinician accepts the reviewed values; the chart is updated and the history counts as reviewed.
+  r.post('/patient-forms/:fid/review', requirePermission('clinical:write'), async (req, res) => {
+    const form = await findOr404(db, 'patient_forms', req.params.fid, req.user.practice_id, 'Form');
+    if (form.review_status !== 'pending') throw new HttpError(409, 'That form was already reviewed');
+    const updates = {};
+    for (const f of ['medical_alerts', 'allergies', 'medications']) {
+      if (req.body?.[f] !== undefined) updates[f] = String(req.body[f] ?? '').trim().slice(0, 2000) || null;
+    }
+    await db.tx(async () => {
+      if (Object.keys(updates).length) await update(db, 'patients', form.patient_id, req.user.practice_id, { ...updates, updated_at: new Date().toISOString() });
+      await db.run("UPDATE patients SET medical_reviewed_at = datetime('now') WHERE id = ?", form.patient_id);
+      // Older unreviewed submissions are superseded by this review.
+      await db.run("UPDATE patient_forms SET review_status = CASE WHEN id = ? THEN 'reviewed' ELSE 'superseded' END, reviewed_by = ?, reviewed_at = datetime('now') WHERE patient_id = ? AND review_status = 'pending' AND id <= ?", form.id, req.user.id, form.patient_id, form.id);
+    });
+    await audit(db, req, 'medical_history.review', 'patients', form.patient_id, { form_id: form.id, fields: Object.keys(updates) });
+    res.json(await db.get('SELECT id, medical_alerts, allergies, medications, medical_reviewed_at FROM patients WHERE id = ?', form.patient_id));
   });
 
   r.post('/patients/:id/medical-reviewed', requirePermission('clinical:write'), async (req, res) => {

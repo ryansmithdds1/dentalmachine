@@ -1,6 +1,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { DEFAULT_HOURS } from '../src/hours.js';
+import { buildDicom } from '../src/dicom.js';
 import { mkdtempSync, rmSync, readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -189,6 +190,7 @@ test('online booking: public request → front desk accepts → patient + appoin
 
 test('intake form link updates the medical history with an e-signature', async () => {
   const { api, patient } = await setup();
+  await api.put(`/patients/${patient.id}`, { allergies: 'Latex' });
   const created = (await api.post(`/patients/${patient.id}/form-requests`, { send: 'sms' })).data;
   assert.match(created.url, /^https:\/\/app\.example\.com\/f\//);
   assert.equal(created.message.kind, 'intake_form');
@@ -209,10 +211,22 @@ test('intake form link updates the medical history with an e-signature', async (
   assert.equal(ok.status, 201);
   assert.equal((await pub.get(`/public/forms/${token}`)).status, 410, 'single use');
 
-  const p = (await api.get(`/patients/${patient.id}`)).data;
-  assert.equal(p.medical_alerts, 'Diabetes, Requires antibiotic premedication');
-  assert.equal(p.allergies, 'Penicillin');
+  // Contact details apply at once; medical changes wait for a clinician, merged with what's on the chart.
+  let p = (await api.get(`/patients/${patient.id}`)).data;
   assert.equal(p.address, '1 New St');
+  assert.equal(p.allergies, 'Latex', 'staff-entered allergy untouched until review');
+  assert.equal(p.history_review_pending, true);
+  const review = (await api.get(`/patients/${patient.id}/history-review`)).data;
+  assert.deepEqual(review.changes.allergies, { current: 'Latex', reported: 'Penicillin', proposed: 'Latex, Penicillin' });
+  assert.equal(review.changes.medical_alerts.proposed, 'Diabetes, Requires antibiotic premedication');
+  const done = await api.post(`/patient-forms/${review.form_id}/review`, { medical_alerts: review.changes.medical_alerts.proposed, allergies: review.changes.allergies.proposed, medications: 'Metformin' });
+  assert.equal(done.status, 200);
+  p = (await api.get(`/patients/${patient.id}`)).data;
+  assert.equal(p.medical_alerts, 'Diabetes, Requires antibiotic premedication');
+  assert.equal(p.allergies, 'Latex, Penicillin');
+  assert.equal(p.history_review_pending, false);
+  assert.ok(p.medical_reviewed_at);
+  assert.equal((await api.post(`/patient-forms/${review.form_id}/review`, {})).status, 409);
   const forms = (await api.get(`/patients/${patient.id}/forms`)).data;
   assert.equal(forms.submissions[0].signature_name, 'Pat Smith');
   assert.deepEqual(forms.submissions[0].data.conditions, ['Diabetes']);
@@ -239,9 +253,15 @@ test('documents are stored encrypted, served back intact, and practice-scoped', 
 
   const bad = await api.post(`/patients/${patient.id}/documents?filename=x.html`, '<script>alert(1)</script>', { 'Content-Type': 'text/html' });
   assert.equal(bad.status, 415);
-  assert.equal((await api.get(`/patients/${patient.id}/documents`)).data.length, 1);
+  // The type comes from the contents: a DICOM file from a browser (sent as octet-stream) is accepted,
+  // and HTML that claims to be a PNG is not.
+  const dcm = await api.post(`/patients/${patient.id}/documents?category=xray&filename=pa.dcm`, new Uint8Array(buildDicom({ patientId: String(patient.id), studyDate: '20260101', modality: 'IO' })), { 'Content-Type': 'application/octet-stream' });
+  assert.equal(dcm.status, 201, JSON.stringify(dcm.data));
+  assert.equal(dcm.data.mime, 'application/dicom');
+  assert.equal((await api.post(`/patients/${patient.id}/documents?filename=x.png`, '<html>hi</html>', { 'Content-Type': 'image/png' })).status, 415);
+  assert.equal((await api.get(`/patients/${patient.id}/documents`)).data.length, 2);
   await api.del(`/documents/${up.data.id}`);
-  assert.equal((await api.get(`/patients/${patient.id}/documents`)).data.length, 0);
+  assert.equal((await api.get(`/patients/${patient.id}/documents`)).data.length, 1);
 });
 
 test('text-to-pay: Stripe checkout link, then signed webhook posts the payment once', async () => {

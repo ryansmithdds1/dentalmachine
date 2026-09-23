@@ -74,3 +74,11 @@ test('queries outside a transaction neither see nor join its uncommitted work', 
     await db.close();
   }
 });
+
+test('medical history merges keep what staff recorded', async () => {
+  const { mergeList } = await import('../src/forms.js');
+  assert.equal(mergeList('Latex', 'None'), 'Latex', 'a rushed "none" never erases an allergy');
+  assert.equal(mergeList('Penicillin; latex', 'penicillin, Codeine'), 'Penicillin, latex, Codeine');
+  assert.equal(mergeList(null, 'NKDA'), 'None');
+  assert.equal(mergeList(null, null), null);
+});

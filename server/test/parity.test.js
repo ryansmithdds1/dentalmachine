@@ -209,9 +209,11 @@ test('analytics KPIs, statement batch, recall campaign, review requests and temp
   await api.put('/practice', { review_url: 'https://g.page/r/example/review', review_requests: true });
   const early = (await api.post('/appointments', { patient_id: patient.id, provider_id: dentist.id, start_time: `${d} 00:10`, end_time: `${d} 00:20` })).data;
   await api.put(`/appointments/${early.id}`, { status: 'completed' });
-  assert.equal(await runReviewRequests(db, messenger), 1);
+  // Run as of late evening that day (the job only sends for visits that have ended).
+  const evening = { now: new Date(`${d}T22:00:00-04:00`) };
+  assert.equal(await runReviewRequests(db, messenger, evening), 1);
   assert.match(sent.at(-1).body, /g\.page\/r\/example\/review/);
-  assert.equal(await runReviewRequests(db, messenger), 0);
+  assert.equal(await runReviewRequests(db, messenger, evening), 0);
 });
 
 test('quick search and full data export (without secrets)', async () => {

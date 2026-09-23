@@ -19,13 +19,30 @@ export const RX_FAVORITES = [
   { drug: 'Sodium fluoride 1.1% (PreviDent 5000)', strength: '1.1% paste', sig: 'Brush with a thin ribbon once daily at bedtime; spit, do not rinse', quantity: '1 tube' },
 ];
 
+// What the patient saw and signed: frozen at signing, so later edits to the plan can't change it.
+export const snapshotOf = (view) => ({
+  procedures: view.procedures.filter((p) => p.status === 'planned').map((p) => ({ id: p.id, code: p.code, description: p.description, tooth: p.tooth, surfaces: p.surfaces, fee: p.fee, status: p.status })),
+  estimate: view.estimate,
+});
+export const signedVersion = (plan, current) => {
+  if (!plan.signed_snapshot) return null;
+  const signed = JSON.parse(plan.signed_snapshot);
+  // Changed since signing: a signed line was edited or removed, or new work was added to the plan.
+  const now = new Map(current.map((p) => [p.id, p]));
+  const same = (s, c) => c && c.code === s.code && (c.tooth || '') === (s.tooth || '') && (c.surfaces || '') === (s.surfaces || '') && c.fee === s.fee;
+  const changed = signed.procedures.some((s) => !same(s, now.get(s.id))) || current.some((p) => p.status === 'planned' && !signed.procedures.some((s) => s.id === p.id));
+  return { ...signed, changed };
+};
+
 const planView = async (db, plan) => {
   const procedures = await db.all("SELECT * FROM procedures WHERE treatment_plan_id = ? AND status != 'cancelled' ORDER BY priority, id", plan.id);
   return {
-    ...plan, sign_token_hash: undefined, procedures,
+    ...plan, sign_token_hash: undefined, signed_snapshot: undefined, procedures,
     estimate: await estimateCoverage(db, await primaryPolicy(db, plan.practice_id, plan.patient_id), procedures.filter((p) => p.status === 'planned')),
+    signed_version: signedVersion(plan, procedures),
   };
 };
+const SIGN_LINK_DAYS = 30;
 
 export default function casePresentationRoutes({ db, messenger, config, erx }) {
   const r = Router();
@@ -35,7 +52,8 @@ export default function casePresentationRoutes({ db, messenger, config, erx }) {
     const plan = await findOr404(db, 'treatment_plans', req.params.tid, req.user.practice_id, 'Treatment plan');
     if (plan.signed_at) throw new HttpError(409, 'This plan is already signed');
     const { token, hash } = newToken();
-    await db.run("UPDATE treatment_plans SET sign_token_hash = ?, presented_at = datetime('now') WHERE id = ?", hash, plan.id);
+    const expires = new Date(Date.now() + SIGN_LINK_DAYS * 86400_000).toISOString();
+    await db.run("UPDATE treatment_plans SET sign_token_hash = ?, sign_token_expires_at = ?, presented_at = datetime('now') WHERE id = ?", hash, expires, plan.id);
     const url = `${config.appUrl}/tp/${token}`;
     let message = null;
     if (req.body?.send) {
@@ -164,10 +182,15 @@ export function publicCasePresentation({ db }) {
   const byToken = async (token) => {
     const plan = await db.get('SELECT * FROM treatment_plans WHERE sign_token_hash = ?', hashToken(token));
     if (!plan) throw new HttpError(404, 'This link is no longer valid');
+    // Links expire; once signed, the patient can look at what they signed for a week.
+    const signedLongAgo = plan.signed_at && Date.parse(`${plan.signed_at.replace(' ', 'T')}Z`) < Date.now() - 7 * 86400_000;
+    if (signedLongAgo || (plan.sign_token_expires_at && plan.sign_token_expires_at < new Date().toISOString())) throw new HttpError(410, 'This link has expired — please ask the office for a new one');
     return plan;
   };
   const publicView = async (plan) => {
-    const v = await planView(db, plan);
+    const live = await planView(db, plan);
+    // After signing, the patient sees exactly the version they signed.
+    const v = plan.signed_snapshot ? { ...live, ...JSON.parse(plan.signed_snapshot) } : live;
     const patient = await db.get('SELECT first_name FROM patients WHERE id = ?', plan.patient_id);
     const practice = await db.get('SELECT name, phone, address, city, state, zip FROM practices WHERE id = ?', plan.practice_id);
     return {
@@ -187,10 +210,12 @@ export function publicCasePresentation({ db }) {
     const image = req.body?.signature_image;
     if (image != null && (typeof image !== 'string' || !image.startsWith('data:image/png;base64,') || image.length > 300_000)) throw new HttpError(400, 'Invalid signature image');
     if (!req.body?.consent) throw new HttpError(400, 'Please confirm you have read and understand the plan');
-    await db.run(
-      "UPDATE treatment_plans SET status = 'accepted', accepted_at = COALESCE(accepted_at, datetime('now')), signed_at = datetime('now'), signature_name = ?, signature_image = ? WHERE id = ?",
-      name, image || null, plan.id,
+    const snapshot = JSON.stringify(snapshotOf(await planView(db, plan)));
+    const signed = await db.run(
+      "UPDATE treatment_plans SET status = 'accepted', accepted_at = COALESCE(accepted_at, datetime('now')), signed_at = datetime('now'), signature_name = ?, signature_image = ?, signed_snapshot = ? WHERE id = ? AND signed_at IS NULL",
+      name, image || null, snapshot, plan.id,
     );
+    if (!signed.changes) throw new HttpError(409, 'This plan has already been signed');
     await audit(db, { ip: req.ip, user: { practice_id: plan.practice_id, id: null } }, 'treatment_plan.patient_signed', 'treatment_plans', plan.id);
     res.json(await publicView(await db.get('SELECT * FROM treatment_plans WHERE id = ?', plan.id)));
   });

@@ -75,6 +75,7 @@ export default function patientRoutes({ db }) {
         pid, patient.id, (await practiceNow(db, pid)).slice(0, 10),
       ),
       recalls: await db.all('SELECT * FROM recalls WHERE practice_id = ? AND patient_id = ? ORDER BY due_date', pid, patient.id),
+      history_review_pending: (await db.get("SELECT COUNT(*) AS n FROM patient_forms WHERE patient_id = ? AND kind = 'medical_history' AND review_status = 'pending'", patient.id)).n > 0,
       guarantor: patient.guarantor_id ? await db.get('SELECT id, first_name, last_name FROM patients WHERE id = ?', patient.guarantor_id) : null,
       family_size: (await db.get('SELECT COUNT(*) AS n FROM patients WHERE practice_id = ? AND status != \'archived\' AND (id = ? OR guarantor_id = ?)', pid, patient.guarantor_id || patient.id, patient.guarantor_id || patient.id)).n,
       open_lab_cases: await db.all("SELECT id, lab_name, description, status, due_date FROM lab_cases WHERE practice_id = ? AND patient_id = ? AND status IN ('sent','returned_for_adjustment','received') ORDER BY due_date", pid, patient.id),

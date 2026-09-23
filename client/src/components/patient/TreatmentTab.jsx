@@ -45,7 +45,8 @@ export default function TreatmentTab({ patient, onChange }) {
               <h3 style={{ margin: 0 }}>{plan.name} <Badge value={plan.status} /></h3>
               <div className="muted">
                 Created {fmtDate(plan.created_at)}{plan.accepted_at ? ` · Accepted ${fmtDate(plan.accepted_at)}` : ''}
-                {plan.signed_at && <> · <span className="badge ok">✍ Signed by {plan.signature_name}</span></>}
+                {plan.signed_at && <> · <span className="badge ok">✍ Signed by {plan.signature_name}</span> <a href={`/treatment-plans/${plan.id}/print?signed=1`} target="_blank" rel="noreferrer">signed copy</a></>}
+                {plan.signed_version?.changed && <> · <span className="badge warn" title="The plan was edited after the patient signed it. The signed copy is kept as it was; put new work in a new plan to get it signed.">Changed since signed</span></>}
                 {!plan.signed_at && plan.presented_at && ` · Sent to patient ${fmtDate(plan.presented_at)}`}
               </div>
             </div>
@@ -56,7 +57,7 @@ export default function TreatmentTab({ patient, onChange }) {
                   <button className="small" onClick={() => act(async () => { await api.post('/preauths', { patient_insurance_id: plan.estimate.policy.id, treatment_plan_id: plan.id }); setNote('Pre-authorization created — send it from Billing → Pre-authorizations.'); })}>Pre-authorize</button>
                 )}
                 <button className="small" onClick={() => window.open(`/treatment-plans/${plan.id}/print`, '_blank')}>Print</button>
-                {plan.status !== 'accepted' && <button className="small" onClick={() => act(() => api.put(`/treatment-plans/${plan.id}`, { status: 'accepted' }))}>Accepted verbally</button>}
+                {plan.status === 'proposed' && <button className="small" onClick={() => act(() => api.put(`/treatment-plans/${plan.id}`, { status: 'accepted' }))}>Accepted verbally</button>}
                 {plan.status === 'proposed' && <button className="small danger" onClick={() => act(() => api.put(`/treatment-plans/${plan.id}`, { status: 'rejected' }))}>Declined</button>}
               </div>
             )}

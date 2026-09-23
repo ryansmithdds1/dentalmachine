@@ -128,6 +128,8 @@ export async function estimateCoverage(db, policy, procedures, { primary = null 
 }
 
 const RECALL_CODES = { D1110: 'prophy', D1120: 'prophy', D4910: 'perio_maint' };
+// Extractions (D7111-D7250): the tooth is charted missing once the extraction is done.
+export const isExtraction = (code) => /^D7(1[1-4]\d|2[0-5]\d)$/.test(String(code || ''));
 
 export async function completeProcedure(db, user, procedure, { providerId, appointmentId } = {}) {
   if (procedure.status === 'completed') throw new HttpError(409, 'Procedure already completed');
@@ -153,6 +155,13 @@ export async function completeProcedure(db, user, procedure, { providerId, appoi
       entry_date: today,
       created_by: user.id,
     });
+
+    if (isExtraction(procedure.code) && procedure.tooth) {
+      await insert(db, 'tooth_conditions', {
+        practice_id: procedure.practice_id, patient_id: procedure.patient_id, tooth: procedure.tooth, condition: 'missing',
+        notes: `Extracted (${procedure.code})`, recorded_by: user.id, procedure_id: procedure.id,
+      });
+    }
 
     const recallType = RECALL_CODES[procedure.code];
     if (recallType) {
@@ -255,6 +264,7 @@ export async function voidLedgerEntry(db, entry, { userId, reason }) {
       const claim = await db.get("SELECT c.id FROM claim_items ci JOIN claims c ON c.id = ci.claim_id WHERE ci.procedure_id = ? AND c.status != 'void'", entry.procedure_id);
       if (claim) throw new HttpError(409, `The procedure is on claim #${claim.id} — void that claim first`);
       await db.run("UPDATE procedures SET status = 'planned', completed_at = NULL WHERE id = ? AND status = 'completed'", entry.procedure_id);
+      await db.run('DELETE FROM tooth_conditions WHERE procedure_id = ?', entry.procedure_id);
     }
     return reverseEntry(db, entry, { userId, reason: String(reason).trim().slice(0, 300), date });
   });

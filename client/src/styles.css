@@ -534,3 +534,5 @@ button.active, .seg button.active { background: var(--primary-soft); color: var(
   .settings-select { display: block; margin-bottom: 12px; }
 }
 tr.voided td { color: var(--muted); } tr.voided td:nth-child(3), tr.voided td.num:not(:last-child) { text-decoration: line-through; }
+.addendum { border-left: 3px solid var(--border); padding: 4px 0 4px 10px; margin-top: 10px; }
+.actions button.active { background: var(--danger-soft); border-color: var(--danger); color: var(--danger); }

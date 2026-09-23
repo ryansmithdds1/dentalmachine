@@ -183,6 +183,8 @@ export function sniffMime(buf, filename = '') {
   if (b[0] === 0xff && b[1] === 0xd8) return 'image/jpeg';
   if (b.toString('latin1', 1, 4) === 'PNG') return 'image/png';
   if (b.toString('latin1', 0, 2) === 'BM') return 'image/bmp';
+  if (b.toString('latin1', 0, 4) === 'GIF8') return 'image/gif';
+  if (b.toString('latin1', 0, 4) === 'RIFF' && b.toString('latin1', 8, 12) === 'WEBP') return 'image/webp';
   if (b.toString('latin1', 0, 4) === 'II*\0' || b.toString('latin1', 0, 4) === 'MM\0*') return 'image/tiff';
   if (b.toString('latin1', 0, 4) === '%PDF') return 'application/pdf';
   if (/\.dcm$/i.test(filename)) return 'application/dicom';

@@ -3,7 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 import { useApi } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
 import { money, fullName, age, fmtDate, fmtDateTime, fmtUtcDate, label, practiceToday } from '../format.js';
-import { Modal, Badge } from '../components/ui.jsx';
+import { Modal, Badge, ErrorBox, useSubmit } from '../components/ui.jsx';
 import PatientForm from '../components/PatientForm.jsx';
 import AppointmentForm from '../components/AppointmentForm.jsx';
 import ChartTab from '../components/patient/ChartTab.jsx';
@@ -131,6 +131,7 @@ function Overview({ p, reload }) {
   const { can, practice } = useAuth();
   const { data: tasks, reload: reloadTasks } = useApi(`/tasks?patient_id=${p.id}`);
   const [modal, setModal] = useState(null);
+  const [historyReview, setHistoryReview] = useState(false);
   return (
     <>
     {modal && (
@@ -140,6 +141,7 @@ function Overview({ p, reload }) {
           : <TaskForm patient={p} onDone={() => { setModal(null); reloadTasks(); }} />}
       </Modal>
     )}
+    {historyReview && <HistoryReview patient={p} onDone={() => { setHistoryReview(false); reload(); }} />}
     <div className="grid grid-2">
       <div className="card">
         <h2>Contact</h2>
@@ -157,9 +159,14 @@ function Overview({ p, reload }) {
         <div className={`muted`} style={{ fontSize: 12, margin: '4px 0 8px', color: medStale(p) ? 'var(--warn)' : undefined }}>
           {p.medical_reviewed_at ? `Last reviewed ${fmtUtcDate(p.medical_reviewed_at, practice?.timezone)}` : 'Never reviewed'}{medStale(p) ? ' — update due' : ''}
         </div>
+        {p.history_review_pending && can('clinical:write') && (
+          <div className="public-notice" style={{ marginBottom: 10 }}>
+            📋 The patient submitted a new medical history. <button className="small primary" onClick={() => setHistoryReview(true)}>Review changes</button>
+          </div>
+        )}
         <dl className="kv">
           <dt>Alerts</dt><dd>{p.medical_alerts || 'None'}</dd>
-          <dt>Allergies</dt><dd>{p.allergies || 'NKDA'}</dd>
+          <dt>Allergies</dt><dd>{p.allergies || <span className="muted">Not recorded — ask the patient</span>}</dd>
           <dt>Medications</dt><dd>{p.medications || 'None reported'}</dd>
           <dt>Notes</dt><dd style={{ whiteSpace: 'pre-wrap' }}>{p.notes || '—'}</dd>
         </dl>
@@ -241,3 +248,41 @@ function Overview({ p, reload }) {
 }
 
 const medStale = (p) => !p.medical_reviewed_at || Date.now() - new Date(p.medical_reviewed_at.slice(0, 10)).getTime() > 365 * 86400000;
+
+// A clinician compares the submitted history with the chart and accepts the merged values.
+function HistoryReview({ patient, onDone }) {
+  const { data } = useApi(`/patients/${patient.id}/history-review`);
+  const [form, setForm] = useState(null);
+  const fields = [['medical_alerts', 'Medical alerts'], ['allergies', 'Allergies'], ['medications', 'Medications']];
+  const values = form || (data && Object.fromEntries(fields.map(([f]) => [f, data.changes[f] ? data.changes[f].proposed || '' : patient[f] || ''])));
+  const { submit, busy, error } = useSubmit(async () => {
+    await api.post(`/patient-forms/${data.form_id}/review`, values);
+    onDone();
+  });
+  return (
+    <Modal title="Review medical history" wide onClose={() => onDone()}>
+      {!data ? <div className="empty">Loading…</div> : (
+        <form onSubmit={(e) => { e.preventDefault(); submit(); }}>
+          <ErrorBox error={error} />
+          <p className="muted">Signed by {data.signature_name} on {fmtDateTime(data.signed_at.replace(' ', 'T') + 'Z')}. Nothing on the chart changes until you save.</p>
+          {fields.map(([f, name]) => (
+            <div key={f} style={{ marginBottom: 14 }}>
+              <strong>{name}</strong>{!data.changes[f] && <span className="muted"> — no change</span>}
+              {data.changes[f] && (
+                <div className="grid grid-2" style={{ fontSize: 13, margin: '4px 0' }}>
+                  <div><span className="muted">On the chart:</span> {data.changes[f].current || '—'}</div>
+                  <div><span className="muted">Patient reported:</span> {data.changes[f].reported || '—'}</div>
+                </div>
+              )}
+              <textarea rows={2} value={values[f]} onChange={(e) => setForm({ ...values, [f]: e.target.value })} />
+            </div>
+          ))}
+          {(data.answers.pregnant || data.answers.premedication || data.answers.tobacco) && (
+            <p style={{ fontSize: 13 }}>{[data.answers.pregnant && 'Pregnant', data.answers.premedication && 'Needs premedication', data.answers.tobacco && 'Uses tobacco'].filter(Boolean).join(' · ')}</p>
+          )}
+          <div className="form-actions"><button className="primary" disabled={busy}>Save to chart</button></div>
+        </form>
+      )}
+    </Modal>
+  );
+}

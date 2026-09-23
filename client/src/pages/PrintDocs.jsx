@@ -13,10 +13,13 @@ const useAutoPrint = (ready) => {
 // Printable treatment plan / case presentation.
 export function TreatmentPlanPrint() {
   const { id } = useParams();
-  const { data: t } = useApi(`/treatment-plans/${id}`);
+  const { data: live } = useApi(`/treatment-plans/${id}`);
   const tz = useAuth().practice?.timezone;
-  useAutoPrint(!!t);
-  if (!t) return <div className="empty">Loading…</div>;
+  const signedCopy = new URLSearchParams(window.location.search).get('signed') === '1';
+  useAutoPrint(!!live);
+  if (!live) return <div className="empty">Loading…</div>;
+  // The signed copy prints exactly what the patient signed, even if the plan changed afterwards.
+  const t = signedCopy && live.signed_version ? { ...live, procedures: live.signed_version.procedures, estimate: live.signed_version.estimate } : { ...live, signed_at: live.signed_version?.changed ? null : live.signed_at };
   const est = Object.fromEntries(t.estimate.items.map((i) => [i.procedure_id, i]));
   return (
     <div className="print-doc">

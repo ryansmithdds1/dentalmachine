@@ -8,6 +8,9 @@ import { ErrorBox, useSubmit } from '../ui.jsx';
 const UPPER = Array.from({ length: 16 }, (_, i) => String(i + 1));
 const LOWER = Array.from({ length: 16 }, (_, i) => String(32 - i));
 const SITES = ['DB', 'B', 'MB', 'DL', 'L', 'ML'];
+// Readings are stored distal→mesial ([DB, B, MB, DL, L, ML]). On screen, mesial always faces the midline,
+// so on the patient's left (teeth 9-24) each tooth's sites display the other way round.
+const siteOrder = (tooth, from) => (Number(tooth) >= 9 && Number(tooth) <= 24 ? [from + 2, from + 1, from] : [from, from + 1, from + 2]);
 const depthColor = (d) => (d == null || d === '' ? undefined : d >= 5 ? 'var(--danger)' : d === 4 ? 'var(--warn)' : undefined);
 
 // Six-site probing depths per tooth, entered buccal row then lingual row.
@@ -16,6 +19,7 @@ export default function PerioTab({ patient }) {
   const { data: exams, reload } = useApi(`/patients/${patient.id}/perio`);
   const [readings, setReadings] = useState({});
   const [viewing, setViewing] = useState(null);
+  const [bleedMode, setBleedMode] = useState(false);
   const { submit, busy, error } = useSubmit(async () => {
     const clean = {};
     for (const [tooth, v] of Object.entries(readings)) {
@@ -53,12 +57,13 @@ export default function PerioTab({ patient }) {
             {teeth.map((t) => (
               <td key={t} style={{ padding: 2 }}>
                 <div style={{ display: 'flex', gap: 1 }}>
-                  {get(t).pd.slice(from, to).map((d, k) => {
-                    const i = from + k;
+                  {siteOrder(t, from).map((i) => {
+                    const d = get(t).pd[i];
                     return editable ? (
-                      <input key={i} value={d ?? ''} onChange={(e) => setDepth(t, i, e.target.value)}
+                      <input key={i} value={d ?? ''} onChange={(e) => setDepth(t, i, e.target.value)} readOnly={bleedMode}
+                        onClick={() => bleedMode && toggleBop(t, i)}
                         onContextMenu={(e) => { e.preventDefault(); toggleBop(t, i); }}
-                        title={`${SITES[i]} · right-click toggles bleeding`}
+                        title={`${SITES[i]} · ${bleedMode ? 'tap to toggle bleeding' : 'right-click toggles bleeding'}`}
                         style={{ padding: '2px 0', textAlign: 'center', fontSize: 12, color: depthColor(Number(d)), background: get(t).bop[i] ? 'var(--danger-soft)' : undefined }} />
                     ) : (
                       <span key={i} style={{ flex: 1, textAlign: 'center', fontSize: 12, color: depthColor(d), background: get(t).bop?.[i] ? 'var(--danger-soft)' : undefined }}>{d ?? '·'}</span>
@@ -82,12 +87,13 @@ export default function PerioTab({ patient }) {
             <option value="">{can('clinical:write') ? 'New exam' : 'Select an exam'}</option>
             {exams?.map((x) => <option key={x.id} value={x.id}>{fmtDate(x.exam_date)}</option>)}
           </select>
+          {editable && <button className={bleedMode ? 'active' : ''} aria-pressed={bleedMode} onClick={() => setBleedMode(!bleedMode)} title="Tap sites to mark bleeding (for touch screens)">🩸 Bleeding {bleedMode ? 'on' : 'off'}</button>}
           {editable && <button className="primary" disabled={busy || !Object.keys(readings).length} onClick={submit}>Save exam</button>}
         </div>
       </div>
       <ErrorBox error={error} />
-      <PerioSummary current={shown} previous={viewing ? exams?.find((x) => x.exam_date < viewing.exam_date) : exams?.[0]} />
-      <div className="muted" style={{ marginBottom: 8 }}>Depths in mm. <span style={{ color: 'var(--warn)' }}>4mm</span> · <span style={{ color: 'var(--danger)' }}>5mm+</span> · shaded = bleeding on probing{editable ? ' (right-click a site to toggle)' : ''}.</div>
+      <PerioSummary current={shown} previous={viewing ? exams?.[exams.findIndex((x) => x.id === viewing.id) + 1] : exams?.[0]} />
+      <div className="muted" style={{ marginBottom: 8 }}>Depths in mm. <span style={{ color: 'var(--warn)' }}>4mm</span> · <span style={{ color: 'var(--danger)' }}>5mm+</span> · shaded = bleeding on probing{editable ? ' (right-click a site, or turn on 🩸 and tap)' : ''}. Mesial sites face the midline.</div>
       <div className="table-wrap">
         {renderArch(UPPER)}
         <div style={{ height: 12 }} />

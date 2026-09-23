@@ -19,12 +19,24 @@ export default function NotesTab({ patient }) {
   const [providerId, setProviderId] = useState('');
   const [signNow, setSignNow] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [addendum, setAddendum] = useState(null);
   const { submit, busy, error } = useSubmit(async () => {
     const note = await api.post(`/patients/${patient.id}/notes`, { body, provider_id: providerId ? Number(providerId) : null });
-    if (signNow) await api.post(`/notes/${note.id}/sign`);
+    // The note is saved even if signing is refused (e.g. it's another provider's): clear the draft first
+    // so a retry can't save it twice.
     setBody('');
     reload();
+    if (signNow) {
+      await api.post(`/notes/${note.id}/sign`).catch((e) => {
+        throw new Error(`Note saved but not signed: ${e.message}`);
+      });
+      reload();
+    }
   });
+  const useTemplate = (t) => {
+    if (body.trim() && body !== TEMPLATES[t] && !window.confirm('Replace what you have typed with this template?')) return;
+    setBody(TEMPLATES[t]);
+  };
   const [actionErr, setActionErr] = useState(null);
   const act = async (fn) => {
     setActionErr(null);
@@ -43,7 +55,7 @@ export default function NotesTab({ patient }) {
           <h2>New note</h2>
           <ErrorBox error={error} />
           <div className="inline" style={{ marginBottom: 8, flexWrap: 'wrap' }}>
-            {Object.keys(TEMPLATES).map((t) => <button key={t} className="small" onClick={() => setBody(TEMPLATES[t])}>{t}</button>)}
+            {Object.keys(TEMPLATES).map((t) => <button key={t} className="small" onClick={() => useTemplate(t)}>{t}</button>)}
           </div>
           <textarea rows={10} value={body} onChange={(e) => setBody(e.target.value)} placeholder="Clinical note…" />
           <div className="form-grid" style={{ marginTop: 10 }}>
@@ -71,7 +83,7 @@ export default function NotesTab({ patient }) {
                 <strong>{fmtDateTime(n.created_at.replace('T', ' '))}</strong>
                 <span className="muted"> · {n.author_name}{n.provider_name ? ` for ${n.provider_name}` : ''}</span>
               </div>
-              {n.signed ? <span className="badge ok">Signed {fmtDateTime(n.signed_at)}</span> : <span className="badge warn">Unsigned</span>}
+              {n.signed ? <span className="badge ok">Signed{n.signed_by_name ? ` by ${n.signed_by_name}` : ''} {fmtDateTime(n.signed_at)}</span> : <span className="badge warn">Unsigned</span>}
             </div>
             {editing?.id === n.id ? (
               <>
@@ -90,6 +102,29 @@ export default function NotesTab({ patient }) {
                 {can('clinical:sign') && <button className="small primary" onClick={() => act(() => api.post(`/notes/${n.id}/sign`))}>Sign</button>}
               </div>
             )}
+            {n.addenda?.map((a) => (
+              <div key={a.id} className="addendum">
+                <div className="muted" style={{ fontSize: 12 }}>
+                  Addendum · {fmtDateTime(a.created_at.replace('T', ' '))} · {a.author_name}
+                  {a.signed ? ` · signed${a.signed_by_name ? ` by ${a.signed_by_name}` : ''}` : ' · unsigned'}
+                </div>
+                <div style={{ whiteSpace: 'pre-wrap' }}>{a.body}</div>
+                {!a.signed && can('clinical:sign') && <button className="small primary" style={{ marginTop: 4 }} onClick={() => act(() => api.post(`/notes/${a.id}/sign`))}>Sign addendum</button>}
+              </div>
+            ))}
+            {n.signed && can('clinical:write') && (addendum?.id === n.id ? (
+              <div style={{ marginTop: 8 }}>
+                <textarea rows={3} autoFocus value={addendum.body} onChange={(e) => setAddendum({ ...addendum, body: e.target.value })} placeholder="Correction or late entry…" />
+                <div className="form-actions">
+                  <button className="small" onClick={() => setAddendum(null)}>Cancel</button>
+                  <button className="small primary" disabled={!addendum.body.trim()} onClick={() => act(async () => {
+                    const a = await api.post(`/notes/${n.id}/addenda`, { body: addendum.body });
+                    setAddendum(null);
+                    if (can('clinical:sign')) await api.post(`/notes/${a.id}/sign`).catch(() => {});
+                  })}>Save addendum</button>
+                </div>
+              </div>
+            ) : <div className="form-actions" style={{ marginTop: 8 }}><button className="small" onClick={() => setAddendum({ id: n.id, body: '' })}>Add addendum</button></div>)}
           </div>
         ))}
       </div>

@@ -35,17 +35,41 @@ export function parseMedicalHistory(body) {
   return { answers: out, signatureName, signatureImage: signatureImage || null };
 }
 
-// Fields on the patient record that a completed medical history refreshes.
-export function patientUpdatesFromHistory(a) {
+// Contact details the patient gave are theirs to update, so they apply straight away.
+export function contactUpdatesFromHistory(a) {
+  const updates = {};
+  for (const f of ['phone', 'email', 'address', 'city', 'state', 'zip', 'emergency_contact']) if (a[f]) updates[f] = a[f];
+  return updates;
+}
+
+// What the patient reported, as the three medical fields on the chart.
+export function medicalFromHistory(a) {
   const alerts = [...a.conditions];
   if (a.other_conditions) alerts.push(a.other_conditions);
   if (a.pregnant) alerts.push('Pregnant');
   if (a.premedication) alerts.push('Requires antibiotic premedication');
-  const updates = {
-    medical_alerts: alerts.join(', ') || null,
-    allergies: a.allergies,
-    medications: a.medications,
-  };
-  for (const f of ['phone', 'email', 'address', 'city', 'state', 'zip', 'emergency_contact']) if (a[f]) updates[f] = a[f];
-  return updates;
+  return { medical_alerts: alerts.join(', ') || null, allergies: a.allergies || null, medications: a.medications || null };
+}
+
+const NONE = /^(none|nkda|no known( drug)? allergies|n\/a|na|no)$/i;
+const items = (v) => String(v || '').split(/[,;\n]+/).map((x) => x.trim()).filter(Boolean);
+// Keeps everything already on the chart and adds what's new ("none" never erases a real entry).
+export function mergeList(current, incoming) {
+  const out = items(current).filter((x) => !NONE.test(x));
+  for (const x of items(incoming)) if (!NONE.test(x) && !out.some((y) => y.toLowerCase() === x.toLowerCase())) out.push(x);
+  if (out.length) return out.join(', ');
+  return items(incoming).some((x) => NONE.test(x)) || items(current).some((x) => NONE.test(x)) ? 'None' : null;
+}
+
+// Differences between the chart and a submitted history, with a suggested merge, for staff to review.
+export function historyChanges(patient, answers) {
+  const reported = medicalFromHistory(answers);
+  const out = {};
+  for (const f of ['medical_alerts', 'allergies', 'medications']) {
+    const proposed = mergeList(patient[f], reported[f]);
+    if ((proposed || '') !== (patient[f] || '') || (reported[f] || '') !== (patient[f] || '')) {
+      out[f] = { current: patient[f] || null, reported: reported[f], proposed };
+    }
+  }
+  return out;
 }

@@ -113,3 +113,13 @@ test('office hours apply to every provider unless overridden; phone search ignor
     assert.ok(found.some((p) => p.id === patient.id), q);
   }
 });
+
+test('a completed extraction charts the tooth missing; undoing it takes that back', async () => {
+  const { api, provider, patient } = await h.practice();
+  const ext = (await api.post(`/patients/${patient.id}/procedures`, { code: 'D7140', tooth: '19', provider_id: provider.id, complete: true })).data;
+  let chart = (await api.get(`/patients/${patient.id}/chart`)).data;
+  assert.ok(chart.conditions.some((c) => c.tooth === '19' && c.condition === 'missing'));
+  await api.post(`/procedures/${ext.id}/uncomplete`, { reason: 'Wrong tooth' });
+  chart = (await api.get(`/patients/${patient.id}/chart`)).data;
+  assert.ok(!chart.conditions.some((c) => c.tooth === '19' && c.condition === 'missing'));
+});

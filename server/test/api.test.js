@@ -206,8 +206,32 @@ test('signed clinical notes are immutable', async () => {
   const { api, patient } = await setupPractice('notes');
   const note = (await api.post(`/patients/${patient.id}/notes`, { body: 'Pt presents for exam.' })).data;
   assert.equal((await api.put(`/notes/${note.id}`, { body: 'Edited' })).data.body, 'Edited');
-  assert.equal((await api.post(`/notes/${note.id}/sign`)).status, 200);
+  const signed = await api.post(`/notes/${note.id}/sign`);
+  assert.equal(signed.status, 200);
+  assert.ok(signed.data.signed_by, 'the signer is recorded');
   assert.equal((await api.put(`/notes/${note.id}`, { body: 'Tamper' })).status, 409);
+  assert.equal((await api.post(`/notes/${note.id}/sign`)).status, 409);
+  // Corrections go in a signed addendum under the note.
+  const add = await api.post(`/notes/${note.id}/addenda`, { body: 'Addendum: patient also reports sensitivity on #14.' });
+  assert.equal(add.status, 201);
+  assert.equal((await api.post(`/notes/${add.data.id}/sign`)).status, 200);
+  const list = (await api.get(`/patients/${patient.id}/notes`)).data;
+  assert.equal(list.length, 1);
+  assert.equal(list[0].addenda[0].body, 'Addendum: patient also reports sensitivity on #14.');
+  assert.equal(list[0].addenda[0].signed, 1);
+  assert.ok(list[0].signed_by_name);
+
+  // A note written for a provider with a login can only be signed by that provider.
+  await api.post('/users', { email: 'dr2@notes.example.com', name: 'Dr Two', role: 'dentist', password: 'dentist-two-password' });
+  const dr2 = client((await client().post('/auth/login', { email: 'dr2@notes.example.com', password: 'dentist-two-password' })).data.token);
+  const me = (await api.get('/auth/me')).data.user;
+  const prov = (await api.post('/providers', { name: 'Dr. One', type: 'dentist' })).data;
+  await api.put(`/providers/${prov.id}`, { user_id: me.id });
+  const forOne = (await dr2.post(`/patients/${patient.id}/notes`, { body: 'Seated crown #3.', provider_id: prov.id })).data;
+  const refused = await dr2.post(`/notes/${forOne.id}/sign`);
+  assert.equal(refused.status, 403);
+  assert.match(refused.data.error, /Only Dr\. One/);
+  assert.equal((await api.post(`/notes/${forOne.id}/sign`)).status, 200);
 });
 
 test('role-based access control', async () => {

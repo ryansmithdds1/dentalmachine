@@ -3,6 +3,7 @@ import { requirePermission, HttpError } from '../auth.js';
 import {
   pick, requireFields, requireOneOf, insert, update, findOr404, audit, validTooth, normalizeSurfaces, mapSeq } from '../util.js';
 import { completeProcedure, estimateCoverage, primaryPolicy, voidLedgerEntry } from '../services.js';
+import { signedVersion } from './casepres.js';
 
 export const CONDITIONS = [
   'caries', 'missing', 'filling', 'crown', 'root_canal', 'implant', 'bridge_pontic', 'fracture',
@@ -151,7 +152,11 @@ export default function clinicalRoutes({ db }) {
   const planWithDetails = async (plan) => {
     const procedures = await db.all("SELECT * FROM procedures WHERE treatment_plan_id = ? AND status != 'cancelled' ORDER BY priority, id", plan.id);
     const planned = procedures.filter((p) => p.status === 'planned');
-    return { ...plan, procedures, estimate: await estimateCoverage(db, await primaryPolicy(db, plan.practice_id, plan.patient_id), planned) };
+    return {
+      ...plan, sign_token_hash: undefined, signed_snapshot: undefined, procedures,
+      estimate: await estimateCoverage(db, await primaryPolicy(db, plan.practice_id, plan.patient_id), planned),
+      signed_version: signedVersion(plan, procedures),
+    };
   };
 
   r.get('/patients/:id/treatment-plans', requirePermission('clinical:read'), async (req, res) => {
@@ -188,12 +193,31 @@ export default function clinicalRoutes({ db }) {
   // ---- Clinical notes (signed notes are immutable; corrections go in an addendum) ----
   r.get('/patients/:id/notes', requirePermission('clinical:read'), async (req, res) => {
     const patient = await patientOr404(req);
-    res.json(await db.all(
-      `SELECT n.*, u.name AS author_name, pv.name AS provider_name FROM clinical_notes n
-       JOIN users u ON u.id = n.author_id LEFT JOIN providers pv ON pv.id = n.provider_id
+    const notes = await db.all(
+      `SELECT n.*, u.name AS author_name, pv.name AS provider_name, s.name AS signed_by_name FROM clinical_notes n
+       JOIN users u ON u.id = n.author_id LEFT JOIN providers pv ON pv.id = n.provider_id LEFT JOIN users s ON s.id = n.signed_by
        WHERE n.patient_id = ? AND n.practice_id = ? ORDER BY n.created_at DESC, n.id DESC`,
       patient.id, req.user.practice_id,
-    ));
+    );
+    // Addenda are shown under the note they amend, oldest first.
+    const top = notes.filter((n) => !n.addendum_of);
+    for (const n of top) n.addenda = notes.filter((a) => a.addendum_of === n.id).reverse();
+    res.json(top);
+  });
+
+  // Signed notes never change; a correction or late entry is an addendum, itself signed.
+  r.post('/notes/:nid/addenda', requirePermission('clinical:write'), async (req, res) => {
+    const note = await findOr404(db, 'clinical_notes', req.params.nid, req.user.practice_id, 'Note');
+    if (note.addendum_of) throw new HttpError(400, 'Add the addendum to the original note');
+    if (!note.signed) throw new HttpError(409, 'This note is not signed yet — edit it instead');
+    const body = String(req.body?.body || '').trim();
+    if (!body) throw new HttpError(400, 'body is required');
+    const id = await insert(db, 'clinical_notes', {
+      practice_id: note.practice_id, patient_id: note.patient_id, appointment_id: note.appointment_id, provider_id: note.provider_id,
+      author_id: req.user.id, body: body.slice(0, 20000), addendum_of: note.id,
+    });
+    await audit(db, req, 'note.addendum', 'clinical_notes', id, { note_id: note.id });
+    res.status(201).json(await db.get('SELECT * FROM clinical_notes WHERE id = ?', id));
   });
 
   r.post('/patients/:id/notes', requirePermission('clinical:write'), async (req, res) => {
@@ -221,7 +245,15 @@ export default function clinicalRoutes({ db }) {
   r.post('/notes/:nid/sign', requirePermission('clinical:sign'), async (req, res) => {
     const existing = await findOr404(db, 'clinical_notes', req.params.nid, req.user.practice_id, 'Note');
     if (existing.signed) throw new HttpError(409, 'Note already signed');
-    await db.run("UPDATE clinical_notes SET signed = 1, signed_at = datetime('now') WHERE id = ?", existing.id);
+    // A note written for a provider is signed by that provider (when they have a login); an assistant
+    // or another dentist can't sign it for them.
+    const provider = existing.provider_id ? await db.get('SELECT name, user_id FROM providers WHERE id = ?', existing.provider_id) : null;
+    if (provider?.user_id && provider.user_id !== req.user.id) throw new HttpError(403, `Only ${provider.name} can sign this note`);
+    if (!provider?.user_id && existing.author_id !== req.user.id && req.user.role !== 'admin' && !(await db.get('SELECT 1 AS ok FROM providers WHERE user_id = ? AND practice_id = ?', req.user.id, req.user.practice_id))) {
+      throw new HttpError(403, 'Only the author or a provider can sign this note');
+    }
+    const signed = await db.run("UPDATE clinical_notes SET signed = 1, signed_at = datetime('now'), signed_by = ? WHERE id = ? AND signed = 0", req.user.id, existing.id);
+    if (!signed.changes) throw new HttpError(409, 'Note already signed');
     await audit(db, req, 'note.sign', 'clinical_notes', existing.id);
     res.json(await db.get('SELECT * FROM clinical_notes WHERE id = ?', existing.id));
   });
