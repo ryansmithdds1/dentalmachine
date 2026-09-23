@@ -5,7 +5,7 @@ import { ErrorBox, useSubmit } from './ui.jsx';
 
 const EMPTY = {
   first_name: '', last_name: '', preferred_name: '', dob: '', gender: '', phone: '', email: '', address: '', city: '', state: '', zip: '',
-  emergency_contact: '', medical_alerts: '', allergies: '', medications: '', notes: '', primary_provider_id: '', status: 'active',
+  emergency_contact: '', referral_source: '', office_alert: '', medical_alerts: '', allergies: '', medications: '', notes: '', primary_provider_id: '', status: 'active',
 };
 
 export default function PatientForm({ patient, onSaved, onCancel }) {
@@ -51,6 +51,11 @@ export default function PatientForm({ patient, onSaved, onCancel }) {
         {field('zip', 'ZIP')}
         {field('emergency_contact', 'Emergency contact')}
         <label>
+          How did they hear about us?
+          <input list="referral-sources" value={form.referral_source} onChange={(e) => setForm({ ...form, referral_source: e.target.value })} placeholder="e.g. Google, friend…" />
+          <datalist id="referral-sources">{['Google', 'Insurance directory', 'Friend or family', 'Existing patient referral', 'Facebook / Instagram', 'Yelp', 'Drove by', 'Doctor referral', 'Mailer', 'Website'].map((x) => <option key={x} value={x} />)}</datalist>
+        </label>
+        <label>
           Primary provider
           <select value={form.primary_provider_id} onChange={(e) => setForm({ ...form, primary_provider_id: e.target.value })}>
             <option value="">—</option>
@@ -69,6 +74,10 @@ export default function PatientForm({ patient, onSaved, onCancel }) {
         {area('allergies', 'Allergies')}
         {area('medications', 'Medications')}
         {area('notes', 'Notes')}
+        <label className="full">
+          Pop-up office alert (shown to staff when the chart opens)
+          <input value={form.office_alert} onChange={(e) => setForm({ ...form, office_alert: e.target.value })} placeholder="e.g. Anxious — offer nitrous; collect copay before seating" />
+        </label>
       </div>
       <div className="form-actions">
         <button type="button" onClick={onCancel}>Cancel</button>

@@ -23,6 +23,8 @@ const FIRST = ['Emma', 'Liam', 'Olivia', 'Noah', 'Ava', 'Elijah', 'Sophia', 'Jam
 const LAST = ['Johnson', 'Martinez', 'Nguyen', 'Patel', 'Garcia', 'Kim', 'Brown', 'Davis', 'Lopez', 'Wilson', 'Anderson', 'Thomas', 'Clark', 'Lewis', 'Walker', 'Hall', 'Young', 'King', 'Wright', 'Scott'];
 const ALERTS = [null, null, null, null, 'Hypertension', 'Diabetes Type 2', 'Pre-med required (joint replacement)', 'Pregnant', 'Blood thinners (warfarin)'];
 const ALLERGIES = [null, null, null, 'Penicillin', 'Latex', 'Codeine', 'Sulfa'];
+const REFERRALS = ['Google search', 'Google search', 'Friend or family', 'Friend or family', 'Insurance directory', 'Instagram', 'Drove by', null];
+const OFFICE_ALERTS = [null, null, null, null, null, null, 'Prefers text, not calls', 'Anxious — offer nitrous & headphones', 'Always runs 10 min late — book first slot', 'Spanish-speaking parent; bring Maria to translate', 'Collect balance before seating'];
 
 const today = localNow('America/Chicago').slice(0, 10);
 const dayOffset = (n) => {
@@ -46,7 +48,7 @@ db.tx(() => {
   user('frontdesk@demo.dentalmachine.app', 'Jordan Lee', 'front_desk');
   user('billing@demo.dentalmachine.app', 'Casey Park', 'billing');
 
-  const drChen = insert(db, 'providers', { practice_id: practiceId, user_id: drUser, name: 'Dr. Alex Chen, DDS', type: 'dentist', npi: '1234567893', color: '#2563eb' });
+  const drChen = insert(db, 'providers', { practice_id: practiceId, user_id: drUser, name: 'Dr. Alex Chen, DDS', type: 'dentist', npi: '1234567893', license_number: 'TX-28841', dea_number: 'BC1234563', color: '#2563eb' });
   const drRivera = insert(db, 'providers', { practice_id: practiceId, name: 'Dr. Priya Rivera, DMD', type: 'dentist', npi: '1234567901', color: '#7c3aed' });
   const hyg = insert(db, 'providers', { practice_id: practiceId, user_id: hygUser, name: 'Sam Okafor, RDH', type: 'hygienist', color: '#059669' });
   const ops = db.all('SELECT id FROM operatories WHERE practice_id = ? ORDER BY id', practiceId).map((o) => o.id);
@@ -54,6 +56,15 @@ db.tx(() => {
   const carriers = [
     ['Delta Dental', '94276'], ['MetLife Dental', '65978'], ['Cigna Dental', '62308'], ['Aetna Dental', '60054'], ['Guardian', '64246'],
   ].map(([name, payer_id]) => insert(db, 'insurance_carriers', { practice_id: practiceId, name, payer_id, phone: '(800) 555-0100' }));
+
+  // In-network PPO fee schedules: Delta and Cigna pay contracted fees (office fee minus a write-off).
+  for (const [name, pct, carrierIdx] of [['Delta Dental PPO', 82, [0]], ['Cigna DPPO', 76, [2]]]) {
+    const fsId = insert(db, 'fee_schedules', { practice_id: practiceId, name });
+    for (const c of db.all('SELECT code, fee FROM procedure_codes WHERE practice_id = ? AND active = 1', practiceId)) {
+      db.run('INSERT INTO fee_schedule_items (fee_schedule_id, code, fee) VALUES (?, ?, ?)', fsId, c.code, Math.round((c.fee * pct) / 100 / 100) * 100);
+    }
+    for (const i of carrierIdx) db.run('UPDATE insurance_carriers SET fee_schedule_id = ? WHERE id = ?', fsId, carriers[i]);
+  }
 
   const code = (c) => db.get('SELECT * FROM procedure_codes WHERE practice_id = ? AND code = ?', practiceId, c);
   const addProc = (patientId, c, extra = {}) => {
@@ -75,6 +86,8 @@ db.tx(() => {
       gender: rand() > 0.5 ? 'female' : 'male', phone: `(512) 555-${String(1000 + i * 37).slice(-4)}`,
       email: `${first}.${last}${i}@example.com`.toLowerCase(), address: `${100 + i * 13} Oak Ave`, city: 'Austin', state: 'TX', zip: '78704',
       medical_alerts: pickOne(ALERTS), allergies: pickOne(ALLERGIES), primary_provider_id: rand() > 0.5 ? drChen : drRivera,
+      referral_source: pickOne(REFERRALS), office_alert: pickOne(OFFICE_ALERTS),
+      medical_reviewed_at: rand() > 0.35 ? `${dayOffset(-Math.floor(rand() * 500))} 09:00:00` : null,
       created_at: `${dayOffset(-Math.floor(rand() * 400))} 10:00:00`,
     });
     patients.push(id);
@@ -107,7 +120,12 @@ db.tx(() => {
     if (rand() < 0.5) {
       const tooth = String(pickOne([3, 14, 19, 30, 2, 15, 18, 31]));
       insert(db, 'tooth_conditions', { practice_id: practiceId, patient_id: id, tooth, surfaces: 'MO', condition: 'caries', recorded_by: drUser });
-      const planId = insert(db, 'treatment_plans', { practice_id: practiceId, patient_id: id, name: 'Restorative', status: rand() > 0.4 ? 'accepted' : 'proposed' });
+      const accepted = rand() > 0.4;
+      const planDay = dayOffset(-Math.floor(rand() * 150));
+      const planId = insert(db, 'treatment_plans', {
+        practice_id: practiceId, patient_id: id, name: 'Restorative', status: accepted ? 'accepted' : 'proposed', accepted_at: accepted ? `${planDay} 15:20:00` : null, created_at: `${planDay} 15:00:00`,
+        ...(accepted && rand() > 0.4 ? { signature_name: `${first} ${last}`, signed_at: `${planDay} 15:20:00`, presented_at: `${planDay} 15:05:00` } : {}),
+      });
       addProc(id, 'D2392', { tooth, surfaces: 'MO', provider_id: drChen, treatment_plan_id: planId, priority: 1 });
       if (rand() < 0.4) addProc(id, 'D2740', { tooth: String(pickOne([3, 14, 19, 30])), provider_id: drChen, treatment_plan_id: planId, priority: 2 });
     }
@@ -155,7 +173,7 @@ db.tx(() => {
   }
 
   // Upcoming schedule: today and the next several weekdays, built from appointment types.
-  db.run('UPDATE practices SET daily_goal = ? WHERE id = ?', 600000, practiceId);
+  db.run('UPDATE practices SET daily_goal = ?, hygiene_goal = ?, review_url = ?, review_requests = 1 WHERE id = ?', 600000, 180000, 'https://g.page/r/bright-smiles-austin/review', practiceId);
   const typeId = (name) => db.get('SELECT * FROM appointment_types WHERE practice_id = ? AND name = ?', practiceId, name);
   const hhmm = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
   const plan = [
@@ -177,7 +195,7 @@ db.tx(() => {
       if (start < 13 * 60 && start + type.duration > 12 * 60) start = 13 * 60; // skip lunch
       if (start + type.duration > 17 * 60) continue;
       cursor[prov] = start + type.duration + (rand() < 0.25 ? 30 : 0);
-      const patientId = patients[pi++ % patients.length];
+      const patientId = patients[pi++ % 30]; // the last 10 patients stay off the schedule (follow-up lists)
       const apptId = insert(db, 'appointments', {
         practice_id: practiceId, patient_id: patientId, provider_id: prov, operatory_id: ops[opIdx], appointment_type_id: type.id, reason: type.name,
         start_time: `${day} ${hhmm(start)}`, end_time: `${day} ${hhmm(start + type.duration)}`, asap: d > 3 && rand() < 0.08 ? 1 : 0,
@@ -193,6 +211,26 @@ db.tx(() => {
       }
     }
   }
+
+  // Patients who fell off the schedule: overdue recall, broken appointments, diagnosed-but-unscheduled treatment.
+  for (let j = 30; j < 40; j++) {
+    const pid = patients[j];
+    db.run("UPDATE recalls SET due_date = ?, status = 'due' WHERE patient_id = ?", dayOffset(j % 3 === 0 ? 12 : -(j - 25) * 9), pid);
+    if (j % 2 === 0) {
+      const when = dayOffset(-(j - 28) * 3);
+      insert(db, 'appointments', {
+        practice_id: practiceId, patient_id: pid, provider_id: j % 4 === 0 ? drChen : hyg, operatory_id: ops[j % 4 === 0 ? 0 : 2],
+        start_time: `${when} 14:00`, end_time: `${when} 15:00`, status: j % 4 === 0 ? 'no_show' : 'cancelled', reason: j % 4 === 0 ? 'Crown prep' : 'Recall exam & cleaning',
+      });
+    }
+    if (!db.get("SELECT 1 FROM procedures WHERE patient_id = ? AND status = 'planned'", pid)) {
+      const planDay = dayOffset(-(j - 20) * 4);
+      const tp = insert(db, 'treatment_plans', { practice_id: practiceId, patient_id: pid, name: 'Restorative', status: j % 3 ? 'accepted' : 'proposed', accepted_at: j % 3 ? `${planDay} 15:00:00` : null, created_at: `${planDay} 14:00:00` });
+      addProc(pid, pickOne(['D2740', 'D2392', 'D3330']), { tooth: pickOne(['3', '14', '19', '30']), provider_id: drChen, treatment_plan_id: tp, priority: 1 });
+    }
+  }
+  insert(db, 'followups', { practice_id: practiceId, patient_id: patients[31], kind: 'recall', outcome: 'left_voicemail', note: 'Left VM on cell', created_by: adminId, created_at: `${dayOffset(-2)} 16:00:00` });
+  insert(db, 'followups', { practice_id: practiceId, patient_id: patients[34], kind: 'unscheduled', outcome: 'spoke_will_call', note: 'Checking work schedule, will call back', created_by: adminId, created_at: `${dayOffset(-1)} 11:00:00` });
 
   // A few households share a guarantor.
   for (let f = 0; f < 5; f++) {

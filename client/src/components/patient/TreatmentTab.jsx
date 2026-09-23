@@ -11,6 +11,8 @@ export default function TreatmentTab({ patient, onChange }) {
   const { data: loose, reload: reloadLoose } = useApi(`/patients/${patient.id}/procedures?status=planned`);
   const [creating, setCreating] = useState(false);
   const [err, setErr] = useState(null);
+  const [presenting, setPresenting] = useState(null);
+  const [note, setNote] = useState(null);
   const refresh = () => { reload(); reloadLoose(); onChange?.(); };
 
   const act = async (fn) => {
@@ -32,6 +34,8 @@ export default function TreatmentTab({ patient, onChange }) {
         {can('clinical:write') && <button className="primary" onClick={() => setCreating(true)}>+ New treatment plan</button>}
       </div>
       <ErrorBox error={err} />
+      {note && <div className="public-notice ok" style={{ marginBottom: 12 }}>{note}</div>}
+      {presenting && <PresentModal plan={presenting} patient={patient} onClose={() => { setPresenting(null); refresh(); }} />}
       {plans?.length === 0 && unplanned.length === 0 && <div className="card empty">No treatment planned.</div>}
 
       {plans?.map((plan) => (
@@ -39,11 +43,20 @@ export default function TreatmentTab({ patient, onChange }) {
           <div className="page-header" style={{ marginBottom: 10 }}>
             <div>
               <h3 style={{ margin: 0 }}>{plan.name} <Badge value={plan.status} /></h3>
-              <div className="muted">Created {fmtDate(plan.created_at)}{plan.accepted_at ? ` · Accepted ${fmtDate(plan.accepted_at)}` : ''}</div>
+              <div className="muted">
+                Created {fmtDate(plan.created_at)}{plan.accepted_at ? ` · Accepted ${fmtDate(plan.accepted_at)}` : ''}
+                {plan.signed_at && <> · <span className="badge ok">✍ Signed by {plan.signature_name}</span></>}
+                {!plan.signed_at && plan.presented_at && ` · Sent to patient ${fmtDate(plan.presented_at)}`}
+              </div>
             </div>
             {can('clinical:write') && plan.status !== 'completed' && (
               <div className="actions">
-                {plan.status !== 'accepted' && <button className="small" onClick={() => act(() => api.put(`/treatment-plans/${plan.id}`, { status: 'accepted' }))}>Patient accepted</button>}
+                {!plan.signed_at && <button className="small primary" onClick={() => setPresenting(plan)}>Present & e-sign…</button>}
+                {plan.estimate?.policy && can('billing:write') && plan.procedures.some((p) => p.status === 'planned') && (
+                  <button className="small" onClick={() => act(async () => { await api.post('/preauths', { patient_insurance_id: plan.estimate.policy.id, treatment_plan_id: plan.id }); setNote('Pre-authorization created — send it from Billing → Pre-authorizations.'); })}>Pre-authorize</button>
+                )}
+                <button className="small" onClick={() => window.open(`/treatment-plans/${plan.id}/print`, '_blank')}>Print</button>
+                {plan.status !== 'accepted' && <button className="small" onClick={() => act(() => api.put(`/treatment-plans/${plan.id}`, { status: 'accepted' }))}>Accepted verbally</button>}
                 {plan.status === 'proposed' && <button className="small danger" onClick={() => act(() => api.put(`/treatment-plans/${plan.id}`, { status: 'rejected' }))}>Declined</button>}
               </div>
             )}
@@ -74,7 +87,7 @@ function ProcTable({ procs, estimate, canEdit, act }) {
     <div className="table-wrap">
       <table>
         <thead>
-          <tr><th>#</th><th>Code</th><th>Description</th><th>Tooth</th><th>Status</th><th className="num">Fee</th>{estimate && <><th className="num">Est. insurance</th><th className="num">Est. patient</th></>}<th /></tr>
+          <tr><th>#</th><th>Code</th><th>Description</th><th>Tooth</th><th>Status</th><th className="num">Fee</th>{estimate && <>{estimate.total_write_off > 0 && <th className="num">PPO write-off</th>}<th className="num">Est. insurance</th><th className="num">Est. patient</th></>}<th /></tr>
         </thead>
         <tbody>
           {procs.map((p) => (
@@ -85,7 +98,7 @@ function ProcTable({ procs, estimate, canEdit, act }) {
               <td>{p.tooth ? `#${p.tooth}` : ''} {p.surfaces || ''}</td>
               <td><Badge value={p.status} />{p.appointment_id && p.status === 'planned' ? <div className="muted" style={{ fontSize: 11 }}>scheduled</div> : null}</td>
               <td className="num">{money(p.fee)}</td>
-              {estimate && <><td className="num">{est[p.id] ? money(est[p.id].insurance) : '—'}</td><td className="num">{est[p.id] ? money(est[p.id].patient) : '—'}</td></>}
+              {estimate && <>{estimate.total_write_off > 0 && <td className="num muted">{est[p.id]?.write_off ? `−${money(est[p.id].write_off)}` : '—'}</td>}<td className="num">{est[p.id] ? money(est[p.id].insurance) : '—'}</td><td className="num">{est[p.id] ? money(est[p.id].patient) : '—'}</td></>}
               <td style={{ whiteSpace: 'nowrap' }}>
                 {canEdit && p.status === 'planned' && (
                   <>
@@ -100,6 +113,7 @@ function ProcTable({ procs, estimate, canEdit, act }) {
             <tr className="totals-row">
               <td colSpan={5}>Remaining planned {estimate.policy ? `· ${estimate.policy.carrier_name}` : '· self-pay'}</td>
               <td className="num">{money(estimate.total_fee)}</td>
+              {estimate.total_write_off > 0 && <td className="num">−{money(estimate.total_write_off)}</td>}
               <td className="num">{money(estimate.total_insurance)}</td>
               <td className="num">{money(estimate.total_patient)}</td>
               <td />
@@ -171,5 +185,37 @@ function PlanBuilder({ patient, onDone, onCancel }) {
         <button className="primary" disabled={busy}>Create plan</button>
       </div>
     </form>
+  );
+}
+
+function PresentModal({ plan, patient, onClose }) {
+  const [result, setResult] = useState(null);
+  const [err, setErr] = useState(null);
+  const go = async (send) => {
+    setErr(null);
+    try {
+      const r = await api.post(`/treatment-plans/${plan.id}/present`, send ? { send } : {});
+      setResult(r);
+      if (!send) window.open(r.url, '_blank');
+    } catch (e) {
+      setErr(e);
+    }
+  };
+  return (
+    <Modal title={`Present “${plan.name}”`} onClose={onClose}>
+      <ErrorBox error={err} />
+      <p>The patient sees each procedure in plain language with their estimated insurance and out-of-pocket cost, then signs to accept.</p>
+      {!result ? (
+        <div className="inline" style={{ flexWrap: 'wrap' }}>
+          <button className="primary" onClick={() => go(null)}>Open on this screen / tablet</button>
+          <button onClick={() => go('auto')} disabled={!patient.phone && !patient.email}>Text or email to {patient.first_name}</button>
+        </div>
+      ) : (
+        <div className="public-notice ok">
+          {result.message ? `Sent by ${result.message.channel === 'sms' ? 'text' : 'email'}. ` : 'Opened in a new tab. '}
+          Link: <a href={result.url} target="_blank" rel="noreferrer">{result.url}</a>
+        </div>
+      )}
+    </Modal>
   );
 }

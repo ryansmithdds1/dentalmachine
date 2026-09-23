@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { getToken } from '../api.js';
+import { api, getToken } from '../api.js';
 import { useApi } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
-import { money, fmtDate } from '../format.js';
-import { Badge, ErrorBox } from '../components/ui.jsx';
+import { money, fmtDate, fmtDateTime, toCents } from '../format.js';
+import { Badge, ErrorBox, Modal } from '../components/ui.jsx';
 import { PlanSummary } from '../components/patient/PaymentPlans.jsx';
 
 const FILTERS = [['draft', 'Ready to send'], ['submitted', 'Submitted'], ['partially_paid', 'Partially paid'], ['denied', 'Denied'], ['paid', 'Paid'], ['void', 'Void'], ['', 'All']];
@@ -17,13 +17,16 @@ export default function Claims() {
     <>
       <div className="page-header"><h1>Billing</h1></div>
       <div className="tabs">
-        {[['claims', 'Claims'], ['era', 'Remittance (ERA)'], ['plans', 'Payment plans']].map(([k, l]) => (
+        {[['claims', 'Claims'], ['followup', 'Insurance follow-up'], ['preauths', 'Pre-authorizations'], ['era', 'Remittance (ERA)'], ['statements', 'Statements'], ['plans', 'Payment plans']].map(([k, l]) => (
           <button key={k} className={tab === k ? 'active' : ''} onClick={() => setParams({ tab: k })}>{l}</button>
         ))}
       </div>
       {tab === 'claims' && <ClaimList />}
       {tab === 'era' && <EraImport />}
       {tab === 'plans' && <Plans />}
+      {tab === 'followup' && <InsuranceFollowup />}
+      {tab === 'preauths' && <Preauths />}
+      {tab === 'statements' && <Statements />}
     </>
   );
 }
@@ -208,6 +211,176 @@ function Plans() {
           </div>
         ))}
       </div>
+    </>
+  );
+}
+
+function InsuranceFollowup() {
+  const { data } = useApi('/reports/outstanding-claims');
+  if (!data) return <div className="empty">Loading…</div>;
+  const B = [['d0_30', '0–30 days'], ['d31_60', '31–60 days'], ['d61_90', '61–90 days'], ['d90_plus', '90+ days']];
+  return (
+    <>
+      <div className="grid grid-4" style={{ marginBottom: 16 }}>
+        {B.map(([k, l]) => <div key={k} className={`card stat${k === 'd90_plus' && data.totals[k] ? ' stat-danger' : k === 'd61_90' && data.totals[k] ? ' stat-warn' : ''}`}><div className="label">{l}</div><div className="value">{money(data.totals[k])}</div><div className="sub">expected from insurance</div></div>)}
+      </div>
+      <div className="card" style={{ padding: 0 }}>
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>Claim</th><th>Patient</th><th>Carrier</th><th>Submitted</th><th className="num">Days out</th><th className="num">Expected</th><th>Status</th></tr></thead>
+            <tbody>
+              {data.rows.map((c) => (
+                <tr key={c.id}>
+                  <td><Link to={`/claims/${c.id}`}>#{c.id}</Link></td>
+                  <td><Link to={`/patients/${c.patient_id}`}>{c.first_name} {c.last_name}</Link></td>
+                  <td>{c.carrier_name}{c.carrier_phone ? <div className="muted"><a href={`tel:${c.carrier_phone}`}>{c.carrier_phone}</a></div> : null}</td>
+                  <td>{fmtDate(c.submitted_at)}</td>
+                  <td className="num" style={{ color: c.days_out > 60 ? 'var(--danger)' : c.days_out > 30 ? 'var(--warn)' : undefined, fontWeight: c.days_out > 30 ? 700 : 400 }}>{c.days_out}</td>
+                  <td className="num">{money(c.estimated_amount - c.paid_amount)}</td>
+                  <td><Badge value={c.status} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {data.rows.length === 0 && <div className="empty">No outstanding claims. 🎉</div>}
+        </div>
+      </div>
+    </>
+  );
+}
+
+function Preauths() {
+  const { can } = useAuth();
+  const { data: rows, reload } = useApi('/preauths');
+  const [edit, setEdit] = useState(null);
+  const exportFile = async (pa) => {
+    await download(`/preauths/${pa.id}/837`, {}, `predetermination-${pa.id}.837`);
+    reload();
+  };
+  return (
+    <>
+      <p className="muted">Create pre-authorizations from a patient&apos;s treatment plan. Send them electronically as an 837D predetermination, then record the payer&apos;s answer here.</p>
+      <div className="card" style={{ padding: 0 }}>
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>#</th><th>Patient</th><th>Carrier</th><th>Procedures</th><th className="num">Fee</th><th className="num">Estimated</th><th className="num">Approved</th><th>Status</th><th /></tr></thead>
+            <tbody>
+              {rows?.map((pa) => (
+                <tr key={pa.id}>
+                  <td>{pa.id}</td>
+                  <td><Link to={`/patients/${pa.patient_id}`}>{pa.first_name} {pa.last_name}</Link><div className="muted">{fmtDate(pa.created_at)}</div></td>
+                  <td>{pa.carrier_name}</td>
+                  <td style={{ maxWidth: 240 }}>{pa.procedures.map((p) => `${p.code}${p.tooth ? ` #${p.tooth}` : ''}`).join(', ')}</td>
+                  <td className="num">{money(pa.total_fee)}</td>
+                  <td className="num">{money(pa.estimated_amount)}</td>
+                  <td className="num">{pa.approved_amount != null ? money(pa.approved_amount) : '—'}</td>
+                  <td><span className={`badge ${pa.status === 'approved' ? 'ok' : pa.status === 'denied' ? 'danger' : pa.status === 'submitted' ? 'warn' : 'info'}`}>{pa.status}</span>{pa.payer_reference && <div className="muted" style={{ fontSize: 11 }}>{pa.payer_reference}</div>}</td>
+                  <td style={{ whiteSpace: 'nowrap' }}>
+                    {can('billing:write') && pa.status === 'draft' && <button className="small primary" onClick={() => exportFile(pa)}>Send (837)</button>}{' '}
+                    {can('billing:write') && ['draft', 'submitted'].includes(pa.status) && <button className="small" onClick={() => setEdit(pa)}>Record answer</button>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {rows?.length === 0 && <div className="empty">No pre-authorizations yet.</div>}
+        </div>
+      </div>
+      {edit && (
+        <Modal title={`Pre-authorization #${edit.id}`} onClose={() => setEdit(null)}>
+          <PreauthAnswer pa={edit} onDone={() => { setEdit(null); reload(); }} />
+        </Modal>
+      )}
+    </>
+  );
+}
+
+function PreauthAnswer({ pa, onDone }) {
+  const [form, setForm] = useState({ status: 'approved', approved_amount: (pa.estimated_amount / 100).toFixed(2), payer_reference: '', notes: '' });
+  const [err, setErr] = useState(null);
+  const save = async () => {
+    try {
+      await api.put(`/preauths/${pa.id}`, { ...form, approved_amount: form.status === 'approved' ? toCents(form.approved_amount) : null });
+      onDone();
+    } catch (e) {
+      setErr(e);
+    }
+  };
+  return (
+    <div>
+      <ErrorBox error={err} />
+      <div className="form-grid">
+        <label>Answer<select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}><option value="approved">Approved</option><option value="denied">Denied</option><option value="submitted">Still waiting</option></select></label>
+        {form.status === 'approved' && <label>Approved amount ($)<input type="number" step="0.01" value={form.approved_amount} onChange={(e) => setForm({ ...form, approved_amount: e.target.value })} /></label>}
+        <label>Payer reference #<input value={form.payer_reference} onChange={(e) => setForm({ ...form, payer_reference: e.target.value })} /></label>
+        <label className="full">Notes<input value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></label>
+      </div>
+      <div className="form-actions"><button className="primary" onClick={save}>Save</button></div>
+    </div>
+  );
+}
+
+function Statements() {
+  const { can } = useAuth();
+  const [min, setMin] = useState('5');
+  const [since, setSince] = useState(25);
+  const { data: rows, reload } = useApi(`/statements/candidates?min_balance=${toCents(min || 0)}&since_days=${since}`);
+  const { data: runs, reload: reloadRuns } = useApi('/statements/runs');
+  const [result, setResult] = useState(null);
+  const [err, setErr] = useState(null);
+  const run = async () => {
+    setErr(null);
+    try {
+      const r = await api.post('/statements/run', { min_balance: toCents(min || 0), since_days: since });
+      setResult(r);
+      reload();
+      reloadRuns();
+    } catch (e) {
+      setErr(e);
+    }
+  };
+  const total = (rows || []).reduce((s, r) => s + r.patient_portion, 0);
+  return (
+    <>
+      <div className="card inline" style={{ flexWrap: 'wrap', gap: 12, marginBottom: 12 }}>
+        <label>Minimum balance ($)<input type="number" min="0" value={min} onChange={(e) => setMin(e.target.value)} style={{ width: 120 }} /></label>
+        <label>Skip accounts statemented in the last<select value={since} onChange={(e) => setSince(Number(e.target.value))} style={{ width: 140 }}><option value={0}>— none —</option><option value={14}>14 days</option><option value={25}>25 days</option><option value={45}>45 days</option></select></label>
+        <div style={{ marginLeft: 'auto', textAlign: 'right' }}>
+          <div><strong>{rows?.length ?? 0}</strong> accounts · <strong>{money(total)}</strong> patient portion</div>
+          {can('billing:write') && <button className="primary" style={{ marginTop: 6 }} disabled={!rows?.length} onClick={run}>Send statements</button>}
+        </div>
+      </div>
+      <ErrorBox error={err} />
+      {result && (
+        <div className="public-notice ok" style={{ marginBottom: 12 }}>
+          {result.accounts} statements: {result.emailed} emailed, {result.printed} to print.{' '}
+          {result.print_ids.length > 0 && <>Print: {result.print_ids.map((id) => <Link key={id} to={`/patients/${id}/statement?family=1`} style={{ marginRight: 8 }}>#{id}</Link>)}</>}
+        </div>
+      )}
+      <div className="card" style={{ padding: 0 }}>
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>Guarantor</th><th>Delivery</th><th>Last statement</th><th className="num">Balance</th><th className="num">Pending ins.</th><th className="num">Patient owes</th></tr></thead>
+            <tbody>
+              {rows?.map((r) => (
+                <tr key={r.id}>
+                  <td><Link to={`/patients/${r.id}`}>{r.first_name} {r.last_name}</Link><div className="muted">{[r.address, r.city, r.state].filter(Boolean).join(', ') || 'no address'}</div></td>
+                  <td>{r.email && r.email_opt_in ? 'Email' : <span className="badge warn">Print & mail</span>}</td>
+                  <td>{r.statement_sent_at ? fmtDate(r.statement_sent_at) : 'Never'}</td>
+                  <td className="num">{money(r.balance)}</td><td className="num">{money(r.pending_insurance)}</td><td className="num"><strong>{money(r.patient_portion)}</strong></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {rows?.length === 0 && <div className="empty">No accounts need a statement.</div>}
+        </div>
+      </div>
+      {runs?.length > 0 && (
+        <div className="card">
+          <h3>Recent statement runs</h3>
+          {runs.map((r) => <div key={r.id} className="muted" style={{ padding: '3px 0' }}>{fmtDateTime(r.created_at)} · {r.accounts} accounts · {r.emailed} emailed · {r.printed} printed · {money(r.total)} · {r.created_by_name}</div>)}
+        </div>
+      )}
     </>
   );
 }

@@ -101,7 +101,7 @@ export default function ClaimDetail() {
 
 function PaymentForm({ claim, onDone }) {
   const remaining = Math.max(0, claim.estimated_amount - claim.paid_amount);
-  const [form, setForm] = useState({ amount: fromCents(remaining), write_off: '0.00', reference: '', final: true });
+  const [form, setForm] = useState({ amount: fromCents(remaining), write_off: fromCents(claim.write_off_estimate || 0), reference: '', final: true });
   const { submit, busy, error } = useSubmit(async () => {
     await api.post(`/claims/${claim.id}/payment`, { amount: toCents(form.amount), write_off: toCents(form.write_off || 0), reference: form.reference, final: form.final });
     onDone();

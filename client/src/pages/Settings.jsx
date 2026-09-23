@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { api } from '../api.js';
+import { api, getToken } from '../api.js';
 import { useApi, invalidateLookup } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
 import { money, fmtDateTime, label, toCents, fromCents } from '../format.js';
@@ -13,7 +13,7 @@ const CATEGORIES = ['diagnostic', 'preventive', 'restorative', 'endodontics', 'p
 const RESOURCES = {
   providers: {
     title: 'Providers', path: '/providers', columns: ['name', 'type', 'npi', 'color'],
-    fields: [['name', 'Name', 'text'], ['type', 'Type', 'select', ['dentist', 'hygienist', 'specialist']], ['npi', 'NPI (10 digits)', 'text'], ['license_number', 'License #', 'text'], ['color', 'Schedule color', 'color'], ['active', 'Active', 'checkbox']],
+    fields: [['name', 'Name', 'text'], ['type', 'Type', 'select', ['dentist', 'hygienist', 'specialist']], ['npi', 'NPI (10 digits)', 'text'], ['license_number', 'License #', 'text'], ['dea_number', 'DEA # (for printed Rx)', 'text'], ['color', 'Schedule color', 'color'], ['active', 'Active', 'checkbox']],
   },
   operatories: { title: 'Operatories', path: '/operatories', columns: ['name'], fields: [['name', 'Name', 'text'], ['active', 'Active', 'checkbox']] },
   codes: {
@@ -43,6 +43,8 @@ export default function Settings() {
     ['codes', 'Fee schedule', true],
     ['types', 'Appointment types', true],
     ['carriers', 'Insurance carriers', can('billing:read')],
+    ['ppo', 'PPO fee schedules', can('billing:read')],
+    ['messaging', 'Messages & reviews', admin],
     ['audit', 'Audit log', admin],
   ].filter((t) => t[2]);
   const [tab, setTab] = useState(admin ? 'practice' : 'account');
@@ -55,6 +57,8 @@ export default function Settings() {
       {tab === 'practice' && <Practice />}
       {tab === 'users' && <Users />}
       {RESOURCES[tab] && <ResourceTable key={tab} spec={RESOURCES[tab]} canWrite={RESOURCES[tab].writePerm ? can(RESOURCES[tab].writePerm) : admin} />}
+      {tab === 'ppo' && <FeeSchedules admin={admin} />}
+      {tab === 'messaging' && <Messaging />}
       {tab === 'audit' && <AuditLog />}
     </>
   );
@@ -187,9 +191,28 @@ function Practice() {
             Practice texting number (Twilio)
             <input value={current.sms_number ?? ''} placeholder="+15125550142" onChange={(e) => change('sms_number', e.target.value)} />
           </label>
-          <label className="checkbox full"><input type="checkbox" checked={!!current.require_mfa} onChange={(e) => change('require_mfa', e.target.checked)} /> Require two-factor authentication for all staff</label>
+          <label>
+            Daily hygiene goal ($)
+            <input type="number" min="0" step="100" value={current.hygiene_goal != null ? current.hygiene_goal / 100 : ''} onChange={(e) => change('hygiene_goal', Math.round(Number(e.target.value) * 100))} />
+          </label>
         </div>
         <MessagingStatus />
+      </div>
+      <div className="card">
+        <h2>Security & data</h2>
+        <div className="form-grid">
+          <label className="checkbox full"><input type="checkbox" checked={!!current.require_mfa} onChange={(e) => change('require_mfa', e.target.checked)} /> Require two-factor authentication for all staff</label>
+          <label>
+            Automatic sign-out after inactivity
+            <select value={current.idle_timeout_minutes || 15} onChange={(e) => change('idle_timeout_minutes', Number(e.target.value))}>
+              {[5, 10, 15, 30, 60, 120, 240].map((m) => <option key={m} value={m}>{m < 60 ? `${m} minutes` : `${m / 60} hour${m > 60 ? 's' : ''}`}</option>)}
+            </select>
+          </label>
+          <div>
+            <div className="muted" style={{ fontSize: 13, marginBottom: 6 }}>Your data is yours. Download everything (patients, charts, ledger, claims, schedule) as JSON.</div>
+            <button type="button" onClick={exportData}>⬇ Export practice data</button>
+          </div>
+        </div>
       </div>
       <ErrorBox error={error} />
       <div className="form-actions">
@@ -419,5 +442,170 @@ function OfficeHours({ value, onChange }) {
       })}
       <p className="muted" style={{ fontSize: 12 }}>Closed times are shaded on the schedule and never offered for online booking. Use blocked time for lunches and one-off closures.</p>
     </div>
+  );
+}
+
+async function exportData() {
+  const res = await fetch('/api/export', { headers: { Authorization: `Bearer ${getToken()}` } });
+  if (!res.ok) return alert('Export failed');
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = (res.headers.get('Content-Disposition') || '').match(/filename="(.+)"/)?.[1] || 'dentalmachine-export.json';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// PPO fee schedules: contracted allowed fees per carrier, which drive write-offs and patient estimates.
+function FeeSchedules({ admin }) {
+  const { data: list, reload } = useApi('/fee-schedules');
+  const { data: carriers } = useApi('/carriers');
+  const { data: codes } = useApi('/procedure-codes');
+  const [sel, setSel] = useState(null);
+  const [creating, setCreating] = useState(false);
+  const current = list?.find((f) => f.id === sel) || list?.[0];
+  return (
+    <div className="grid" style={{ gridTemplateColumns: 'minmax(200px, 260px) minmax(0, 1fr)' }}>
+      <div className="card">
+        <h2>Schedules</h2>
+        <p className="muted" style={{ fontSize: 13 }}>In-network (PPO) plans pay from their contracted fee, not your office fee. The difference is written off and patient estimates use the contracted fee.</p>
+        {list?.map((f) => (
+          <button key={f.id} className={`list-item${current?.id === f.id ? ' active' : ''}`} onClick={() => setSel(f.id)}>
+            <strong>{f.name}</strong>
+            <div className="muted" style={{ fontSize: 12 }}>{f.items.length} codes · {f.carriers.map((c) => c.name).join(', ') || 'no carriers'}</div>
+          </button>
+        ))}
+        {list?.length === 0 && <div className="muted">None yet — all carriers are paid from office fees.</div>}
+        {admin && <button className="primary" style={{ marginTop: 12 }} onClick={() => setCreating(true)}>+ New fee schedule</button>}
+      </div>
+      {current && codes && carriers && <FeeScheduleEditor key={current.id} fs={current} codes={codes} carriers={carriers} admin={admin} onSaved={reload} />}
+      {creating && (
+        <Modal title="New PPO fee schedule" onClose={() => setCreating(false)}>
+          <NewFeeSchedule onDone={(fs) => { setCreating(false); reload(); setSel(fs.id); }} />
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function NewFeeSchedule({ onDone }) {
+  const [form, setForm] = useState({ name: '', percent_of_ucr: 80 });
+  const { submit, busy, error } = useSubmit(async () => onDone(await api.post('/fee-schedules', form)));
+  return (
+    <form onSubmit={(e) => { e.preventDefault(); submit(); }}>
+      <ErrorBox error={error} />
+      <div className="form-grid">
+        <label className="full">Name<input required value={form.name} placeholder="e.g. Delta Dental PPO 2026" onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
+        <label className="full">Start at % of office fees<input type="number" min="0" max="100" value={form.percent_of_ucr} onChange={(e) => setForm({ ...form, percent_of_ucr: Number(e.target.value) })} /><span className="muted">You can then enter each contracted fee exactly.</span></label>
+      </div>
+      <div className="form-actions"><button className="primary" disabled={busy}>Create</button></div>
+    </form>
+  );
+}
+
+function FeeScheduleEditor({ fs, codes, carriers, admin, onSaved }) {
+  const [fees, setFees] = useState(() => Object.fromEntries(fs.items.map((i) => [i.code, fromCents(i.fee)])));
+  const [assigned, setAssigned] = useState(() => fs.carriers.map((c) => c.id));
+  const [filter, setFilter] = useState('');
+  const [saved, setSaved] = useState(false);
+  const { submit, busy, error } = useSubmit(async () => {
+    const items = codes.map((c) => ({ code: c.code, fee: fees[c.code] === '' || fees[c.code] == null ? null : toCents(fees[c.code]) }));
+    await api.put(`/fee-schedules/${fs.id}`, { items, carrier_ids: assigned });
+    setSaved(true);
+    onSaved();
+  });
+  const shown = codes.filter((c) => !filter || `${c.code} ${c.description}`.toLowerCase().includes(filter.toLowerCase()));
+  return (
+    <div className="card">
+      <div className="page-header" style={{ marginBottom: 8 }}>
+        <h2 style={{ margin: 0 }}>{fs.name}</h2>
+        {admin && <div className="inline">{saved && <span className="badge ok">Saved</span>}<button className="primary" disabled={busy} onClick={submit}>Save</button></div>}
+      </div>
+      <ErrorBox error={error} />
+      <div style={{ marginBottom: 12 }}>
+        <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>Used for these carriers</div>
+        <div className="chips">
+          {carriers.map((c) => (
+            <button key={c.id} type="button" disabled={!admin} className={`chip${assigned.includes(c.id) ? ' active' : ''}`}
+              onClick={() => { setSaved(false); setAssigned(assigned.includes(c.id) ? assigned.filter((x) => x !== c.id) : [...assigned, c.id]); }}>
+              {assigned.includes(c.id) ? '✓ ' : ''}{c.name}
+            </button>
+          ))}
+        </div>
+      </div>
+      <input placeholder="Filter codes…" value={filter} onChange={(e) => setFilter(e.target.value)} style={{ marginBottom: 8, maxWidth: 280 }} />
+      <div className="table-wrap" style={{ maxHeight: 460, overflow: 'auto' }}>
+        <table>
+          <thead><tr><th>Code</th><th>Description</th><th className="num">Office fee</th><th className="num">Contracted</th><th className="num">Write-off</th></tr></thead>
+          <tbody>
+            {shown.map((c) => {
+              const v = fees[c.code];
+              const wo = v !== '' && v != null ? c.fee - toCents(v) : null;
+              return (
+                <tr key={c.code}>
+                  <td>{c.code}</td><td>{c.description}</td><td className="num">{money(c.fee)}</td>
+                  <td className="num"><input className="fee-input" type="number" min="0" step="0.01" disabled={!admin} value={v ?? ''} placeholder="office fee" onChange={(e) => { setSaved(false); setFees({ ...fees, [c.code]: e.target.value }); }} /></td>
+                  <td className="num muted">{wo ? money(wo) : '—'}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+const TEMPLATE_INFO = {
+  reminder: ['Appointment reminder', 'Sent before each appointment. Must include {link} (the confirm page).'],
+  booking_confirmation: ['Booking confirmation', 'Sent when a patient books online or the office books them.'],
+  recall: ['Recall reminder', 'Sent from the recall list and recall campaigns.'],
+  review: ['Review request', 'Sent after a completed visit when review requests are on. Must include {link}.'],
+};
+
+// Message templates and the Google review request program.
+function Messaging() {
+  const { data: practice } = useApi('/practice');
+  const { data: defaults } = useApi('/message-templates/defaults');
+  const [form, setForm] = useState(null);
+  const [saved, setSaved] = useState(false);
+  const { refresh } = useAuth();
+  const { submit, busy, error } = useSubmit(async () => {
+    await api.put('/practice', { review_url: form.review_url || null, review_requests: form.review_requests, message_templates: form.templates });
+    setSaved(true);
+    refresh();
+  });
+  if (!practice || !defaults) return null;
+  const cur = form || { review_url: practice.review_url || '', review_requests: !!practice.review_requests, templates: JSON.parse(practice.message_templates || '{}') };
+  const change = (patch) => { setSaved(false); setForm({ ...cur, ...patch }); };
+  const sample = { first_name: 'Maria', practice: practice.name, when: 'Tue, Oct 6 at 9:00 AM', provider: 'Dr. Chen', link: 'https://…/c/abc123', phone: practice.phone || '' };
+  const render = (t) => t.replace(/\{(\w+)\}/g, (_, k) => sample[k] ?? '');
+  return (
+    <>
+      <div className="card">
+        <h2>Online reviews</h2>
+        <p className="muted" style={{ fontSize: 13 }}>After a completed visit, patients get one friendly text asking for a review (at most once every 6 months). More 5-star reviews means more new patients.</p>
+        <div className="form-grid">
+          <label className="full">Review link (Google, Yelp…)<input value={cur.review_url} placeholder="https://g.page/r/your-practice/review" onChange={(e) => change({ review_url: e.target.value })} /></label>
+          <label className="checkbox full"><input type="checkbox" checked={cur.review_requests} onChange={(e) => change({ review_requests: e.target.checked })} /> Automatically send review requests after visits</label>
+        </div>
+      </div>
+      <div className="card">
+        <h2>Message templates</h2>
+        <p className="muted" style={{ fontSize: 13 }}>Placeholders: <code>{'{first_name}'}</code> <code>{'{practice}'}</code> <code>{'{when}'}</code> <code>{'{provider}'}</code> <code>{'{link}'}</code> <code>{'{phone}'}</code>. Leave blank to use the default.</p>
+        {Object.entries(TEMPLATE_INFO).map(([k, [title, help]]) => {
+          const value = cur.templates[k] ?? '';
+          return (
+            <div key={k} className="template-row">
+              <label>{title}<textarea rows={2} value={value} placeholder={defaults[k]} onChange={(e) => change({ templates: { ...cur.templates, [k]: e.target.value } })} /></label>
+              <div className="muted" style={{ fontSize: 12 }}>{help}</div>
+              <div className="sms-preview">{render(value || defaults[k])}</div>
+            </div>
+          );
+        })}
+      </div>
+      <ErrorBox error={error} />
+      <div className="form-actions">{saved && <span className="badge ok">Saved</span>}<button className="primary" disabled={busy} onClick={submit}>Save</button></div>
+    </>
   );
 }

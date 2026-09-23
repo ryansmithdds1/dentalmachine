@@ -47,3 +47,10 @@ export function practiceToday(tz = 'America/New_York') {
   const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date()).map((x) => [x.type, x.value]));
   return `${p.year}-${p.month}-${p.day}`;
 }
+
+// For UTC timestamps from the server (created_at, signed_at…): show the practice-local date.
+export function fmtUtcDate(s, tz) {
+  if (!s) return '';
+  const d = new Date(`${s.slice(0, 19).replace(' ', 'T')}Z`);
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', ...(tz ? { timeZone: tz } : {}) });
+}

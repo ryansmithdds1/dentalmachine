@@ -49,6 +49,15 @@ export default function casePresentationRoutes({ db, messenger, config }) {
     res.json({ url, message });
   });
 
+  r.get('/treatment-plans/:tid', requirePermission('clinical:read'), (req, res) => {
+    const plan = findOr404(db, 'treatment_plans', req.params.tid, req.user.practice_id, 'Treatment plan');
+    res.json({
+      ...planView(db, plan),
+      patient: db.get('SELECT id, first_name, last_name, dob, address, city, state, zip, phone FROM patients WHERE id = ?', plan.patient_id),
+      practice: db.get('SELECT name, address, city, state, zip, phone FROM practices WHERE id = ?', req.user.practice_id),
+    });
+  });
+
   // ---- Prescriptions ----
   r.get('/rx/favorites', (_req, res) => res.json(RX_FAVORITES));
 

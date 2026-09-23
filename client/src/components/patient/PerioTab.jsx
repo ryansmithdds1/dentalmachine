@@ -86,12 +86,53 @@ export default function PerioTab({ patient }) {
         </div>
       </div>
       <ErrorBox error={error} />
+      <PerioSummary current={shown} previous={viewing ? exams?.find((x) => x.exam_date < viewing.exam_date) : exams?.[0]} />
       <div className="muted" style={{ marginBottom: 8 }}>Depths in mm. <span style={{ color: 'var(--warn)' }}>4mm</span> · <span style={{ color: 'var(--danger)' }}>5mm+</span> · shaded = bleeding on probing{editable ? ' (right-click a site to toggle)' : ''}.</div>
       <div className="table-wrap">
         {renderArch(UPPER)}
         <div style={{ height: 12 }} />
         {renderArch(LOWER)}
       </div>
+    </div>
+  );
+}
+
+// Perio summary: bleeding %, pocket counts and change vs the prior exam (what insurers and patients care about).
+export function perioStats(readings) {
+  let sites = 0, bleeding = 0, p4 = 0, p5 = 0, deepest = 0;
+  for (const v of Object.values(readings || {})) {
+    v.pd.forEach((d, i) => {
+      if (d === '' || d == null) return;
+      const n = Number(d);
+      sites++;
+      if (v.bop?.[i]) bleeding++;
+      if (n >= 4) p4++;
+      if (n >= 5) p5++;
+      deepest = Math.max(deepest, n);
+    });
+  }
+  return { sites, bop_pct: sites ? Math.round((bleeding / sites) * 100) : 0, p4, p5, deepest };
+}
+
+function PerioSummary({ current, previous }) {
+  const now = perioStats(current);
+  if (!now.sites) return null;
+  const prev = previous ? perioStats(previous.readings) : null;
+  const delta = (k, lowerIsBetter = true) => {
+    if (!prev?.sites) return null;
+    const d = now[k] - prev[k];
+    if (!d) return <span className="muted"> ±0</span>;
+    const good = lowerIsBetter ? d < 0 : d > 0;
+    return <span style={{ color: good ? 'var(--ok)' : 'var(--danger)' }}> {d > 0 ? '▲' : '▼'}{Math.abs(d)}</span>;
+  };
+  return (
+    <div className="perio-summary">
+      <div><strong>{now.sites}</strong><span>sites charted</span></div>
+      <div><strong className={now.bop_pct > 30 ? 'text-danger' : ''}>{now.bop_pct}%{delta('bop_pct')}</strong><span>bleeding on probing</span></div>
+      <div><strong>{now.p4}{delta('p4')}</strong><span>pockets ≥ 4 mm</span></div>
+      <div><strong className={now.p5 ? 'text-danger' : ''}>{now.p5}{delta('p5')}</strong><span>pockets ≥ 5 mm</span></div>
+      <div><strong>{now.deepest} mm</strong><span>deepest</span></div>
+      {prev?.sites ? <div className="muted" style={{ alignSelf: 'center', fontSize: 12 }}>vs {fmtDate(previous.exam_date)}</div> : null}
     </div>
   );
 }

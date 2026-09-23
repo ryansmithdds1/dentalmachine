@@ -8,7 +8,12 @@ import Patients from './pages/Patients.jsx';
 import PatientDetail from './pages/PatientDetail.jsx';
 import Claims from './pages/Claims.jsx';
 import ClaimDetail from './pages/ClaimDetail.jsx';
-import Recalls from './pages/Recalls.jsx';
+import Followups from './pages/Followups.jsx';
+import RouteSlip from './pages/RouteSlip.jsx';
+import { TreatmentPlanPrint, PrescriptionPrint } from './pages/PrintDocs.jsx';
+import CommandPalette from './components/CommandPalette.jsx';
+import IdleLogout from './components/IdleLogout.jsx';
+import CaseAcceptance from './pages/public/CaseAcceptance.jsx';
 import Reports from './pages/Reports.jsx';
 import Settings from './pages/Settings.jsx';
 import Statement from './pages/Statement.jsx';
@@ -32,6 +37,7 @@ export default function App() {
       <Route path="/c/:token" element={<ConfirmPage />} />
       <Route path="/f/:token" element={<IntakePage />} />
       <Route path="/pay/:result" element={<PayResult />} />
+      <Route path="/tp/:token" element={<CaseAcceptance />} />
       <Route path="*" element={<StaffApp />} />
     </Routes>
   );
@@ -72,12 +78,12 @@ function StaffApp() {
   }
 
   const nav = [
-    ['/', '📊', 'Dashboard', true],
+    ['/', '☀️', 'Today', true],
     ['/schedule', '📅', 'Schedule', can('schedule:read')],
     ['/patients', '🧑‍⚕️', 'Patients', can('patients:read')],
     ['/messages', '💬', 'Messages', can('patients:read')],
     ['/requests', '📥', 'Online requests', can('schedule:read')],
-    ['/recalls', '🔔', 'Recall', can('schedule:read')],
+    ['/followups', '📞', 'Follow-up lists', can('schedule:read')],
     ['/claims', '🧾', 'Billing', can('billing:read')],
     ['/office', '✅', 'To-do & labs', true],
     ['/reports', '📈', 'Reports', can('reports:read')],
@@ -85,7 +91,21 @@ function StaffApp() {
   ];
 
   return (
+    <Routes>
+      <Route path="/appointments/:id/route-slip" element={<RouteSlip />} />
+      <Route path="/treatment-plans/:id/print" element={<TreatmentPlanPrint />} />
+      <Route path="/prescriptions/:id/print" element={<PrescriptionPrint />} />
+      <Route path="*" element={<Shell nav={nav} />} />
+    </Routes>
+  );
+}
+
+function Shell({ nav }) {
+  const { user, practice, logout } = useAuth();
+  return (
     <div className="app">
+      <CommandPalette />
+      <IdleLogout />
       <aside className="sidebar">
         <div className="brand">
           <span>🦷</span>
@@ -94,6 +114,9 @@ function StaffApp() {
             <small>{practice?.name}</small>
           </div>
         </div>
+        <button className="search-trigger" onClick={() => window.dispatchEvent(new Event('dm:search'))}>
+          🔍 Search <kbd>Ctrl K</kbd>
+        </button>
         <nav className="nav">
           {nav.filter((n) => n[3]).map(([to, icon, text]) => (
             <NavLink key={to} to={to} end={to === '/'}>
@@ -115,7 +138,8 @@ function StaffApp() {
           <Route path="/patients" element={<Patients />} />
           <Route path="/patients/:id" element={<PatientDetail />} />
           <Route path="/patients/:id/statement" element={<Statement />} />
-          <Route path="/recalls" element={<Recalls />} />
+          <Route path="/followups" element={<Followups />} />
+          <Route path="/recalls" element={<Navigate to="/followups" replace />} />
           <Route path="/requests" element={<Requests />} />
           <Route path="/messages" element={<Inbox />} />
           <Route path="/office" element={<Office />} />

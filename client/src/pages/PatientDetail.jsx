@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useApi } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
-import { money, fullName, age, fmtDate, fmtDateTime, label } from '../format.js';
+import { money, fullName, age, fmtDate, fmtDateTime, fmtUtcDate, label } from '../format.js';
 import { Modal, Badge } from '../components/ui.jsx';
 import PatientForm from '../components/PatientForm.jsx';
 import AppointmentForm from '../components/AppointmentForm.jsx';
@@ -15,6 +15,7 @@ import PerioTab from '../components/patient/PerioTab.jsx';
 import DocumentsTab from '../components/patient/DocumentsTab.jsx';
 import CommsTab from '../components/patient/CommsTab.jsx';
 import FamilyTab from '../components/patient/FamilyTab.jsx';
+import RxTab from '../components/patient/RxTab.jsx';
 import { LabCaseForm, TaskForm, LAB_STATUSES } from '../components/OfficeForms.jsx';
 import { api } from '../api.js';
 
@@ -24,6 +25,20 @@ export default function PatientDetail() {
   const { data: p, error, reload } = useApi(`/patients/${id}`);
   const [tab, setTab] = useState('overview');
   const [modal, setModal] = useState(null);
+  const [popup, setPopup] = useState(null);
+
+  // Pop-up office alert, shown once per session per patient (like Dentrix/Open Dental pop-ups).
+  useEffect(() => {
+    if (!p?.office_alert) return;
+    const key = `dm_alert_seen_${p.id}`;
+    try {
+      if (sessionStorage.getItem(key) === p.office_alert) return;
+      sessionStorage.setItem(key, p.office_alert);
+    } catch {
+      /* storage unavailable */
+    }
+    setPopup(p.office_alert);
+  }, [p?.id, p?.office_alert]);
 
   if (error) return <div className="error">{error.message}</div>;
   if (!p) return <div className="empty">Loading…</div>;
@@ -35,6 +50,7 @@ export default function PatientDetail() {
     ['treatment', 'Treatment plans', can('clinical:read')],
     ['perio', 'Perio', can('clinical:read')],
     ['notes', 'Clinical notes', can('clinical:read')],
+    ['rx', 'Rx', can('clinical:read')],
     ['documents', 'Documents & x-rays', can('clinical:read')],
     ['ledger', 'Ledger', can('billing:read')],
     ['insurance', 'Insurance', true],
@@ -53,6 +69,7 @@ export default function PatientDetail() {
                 #{p.id} · {p.dob ? `${fmtDate(p.dob)} (${age(p.dob)} y)` : 'DOB not recorded'} {p.gender ? `· ${label(p.gender)}` : ''} {p.phone ? `· ${p.phone}` : ''}
               </div>
               <div className="inline" style={{ marginTop: 6, flexWrap: 'wrap' }}>
+                {p.office_alert && <button className="office-chip" onClick={() => setPopup(p.office_alert)}>📌 {p.office_alert}</button>}
                 {p.medical_alerts && <span className="alert-chip">⚠ {p.medical_alerts}</span>}
                 {p.allergies && <span className="alert-chip">Allergy: {p.allergies}</span>}
                 {p.guarantor && <button className="link" style={{ fontSize: 12 }} onClick={() => setTab('family')}>Guarantor: {p.guarantor.first_name} {p.guarantor.last_name}</button>}
@@ -83,11 +100,18 @@ export default function PatientDetail() {
       {tab === 'treatment' && <TreatmentTab patient={p} onChange={reload} />}
       {tab === 'perio' && <PerioTab patient={p} />}
       {tab === 'notes' && <NotesTab patient={p} />}
+      {tab === 'rx' && <RxTab patient={p} />}
       {tab === 'ledger' && <LedgerTab patient={p} onChange={reload} />}
       {tab === 'insurance' && <InsuranceTab patient={p} onChange={reload} />}
       {tab === 'documents' && <DocumentsTab patient={p} />}
       {tab === 'comms' && <CommsTab patient={p} onChange={reload} />}
 
+      {popup && (
+        <Modal title="Office alert" onClose={() => setPopup(null)}>
+          <div className="office-popup">📌 {popup}</div>
+          <div className="form-actions"><button className="primary" autoFocus onClick={() => setPopup(null)}>Got it</button></div>
+        </Modal>
+      )}
       {modal === 'edit' && (
         <Modal title="Edit patient" wide onClose={() => setModal(null)}>
           <PatientForm patient={p} onCancel={() => setModal(null)} onSaved={() => { setModal(null); reload(); }} />
@@ -104,7 +128,7 @@ export default function PatientDetail() {
 
 function Overview({ p, reload }) {
   const ins = p.primary_insurance;
-  const { can } = useAuth();
+  const { can, practice } = useAuth();
   const { data: tasks, reload: reloadTasks } = useApi(`/tasks?patient_id=${p.id}`);
   const [modal, setModal] = useState(null);
   return (
@@ -124,8 +148,15 @@ function Overview({ p, reload }) {
           <dt>Email</dt><dd>{p.email || '—'}</dd>
           <dt>Address</dt><dd>{[p.address, p.city, p.state, p.zip].filter(Boolean).join(', ') || '—'}</dd>
           <dt>Emergency contact</dt><dd>{p.emergency_contact || '—'}</dd>
+          <dt>Referred by</dt><dd>{p.referral_source || '—'}</dd>
         </dl>
-        <h2 style={{ marginTop: 18 }}>Medical history</h2>
+        <div className="inline" style={{ marginTop: 18, justifyContent: 'space-between' }}>
+          <h2 style={{ margin: 0 }}>Medical history</h2>
+          {can('clinical:write') && <button className="small" onClick={() => api.post(`/patients/${p.id}/medical-reviewed`).then(reload)}>✓ Reviewed today</button>}
+        </div>
+        <div className={`muted`} style={{ fontSize: 12, margin: '4px 0 8px', color: medStale(p) ? 'var(--warn)' : undefined }}>
+          {p.medical_reviewed_at ? `Last reviewed ${fmtUtcDate(p.medical_reviewed_at, practice?.timezone)}` : 'Never reviewed'}{medStale(p) ? ' — update due' : ''}
+        </div>
         <dl className="kv">
           <dt>Alerts</dt><dd>{p.medical_alerts || 'None'}</dd>
           <dt>Allergies</dt><dd>{p.allergies || 'NKDA'}</dd>
@@ -208,3 +239,5 @@ function Overview({ p, reload }) {
     </>
   );
 }
+
+const medStale = (p) => !p.medical_reviewed_at || Date.now() - new Date(p.medical_reviewed_at.slice(0, 10)).getTime() > 365 * 86400000;

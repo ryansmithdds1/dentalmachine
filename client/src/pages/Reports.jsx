@@ -1,10 +1,26 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
+import Analytics from '../components/Analytics.jsx';
 import { useApi } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
 import { money, label, practiceToday, shiftDate } from '../format.js';
 
 export default function Reports() {
+  const [params, setParams] = useSearchParams();
+  const tab = params.get('tab') || 'kpis';
+  return (
+    <>
+      <div className="page-header"><h1>Reports</h1></div>
+      <div className="tabs">
+        <button className={tab === 'kpis' ? 'active' : ''} onClick={() => setParams({ tab: 'kpis' })}>Practice KPIs</button>
+        <button className={tab === 'ops' ? 'active' : ''} onClick={() => setParams({ tab: 'ops' })}>Day sheet, production & A/R</button>
+      </div>
+      {tab === 'kpis' ? <Analytics /> : <Operational />}
+    </>
+  );
+}
+
+function Operational() {
   const { practice } = useAuth();
   const today = practiceToday(practice?.timezone);
   const [from, setFrom] = useState(`${today.slice(0, 7)}-01`);
@@ -18,10 +34,6 @@ export default function Reports() {
 
   return (
     <>
-      <div className="page-header">
-        <h1>Reports</h1>
-      </div>
-
       <DaySheet sheet={sheet} date={sheetDate} setDate={setSheetDate} />
 
       <div className="page-header" style={{ marginTop: 24 }}>
