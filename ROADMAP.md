@@ -231,8 +231,8 @@ Works well: drag, resize and create; undo; live updates; conflict checks; open-t
 
 ### Clinical notes
 1. ✅ **P1** Editable template library, merge fields and prompts (pairs with item 52).
-2. **P2** Link notes to an appointment; search and filter notes.
-3. **P2** Signature shows the signer's name, credentials and time on printouts.
+2. ✅ **P2** Link notes to an appointment; search and filter notes. _(Done: each note shows its visit, unlinked unsigned notes can be linked to one; search (notes and addenda), provider and unsigned-only filters.)_
+3. ✅ **P2** Signature shows the signer's name, credentials and time on printouts. _(Done: “Electronically signed by Dr. …, DDS · License … · NPI … · time” under each signed note and addendum, on screen and on the printable notes (filters apply).)_
 
 ### Documents and imaging
 1. ✅ **P1** Edit category, tooth and date after upload. _(Done: “Edit details” in the viewer — name, type, tooth, date taken, note; audited.)_

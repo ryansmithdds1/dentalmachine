@@ -1,14 +1,19 @@
 import { useState } from 'react';
 import { api } from '../../api.js';
-import { useApi } from '../../hooks.js';
+import { useApi, useLookup } from '../../hooks.js';
 import { useAuth } from '../../auth.jsx';
-import { fmtDateTime } from '../../format.js';
+import { fmtDateTime, fmtDate } from '../../format.js';
 import { ErrorBox } from '../ui.jsx';
 import NoteComposer from '../NoteComposer.jsx';
 
 export default function NotesTab({ patient }) {
   const { user, can } = useAuth();
-  const { data: notes, reload } = useApi(`/patients/${patient.id}/notes`);
+  const [filter, setFilter] = useState({ q: '', provider_id: '', unsigned: false });
+  const query = new URLSearchParams({ ...(filter.q.trim() ? { q: filter.q.trim() } : {}), ...(filter.provider_id ? { provider_id: filter.provider_id } : {}), ...(filter.unsigned ? { unsigned: '1' } : {}) }).toString();
+  const { data: notes, reload } = useApi(`/patients/${patient.id}/notes${query ? `?${query}` : ''}`);
+  const providers = useLookup('/providers');
+  const { data: visits } = useApi(`/appointments?patient_id=${patient.id}&from=2000-01-01&to=2100-01-01`);
+  const visitLabel = (v) => `${fmtDate(v.start_time.slice(0, 10))} · ${v.type_name || v.reason || 'Visit'}`;
   const [editing, setEditing] = useState(null);
   const [addendum, setAddendum] = useState(null);
   const [actionErr, setActionErr] = useState(null);
@@ -31,8 +36,17 @@ export default function NotesTab({ patient }) {
         </div>
       )}
       <div>
+        <div className="inline notes-filter" style={{ gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+          <input type="search" aria-label="Search notes" placeholder="Search notes…" value={filter.q} onChange={(e) => setFilter({ ...filter, q: e.target.value })} style={{ flex: 1, minWidth: 160 }} />
+          <select aria-label="Provider" value={filter.provider_id} onChange={(e) => setFilter({ ...filter, provider_id: e.target.value })} style={{ width: 'auto' }}>
+            <option value="">All providers</option>
+            {providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+          <label className="inline" style={{ gap: 4, flexDirection: 'row', alignItems: 'center', margin: 0 }}><input type="checkbox" style={{ width: 'auto' }} checked={filter.unsigned} onChange={(e) => setFilter({ ...filter, unsigned: e.target.checked })} /> Unsigned only</label>
+          <button className="small" onClick={() => window.open(`/patients/${patient.id}/notes/print${query ? `?${query}` : ''}`, '_blank')}>Print</button>
+        </div>
         <ErrorBox error={actionErr} />
-        {notes?.length === 0 && <div className="card empty">No clinical notes.</div>}
+        {notes?.length === 0 && <div className="card empty">{query ? 'No notes match.' : 'No clinical notes.'}</div>}
         {notes?.map((n) => (
           <div className="card" key={n.id}>
             <div className="inline" style={{ justifyContent: 'space-between', marginBottom: 8 }}>
@@ -41,6 +55,14 @@ export default function NotesTab({ patient }) {
                 <span className="muted"> · {n.author_name}{n.provider_name ? ` for ${n.provider_name}` : ''}</span>
               </div>
               {n.signed ? <span className="badge ok">Signed{n.signed_by_name ? ` by ${n.signed_by_name}` : ''} {fmtDateTime(n.signed_at)}</span> : <span className="badge warn">Unsigned</span>}
+            </div>
+            <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>
+              {n.visit_start ? <>Visit: {fmtDate(n.visit_start.slice(0, 10))} · {n.visit_reason || 'appointment'}</> : !n.signed && can('clinical:write') && visits?.length ? (
+                <select aria-label="Link to visit" value="" style={{ width: 'auto' }} onChange={(e) => e.target.value && act(() => api.put(`/notes/${n.id}`, { appointment_id: Number(e.target.value) }))}>
+                  <option value="">Link to a visit…</option>
+                  {visits.map((v) => <option key={v.id} value={v.id}>{visitLabel(v)}</option>)}
+                </select>
+              ) : 'Not linked to a visit'}
             </div>
             {editing?.id === n.id ? (
               <>
@@ -51,7 +73,10 @@ export default function NotesTab({ patient }) {
                 </div>
               </>
             ) : (
-              <div style={{ whiteSpace: 'pre-wrap' }}>{n.body}</div>
+              <>
+                <div style={{ whiteSpace: 'pre-wrap' }}>{n.body}</div>
+                {n.signature && <div className="note-signature">{n.signature} · {fmtDateTime(n.signed_at)}</div>}
+              </>
             )}
             {!n.signed && editing?.id !== n.id && (
               <div className="form-actions" style={{ marginTop: 8 }}>
@@ -69,7 +94,7 @@ export default function NotesTab({ patient }) {
                 {!a.signed && can('clinical:sign') && <button className="small primary" style={{ marginTop: 4 }} onClick={() => act(() => api.post(`/notes/${a.id}/sign`))}>Sign addendum</button>}
               </div>
             ))}
-            {n.signed && can('clinical:write') && (addendum?.id === n.id ? (
+            {!!n.signed && can('clinical:write') && (addendum?.id === n.id ? (
               <div style={{ marginTop: 8 }}>
                 <textarea rows={3} autoFocus value={addendum.body} onChange={(e) => setAddendum({ ...addendum, body: e.target.value })} placeholder="Correction or late entry…" />
                 <div className="form-actions">

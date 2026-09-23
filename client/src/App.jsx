@@ -24,6 +24,7 @@ const Campaigns = lazy(() => import('./pages/Campaigns.jsx'));
 const UnsubscribePage = lazy(() => import('./pages/public/UnsubscribePage.jsx'));
 const RouteSlip = lazy(() => import('./pages/RouteSlip.jsx'));
 const SchedulePrint = lazy(() => import('./pages/SchedulePrint.jsx'));
+const NotesPrint = lazy(() => import('./pages/NotesPrint.jsx'));
 const TreatmentPlanPrint = lazy(() => import('./pages/PrintDocs.jsx').then((m) => ({ default: m.TreatmentPlanPrint })));
 const PrescriptionPrint = lazy(() => import('./pages/PrintDocs.jsx').then((m) => ({ default: m.PrescriptionPrint })));
 const WalkoutPrint = lazy(() => import('./pages/PrintDocs.jsx').then((m) => ({ default: m.WalkoutPrint })));
@@ -151,6 +152,7 @@ function StaffApp() {
     <Routes>
       <Route path="/appointments/:id/route-slip" element={<RouteSlip />} />
       <Route path="/schedule/print" element={<SchedulePrint />} />
+      <Route path="/patients/:id/notes/print" element={<NotesPrint />} />
       <Route path="/treatment-plans/:id/print" element={<TreatmentPlanPrint />} />
       <Route path="/prescriptions/:id/print" element={<PrescriptionPrint />} />
       <Route path="/lab-cases/:id/slip" element={<LabSlipPrint />} />

@@ -357,15 +357,32 @@ export default function clinicalRoutes({ db }) {
   // ---- Clinical notes (signed notes are immutable; corrections go in an addendum) ----
   r.get('/patients/:id/notes', requirePermission('clinical:read'), async (req, res) => {
     const patient = await patientOr404(req);
+    // The signer's provider record gives their credentials and license for the signature line.
     const notes = await db.all(
-      `SELECT n.*, u.name AS author_name, pv.name AS provider_name, s.name AS signed_by_name FROM clinical_notes n
+      `SELECT n.*, u.name AS author_name, pv.name AS provider_name, s.name AS signed_by_name,
+         sp.name AS signer_provider_name, sp.license_number AS signer_license, sp.npi AS signer_npi,
+         a.start_time AS visit_start, COALESCE(t.name, a.reason) AS visit_reason
+       FROM clinical_notes n
        JOIN users u ON u.id = n.author_id LEFT JOIN providers pv ON pv.id = n.provider_id LEFT JOIN users s ON s.id = n.signed_by
+       LEFT JOIN providers sp ON sp.id = COALESCE((SELECT MIN(x.id) FROM providers x WHERE x.user_id = n.signed_by AND x.practice_id = n.practice_id), CASE WHEN n.signed_by IS NULL THEN n.provider_id END)
+       LEFT JOIN appointments a ON a.id = n.appointment_id LEFT JOIN appointment_types t ON t.id = a.appointment_type_id
        WHERE n.patient_id = ? AND n.practice_id = ? ORDER BY n.created_at DESC, n.id DESC`,
       patient.id, req.user.practice_id,
     );
+    for (const n of notes) {
+      n.signature = n.signed ? `Electronically signed by ${n.signer_provider_name || n.signed_by_name || 'staff'}${n.signer_license ? ` · License ${n.signer_license}` : ''}${n.signer_npi ? ` · NPI ${n.signer_npi}` : ''}` : null;
+    }
     // Addenda are shown under the note they amend, oldest first.
-    const top = notes.filter((n) => !n.addendum_of);
+    let top = notes.filter((n) => !n.addendum_of);
     for (const n of top) n.addenda = notes.filter((a) => a.addendum_of === n.id).reverse();
+    // Filters: words in the note (or its addenda), provider, visit, dates, unsigned only.
+    const q = String(req.query.q || '').trim().toLowerCase();
+    if (q) top = top.filter((n) => q.split(/\s+/).every((w) => [n.body, ...n.addenda.map((a) => a.body)].join(' ').toLowerCase().includes(w)));
+    if (req.query.provider_id) top = top.filter((n) => n.provider_id === Number(req.query.provider_id));
+    if (req.query.appointment_id) top = top.filter((n) => n.appointment_id === Number(req.query.appointment_id));
+    if (req.query.from) top = top.filter((n) => n.created_at.slice(0, 10) >= req.query.from);
+    if (req.query.to) top = top.filter((n) => n.created_at.slice(0, 10) <= req.query.to);
+    if (req.query.unsigned === '1') top = top.filter((n) => !n.signed || n.addenda.some((a) => !a.signed));
     res.json(top);
   });
 
@@ -389,7 +406,7 @@ export default function clinicalRoutes({ db }) {
     const row = pick(req.body, ['body', 'appointment_id', 'provider_id']);
     requireFields(row, ['body']);
     if (row.provider_id) await findOr404(db, 'providers', row.provider_id, req.user.practice_id, 'Provider');
-    if (row.appointment_id) await findOr404(db, 'appointments', row.appointment_id, req.user.practice_id, 'Appointment');
+    if (row.appointment_id && (await findOr404(db, 'appointments', row.appointment_id, req.user.practice_id, 'Appointment')).patient_id !== patient.id) throw new HttpError(400, "That visit is another patient's");
     const id = await insert(db, 'clinical_notes', { ...row, patient_id: patient.id, practice_id: req.user.practice_id, author_id: req.user.id });
     await audit(db, req, 'note.create', 'clinical_notes', id);
     res.status(201).json(await db.get('SELECT * FROM clinical_notes WHERE id = ?', id));
@@ -399,8 +416,13 @@ export default function clinicalRoutes({ db }) {
     const existing = await findOr404(db, 'clinical_notes', req.params.nid, req.user.practice_id, 'Note');
     if (existing.signed) throw new HttpError(409, 'Signed notes cannot be edited; add an addendum instead');
     if (existing.author_id !== req.user.id && req.user.role !== 'admin') throw new HttpError(403, 'Only the author can edit this note');
-    const row = pick(req.body, ['body']);
-    requireFields(row, ['body']);
+    const row = pick(req.body, ['body', 'appointment_id']);
+    if (row.body !== undefined) requireFields(row, ['body']);
+    if (row.appointment_id) {
+      const appt = await findOr404(db, 'appointments', row.appointment_id, req.user.practice_id, 'Appointment');
+      if (appt.patient_id !== existing.patient_id) throw new HttpError(400, "That visit is another patient's");
+    }
+    if (!Object.keys(row).length) throw new HttpError(400, 'Nothing to change');
     await update(db, 'clinical_notes', existing.id, req.user.practice_id, row);
     await audit(db, req, 'note.update', 'clinical_notes', existing.id);
     res.json(await db.get('SELECT * FROM clinical_notes WHERE id = ?', existing.id));
