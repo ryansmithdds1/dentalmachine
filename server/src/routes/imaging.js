@@ -7,6 +7,7 @@ import { requirePermission, HttpError, rateLimit } from '../auth.js';
 import { findOr404, insert, audit, newToken, hashToken, validTooth } from '../util.js';
 import { publish } from '../events.js';
 import { isDicom, readDicomTags } from '../dicom.js';
+import { dicomToImage } from '../dicomimage.js';
 import { MAX_UPLOAD_BYTES, MOUNT_TEMPLATES } from './documents.js';
 
 const ONLINE_SECONDS = 90;
@@ -15,7 +16,7 @@ const requireAdmin = (req, _res, next) => (req.user.role === 'admin' ? next() : 
 
 // Imaging bridges: a small agent on each operatory PC opens the patient in the practice's imaging
 // software (DEXIS, Sidexis, Carestream, Apteryx, VixWin…) and sends captured images back to the chart.
-export default function imagingRoutes({ db }) {
+export default function imagingRoutes({ db, storage }) {
   const r = Router();
   const view = (a) => ({
     id: a.id, name: a.name, hostname: a.hostname, version: a.version, apps: JSON.parse(a.apps || '[]'), sensor: a.sensor || null, last_seen_at: a.last_seen_at, active: !!a.active,
@@ -94,6 +95,54 @@ export default function imagingRoutes({ db }) {
     const c = await findOr404(db, 'bridge_commands', req.params.cid, req.user.practice_id, 'Command');
     if (['pending', 'delivered'].includes(c.status)) await db.run("UPDATE bridge_commands SET status = 'done', result = 'Stopped from the chart', completed_at = datetime('now') WHERE id = ?", c.id);
     res.json({ ok: true });
+  });
+
+  // ---- Unfiled images: bridge imports that couldn't be matched to a patient ----
+  r.get('/imaging/unfiled', requirePermission('clinical:read'), async (req, res) => {
+    const rows = await db.all(
+      `SELECT u.id, u.filename, u.mime, u.size, u.reason, u.claimed, u.opened_patient_id, u.taken_at, u.modality, u.category, u.created_at, b.name AS workstation,
+         p.first_name AS opened_first_name, p.last_name AS opened_last_name
+       FROM unfiled_images u LEFT JOIN bridge_agents b ON b.id = u.agent_id LEFT JOIN patients p ON p.id = u.opened_patient_id
+       WHERE u.practice_id = ? AND u.filed_at IS NULL AND u.discarded_at IS NULL ORDER BY u.id DESC LIMIT 500`, req.user.practice_id,
+    );
+    res.json(rows.map((r) => ({ ...r, claimed: r.claimed ? JSON.parse(r.claimed) : null })));
+  });
+  r.get('/imaging/unfiled/:uid/image', requirePermission('clinical:read'), async (req, res) => {
+    const u = await findOr404(db, 'unfiled_images', req.params.uid, req.user.practice_id, 'Image');
+    const data = await storage.read(u.storage_key, !!u.encrypted);
+    if (!data) throw new HttpError(404, 'File missing from storage');
+    const view = u.mime === 'application/dicom' ? dicomToImage(data) : { mime: u.mime, data };
+    if (!view || !/^image\//.test(view.mime)) throw new HttpError(415, 'No preview for this file');
+    res.set({ 'Content-Type': view.mime, 'Cache-Control': 'private, max-age=300', 'Content-Security-Policy': "default-src 'none'; sandbox" }).send(view.data);
+  });
+  // File several at once into one patient's chart (or discard mistakes).
+  r.post('/imaging/unfiled/file', requirePermission('clinical:write'), async (req, res) => {
+    const ids = (Array.isArray(req.body?.ids) ? req.body.ids : []).map(Number).filter(Boolean);
+    if (!ids.length) throw new HttpError(400, 'Choose the images');
+    const discard = req.body?.discard === true;
+    const patient = discard ? null : await findOr404(db, 'patients', req.body?.patient_id, req.user.practice_id, 'Patient');
+    const filed = [];
+    await db.tx(async () => {
+      for (const id of ids) {
+        const u = await db.get('SELECT * FROM unfiled_images WHERE id = ? AND practice_id = ? AND filed_at IS NULL AND discarded_at IS NULL', id, req.user.practice_id);
+        if (!u) throw new HttpError(409, `Image ${id} was already filed`);
+        if (discard) {
+          await db.run("UPDATE unfiled_images SET discarded_at = datetime('now'), filed_by = ? WHERE id = ?", req.user.id, u.id);
+          continue;
+        }
+        const docId = await insert(db, 'documents', {
+          practice_id: u.practice_id, patient_id: patient.id, category: req.body?.category || u.category || 'xray', filename: u.filename, mime: u.mime, size: u.size,
+          storage_key: u.storage_key, encrypted: u.encrypted, notes: `Filed by hand from the imaging bridge (${u.reason})`, source: `bridge:${u.agent_id}`, source_hash: u.source_hash,
+          taken_at: u.taken_at, uploaded_by: req.user.id,
+        });
+        await db.run("UPDATE unfiled_images SET filed_at = datetime('now'), filed_by = ?, document_id = ? WHERE id = ?", req.user.id, docId, u.id);
+        filed.push(docId);
+      }
+    });
+    await audit(db, req, discard ? 'unfiled.discard' : 'unfiled.file', 'patients', patient?.id ?? null, { ids, documents: filed });
+    if (patient) publish(req.user.practice_id, { type: 'documents', patient_id: patient.id });
+    publish(req.user.practice_id, { type: 'unfiled' });
+    res.json({ ok: true, documents: filed });
   });
 
   // The agent program, for installing on operatory PCs.
@@ -197,6 +246,20 @@ export function bridgeAgentRoutes({ db, storage }) {
     ].filter(([, v]) => v);
     let patientId = null;
     let matchedBy = null;
+    // An image nobody can place goes to the practice's unfiled queue for a person to file, never guessed.
+    const queue = async (reason) => {
+      const hash = createHash('sha256').update(data).digest('hex');
+      const already = await db.get('SELECT id FROM unfiled_images WHERE practice_id = ? AND source_hash = ?', agent.practice_id, hash);
+      if (already) return res.status(202).json({ queued: true, unmatched: true, id: already.id, duplicate: true, reason });
+      const saved = await storage.save(agent.practice_id, data);
+      const id = await insert(db, 'unfiled_images', {
+        practice_id: agent.practice_id, agent_id: agent.id, filename, mime, size: data.length, storage_key: saved.storageKey, encrypted: saved.encrypted ? 1 : 0,
+        source_hash: hash, reason, claimed: claimed.length ? JSON.stringify(Object.fromEntries(claimed)) : null, opened_patient_id: launched ?? null,
+        taken_at: tags?.studyDate || null, modality: tags?.modality || null, category: ['xray', 'photo'].includes(req.query.category) ? req.query.category : tags?.modality === 'XC' ? 'photo' : 'xray',
+      });
+      publish(agent.practice_id, { type: 'unfiled' });
+      return res.status(202).json({ queued: true, unmatched: true, id, reason });
+    };
     if (capture) {
       const disagree = claimed.find(([, v]) => Number(v) !== capture.patient_id);
       if (disagree) throw new HttpError(422, `This image is labelled for patient ${disagree[1]} (${disagree[0]}), not the patient being captured`, { unmatched: true, conflict: true });
@@ -204,7 +267,7 @@ export function bridgeAgentRoutes({ db, storage }) {
       matchedBy = 'capture';
     } else if (launched) {
       const disagree = claimed.find(([, v]) => Number(v) !== launched);
-      if (disagree) throw new HttpError(422, `This image is labelled for patient ${disagree[1]} (${disagree[0]}), but patient #${launched} was opened on ${agent.name} — file it by hand`, { unmatched: true, conflict: true });
+      if (disagree) return queue(`Labelled for patient ${disagree[1]} (${disagree[0]}), but patient #${launched} was open on ${agent.name}`);
       patientId = launched;
       matchedBy = claimed.length ? `last_opened+${claimed.map(([k]) => k).join('+')}` : 'last_opened';
     } else {
@@ -212,10 +275,10 @@ export function bridgeAgentRoutes({ db, storage }) {
         const id = await inPractice(v);
         if (!id) continue;
         if (!patientId) [patientId, matchedBy] = [id, by];
-        else if (id !== patientId) throw new HttpError(422, 'The DICOM header and the file name point to different patients — file it by hand', { unmatched: true, conflict: true });
+        else if (id !== patientId) return queue('The DICOM header and the file name point to different patients');
       }
     }
-    if (!patientId) throw new HttpError(422, 'Could not tell which patient this image belongs to', { unmatched: true });
+    if (!patientId) return queue(claimed.length ? `No patient ${claimed.map(([k, v]) => `${v} (${k})`).join(' or ')} in this practice` : 'No patient was open on the workstation and the image has no chart number');
     const hash = createHash('sha256').update(data).digest('hex');
     const dup = await db.get('SELECT id FROM documents WHERE patient_id = ? AND source_hash = ? AND deleted_at IS NULL', patientId, hash);
     if (dup && capture) throw new HttpError(409, 'The sensor sent the same image twice — it was already filed', { duplicate: true, id: dup.id });

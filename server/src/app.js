@@ -186,7 +186,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(inventoryRoutes({ db }));
   api.use(queryBuilderRoutes({ db }));
   api.use(orthoRoutes({ db, payments }));
-  api.use(imagingRoutes({ db }));
+  api.use(imagingRoutes({ db, storage }));
   api.use(systemRoutes({ db, config, messenger, storage, payments, clearinghouse, erx, mailer }));
   app.use('/api', api);
   app.use('/api', (_req, _res, next) => next(new HttpError(404, 'Not found')));

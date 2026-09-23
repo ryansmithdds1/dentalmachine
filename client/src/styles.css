@@ -710,3 +710,4 @@ p a, .muted a, li a, .public-notice a { text-decoration: underline; }
 .plan-split { margin-top: 6px; padding: 8px 10px; background: #fef9c3; border-radius: 6px; }
 .fin-option { display: inline-flex; align-items: center; gap: 6px; margin: 2px 10px 2px 0; padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px; background: #fff; }
 .note-signature { font-size: 12px; color: var(--muted); font-style: italic; margin-top: 6px; } .notes-print .note-print { border-top: 1px solid var(--border); padding: 10px 0; break-inside: avoid; }
+.doc-tile.unfiled { cursor: pointer; } .doc-tile.picked { outline: 2px solid var(--primary); }

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import TimeClock from '../components/TimeClock.jsx';
 import Supplies from '../components/Supplies.jsx';
+import UnfiledImages from '../components/UnfiledImages.jsx';
 import { api } from '../api.js';
 import { useApi } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
@@ -12,15 +13,17 @@ import { LabCaseForm, TaskForm, LAB_STATUSES } from '../components/OfficeForms.j
 // Team to-do list and lab case tracking, and the time clock.
 export default function Office() {
   const [params, setParams] = useSearchParams();
-  const tab = ['time', 'supplies'].includes(params.get('tab')) ? params.get('tab') : 'todo';
+  const tab = ['time', 'supplies', 'unfiled'].includes(params.get('tab')) ? params.get('tab') : 'todo';
+  const { data: unfiled } = useApi('/imaging/unfiled');
   return (
     <>
       <div className="tabs" style={{ marginBottom: 12 }}>
         <button className={tab === 'todo' ? 'active' : ''} onClick={() => setParams({})}>To-do & labs</button>
         <button className={tab === 'supplies' ? 'active' : ''} onClick={() => setParams({ tab: 'supplies' })}>Supplies</button>
         <button className={tab === 'time' ? 'active' : ''} onClick={() => setParams({ tab: 'time' })}>Time clock</button>
+        {(unfiled?.length > 0 || tab === 'unfiled') && <button className={tab === 'unfiled' ? 'active' : ''} onClick={() => setParams({ tab: 'unfiled' })}>Unfiled images{unfiled?.length ? ` (${unfiled.length})` : ''}</button>}
       </div>
-      {tab === 'time' ? <TimeClock /> : tab === 'supplies' ? <Supplies /> : <OfficeBoard />}
+      {tab === 'time' ? <TimeClock /> : tab === 'supplies' ? <Supplies /> : tab === 'unfiled' ? <UnfiledImages /> : <OfficeBoard />}
     </>
   );
 }

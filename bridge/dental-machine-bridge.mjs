@@ -200,8 +200,9 @@ async function scan() {
       if (lastPatient && Date.now() - lastPatient.at < 45 * 60_000) params.set('opened_patient_id', lastPatient.id);
       try {
         const out = await call('POST', `/images?${params}`, data, { 'Content-Type': 'application/octet-stream', 'X-Content-SHA256': createHash('sha256').update(data).digest('hex') });
-        log(`${name} → patient #${out.patient_id}${out.duplicate ? ' (already in chart)' : ''}`);
-        state.seen[key] = out.id;
+        if (out.queued) log(`${name}: couldn't tell which patient (${out.reason}) — sent to Unfiled images for the office to file`);
+        else log(`${name} → patient #${out.patient_id}${out.duplicate ? ' (already in chart)' : ''}`);
+        state.seen[key] = out.queued ? `unfiled:${out.id}` : out.id;
         if (w.moveTo) {
           mkdirSync(w.moveTo, { recursive: true });
           renameSync(path, join(w.moveTo, name));

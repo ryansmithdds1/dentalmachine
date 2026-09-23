@@ -27,7 +27,7 @@ test('DICOM headers are read from explicit-VR files', () => {
 });
 
 test('imaging bridge: launch the imaging program from the chart and import captured images', async () => {
-  const { api, patient } = await h.practice();
+  const { api, patient, token } = await h.practice();
   const created = await api.post('/imaging/agents', { name: 'Op 2' });
   assert.equal(created.status, 201);
   assert.match(created.data.token, /^dmb_/);
@@ -83,9 +83,21 @@ test('imaging bridge: launch the imaging program from the chart and import captu
     const other = (await api.post('/patients', { first_name: 'Otto', last_name: 'Other', dob: '1970-01-01' })).data;
     const upload = (query, body) => fetch(`${h.origin}/api/bridge/images?${new URLSearchParams(query)}`, { method: 'POST', headers: { Authorization: `Bridge ${created.data.token}`, 'Content-Type': 'application/octet-stream' }, body });
     const conflict = await upload({ filename: 'other.dcm' }, buildDicom({ patientId: String(other.id), studyDate: '20260920', modality: 'IO' }));
-    assert.equal(conflict.status, 422);
-    assert.equal((await conflict.json()).details.conflict, true);
+    assert.equal(conflict.status, 202, 'held for a person to file');
+    const queued = await conflict.json();
+    assert.equal(queued.queued, true);
+    assert.match(queued.reason, /Labelled for patient/);
     assert.equal((await api.get(`/patients/${other.id}/documents`)).data.length, 0);
+    // Staff file it from the queue into the right chart.
+    const unfiled = (await api.get('/imaging/unfiled')).data;
+    assert.equal(unfiled.length, 1);
+    assert.equal(unfiled[0].workstation, 'Op 2');
+    assert.equal((await fetch(`${h.origin}/api/imaging/unfiled/${unfiled[0].id}/image`, { headers: { Authorization: `Bearer ${token}` } })).status, 415, 'a DICOM with no pixels has no preview (the file itself is kept)');
+    const filed = await api.post('/imaging/unfiled/file', { ids: [unfiled[0].id], patient_id: other.id });
+    assert.equal(filed.status, 200);
+    assert.equal((await api.get(`/patients/${other.id}/documents`)).data.length, 1);
+    assert.equal((await api.get('/imaging/unfiled')).data.length, 0);
+    assert.equal((await api.post('/imaging/unfiled/file', { ids: [unfiled[0].id], patient_id: other.id })).status, 409, 'already filed');
     // Agreeing labels are fine.
     const agree = await upload({ filename: `P${patient.id}_pa.jpg`, patient_id: String(patient.id) }, Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(80)]));
     assert.equal(agree.status, 201);

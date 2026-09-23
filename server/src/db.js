@@ -841,6 +841,30 @@ CREATE TABLE IF NOT EXISTS message_opt_outs (
   UNIQUE (practice_id, channel, address)
 );
 
+-- Images from imaging bridges that couldn't be matched to a patient, waiting for someone to file them.
+CREATE TABLE IF NOT EXISTS unfiled_images (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  agent_id INTEGER REFERENCES bridge_agents(id),
+  filename TEXT NOT NULL,
+  mime TEXT NOT NULL,
+  size INTEGER NOT NULL,
+  storage_key TEXT NOT NULL,
+  encrypted INTEGER NOT NULL DEFAULT 0,
+  source_hash TEXT,
+  reason TEXT,
+  claimed TEXT,
+  opened_patient_id INTEGER,
+  taken_at TEXT,
+  modality TEXT,
+  category TEXT,
+  filed_at TEXT,
+  discarded_at TEXT,
+  filed_by INTEGER,
+  document_id INTEGER,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Saved custom queries from the report builder (a JSON description, never SQL).
 CREATE TABLE IF NOT EXISTS custom_queries (
   id INTEGER PRIMARY KEY,
