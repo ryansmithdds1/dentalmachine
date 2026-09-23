@@ -96,14 +96,14 @@ function Account() {
 }
 
 function TwoFactorCard() {
-  const { user, refresh } = useAuth();
+  const { user, refresh, adoptSession } = useAuth();
   const [mode, setMode] = useState(null);
   const [password, setPassword] = useState('');
   const disable = useSubmit(async () => {
-    await api.post('/auth/mfa/disable', { password });
+    const res = await api.post('/auth/mfa/disable', { password });
     setMode(null);
     setPassword('');
-    refresh();
+    await adoptSession(res.token);
   });
   return (
     <div className="card">
@@ -132,22 +132,33 @@ function TwoFactorCard() {
 }
 
 function PasswordCard() {
+  const { adoptSession } = useAuth();
   const [form, setForm] = useState({ current_password: '', new_password: '' });
-  const [ok, setOk] = useState(false);
+  const [ok, setOk] = useState(null);
   const { submit, busy, error } = useSubmit(async () => {
-    await api.post('/auth/change-password', form);
+    const res = await api.post('/auth/change-password', form);
     setForm({ current_password: '', new_password: '' });
-    setOk(true);
+    await adoptSession(res.token);
+    setOk('Password updated — you were signed out on your other devices');
+  });
+  const signOutOthers = useSubmit(async () => {
+    const res = await api.post('/auth/logout-all');
+    await adoptSession(res.token);
+    setOk('Signed out on every other device');
   });
   return (
     <div className="card">
       <h2>Change password</h2>
       <ErrorBox error={error} />
-      {ok && <div className="badge ok" style={{ marginBottom: 10 }}>Password updated</div>}
-      <form onSubmit={(e) => { e.preventDefault(); setOk(false); submit(); }} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <ErrorBox error={signOutOthers.error} />
+      {ok && <div className="badge ok" style={{ marginBottom: 10 }}>{ok}</div>}
+      <form onSubmit={(e) => { e.preventDefault(); setOk(null); submit(); }} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         <label>Current password<input type="password" required value={form.current_password} onChange={(e) => setForm({ ...form, current_password: e.target.value })} /></label>
         <label>New password (min 10 characters)<input type="password" required minLength={10} value={form.new_password} onChange={(e) => setForm({ ...form, new_password: e.target.value })} /></label>
-        <div><button className="primary" disabled={busy}>Update password</button></div>
+        <div className="inline" style={{ justifyContent: 'space-between' }}>
+          <button className="primary" disabled={busy}>Update password</button>
+          <button type="button" disabled={signOutOthers.busy} onClick={() => { setOk(null); signOutOthers.submit(); }} title="Lost a phone or signed in on a shared computer?">Sign out other devices</button>
+        </div>
       </form>
     </div>
   );

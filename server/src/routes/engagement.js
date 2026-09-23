@@ -144,7 +144,12 @@ export default function engagementRoutes({ db, messenger, config }) {
     let message = null;
     if (req.body?.notify !== false) {
       const practice = await db.get('SELECT name, phone FROM practices WHERE id = ?', req.user.practice_id);
-      const target = preferredChannel({ ...b, sms_opt_in: 1, email_opt_in: 1 });
+      // A reply to their own request is fine to send — unless they're a patient who opted out of that channel.
+      const known = await db.get(
+        "SELECT sms_opt_in, email_opt_in FROM patients WHERE practice_id = ? AND ((phone IS NOT NULL AND phone = ?) OR (email IS NOT NULL AND lower(email) = lower(?))) ORDER BY id LIMIT 1",
+        req.user.practice_id, b.phone || '', b.email || '',
+      );
+      const target = preferredChannel({ ...b, sms_opt_in: known ? known.sms_opt_in : 1, email_opt_in: known ? known.email_opt_in : 1 });
       if (target) {
         message = await sendMessage(db, messenger, {
           practiceId: req.user.practice_id, userId: req.user.id, kind: 'booking_declined', channel: target.channel, to: target.to,

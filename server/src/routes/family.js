@@ -99,7 +99,9 @@ export default function familyRoutes({ db }) {
   });
 
   r.delete('/patients/:id/family/:memberId', requirePermission('patients:write'), async (req, res) => {
+    const head = await guarantorOf(await patientOr404(req));
     const member = await patientOr404(req, req.params.memberId);
+    if (member.guarantor_id !== head.id) throw new HttpError(400, "That patient isn't a member of this family");
     await update(db, 'patients', member.id, req.user.practice_id, { guarantor_id: null, updated_at: new Date().toISOString() });
     await audit(db, req, 'family.unlink', 'patients', member.id);
     res.json({ ok: true });

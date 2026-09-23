@@ -117,8 +117,13 @@ export async function runReminders(db, messenger, { appUrl, now = new Date() } =
     for (const { id } of due) {
       const msg = await sendAppointmentReminder(db, messenger, { appointmentId: id, appUrl });
       if (msg?.status === 'sent') sent++;
-      // Mark attempted even without a reachable channel so we don't retry every cycle.
-      if (!msg) await db.run("UPDATE appointments SET reminder_sent_at = datetime('now') WHERE id = ?", id);
+      // No reachable channel: nothing to retry. A failed send (carrier or provider error) is retried on the
+      // next cycles, up to three attempts.
+      else if (!msg) await db.run("UPDATE appointments SET reminder_sent_at = datetime('now') WHERE id = ?", id);
+      else {
+        await db.run('UPDATE appointments SET reminder_attempts = reminder_attempts + 1 WHERE id = ?', id);
+        await db.run("UPDATE appointments SET reminder_sent_at = datetime('now') WHERE id = ? AND reminder_attempts >= 3", id);
+      }
     }
   }
   return sent + (await runReviewRequests(db, messenger, { now }));

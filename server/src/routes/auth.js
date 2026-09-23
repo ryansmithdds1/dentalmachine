@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { randomBytes } from 'node:crypto';
 import { hashPassword, verifyPassword, signToken, verifyToken, authenticate, rateLimit, HttpError, PERMISSIONS } from '../auth.js';
-import { pick, requireFields, insert, audit, newToken, hashToken } from '../util.js';
+import { pick, requireFields, insert, audit, newToken, hashToken, staffPractice } from '../util.js';
 import { seedPracticeDefaults } from '../defaults.js';
 import { generateSecret, verifyTotp, otpauthUrl } from '../totp.js';
 import { PROVIDERS, issuerFor, pkcePair, discover, exchangeCode, verifyIdToken, verifiedEmail, openSecret } from '../sso.js';
@@ -14,10 +14,11 @@ export function validatePassword(pw) {
 
 async function session(user, secret, db) {
   const { id, practice_id, email, name, role } = user;
+  const tv = (await db.get('SELECT token_version FROM users WHERE id = ?', id))?.token_version ?? 0;
   const mfaEnabled = !!(await db.get('SELECT mfa_enabled FROM users WHERE id = ?', id))?.mfa_enabled;
   const requireMfa = !!(await db.get('SELECT require_mfa FROM practices WHERE id = ?', practice_id))?.require_mfa;
   return {
-    token: signToken({ sub: id, pid: practice_id, role, aud: 'staff' }, secret),
+    token: signToken({ sub: id, pid: practice_id, role, aud: 'staff', tv }, secret),
     user: {
       id, practice_id, email, name, role, permissions: role === 'admin' ? ['*'] : PERMISSIONS[role] || [],
       mfa_enabled: mfaEnabled, mfa_setup_required: requireMfa && !mfaEnabled,
@@ -25,8 +26,13 @@ async function session(user, secret, db) {
   };
 }
 
-export default function authRoutes({ db, secret, config = {}, fetchImpl = globalThis.fetch }) {
+const MAX_FAILURES = 10;
+const LOCK_MINUTES = 15;
+const RESET_MINUTES = 60;
+
+export default function authRoutes({ db, secret, config = {}, fetchImpl = globalThis.fetch, messenger = null }) {
   const r = Router();
+  const endOtherSessions = (userId) => db.run('UPDATE users SET token_version = token_version + 1 WHERE id = ?', userId);
   const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20 });
 
   // Creates a new practice (tenant) along with its first admin user.
@@ -58,20 +64,26 @@ export default function authRoutes({ db, secret, config = {}, fetchImpl = global
       const p = await db.get('SELECT sso_only, sso_provider FROM practices WHERE id = ?', user.practice_id);
       if (p.sso_only && p.sso_provider) throw new HttpError(403, `Your practice signs in with ${PROVIDERS[p.sso_provider].name} — use the single sign-on button`, { sso_required: true });
     }
-    if (!user || !user.active || !verifyPassword(String(password || ''), user.password_hash)) {
-      await audit(db, { ip: req.ip, user: user ? { id: user.id, practice_id: user.practice_id } : null }, 'auth.login_failed', 'users', user?.id, { email });
-      throw new HttpError(401, 'Invalid email or password');
+    // Per-account lockout (on top of the per-IP limit): guessing from many addresses still stops.
+    if (user?.locked_until && user.locked_until > new Date().toISOString()) {
+      throw new HttpError(429, 'Too many failed sign-ins — try again in 15 minutes, or reset your password');
     }
+    const failed = async (action, message, details) => {
+      if (user) {
+        await db.run('UPDATE users SET failed_logins = failed_logins + 1 WHERE id = ?', user.id);
+        await db.run('UPDATE users SET locked_until = ?, failed_logins = 0 WHERE id = ? AND failed_logins >= ?', new Date(Date.now() + LOCK_MINUTES * 60_000).toISOString(), user.id, MAX_FAILURES);
+      }
+      await audit(db, { ip: req.ip, user: user ? { id: user.id, practice_id: user.practice_id } : null }, action, 'users', user?.id, { email });
+      throw new HttpError(401, message, details);
+    };
+    if (!user || !user.active || !verifyPassword(String(password || ''), user.password_hash)) await failed('auth.login_failed', 'Invalid email or password');
     if (user.mfa_enabled) {
       if (!req.body.mfa_code) throw new HttpError(401, 'Enter the 6-digit code from your authenticator app', { mfa_required: true });
       const step = verifyTotp(user.mfa_secret, req.body.mfa_code, { lastStep: user.mfa_last_step });
-      if (step == null) {
-        await audit(db, { ip: req.ip, user: { id: user.id, practice_id: user.practice_id } }, 'auth.mfa_failed', 'users', user.id);
-        throw new HttpError(401, 'Invalid authentication code', { mfa_required: true });
-      }
+      if (step == null) await failed('auth.mfa_failed', 'Invalid authentication code', { mfa_required: true });
       await db.run('UPDATE users SET mfa_last_step = ? WHERE id = ?', step, user.id);
     }
-    await db.run("UPDATE users SET last_login_at = datetime('now') WHERE id = ?", user.id);
+    await db.run("UPDATE users SET last_login_at = datetime('now'), failed_logins = 0, locked_until = NULL WHERE id = ?", user.id);
     req.user = user;
     await audit(db, req, 'auth.login', 'users', user.id);
     res.json(await session(user, secret, db));
@@ -169,7 +181,7 @@ export default function authRoutes({ db, secret, config = {}, fetchImpl = global
 
   r.get('/me', authenticate(db, secret, { allowMfaSetup: true }), async (req, res) => {
     const practice = await db.get('SELECT * FROM practices WHERE id = ?', req.user.practice_id);
-    res.json({ ...(await session(req.user, secret, db)), practice: { ...practice, sso_client_secret: undefined } });
+    res.json({ ...(await session(req.user, secret, db)), practice: staffPractice(practice, req.user) });
   });
 
   r.post('/change-password', authenticate(db, secret, { allowMfaSetup: true }), async (req, res) => {
@@ -178,8 +190,49 @@ export default function authRoutes({ db, secret, config = {}, fetchImpl = global
     if (!verifyPassword(String(current_password || ''), row.password_hash)) throw new HttpError(400, 'Current password is incorrect');
     validatePassword(new_password);
     await db.run('UPDATE users SET password_hash = ? WHERE id = ?', hashPassword(new_password), req.user.id);
+    await endOtherSessions(req.user.id);
     await audit(db, req, 'auth.password_changed', 'users', req.user.id);
+    // Other devices are signed out; this one gets a fresh session.
+    res.json({ ok: true, ...(await session(req.user, secret, db)) });
+  });
+
+  r.post('/logout-all', authenticate(db, secret, { allowMfaSetup: true }), async (req, res) => {
+    await endOtherSessions(req.user.id);
+    await audit(db, req, 'auth.logout_all', 'users', req.user.id);
+    res.json(await session(req.user, secret, db));
+  });
+
+  // Forgot password: a one-time link by email, valid for an hour. The answer is the same whether or
+  // not the email has an account.
+  const resetLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 5, name: 'password-reset' });
+  r.post('/forgot-password', resetLimiter, async (req, res) => {
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    const user = email && (await db.get('SELECT * FROM users WHERE lower(email) = ? AND active = 1', email));
+    if (user && messenger) {
+      const { token, hash } = newToken();
+      await insert(db, 'password_resets', { user_id: user.id, token_hash: hash, expires_at: new Date(Date.now() + RESET_MINUTES * 60_000).toISOString() });
+      const practice = await db.get('SELECT name FROM practices WHERE id = ?', user.practice_id);
+      const link = `${config.appUrl}/#reset=${token}`;
+      messenger.send({
+        channel: 'email', to: user.email, subject: 'Reset your Dental Machine password',
+        body: `Hi ${user.name},\n\nSomeone (hopefully you) asked to reset your password for ${practice.name}. Choose a new one here within ${RESET_MINUTES} minutes:\n\n${link}\n\nIf you didn't ask, you can ignore this email — your password hasn't changed.`,
+      }).catch(() => {});
+      await audit(db, { ip: req.ip, user: { id: user.id, practice_id: user.practice_id } }, 'auth.password_reset_requested', 'users', user.id);
+    }
     res.json({ ok: true });
+  });
+
+  const resetSubmitLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 10, name: 'password-reset-submit' });
+  r.post('/reset-password', resetSubmitLimiter, async (req, res) => {
+    const row = await db.get('SELECT * FROM password_resets WHERE token_hash = ? AND used_at IS NULL', hashToken(String(req.body?.token || '')));
+    if (!row || row.expires_at < new Date().toISOString()) throw new HttpError(400, 'This reset link has expired — ask for a new one');
+    validatePassword(req.body?.password);
+    if (!(await db.run("UPDATE password_resets SET used_at = datetime('now') WHERE id = ? AND used_at IS NULL", row.id)).changes) throw new HttpError(400, 'This reset link was already used');
+    await db.run('UPDATE users SET password_hash = ?, failed_logins = 0, locked_until = NULL WHERE id = ?', hashPassword(req.body.password), row.user_id);
+    await endOtherSessions(row.user_id);
+    const user = await db.get('SELECT * FROM users WHERE id = ?', row.user_id);
+    await audit(db, { ip: req.ip, user: { id: user.id, practice_id: user.practice_id } }, 'auth.password_reset', 'users', user.id);
+    res.json({ ok: true, mfa_enabled: !!user.mfa_enabled });
   });
 
   // ---- Two-factor authentication (TOTP) ----
@@ -209,8 +262,9 @@ export default function authRoutes({ db, secret, config = {}, fetchImpl = global
     const practice = await db.get('SELECT require_mfa FROM practices WHERE id = ?', req.user.practice_id);
     if (practice.require_mfa) throw new HttpError(409, 'Your practice requires two-factor authentication');
     await db.run('UPDATE users SET mfa_enabled = 0, mfa_secret = NULL, mfa_last_step = NULL WHERE id = ?', req.user.id);
+    await endOtherSessions(req.user.id);
     await audit(db, req, 'auth.mfa_disabled', 'users', req.user.id);
-    res.json({ ok: true });
+    res.json({ ok: true, ...(await session(req.user, secret, db)) });
   });
 
   return r;

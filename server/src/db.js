@@ -658,6 +658,15 @@ CREATE TABLE IF NOT EXISTS portal_codes (
 );
 CREATE INDEX IF NOT EXISTS idx_portal_codes ON portal_codes(practice_id, contact);
 
+CREATE TABLE IF NOT EXISTS password_resets (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  token_hash TEXT NOT NULL UNIQUE,
+  expires_at TEXT NOT NULL,
+  used_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS sso_logins (
   id INTEGER PRIMARY KEY,
   state_hash TEXT NOT NULL UNIQUE,
@@ -769,6 +778,10 @@ const COLUMNS = [
   ['treatment_plans', 'signed_snapshot', 'TEXT'],
   ['clinical_notes', 'signed_by', 'INTEGER'],
   ['tooth_conditions', 'procedure_id', 'INTEGER'],
+  ['users', 'token_version', 'INTEGER NOT NULL DEFAULT 0'],
+  ['appointments', 'reminder_attempts', 'INTEGER NOT NULL DEFAULT 0'],
+  ['users', 'failed_logins', 'INTEGER NOT NULL DEFAULT 0'],
+  ['users', 'locked_until', 'TEXT'],
   ['clinical_notes', 'addendum_of', 'INTEGER'],
   ['treatment_plans', 'sign_token_expires_at', 'TEXT'],
   ['patient_forms', 'reviewed_by', 'INTEGER'],

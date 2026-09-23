@@ -204,7 +204,7 @@ export default function growthRoutes({ db, messenger, config, mailer = { enabled
       const recall = await db.get('SELECT * FROM recalls WHERE id = ? AND practice_id = ?', rid, pid);
       if (!recall) continue;
       const patient = await db.get('SELECT * FROM patients WHERE id = ?', recall.patient_id);
-      const target = preferredChannel(patient);
+      const target = patient.status === 'active' && recall.status !== 'inactive' ? preferredChannel(patient) : null;
       if (!target) {
         skipped++;
         continue;

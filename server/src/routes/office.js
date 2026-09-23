@@ -73,7 +73,7 @@ export default function officeRoutes({ db }) {
     if (row.assigned_to) await findOr404(db, 'users', row.assigned_to, req.user.practice_id, 'User');
   };
 
-  r.get('/tasks', async (req, res) => {
+  r.get('/tasks', requirePermission('patients:read'), async (req, res) => {
     const where = ['t.practice_id = ?'];
     const params = [req.user.practice_id];
     if (req.query.mine === 'true') {
@@ -91,7 +91,7 @@ export default function officeRoutes({ db }) {
     ));
   });
 
-  r.post('/tasks', async (req, res) => {
+  r.post('/tasks', requirePermission('patients:read'), async (req, res) => {
     const row = pick(req.body, TASK_FIELDS);
     requireFields(row, ['title']);
     await validateTask(req, row);
@@ -100,7 +100,7 @@ export default function officeRoutes({ db }) {
     res.status(201).json(await db.get(`${TASK_SELECT} WHERE t.id = ?`, id));
   });
 
-  r.put('/tasks/:tid', async (req, res) => {
+  r.put('/tasks/:tid', requirePermission('patients:read'), async (req, res) => {
     const existing = await findOr404(db, 'tasks', req.params.tid, req.user.practice_id, 'Task');
     const row = pick(req.body, TASK_FIELDS);
     await validateTask(req, row);

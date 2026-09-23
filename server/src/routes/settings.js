@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { HttpError, hashPassword } from '../auth.js';
-import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, toCents, practiceNow } from '../util.js';
+import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, toCents, practiceNow, staffPractice } from '../util.js';
 import { validatePassword } from './auth.js';
 import { validateHours } from '../hours.js';
 import { PROVIDERS, sealSecret } from '../sso.js';
@@ -38,7 +38,7 @@ function resource(r, db, { path, table, fields, required, validate = () => {}, o
 export default function settingsRoutes({ db, secret, config = {} }) {
   const r = Router();
 
-  r.get('/practice', async (req, res) => res.json({ ...(await db.get('SELECT * FROM practices WHERE id = ?', req.user.practice_id)), sso_client_secret: undefined }));
+  r.get('/practice', async (req, res) => res.json(staffPractice(await db.get('SELECT * FROM practices WHERE id = ?', req.user.practice_id), req.user)));
   // ---- Single sign-on settings (the client secret is write-only) ----
   const ssoView = (p) => ({
     provider: p.sso_provider, tenant: p.sso_tenant, issuer: p.sso_issuer, client_id: p.sso_client_id, has_secret: !!p.sso_client_secret,
@@ -113,7 +113,10 @@ export default function settingsRoutes({ db, secret, config = {} }) {
 
   // ---- Users ----
   const USER_COLS = 'id, practice_id, email, name, role, active, mfa_enabled, last_login_at, created_at';
-  r.get('/users', async (req, res) => res.json(await db.all(`SELECT ${USER_COLS} FROM users WHERE practice_id = ? ORDER BY name`, req.user.practice_id)));
+  // Everyone can see who's on the team (to assign tasks); account details are for administrators.
+  r.get('/users', async (req, res) => res.json(await db.all(
+    `SELECT ${req.user.role === 'admin' ? USER_COLS : 'id, name, role, active'} FROM users WHERE practice_id = ? ORDER BY name`, req.user.practice_id,
+  )));
 
   r.post('/users', requireAdmin, async (req, res) => {
     const row = pick(req.body, ['email', 'name', 'role']);
@@ -140,6 +143,10 @@ export default function settingsRoutes({ db, secret, config = {} }) {
     // Lost phone: an admin can clear a colleague's 2FA so they can enrol again.
     if (req.body.reset_mfa) Object.assign(row, { mfa_enabled: 0, mfa_secret: null, mfa_last_step: null });
     await update(db, 'users', existing.id, req.user.practice_id, row);
+    // A new password, 2FA reset, role change or deactivation ends that person's open sessions.
+    if (row.password_hash || req.body.reset_mfa || row.active === 0 || row.active === false || (row.role && row.role !== existing.role)) {
+      await db.run('UPDATE users SET token_version = token_version + 1, failed_logins = 0, locked_until = NULL WHERE id = ?', existing.id);
+    }
     await audit(db, req, 'user.update', 'users', existing.id, { fields: Object.keys(row).filter((k) => k !== 'password_hash') });
     res.json(await db.get(`SELECT ${USER_COLS} FROM users WHERE id = ?`, existing.id));
   });

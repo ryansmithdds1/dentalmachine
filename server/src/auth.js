@@ -71,8 +71,10 @@ export function authenticate(db, secret, { allowMfaSetup = false } = {}) {
     const payload = token && verifyToken(token, secret);
     // Only staff sessions reach staff routes (patient-portal tokens are signed with the same key).
     if (!payload || payload.aud !== 'staff') return next(new HttpError(401, 'Authentication required'));
-    const user = await db.get('SELECT id, practice_id, email, name, role, active FROM users WHERE id = ?', payload.sub);
+    const user = await db.get('SELECT id, practice_id, email, name, role, active, token_version FROM users WHERE id = ?', payload.sub);
     if (!user || !user.active) return next(new HttpError(401, 'Account disabled or not found'));
+    // A password change, 2FA reset or "sign out everywhere" bumps the version and ends older sessions.
+    if ((payload.tv ?? 0) !== (user.token_version ?? 0)) return next(new HttpError(401, 'Your session has ended — please sign in again'));
     // Practices can require 2FA; until it's set up, only the account/MFA endpoints are reachable.
     if (!allowMfaSetup) {
       const gate = await db.get('SELECT p.require_mfa, u.mfa_enabled FROM users u JOIN practices p ON p.id = u.practice_id WHERE u.id = ?', user.id);

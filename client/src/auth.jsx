@@ -11,6 +11,17 @@ if (typeof window !== 'undefined' && /^#(sso|sso_error)=/.test(window.location.h
   ssoError = params.get('sso_error');
   window.history.replaceState(null, '', window.location.pathname + window.location.search);
 }
+// Password reset links arrive as /#reset=<token>.
+let resetToken = null;
+if (typeof window !== 'undefined' && /^#reset=/.test(window.location.hash)) {
+  resetToken = new URLSearchParams(window.location.hash.slice(1)).get('reset');
+  window.history.replaceState(null, '', window.location.pathname + window.location.search);
+}
+export const takeResetToken = () => {
+  const t = resetToken;
+  resetToken = null;
+  return t;
+};
 export const takeSsoError = () => {
   const e = ssoError;
   ssoError = null;
@@ -52,9 +63,14 @@ export function AuthProvider({ children }) {
     setToken(null);
     setState({ loading: false, user: null, practice: null });
   };
+  // After a password change or "sign out everywhere", the server hands this device a fresh session.
+  const adoptSession = async (token) => {
+    if (token) setToken(token);
+    await refresh();
+  };
   const can = (perm) => !!state.user && (state.user.role === 'admin' || state.user.permissions.includes(perm));
 
-  return <AuthContext.Provider value={{ ...state, login, register, logout, can, refresh }}>{children}</AuthContext.Provider>;
+  return <AuthContext.Provider value={{ ...state, login, register, logout, can, refresh, adoptSession }}>{children}</AuthContext.Provider>;
 }
 
 export const useAuth = () => useContext(AuthContext);

@@ -80,7 +80,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   });
 
   app.get('/api/health', (_req, res) => res.json({ ok: true }));
-  app.use('/api/auth', authRoutes({ db, secret, config, fetchImpl }));
+  app.use('/api/auth', authRoutes({ db, secret, config, fetchImpl, messenger }));
   app.use('/api/public', (_req, res, next) => {
     res.set('Cache-Control', 'no-store');
     next();
