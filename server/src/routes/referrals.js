@@ -129,9 +129,11 @@ export default function referralRoutes({ db }) {
     );
     // New patients whose source is only the free-text "referral source" (Google, a friend, …).
     const freeText = await db.all(
-      `SELECT COALESCE(referral_source, 'Not recorded') AS source, COUNT(*) AS patients FROM patients
-       WHERE practice_id = ? AND referred_by_id IS NULL AND substr(created_at, 1, 10) BETWEEN ? AND ?
-       GROUP BY COALESCE(referral_source, 'Not recorded') ORDER BY COUNT(*) DESC`,
+      `SELECT COALESCE(p.referral_source, 'Not recorded') AS source, COUNT(*) AS patients,
+         COALESCE(SUM((SELECT COALESCE(SUM(pr.fee), 0) FROM procedures pr WHERE pr.patient_id = p.id AND pr.status = 'completed')), 0) AS production
+       FROM patients p
+       WHERE p.practice_id = ? AND p.referred_by_id IS NULL AND substr(p.created_at, 1, 10) BETWEEN ? AND ?
+       GROUP BY COALESCE(p.referral_source, 'Not recorded') ORDER BY COUNT(*) DESC`,
       pid, from, to,
     );
     const outgoing = await db.all(

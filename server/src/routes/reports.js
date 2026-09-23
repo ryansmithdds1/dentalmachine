@@ -68,6 +68,80 @@ export default function reportRoutes({ db }) {
     res.json({ providers, today: await sum(today), month: await sum(`${today.slice(0, 7)}-01`), year: await sum(`${today.slice(0, 4)}-01-01`) });
   });
 
+  // Hygiene department: production, reappointment, perio vs prophy, and whether recalls get seen.
+  const PERIO = ['D4341', 'D4342', 'D4346', 'D4355', 'D4910'];
+  const PROPHY = ['D1110', 'D1120'];
+  r.get('/reports/hygiene', requirePermission('reports:read'), async (req, res) => {
+    const pid = req.user.practice_id;
+    const { from, to } = await range(req, db);
+    const [f, t] = await utcRange(db, pid, from, to);
+    const hygienists = await db.all("SELECT id, name FROM providers WHERE practice_id = ? AND type = 'hygienist' ORDER BY name", pid);
+    const byHyg = await db.all(
+      `SELECT pr.provider_id, COALESCE(SUM(pr.fee), 0) AS production, COUNT(*) AS procedures
+       FROM procedures pr JOIN providers pv ON pv.id = pr.provider_id
+       WHERE pr.practice_id = ? AND pv.type = 'hygienist' AND pr.status = 'completed' AND pr.completed_at >= ? AND pr.completed_at < ?
+       GROUP BY pr.provider_id`, pid, f, t,
+    );
+    const visits = await db.all(
+      `SELECT a.provider_id, COUNT(*) AS visits, SUM(CASE WHEN EXISTS (SELECT 1 FROM appointments b WHERE b.patient_id = a.patient_id AND b.start_time > a.start_time
+           AND b.status NOT IN ('cancelled','no_show') AND substr(b.created_at, 1, 10) <= substr(a.start_time, 1, 10)) THEN 1 ELSE 0 END) AS reappointed
+       FROM appointments a JOIN providers pv ON pv.id = a.provider_id
+       WHERE a.practice_id = ? AND pv.type = 'hygienist' AND a.status = 'completed' AND a.start_time >= ? AND a.start_time < ?
+       GROUP BY a.provider_id`, pid, `${from} 00:00`, `${to} 24:00`,
+    );
+    const codes = await db.all(
+      `SELECT code, COUNT(*) AS n FROM procedures WHERE practice_id = ? AND status = 'completed' AND completed_at >= ? AND completed_at < ?
+         AND code IN (${[...PERIO, ...PROPHY].map(() => '?').join(',')}) GROUP BY code`, pid, f, t, ...PERIO, ...PROPHY,
+    );
+    const perio = codes.filter((c) => PERIO.includes(c.code)).reduce((s, c) => s + c.n, 0);
+    const prophy = codes.filter((c) => PROPHY.includes(c.code)).reduce((s, c) => s + c.n, 0);
+    // Patients whose recall came due in the period: seen (a completed visit from 2 months before the due date),
+    // booked (a visit still to come), or still waiting.
+    const recall = await db.get(
+      `SELECT COUNT(*) AS due,
+         SUM(CASE WHEN EXISTS (SELECT 1 FROM appointments a WHERE a.patient_id = r.patient_id AND a.status = 'completed' AND a.start_time >= ${db.dialect === 'postgres' ? "to_char(r.due_date::date - 60, 'YYYY-MM-DD')" : "date(r.due_date, '-60 days')"}) THEN 1 ELSE 0 END) AS seen,
+         SUM(CASE WHEN EXISTS (SELECT 1 FROM appointments a WHERE a.patient_id = r.patient_id AND a.status IN ('scheduled','confirmed') AND a.start_time >= ?) THEN 1 ELSE 0 END) AS booked
+       FROM (SELECT x.patient_id, MIN(x.due_date) AS due_date FROM recalls x JOIN patients p ON p.id = x.patient_id
+             WHERE x.practice_id = ? AND x.status != 'inactive' AND p.status = 'active' AND x.due_date BETWEEN ? AND ? GROUP BY x.patient_id) r`,
+      `${(await practiceNow(db, pid)).slice(0, 10)} 00:00`, pid, from, to,
+    );
+    const pct = (a, b) => (b ? Math.round((a / b) * 1000) / 10 : null);
+    const rows = hygienists.map((h) => {
+      const p = byHyg.find((x) => x.provider_id === h.id) || {};
+      const v = visits.find((x) => x.provider_id === h.id) || {};
+      return { provider_id: h.id, name: h.name, production: p.production || 0, visits: v.visits || 0, reappointed: v.reappointed || 0, reappointment_rate: pct(v.reappointed || 0, v.visits || 0), per_visit: v.visits ? Math.round((p.production || 0) / v.visits) : null };
+    });
+    const total = rows.reduce((s, x) => ({ production: s.production + x.production, visits: s.visits + x.visits, reappointed: s.reappointed + x.reappointed }), { production: 0, visits: 0, reappointed: 0 });
+    res.json({
+      from, to, hygienists: rows, total: { ...total, reappointment_rate: pct(total.reappointed, total.visits) },
+      perio: { perio, prophy, perio_pct: pct(perio, perio + prophy), codes },
+      recall: { due: recall.due || 0, seen: recall.seen || 0, booked: recall.booked || 0, seen_pct: pct(recall.seen || 0, recall.due || 0) },
+    });
+  });
+
+  // Treatment plans: presented → accepted → scheduled → completed, by provider (dollars of the plans' procedures).
+  r.get('/reports/treatment-plans', requirePermission('reports:read'), async (req, res) => {
+    const pid = req.user.practice_id;
+    const { from, to } = await range(req, db);
+    const [f, t] = await utcRange(db, pid, from, to);
+    const rows = await db.all(
+      `SELECT pr.provider_id, pv.name AS provider_name, COUNT(DISTINCT tp.id) AS plans,
+         COALESCE(SUM(pr.fee), 0) AS presented,
+         COALESCE(SUM(CASE WHEN tp.status IN ('accepted','completed') OR tp.signed_at IS NOT NULL OR pr.status = 'completed' OR pr.appointment_id IS NOT NULL THEN pr.fee ELSE 0 END), 0) AS accepted,
+         COALESCE(SUM(CASE WHEN pr.status = 'planned' AND pr.appointment_id IS NOT NULL THEN pr.fee ELSE 0 END), 0) AS scheduled,
+         COALESCE(SUM(CASE WHEN pr.status = 'completed' THEN pr.fee ELSE 0 END), 0) AS completed,
+         COUNT(DISTINCT CASE WHEN tp.status IN ('accepted','completed') OR tp.signed_at IS NOT NULL THEN tp.id END) AS accepted_plans
+       FROM treatment_plans tp JOIN procedures pr ON pr.treatment_plan_id = tp.id LEFT JOIN providers pv ON pv.id = pr.provider_id
+       WHERE tp.practice_id = ? AND COALESCE(tp.presented_at, tp.created_at) >= ? AND COALESCE(tp.presented_at, tp.created_at) < ? AND pr.status != 'cancelled'
+       GROUP BY pr.provider_id, pv.name ORDER BY SUM(pr.fee) DESC`, pid, f, t,
+    );
+    const out = rows.map((x) => ({ ...x, provider_name: x.provider_name || 'No provider', unscheduled: Math.max(0, x.accepted - x.scheduled - x.completed), acceptance_pct: x.presented ? Math.round((x.accepted / x.presented) * 1000) / 10 : null }));
+    const sum = (k) => out.reduce((s, x) => s + Number(x[k] || 0), 0);
+    const total = { plans: sum('plans'), presented: sum('presented'), accepted: sum('accepted'), scheduled: sum('scheduled'), completed: sum('completed'), unscheduled: sum('unscheduled') };
+    total.acceptance_pct = total.presented ? Math.round((total.accepted / total.presented) * 1000) / 10 : null;
+    res.json({ from, to, providers: out, total });
+  });
+
   r.get('/reports/production', requirePermission('reports:read'), async (req, res) => {
     const pid = req.user.practice_id;
     const { from, to } = await range(req, db);

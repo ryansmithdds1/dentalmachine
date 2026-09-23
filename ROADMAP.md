@@ -173,9 +173,9 @@ The "OD / Curve" column shows which competitor has the feature: ✓ = has it, ~ 
 |---|---|---|---|
 | 68 | ✅ **Collections by provider** (needs item 8) and **production by provider with adjustments**; associate compensation basis. | P1 | M |
 | 69 | ✅ **Aging by guarantor**, split into insurance and patient, "as of" any date; credit-balance report. | P1 | M |
-| 70 | **Referral sources and referring-doctor report**, with production per source. | P2 | S |
-| 71 | **Hygiene report:** production, reappointment, perio vs prophy ratio, recall effectiveness. | P2 | S |
-| 72 | **Treatment plan report:** presented vs accepted vs scheduled vs completed, by provider. | P2 | S |
+| 70 | ✅ _(Done: referring doctors and free-text sources with patients and production since.)_ **Referral sources and referring-doctor report**, with production per source. | P2 | S |
+| 71 | ✅ _(Done: Reports → Hygiene.)_ **Hygiene report:** production, reappointment, perio vs prophy ratio, recall effectiveness. | P2 | S |
+| 72 | ✅ _(Done: Reports → Treatment plans.)_ **Treatment plan report:** presented vs accepted vs scheduled vs completed, by provider. | P2 | S |
 | 73 | ✅ **Write-off and adjustment report** by type. | P2 | S |
 | 74 | ✅ **Audit log search** (date range, patient, user, action) with CSV export, beyond the current 500-row cap. | P1 | S |
 | 75 | **End-of-day / month-end close** with locking (pairs with the lock date in Part 1). | P2 | S |

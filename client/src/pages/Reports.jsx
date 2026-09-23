@@ -20,8 +20,10 @@ export default function Reports() {
         <button className={tab === 'referrals' ? 'active' : ''} onClick={() => setParams({ tab: 'referrals' })}>Referrals</button>
         <button className={tab === 'memberships' ? 'active' : ''} onClick={() => setParams({ tab: 'memberships' })}>Memberships</button>
         <button className={tab === 'reviews' ? 'active' : ''} onClick={() => setParams({ tab: 'reviews' })}>Reviews</button>
+        <button className={tab === 'hygiene' ? 'active' : ''} onClick={() => setParams({ tab: 'hygiene' })}>Hygiene</button>
+        <button className={tab === 'plans' ? 'active' : ''} onClick={() => setParams({ tab: 'plans' })}>Treatment plans</button>
       </div>
-      {tab === 'kpis' ? <Analytics /> : tab === 'referrals' ? <ReferralReport /> : tab === 'memberships' ? <MembershipReport /> : tab === 'reviews' ? <ReviewReport /> : <Operational />}
+      {tab === 'kpis' ? <Analytics /> : tab === 'hygiene' ? <HygieneReport /> : tab === 'plans' ? <PlanReport /> : tab === 'referrals' ? <ReferralReport /> : tab === 'memberships' ? <MembershipReport /> : tab === 'reviews' ? <ReviewReport /> : <Operational />}
     </>
   );
 }
@@ -225,7 +227,8 @@ function ReferralReport() {
           </table>
           <h3>Other new-patient sources</h3>
           <table className="compact-table">
-            <tbody>{data?.free_text.map((s) => <tr key={s.source}><td>{s.source}</td><td className="num">{s.patients}</td></tr>)}</tbody>
+            <thead><tr><th>Source</th><th className="num">Patients</th><th className="num">Production</th></tr></thead>
+            <tbody>{data?.free_text.map((s) => <tr key={s.source}><td>{s.source}</td><td className="num">{s.patients}</td><td className="num">{money(s.production)}</td></tr>)}</tbody>
           </table>
         </div>
         <div className="card">
@@ -247,6 +250,88 @@ function ReferralReport() {
             </tbody>
           </table>
         </div>
+      </div>
+    </>
+  );
+}
+
+function useRange() {
+  const { practice } = useAuth();
+  const today = practiceToday(practice?.timezone);
+  const [from, setFrom] = useState(`${today.slice(0, 7)}-01`);
+  const [to, setTo] = useState(today);
+  const pickers = (
+    <div className="inline" style={{ margin: '12px 0', gap: 8 }}>
+      <label className="inline">From<input type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></label>
+      <label className="inline">To<input type="date" value={to} onChange={(e) => setTo(e.target.value)} /></label>
+    </div>
+  );
+  return { from, to, pickers };
+}
+const pctText = (v) => (v == null ? '—' : `${v}%`);
+
+// Hygiene: production and reappointment by hygienist, perio vs prophy, and whether due recalls got seen.
+function HygieneReport() {
+  const { from, to, pickers } = useRange();
+  const { data } = useApi(`/reports/hygiene?from=${from}&to=${to}`);
+  return (
+    <>
+      {pickers}
+      {data && (
+        <>
+          <div className="grid grid-4" style={{ marginBottom: 16 }}>
+            <div className="card stat"><div className="label">Hygiene production</div><div className="value">{money(data.total.production)}</div></div>
+            <div className="card stat"><div className="label">Reappointment</div><div className="value">{pctText(data.total.reappointment_rate)}</div><div className="sub">{data.total.reappointed} of {data.total.visits} visits left booked</div></div>
+            <div className="card stat"><div className="label">Perio share</div><div className="value">{pctText(data.perio.perio_pct)}</div><div className="sub">{data.perio.perio} perio · {data.perio.prophy} prophy</div></div>
+            <div className="card stat"><div className="label">Recalls seen</div><div className="value">{pctText(data.recall.seen_pct)}</div><div className="sub">{data.recall.seen} of {data.recall.due} due · {data.recall.booked} booked</div></div>
+          </div>
+          <div className="card">
+            <div className="inline" style={{ justifyContent: 'space-between' }}>
+              <h2 style={{ margin: 0 }}>By hygienist</h2>
+              <CsvButton name={`hygiene-${from}-to-${to}`} rows={data.hygienists} columns={[['Hygienist', (r) => r.name], ['Production', (r) => dollars(r.production)], ['Visits', (r) => r.visits], ['Per visit', (r) => (r.per_visit == null ? '' : dollars(r.per_visit))], ['Reappointed', (r) => r.reappointed], ['Reappointment %', (r) => r.reappointment_rate ?? '']]} />
+            </div>
+            <table className="compact-table">
+              <thead><tr><th>Hygienist</th><th className="num">Production</th><th className="num">Visits</th><th className="num">Per visit</th><th className="num">Reappointed</th></tr></thead>
+              <tbody>
+                {data.hygienists.map((r) => <tr key={r.provider_id}><td>{r.name}</td><td className="num">{money(r.production)}</td><td className="num">{r.visits}</td><td className="num">{r.per_visit == null ? '—' : money(r.per_visit)}</td><td className="num">{pctText(r.reappointment_rate)}</td></tr>)}
+                {!data.hygienists.length && <tr><td colSpan={5} className="muted">No hygienists set up (Settings → Providers, type Hygienist).</td></tr>}
+              </tbody>
+            </table>
+            <p className="muted" style={{ fontSize: 12 }}>Reappointed: the patient left with their next visit already booked. Perio share: scaling and root planing, perio maintenance and full-mouth debridement against adult and child prophies. Recalls seen: patients whose recall came due in these dates who have had a visit since two months before it.</p>
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
+// Treatment plans presented in the dates, and how far each provider's got: accepted, scheduled, done.
+function PlanReport() {
+  const { from, to, pickers } = useRange();
+  const { data } = useApi(`/reports/treatment-plans?from=${from}&to=${to}`);
+  const rows = data ? [...data.providers, { ...data.total, provider_id: 'total', provider_name: 'Total' }] : [];
+  return (
+    <>
+      {pickers}
+      <div className="card">
+        <div className="inline" style={{ justifyContent: 'space-between' }}>
+          <h2 style={{ margin: 0 }}>Presented → accepted → scheduled → done</h2>
+          <CsvButton name={`treatment-plans-${from}-to-${to}`} rows={rows} columns={[['Provider', (r) => r.provider_name], ['Plans', (r) => r.plans], ['Presented', (r) => dollars(r.presented)], ['Accepted', (r) => dollars(r.accepted)], ['Acceptance %', (r) => r.acceptance_pct ?? ''], ['Scheduled', (r) => dollars(r.scheduled)], ['Completed', (r) => dollars(r.completed)], ['Accepted, not scheduled', (r) => dollars(r.unscheduled)]]} />
+        </div>
+        <table className="compact-table">
+          <thead><tr><th>Provider</th><th className="num">Plans</th><th className="num">Presented</th><th className="num">Accepted</th><th className="num">Scheduled</th><th className="num">Completed</th><th className="num">Accepted, not scheduled</th></tr></thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.provider_id ?? 'none'} style={r.provider_id === 'total' ? { fontWeight: 600 } : undefined}>
+                <td>{r.provider_name}</td><td className="num">{r.plans}</td><td className="num">{money(r.presented)}</td>
+                <td className="num">{money(r.accepted)} <span className="muted">{pctText(r.acceptance_pct)}</span></td>
+                <td className="num">{money(r.scheduled)}</td><td className="num">{money(r.completed)}</td><td className="num">{money(r.unscheduled)}</td>
+              </tr>
+            ))}
+            {data && !data.providers.length && <tr><td colSpan={7} className="muted">No treatment plans presented in these dates.</td></tr>}
+          </tbody>
+        </table>
+        <p className="muted" style={{ fontSize: 12 }}>By the date each plan was presented (or created). Accepted counts plans accepted or signed, and any procedure already booked or done. The follow-up list under Follow-ups → Unscheduled treatment has the patients behind the last column.</p>
       </div>
     </>
   );
