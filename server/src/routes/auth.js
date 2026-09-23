@@ -236,7 +236,9 @@ export default function authRoutes({ db, secret, config = {}, fetchImpl = global
 
   r.get('/me', authenticate(db, secret, { allowMfaSetup: true }), async (req, res) => {
     const practice = await db.get('SELECT * FROM practices WHERE id = ?', req.user.practice_id);
-    res.json({ ...(await session(req.user, secret, db, req)), practice: staffPractice(practice, req.user) });
+    // Whether this person sees a practice group's numbers (the Group page).
+    const org = await db.get('SELECT role FROM org_members WHERE user_id = ?', req.user.id);
+    res.json({ ...(await session(req.user, secret, db, req)), practice: { ...staffPractice(practice, req.user), org_role: org?.role ?? null } });
   });
 
   r.post('/change-password', authenticate(db, secret, { allowMfaSetup: true }), async (req, res) => {

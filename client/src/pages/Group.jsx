@@ -1,0 +1,191 @@
+import { useState } from 'react';
+import { api } from '../api.js';
+import { useApi } from '../hooks.js';
+import { useAuth } from '../auth.jsx';
+import { money } from '../format.js';
+import { ErrorBox, useSubmit } from '../components/ui.jsx';
+
+// A group of practices: each office's numbers side by side, and keeping setup in step across offices.
+const pct = (n) => (n == null ? '—' : `${n}%`);
+const COLS = [
+  ['production', 'Production', money], ['collections', 'Collected', money], ['completed_visits', 'Visits', String], ['new_patients', 'New patients', String],
+  ['production_per_visit', 'Per visit', (v) => (v == null ? '—' : money(v))], ['acceptance_pct', 'Case acceptance', pct], ['no_show_rate_pct', 'No-shows', pct],
+  ['ar_total', 'Owed', money], ['ar_over_90_pct', 'Over 90 days', pct], ['overhead_pct', 'Overhead', pct],
+];
+// Higher is better except for these.
+const LOWER_BETTER = new Set(['no_show_rate_pct', 'ar_over_90_pct', 'overhead_pct', 'ar_total']);
+
+export default function Group() {
+  const { user } = useAuth();
+  const { data, reload } = useApi('/org');
+  if (!data) return <div className="empty">Loading…</div>;
+  return (
+    <>
+      <div className="page-header">
+        <div>
+          <h1>{data.org ? data.org.name : 'Practice group'}</h1>
+          <div className="muted">Your offices side by side, and their setup kept in step. The group sees totals only — never another office’s patients.</div>
+        </div>
+      </div>
+      {!data.org && <Start admin={user.role === 'admin'} onDone={reload} />}
+      {data.org && !data.role && (
+        <div className="card">This practice is part of <strong>{data.org.name}</strong>. Its owners can see this office’s totals and copy shared setup here.
+          {user.role === 'admin' && <div style={{ marginTop: 8 }}><LeaveButton onDone={reload} /></div>}
+        </div>
+      )}
+      {data.role && <Dashboard org={data} onChange={reload} />}
+    </>
+  );
+}
+
+function Start({ admin, onDone }) {
+  const [name, setName] = useState('');
+  const [code, setCode] = useState('');
+  const create = useSubmit(async () => { await api.post('/org', { name }); onDone(); });
+  const join = useSubmit(async () => { await api.post('/org/join', { code }); onDone(); });
+  if (!admin) return <div className="card muted">This practice isn’t in a group. An administrator can start one or join one.</div>;
+  return (
+    <div className="grid grid-2">
+      <form className="card" onSubmit={(e) => { e.preventDefault(); create.submit(); }}>
+        <h2>Start a group</h2>
+        <p className="muted" style={{ fontSize: 13 }}>For several offices under one owner, or a DSO. You’ll be its owner; other offices join with a code you give them.</p>
+        <ErrorBox error={create.error} />
+        <label>Group name<input value={name} onChange={(e) => setName(e.target.value)} placeholder="Bright Smiles Dental Group" /></label>
+        <div className="form-actions"><button className="primary" disabled={!name.trim() || create.busy}>Start group</button></div>
+      </form>
+      <form className="card" onSubmit={(e) => { e.preventDefault(); join.submit(); }}>
+        <h2>Join a group</h2>
+        <p className="muted" style={{ fontSize: 13 }}>Enter the code the group’s owner gave you. The group will see this office’s totals and can copy templates and fees here.</p>
+        <ErrorBox error={join.error} />
+        <label>Join code<input value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} placeholder="8 letters" maxLength={8} /></label>
+        <div className="form-actions"><button className="primary" disabled={code.length < 8 || join.busy}>Join</button></div>
+      </form>
+    </div>
+  );
+}
+
+function LeaveButton({ onDone }) {
+  const leave = useSubmit(async () => { await api.post('/org/leave'); onDone(); });
+  return <button className="small danger" onClick={() => window.confirm('Take this practice out of the group?') && leave.submit()}>Leave the group</button>;
+}
+
+function Dashboard({ org, onChange }) {
+  const { user } = useAuth();
+  const today = new Date().toLocaleDateString('en-CA');
+  const [range, setRange] = useState({ from: `${today.slice(0, 7)}-01`, to: today });
+  const { data: roll, error } = useApi(`/org/rollup?from=${range.from}&to=${range.to}`);
+  const owner = org.role === 'owner';
+  const best = (k) => {
+    const vals = (roll?.practices || []).map((p) => p[k]).filter((v) => v != null);
+    if (vals.length < 2) return null;
+    return LOWER_BETTER.has(k) ? Math.min(...vals) : Math.max(...vals);
+  };
+  return (
+    <>
+      <div className="card inline" style={{ gap: 12, flexWrap: 'wrap' }}>
+        <label className="inline">From <input type="date" value={range.from} onChange={(e) => setRange({ ...range, from: e.target.value })} /></label>
+        <label className="inline">To <input type="date" value={range.to} onChange={(e) => setRange({ ...range, to: e.target.value })} /></label>
+        <span className="muted" style={{ fontSize: 12 }}>Best office on each measure is highlighted.</span>
+      </div>
+      <ErrorBox error={error} />
+      <div className="card" style={{ padding: 0 }}>
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>Office</th>{COLS.map(([k, l]) => <th key={k} className="num">{l}</th>)}</tr></thead>
+            <tbody>
+              {roll?.practices.map((p) => (
+                <tr key={p.practice_id}>
+                  <td><strong>{p.name}</strong>{p.city ? <div className="muted" style={{ fontSize: 11 }}>{p.city}</div> : null}</td>
+                  {COLS.map(([k, , f]) => <td key={k} className="num" style={p[k] != null && p[k] === best(k) ? { color: 'var(--ok)', fontWeight: 600 } : {}}>{p[k] == null ? '—' : f(p[k])}</td>)}
+                </tr>
+              ))}
+              {roll && (
+                <tr style={{ borderTop: '2px solid var(--border)' }}>
+                  <td><strong>Group</strong></td>
+                  {COLS.map(([k, , f]) => <td key={k} className="num"><strong>{roll.totals[k] == null ? '' : f(roll.totals[k])}</strong></td>)}
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      {owner && <Push org={org} />}
+      {owner && <Manage org={org} onChange={onChange} me={user.id} />}
+    </>
+  );
+}
+
+function Push({ org }) {
+  const { user } = useAuth();
+  const [from, setFrom] = useState(user.practice_id);
+  const [kinds, setKinds] = useState([]);
+  const [to, setTo] = useState([]);
+  const [result, setResult] = useState(null);
+  const push = useSubmit(async () => {
+    if (!window.confirm('Copy this setup to the chosen offices? Matching items there are replaced.')) return;
+    setResult((await api.post('/org/push', { from_practice_id: Number(from), kinds, to_practice_ids: to })).results);
+  });
+  const others = org.practices.filter((p) => p.id !== Number(from));
+  const toggle = (list, set, v) => set(list.includes(v) ? list.filter((x) => x !== v) : [...list, v]);
+  return (
+    <div className="card" style={{ marginTop: 12 }}>
+      <h2>Copy setup across offices</h2>
+      <ErrorBox error={push.error} />
+      <div className="form-grid">
+        <label>From<select value={from} onChange={(e) => { setFrom(e.target.value); setTo([]); }}>{org.practices.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
+        <div>
+          <div className="muted" style={{ fontSize: 12 }}>What</div>
+          {Object.entries(org.pushable).map(([k, l]) => <label key={k} className="checkbox"><input type="checkbox" checked={kinds.includes(k)} onChange={() => toggle(kinds, setKinds, k)} /> {l}</label>)}
+        </div>
+        <div>
+          <div className="muted" style={{ fontSize: 12 }}>To (none ticked = every other office)</div>
+          {others.map((p) => <label key={p.id} className="checkbox"><input type="checkbox" checked={to.includes(p.id)} onChange={() => toggle(to, setTo, p.id)} /> {p.name}</label>)}
+        </div>
+      </div>
+      {result && <div className="public-notice ok" style={{ marginTop: 8 }}>Copied to {result.length} office{result.length === 1 ? '' : 's'}: {result.map((r) => `${org.practices.find((p) => p.id === r.practice_id)?.name} (${Object.entries(r.counts).map(([k, n]) => `${n} ${k.replace('_', ' ')}`).join(', ')})`).join('; ')}.</div>}
+      <div className="form-actions"><button className="primary" disabled={!kinds.length || push.busy || !others.length} onClick={push.submit}>Copy</button></div>
+    </div>
+  );
+}
+
+function Manage({ org, onChange, me }) {
+  const [code, setCode] = useState(null);
+  const [email, setEmail] = useState('');
+  const [role, setRole] = useState('viewer');
+  const gen = useSubmit(async () => setCode(await api.post('/org/join-code')));
+  const add = useSubmit(async () => { await api.post('/org/members', { email, role }); setEmail(''); onChange(); });
+  const act = useSubmit(async (fn) => { await fn(); onChange(); });
+  return (
+    <div className="grid grid-2" style={{ marginTop: 12 }}>
+      <div className="card">
+        <h2>Offices</h2>
+        <ErrorBox error={gen.error || act.error} />
+        {org.practices.map((p) => (
+          <div key={p.id} className="inline" style={{ justifyContent: 'space-between', padding: '4px 0' }}>
+            <span>{p.name}{p.city ? <span className="muted"> · {p.city}</span> : null}</span>
+            <button className="small" onClick={() => window.confirm(`Remove ${p.name} from the group?`) && act.submit(() => api.del(`/org/practices/${p.id}`))}>Remove</button>
+          </div>
+        ))}
+        <div style={{ marginTop: 10 }}>
+          <button className="small" onClick={gen.submit}>Get a join code</button>
+          {code && <div className="public-notice" style={{ marginTop: 8 }}>Give this to the other office’s administrator (Group → Join a group). It works once, until {new Date(code.expires).toLocaleDateString()}: <strong style={{ fontFamily: 'monospace', fontSize: 16 }}>{code.code}</strong></div>}
+        </div>
+      </div>
+      <div className="card">
+        <h2>Who can see the group</h2>
+        <ErrorBox error={add.error} />
+        {org.members.map((m) => (
+          <div key={m.id} className="inline" style={{ justifyContent: 'space-between', padding: '4px 0' }}>
+            <span>{m.name} <span className="muted" style={{ fontSize: 12 }}>{m.practice} · {m.role}</span></span>
+            {m.id !== me && <button className="small" onClick={() => act.submit(() => api.del(`/org/members/${m.id}`))}>Remove</button>}
+          </div>
+        ))}
+        <form className="inline" style={{ gap: 6, marginTop: 8 }} onSubmit={(e) => { e.preventDefault(); add.submit(); }}>
+          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email of someone at a member office" style={{ flex: 1 }} />
+          <select value={role} onChange={(e) => setRole(e.target.value)}><option value="viewer">Viewer</option><option value="owner">Owner</option></select>
+          <button className="small" disabled={!email || add.busy}>Add</button>
+        </form>
+      </div>
+    </div>
+  );
+}

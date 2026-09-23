@@ -1703,6 +1703,22 @@ CREATE TABLE IF NOT EXISTS tasks (
   completed_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS organizations (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  join_code_hash TEXT,
+  join_code_expires TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS org_members (
+  id INTEGER PRIMARY KEY,
+  organization_id INTEGER NOT NULL REFERENCES organizations(id),
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  role TEXT NOT NULL DEFAULT 'viewer' CHECK (role IN ('owner','viewer')),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (organization_id, user_id)
+);
 `;
 
 // Columns added after the first release. SQLite has no ADD COLUMN IF NOT EXISTS, so check first.
@@ -1983,6 +1999,8 @@ const COLUMNS = [
   ['insurance_plans', 'missing_tooth_clause', 'INTEGER NOT NULL DEFAULT 0'],
   // The office phone line: the Twilio number calls come in on, the desk phone it rings, recording, the
   // missed-call text and when the AI receptionist answers ('off' | 'after_hours' | 'missed' | 'always').
+  // A group of practices (a DSO or several offices under one owner): rollups and shared setup.
+  ['practices', 'organization_id', 'INTEGER'],
   ['practices', 'voice_number', 'TEXT'],
   ['practices', 'forward_to', 'TEXT'],
   ['practices', 'ring_seconds', 'INTEGER NOT NULL DEFAULT 20'],
