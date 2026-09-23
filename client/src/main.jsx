@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom';
 import { AuthProvider } from './auth.jsx';
 import App from './App.jsx';
 import { installErrorReporting } from './errors.jsx';
+import '@fontsource-variable/inter';
 import './styles.css';
 
 // Installable app with an offline fallback (production builds only).

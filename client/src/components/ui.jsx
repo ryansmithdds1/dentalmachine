@@ -110,3 +110,32 @@ export function MoreRows({ shown, total, onMore, step = 200 }) {
     </div>
   );
 }
+
+// A button that opens a short list of actions (closes on a choice, a click elsewhere, or Esc).
+export function Menu({ label, title, items, align = 'right' }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return undefined;
+    const close = (e) => { if (e.type === 'keydown' ? e.key === 'Escape' : !ref.current?.contains(e.target)) setOpen(false); };
+    document.addEventListener('pointerdown', close);
+    document.addEventListener('keydown', close);
+    return () => { document.removeEventListener('pointerdown', close); document.removeEventListener('keydown', close); };
+  }, [open]);
+  const shown = items.filter(Boolean);
+  if (!shown.length) return null;
+  return (
+    <div className="menu" ref={ref}>
+      <button onClick={() => setOpen(!open)} aria-expanded={open} aria-haspopup="menu" title={title}>{label}</button>
+      {open && (
+        <div className={`popover menu-pop ${align}`} role="menu">
+          {shown.map((it) => (
+            <button key={it.label} className="menu-item" role="menuitem" title={it.title} onClick={() => { setOpen(false); it.onClick(); }}>
+              {it.icon}{it.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}

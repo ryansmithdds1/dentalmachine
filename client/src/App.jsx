@@ -13,6 +13,7 @@ import { readOfflineDay } from './offline.js';
 import { ClockButton } from './components/TimeClock.jsx';
 import { useLiveEvents } from './live.js';
 import MfaSetup from './components/MfaSetup.jsx';
+import { Sun, CalendarDays, Users, MessageSquare, Inbox as InboxIcon, PhoneCall, Megaphone, Receipt, ListChecks, ChartColumn, Settings as SettingsIcon, Search, PanelLeftClose, PanelLeftOpen, LogOut, Keyboard } from 'lucide-react';
 
 // Pages load on demand so the first screen appears quickly.
 const Schedule = lazy(() => import('./pages/Schedule.jsx'));
@@ -140,17 +141,17 @@ function StaffApp() {
   }
 
   const nav = [
-    ['/', '☀️', 'Today', true],
-    ['/schedule', '📅', 'Schedule', can('schedule:read')],
-    ['/patients', '🧑‍⚕️', 'Patients', can('patients:read')],
-    ['/messages', '💬', 'Messages', can('patients:read')],
-    ['/requests', '📥', 'Online requests', can('schedule:read')],
-    ['/followups', '📞', 'Follow-up lists', can('schedule:read')],
-    ['/campaigns', '📣', 'Campaigns', can('patients:write')],
-    ['/claims', '🧾', 'Billing', can('billing:read')],
-    ['/office', '✅', 'To-do & labs', true],
-    ['/reports', '📈', 'Reports', can('reports:read')],
-    ['/settings', '⚙️', 'Settings', true],
+    ['/', Sun, 'Today', true],
+    ['/schedule', CalendarDays, 'Schedule', can('schedule:read')],
+    ['/patients', Users, 'Patients', can('patients:read')],
+    ['/messages', MessageSquare, 'Messages', can('patients:read')],
+    ['/requests', InboxIcon, 'Online requests', can('schedule:read')],
+    ['/followups', PhoneCall, 'Follow-up lists', can('schedule:read')],
+    ['/campaigns', Megaphone, 'Campaigns', can('patients:write')],
+    ['/claims', Receipt, 'Billing', can('billing:read')],
+    ['/office', ListChecks, 'To-do & labs', true],
+    ['/reports', ChartColumn, 'Reports', can('reports:read')],
+    ['/settings', SettingsIcon, 'Settings', true],
   ];
 
   return (
@@ -199,44 +200,92 @@ const seenSetup = () => {
   return false;
 };
 
+// The navigation rail: icons only by default so the schedule gets the screen, labels on hover, and a
+// pin to keep it open (remembered on this computer). You, your office, the time clock and sign-out live
+// in the menu under your initials.
+const railPref = () => {
+  try {
+    return localStorage.getItem('dm_nav_open') === '1';
+  } catch {
+    return false;
+  }
+};
+const initials = (name = '') => name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('');
+
+function UserMenu({ user, practice, logout }) {
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!open) return undefined;
+    const close = (e) => { if (e.type === 'keydown' ? e.key === 'Escape' : !e.target.closest?.('.user-menu')) setOpen(false); };
+    document.addEventListener('pointerdown', close);
+    document.addEventListener('keydown', close);
+    return () => { document.removeEventListener('pointerdown', close); document.removeEventListener('keydown', close); };
+  }, [open]);
+  return (
+    <div className="user-menu">
+      <button className="rail-item user-button" onClick={() => setOpen(!open)} aria-expanded={open} data-tip={user.name}>
+        <span className="rail-avatar">{initials(user.name)}</span>
+        <span className="rail-label">{user.name}<small>{label(user.role)}</small></span>
+      </button>
+      {open && (
+        <div className="user-pop" role="menu">
+          <div className="user-pop-head">
+            <span className="rail-avatar big">{initials(user.name)}</span>
+            <div><strong>{user.name}</strong><div className="muted">{label(user.role)} · {practice?.name}</div></div>
+          </div>
+          <LocationPicker user={user} />
+          <ClockButton />
+          <button className="menu-item" onClick={() => { setOpen(false); window.dispatchEvent(new Event('dm:shortcuts')); }}><Keyboard size={16} /> Keyboard shortcuts <kbd>?</kbd></button>
+          <button className="menu-item" onClick={logout}><LogOut size={16} /> Sign out</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Shell({ nav }) {
   const location = useLocation();
   const { user, practice, logout } = useAuth();
+  const [railOpen, setRailOpen] = useState(railPref);
+  const toggleRail = () => setRailOpen((o) => {
+    try { localStorage.setItem('dm_nav_open', o ? '0' : '1'); } catch { /* storage unavailable */ }
+    return !o;
+  });
+  const fullBleed = location.pathname === '/schedule';
   return (
-    <div className="app">
+    <div className={`app${railOpen ? ' rail-open' : ''}`}>
       <a href="#main" className="skip-link">Skip to content</a>
       <CommandPalette />
       <KeyboardHelp />
       <IdleLogout />
-      <aside className="sidebar">
-        <div className="brand">
-          <span>🦷</span>
-          <div>
-            Dental Machine
-            <small>{practice?.name}</small>
-          </div>
+      <aside className="sidebar rail">
+        <div className="rail-brand" title={practice?.name}>
+          <span className="rail-logo" aria-hidden>
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M7 3c-2.5 0-4 2-4 4.5 0 3 1.5 4.5 2 7.5.4 2.6 1 6 2.7 6 1.8 0 1.5-4.5 3-6.2.5-.5 1.1-.5 1.6 0 1.5 1.7 1.2 6.2 3 6.2 1.7 0 2.3-3.4 2.7-6 .5-3 2-4.5 2-7.5C21 5 19.5 3 17 3c-2 0-3 1-5 1S9 3 7 3Z" /></svg>
+          </span>
+          <span className="rail-label">Dental Machine<small>{practice?.name}</small></span>
         </div>
-        <button className="search-trigger" onClick={() => window.dispatchEvent(new Event('dm:search'))}>
-          🔍 Search <kbd>Ctrl K</kbd>
+        <button className="rail-item" onClick={() => window.dispatchEvent(new Event('dm:search'))} data-tip="Search (Ctrl K)">
+          <Search size={19} strokeWidth={1.9} /><span className="rail-label">Search <kbd>Ctrl K</kbd></span>
         </button>
-        <nav className="nav">
-          {nav.filter((n) => n[3]).map(([to, icon, text]) => (
-            <NavLink key={to} to={to} end={to === '/'}>
-              <span aria-hidden>{icon}</span> {text}
+        <nav className="nav rail-nav">
+          {nav.filter((n) => n[3]).map(([to, Icon, text]) => (
+            <NavLink key={to} to={to} end={to === '/'} className="rail-item" data-tip={text} aria-label={text}>
+              <Icon size={19} strokeWidth={1.9} aria-hidden />
+              <span className="rail-label">{text}</span>
               {to === '/messages' && <UnreadBadge />}
             </NavLink>
           ))}
         </nav>
-        <div className="sidebar-footer">
-          <LocationPicker user={user} />
-          <ClockButton />
-          <div style={{ color: '#fff' }}>{user.name}</div>
-          <div>{label(user.role)}</div>
-          <button className="small" onClick={logout}>Sign out</button>
-          <button className="link shortcuts-link" onClick={() => window.dispatchEvent(new Event('dm:shortcuts'))} title="Keyboard shortcuts (?)">Keyboard shortcuts</button>
+        <div className="rail-foot">
+          <button className="rail-item" onClick={toggleRail} data-tip={railOpen ? 'Collapse menu' : 'Keep menu open'} aria-label={railOpen ? 'Collapse menu' : 'Expand menu'}>
+            {railOpen ? <PanelLeftClose size={19} strokeWidth={1.9} /> : <PanelLeftOpen size={19} strokeWidth={1.9} />}
+            <span className="rail-label">Collapse</span>
+          </button>
+          <UserMenu user={user} practice={practice} logout={logout} />
         </div>
       </aside>
-      <main className="main" id="main" tabIndex={-1}>
+      <main className={`main${fullBleed ? ' full-bleed' : ''}`} id="main" tabIndex={-1}>
         {user.role === 'admin' && practice?.setup_status === 'pending' && location.pathname !== '/setup' && (
           <div className="setup-banner no-print">Finish setting up {practice.name} — providers, fees, insurance and reminders. <NavLink to="/setup">Continue setup →</NavLink></div>
         )}

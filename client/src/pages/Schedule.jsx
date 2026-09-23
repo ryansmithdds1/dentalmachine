@@ -7,12 +7,15 @@ import { useAuth } from '../auth.jsx';
 import { useLiveEvents } from '../live.js';
 import { money, fmtTime, shiftDate, practiceToday, label } from '../format.js';
 import { Modal } from '../components/ui.jsx';
+import { ChevronLeft, ChevronRight, CalendarDays, Plus, Ban, SlidersHorizontal, Printer, Hourglass, Pin, X } from 'lucide-react';
 import AppointmentForm from '../components/AppointmentForm.jsx';
 import BlockoutForm from '../components/calendar/BlockoutForm.jsx';
 import AppointmentDrawer from '../components/calendar/AppointmentDrawer.jsx';
 import CalendarGrid, { toMin, STATUS_COLORS } from '../components/calendar/CalendarGrid.jsx';
 
-const ZOOMS = [{ label: 'S', px: 1 }, { label: 'M', px: 1.5 }, { label: 'L', px: 2.2 }];
+// "Fit" sizes the grid so the whole office day fits the screen without scrolling; S/M/L are fixed sizes.
+const ZOOMS = [{ label: 'Fit', px: 0 }, { label: 'S', px: 1 }, { label: 'M', px: 1.5 }, { label: 'L', px: 2.2 }];
+const MIN_FIT_PX = 0.85; // below this, visits get too short to read: scroll instead
 const pref = (k, d) => {
   try {
     return localStorage.getItem(`dm_sched_${k}`) ?? d;
@@ -54,10 +57,11 @@ export default function Schedule() {
   const today = practiceToday(tz);
   const [params, setParams] = useSearchParams();
   const narrow = useMediaQuery('(max-width: 760px)');
+  const compact = useMediaQuery('(max-width: 1700px)');
   const date = params.get('date') || today;
   const view = params.get('view') || (narrow ? 'agenda' : pref('view', 'day'));
   const [mode, setModeState] = useState(() => pref('mode', 'operatory'));
-  const [zoom, setZoomState] = useState(() => Number(pref('zoom', 1.5)));
+  const [zoom, setZoomState] = useState(() => Number(pref('zoom', 0)));
   const [providerFilter, setProviderFilter] = useState('');
   const setMode = (m) => { setModeState(m); savePref('mode', m); };
   const setZoom = (z) => { setZoomState(z); savePref('zoom', z); };
@@ -343,7 +347,9 @@ export default function Schedule() {
     }
     const cols = operatories.map((o) => ({
       ...base, key: `o${o.id}`, label: o.name, assign: { operatory_id: o.id }, showProvider: true,
-      sub: `${appts.filter((a) => a.operatory_id === o.id).length} appts`,
+      sub: ((n) => `${n} appt${n === 1 ? '' : 's'}`)(appts.filter((a) => a.operatory_id === o.id && a.start_time.startsWith(date) && !['cancelled', 'no_show'].includes(a.status)).length),
+      // Who's working in this chair today (from the visits booked in it).
+      people: [...new Map(appts.filter((a) => a.operatory_id === o.id && a.start_time.startsWith(date)).map((a) => [a.provider_id, { name: a.provider_name, color: a.provider_color }])).values()],
       accepts: (a) => a.start_time.startsWith(date) && a.operatory_id === o.id,
       blockouts: blockouts.filter((b) => onDate(b, date) && (officeWide(b) || b.operatory_id === o.id)),
     }));
@@ -366,14 +372,37 @@ export default function Schedule() {
       }
     }
     if (open >= close) [open, close] = [8 * 60, 17 * 60];
-    let start = open - 60;
-    let end = close + 60;
+    const pad = zoom ? 60 : 0; // Fit shows office hours (and any visit outside them), not an extra hour each side
+    let start = open - pad;
+    let end = close + pad;
     for (const a of appts) {
       start = Math.min(start, toMin(a.start_time));
       end = Math.max(end, toMin(a.end_time));
     }
-    return { start: Math.max(0, Math.floor(start / 60) * 60), end: Math.min(24 * 60, Math.ceil(end / 60) * 60), open };
-  }, [columns, appts]);
+    const round = zoom ? 60 : 30;
+    return { start: Math.max(0, Math.floor(start / round) * round), end: Math.min(24 * 60, Math.ceil(end / round) * round), open };
+  }, [columns, appts, zoom]);
+
+  // Fit: pixels per minute so the day fills the space under the column headers.
+  const mainRef = useRef(null);
+  const [mainH, setMainH] = useState(0);
+  useEffect(() => {
+    const el = mainRef.current;
+    if (!el) return undefined;
+    const ro = new ResizeObserver(([e]) => setMainH(e.contentRect.height));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [data !== null]); // eslint-disable-line react-hooks/exhaustive-deps
+  const pxPerMin = zoom || (mainH ? Math.max(MIN_FIT_PX, (mainH - 58) / Math.max(60, timeRange.end - timeRange.start)) : 1.2);
+  const [optionsOpen, setOptionsOpen] = useState(false);
+  useEffect(() => {
+    if (!optionsOpen) return undefined;
+    const close = (e) => { if (e.type === 'keydown' ? e.key === 'Escape' : !e.target.closest?.('.view-options')) setOptionsOpen(false); };
+    document.addEventListener('pointerdown', close);
+    document.addEventListener('keydown', close);
+    return () => { document.removeEventListener('pointerdown', close); document.removeEventListener('keydown', close); };
+  }, [optionsOpen]);
+  const dateInput = useRef(null);
 
   // ---- Summary ----
   const dayAppts = view === 'week' ? appts : appts.filter((a) => a.start_time.startsWith(date));
@@ -382,27 +411,30 @@ export default function Schedule() {
   const unconfirmed = dayAppts.filter((a) => a.status === 'scheduled').length;
   const title = view === 'week'
     ? `${dayName(from, { month: 'short', day: 'numeric' })} – ${dayName(to, { month: 'short', day: 'numeric', year: 'numeric' })}`
-    : dayName(date, { weekday: narrow ? 'short' : 'long', month: narrow ? 'short' : 'long', day: 'numeric', year: 'numeric' });
+    : dayName(date, { weekday: compact ? 'short' : 'long', month: compact ? 'short' : 'long', day: 'numeric', ...(narrow ? {} : { year: 'numeric' }) });
 
   return (
     <div className="schedule-page">
       <div className="sched-toolbar">
         <div className="sched-nav">
-          <button onClick={() => go({ date: shiftDate(date, view === 'week' ? -7 : -1) })} aria-label="Previous">‹</button>
-          <button onClick={() => go({ date: today })} className={date === today ? 'active' : ''}>Today</button>
-          <button onClick={() => go({ date: shiftDate(date, view === 'week' ? 7 : 1) })} aria-label="Next">›</button>
-          <input type="date" value={date} onChange={(e) => e.target.value && go({ date: e.target.value })} aria-label="Go to date" />
+          <button className="icon-btn" onClick={() => go({ date: shiftDate(date, view === 'week' ? -7 : -1) })} aria-label="Previous" title="Previous (←)"><ChevronLeft size={18} /></button>
+          <button onClick={() => go({ date: today })} className={`today-btn${date === today ? ' active' : ''}`} title="Today (T)">Today</button>
+          <button className="icon-btn" onClick={() => go({ date: shiftDate(date, view === 'week' ? 7 : 1) })} aria-label="Next" title="Next (→)"><ChevronRight size={18} /></button>
         </div>
-        <div className="sched-title">
+        <button className="sched-title" onClick={() => { try { dateInput.current?.showPicker(); } catch { dateInput.current?.focus(); } }} title="Go to a date">
           <h1>{title}</h1>
-          <div className="muted sched-stats">
-            <span>{dayAppts.length} appts</span>
-            {unconfirmed > 0 && <span className="badge warn">{unconfirmed} unconfirmed</span>}
-            <span title="Scheduled production">{short(production)}{goal ? ` of ${short(goal)}` : ''}</span>
+          <CalendarDays size={16} className="muted" />
+          <input ref={dateInput} type="date" value={date} onChange={(e) => e.target.value && go({ date: e.target.value })} aria-label="Go to date" tabIndex={-1} />
+        </button>
+        <div className="sched-stats">
+          <span className="stat-pill">{dayAppts.length} appts</span>
+          {unconfirmed > 0 && <span className="stat-pill warn">{unconfirmed} unconfirmed</span>}
+          <span className="stat-pill prod" title="Scheduled production">
+            {short(production)}{goal ? <span className="muted"> / {short(goal)}</span> : ''}
             {goal > 0 && <span className="goal-bar" title="Scheduled production vs goal"><i style={{ width: `${Math.min(100, (production / goal) * 100)}%` }} /></span>}
-            {live !== null && <span className={`live-dot${live ? ' on' : ''}`} title={live ? 'Live: changes from other screens appear instantly' : 'Reconnecting…'}>{live ? 'Live' : 'Offline'}</span>}
-            {loading && <span>Loading…</span>}
-          </div>
+          </span>
+          {live !== null && <span className={`live-dot${live ? ' on' : ''}`} title={live ? 'Live: changes from other screens appear instantly' : 'Reconnecting…'}>{live ? '' : 'Offline'}</span>}
+          {loading && <span className="muted">Loading…</span>}
         </div>
         <div className="sched-controls">
           <div className="seg">
@@ -426,24 +458,27 @@ export default function Schedule() {
             </select>
           )}
           {view !== 'agenda' && (
-            <div className="seg" title="Zoom">
-              {ZOOMS.map((z) => <button key={z.label} className={zoom === z.px ? 'active' : ''} onClick={() => setZoom(z.px)}>{z.label}</button>)}
+            <div className="view-options">
+              <button className={`icon-btn${optionsOpen ? ' active' : ''}`} onClick={() => setOptionsOpen(!optionsOpen)} aria-expanded={optionsOpen} title="View options"><SlidersHorizontal size={17} /></button>
+              {optionsOpen && (
+                <div className="popover" role="dialog" aria-label="View options">
+                  <div className="popover-row"><span>Zoom</span>
+                    <div className="seg">{ZOOMS.map((z) => <button key={z.label} className={zoom === z.px ? 'active' : ''} onClick={() => setZoom(z.px)} title={z.px ? undefined : 'Fit the whole day on screen'}>{z.label}</button>)}</div>
+                  </div>
+                  <div className="popover-row"><span>Time grid</span>
+                    <div className="seg">{[5, 10, 15].map((m) => <button key={m} className={step === m ? 'active' : ''} onClick={() => setStep(m)}>{m} min</button>)}</div>
+                  </div>
+                  <div className="popover-row"><span>Color by</span>
+                    <div className="seg">{[['type', 'Type'], ['provider', 'Provider'], ['status', 'Status']].map(([k, l]) => <button key={k} className={colorBy === k ? 'active' : ''} onClick={() => setColorBy(k)}>{l}</button>)}</div>
+                  </div>
+                  <button className="menu-item" onClick={() => { setOptionsOpen(false); window.open(`/schedule/print?date=${date}${providerFilter ? `&provider_id=${providerFilter}` : ''}`, '_blank'); }}><Printer size={16} /> Print the day (one page per provider)</button>
+                </div>
+              )}
             </div>
           )}
-          {view !== 'agenda' && (
-            <select value={step} onChange={(e) => setStep(Number(e.target.value))} aria-label="Grid step" title="Time grid" style={{ width: 'auto' }}>
-              {[5, 10, 15].map((m) => <option key={m} value={m}>{m} min</option>)}
-            </select>
-          )}
-          {view !== 'agenda' && (
-            <select value={colorBy} onChange={(e) => setColorBy(e.target.value)} aria-label="Color by" title="Color appointments by" style={{ width: 'auto' }}>
-              <option value="type">Color: type</option><option value="provider">Color: provider</option><option value="status">Color: status</option>
-            </select>
-          )}
-          <button onClick={() => window.open(`/schedule/print?date=${date}${providerFilter ? `&provider_id=${providerFilter}` : ''}`, '_blank')} title="Print the day, one page per provider">Print</button>
-          <button onClick={() => setShowAsap(!showAsap)} className={showAsap ? 'active' : ''}>Waitlist</button>
-          {can('schedule:write') && <button onClick={() => setModal({ type: 'block', defaults: { date } })}>Block time</button>}
-          {can('schedule:write') && <button className="primary" onClick={() => setModal({ type: 'new', defaults: { date } })}>+ Appointment</button>}
+          <button onClick={() => setShowAsap(!showAsap)} className={`icon-btn wide${showAsap ? ' active' : ''}`} title="Waitlist and ASAP list"><Hourglass size={16} /> Waitlist</button>
+          {can('schedule:write') && <button className="icon-btn" onClick={() => setModal({ type: 'block', defaults: { date } })} title="Block time"><Ban size={16} /></button>}
+          {can('schedule:write') && <button className="primary" onClick={() => setModal({ type: 'new', defaults: { date } })} title="New appointment (N)"><Plus size={16} strokeWidth={2.5} /> Appointment</button>}
         </div>
       </div>
 
@@ -454,7 +489,7 @@ export default function Schedule() {
         </div>
       )}
 
-      <div className="sched-main">
+      <div className="sched-main" ref={mainRef}>
         {!data ? <div className="empty">Loading schedule…</div> : view === 'agenda' ? (
           <Agenda from={from} to={to} appts={appts} blockouts={blockouts} providerFilter={providerFilter} onOpen={(a) => setSelectedId(a.id)} today={today} />
         ) : columns.length === 0 ? (
@@ -470,11 +505,11 @@ export default function Schedule() {
             </div>
           )}
           <CalendarGrid
-            columns={columns} appointments={appts} range={timeRange} pxPerMin={zoom} nowMin={nowMin} step={step} colorBy={colorBy}
+            columns={columns} appointments={appts} range={timeRange} pxPerMin={pxPerMin} nowMin={nowMin} step={step} colorBy={colorBy}
             onMove={onMove} onResize={onResize} readOnly={!can('schedule:write')}
             onSelectRange={onSelectRange} onOpen={(a) => setSelectedId(a.id)}
             onOpenBlockout={(b) => can('schedule:write') && setModal({ type: 'block', blockout: b })}
-            placing={placing} onPlace={onPlace} selectedId={selectedId} scrollKey={`${view}|${from}`}
+            placing={placing} onPlace={onPlace} selectedId={selectedId} scrollKey={`${view}|${from}|${zoom}`}
             onPin={can('schedule:write') ? onPin : undefined}
           />
           </>
@@ -500,14 +535,14 @@ export default function Schedule() {
 
       {can('schedule:write') && view !== 'agenda' && (
         <div className={`pinboard${pins.length ? '' : ' empty'}`} data-pin-drop>
-          <strong>📌 Pinboard</strong>
-          {!pins.length && <span className="muted">Drag an appointment here to move it to another day.</span>}
+          <strong><Pin size={14} /> Pinboard</strong>
+          {!pins.length && <span className="muted">Drop here to move it to another day</span>}
           {pins.map((p) => (
             <span key={p.id} className={`pin-item${placing?.id === p.id ? ' active' : ''}`} style={{ borderLeftColor: p.type_color || p.provider_color || '#64748b' }}>
               <button className="link" onClick={() => setPlacing(placing?.id === p.id ? null : p)} title="Tap, then tap a new time on the schedule">
                 {p.first_name} {p.last_name} <span className="muted">· {p.type_name || p.reason || 'Visit'} · {toMin(p.end_time) - toMin(p.start_time)} min · was {dayName(p.start_time.slice(0, 10), { month: 'short', day: 'numeric' })} {fmtTime(p.start_time)}</span>
               </button>
-              <button className="link" aria-label="Unpin" title="Leave it where it is" onClick={() => { setPins((cur) => cur.filter((x) => x.id !== p.id)); if (placing?.id === p.id) setPlacing(null); }}>✕</button>
+              <button className="link" aria-label="Unpin" title="Leave it where it is" onClick={() => { setPins((cur) => cur.filter((x) => x.id !== p.id)); if (placing?.id === p.id) setPlacing(null); }}><X size={14} /></button>
             </span>
           ))}
         </div>

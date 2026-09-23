@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
-import { Link, useParams, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useApi, useLookup } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
 import { money, fullName, age, fmtDate, fmtDateTime, fmtUtcDate, label, practiceToday } from '../format.js';
-import { Modal, Badge, ErrorBox, useSubmit } from '../components/ui.jsx';
+import { Modal, Badge, ErrorBox, useSubmit, Menu } from '../components/ui.jsx';
+import { Pin, Pill, TriangleAlert, MoreHorizontal, GitMerge, FileArchive, ShieldCheck, CalendarPlus, Pencil } from 'lucide-react';
 import PatientForm from '../components/PatientForm.jsx';
 import AppointmentForm from '../components/AppointmentForm.jsx';
 import ChartTab from '../components/patient/ChartTab.jsx';
@@ -25,6 +26,7 @@ import { MembershipCard } from '../components/Memberships.jsx';
 export default function PatientDetail() {
   const { id } = useParams();
   const { can, practice, user } = useAuth();
+  const navigate = useNavigate();
   const { data: p, error, reload } = useApi(`/patients/${id}`);
   // Links can open a tab directly (?tab=ledger, ?tab=insurance…).
   const [params] = useSearchParams();
@@ -78,10 +80,10 @@ export default function PatientDetail() {
                 #{p.id} · {p.dob ? `${fmtDate(p.dob)} (${age(p.dob)} y)` : 'DOB not recorded'} {p.gender ? `· ${label(p.gender)}` : ''} {p.phone ? `· ${p.phone}` : ''}
               </div>
               <div className="inline" style={{ marginTop: 6, flexWrap: 'wrap' }}>
-                {p.office_alert && <button className="office-chip" onClick={() => setPopup(p.office_alert)}>📌 {p.office_alert}</button>}
-                {!!p.premed_required && <span className="alert-chip strong" title="Antibiotic premedication before treatment">💊 PREMED</span>}
+                {p.office_alert && <button className="office-chip" onClick={() => setPopup(p.office_alert)}><Pin size={13} /> {p.office_alert}</button>}
+                {!!p.premed_required && <span className="alert-chip strong" title="Antibiotic premedication before treatment"><Pill size={13} /> PREMED</span>}
                 {p.asa_class && p.asa_class !== 'I' && <span className="alert-chip" title="ASA physical status">ASA {p.asa_class}</span>}
-                {p.medical_alerts && <span className="alert-chip">⚠ {p.medical_alerts}</span>}
+                {p.medical_alerts && <span className="alert-chip"><TriangleAlert size={13} /> {p.medical_alerts}</span>}
                 {p.allergies && <span className="alert-chip">Allergy: {p.allergies}</span>}
                 {p.guarantor && <button className="link" style={{ fontSize: 12 }} onClick={() => setTab('family')}>Guarantor: {p.guarantor.first_name} {p.guarantor.last_name}</button>}
                 {!p.guarantor && p.family_size > 1 && <button className="link" style={{ fontSize: 12 }} onClick={() => setTab('family')}>Head of household · {p.family_size} in family</button>}
@@ -89,19 +91,17 @@ export default function PatientDetail() {
             </div>
           </div>
           <div className="actions">
-            <div style={{ textAlign: 'right', marginRight: 8 }}>
-              <div className="muted" style={{ fontSize: 12 }}>Balance</div>
-              <div style={{ fontSize: 20, fontWeight: 700, color: p.balance > 0 ? 'var(--danger)' : undefined }}>{money(p.balance)}</div>
+            <div className={`balance-block${p.balance > 0 ? ' owed' : ''}`}>
+              <span>Balance</span>
+              <strong>{money(p.balance)}</strong>
             </div>
-            {can('schedule:write') && <button className="primary" onClick={() => setModal('appt')}>Book appointment</button>}
-            {can('patients:write') && <button onClick={() => setModal('edit')}>Edit</button>}
-            {user?.role === 'admin' && <button onClick={() => setModal('merge')} title="Move a duplicate chart's history into this one">Merge…</button>}
-            {can('clinical:read') && can('billing:read') && (
-              <button onClick={() => download(`/patients/${p.id}/record-export`, `health-record-${p.id}.zip`)} title="The patient's copy of their record (for a records request): summary PDF, all the data and their images and documents, in one ZIP">
-                Export record
-              </button>
-            )}
-            {user?.role === 'admin' && <Link to={`/settings?tab=audit&patient_id=${p.id}`}><button title="Who viewed or changed this patient's record">Access log</button></Link>}
+            {can('patients:write') && <button onClick={() => setModal('edit')}><Pencil size={15} /> Edit</button>}
+            {can('schedule:write') && <button className="primary" onClick={() => setModal('appt')}><CalendarPlus size={16} /> Book appointment</button>}
+            <Menu label={<MoreHorizontal size={18} />} title="More" items={[
+              can('clinical:read') && can('billing:read') && { label: 'Export record', icon: <FileArchive size={16} />, title: "The patient's copy of their record (for a records request): summary PDF, all the data and their images and documents, in one ZIP", onClick: () => download(`/patients/${p.id}/record-export`, `health-record-${p.id}.zip`) },
+              user?.role === 'admin' && { label: 'Access log', icon: <ShieldCheck size={16} />, title: "Who viewed or changed this patient's record", onClick: () => navigate(`/settings?tab=audit&patient_id=${p.id}`) },
+              user?.role === 'admin' && { label: 'Merge a duplicate chart…', icon: <GitMerge size={16} />, title: "Move a duplicate chart's history into this one", onClick: () => setModal('merge') },
+            ]} />
           </div>
         </div>
       </div>

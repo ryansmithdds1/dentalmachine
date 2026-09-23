@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Check, CheckCheck, DoorOpen, Armchair, Pill, TriangleAlert, Repeat } from 'lucide-react';
 import { eligibilityBadge } from '../../format.js';
 
 export const toMin = (t) => Number(t.slice(-5, -3)) * 60 + Number(t.slice(-2));
 export const fmtMin = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 export const label12 = (m) => `${((Math.floor(m / 60) + 11) % 12) + 1}${m % 60 ? `:${String(m % 60).padStart(2, '0')}` : ''}${m < 720 ? 'a' : 'p'}`;
-const STATUS_ICON = { confirmed: '✓', checked_in: '➜', in_chair: '●', completed: '✔', scheduled: '' };
+const STATUS_ICON = { confirmed: [Check, 'Confirmed'], checked_in: [DoorOpen, 'Checked in'], in_chair: [Armchair, 'In the chair'], completed: [CheckCheck, 'Completed'] };
+const hourLabel = (m) => `${((Math.floor(m / 60) + 11) % 12) + 1} ${m < 720 ? 'AM' : 'PM'}`;
+const clock = (m) => `${((Math.floor(m / 60) + 11) % 12) + 1}:${String(m % 60).padStart(2, '0')}`;
+const initialsOf = (name = '') => name.replace(/^(dr\.?|drs\.?)\s+/i, '').split(/[\s,]+/).filter((w) => w && !/^(dds|dmd|rdh|md|phd|jr|sr)\.?$/i.test(w)).slice(0, 2).map((w) => w[0].toUpperCase()).join('');
 
 // Side-by-side lanes for overlapping events within one column.
 function layoutLanes(items) {
@@ -59,6 +63,13 @@ export default function CalendarGrid({
     for (let m = Math.ceil(range.start / 60) * 60; m < range.end; m += 60) out.push(m);
     return out;
   }, [range]);
+
+  // While an appointment is being dragged, the pinboard shows as a drop target.
+  const moving = drag?.kind === 'move' && drag.active;
+  useEffect(() => {
+    document.body.classList.toggle('cal-dragging', moving);
+    return () => document.body.classList.remove('cal-dragging');
+  }, [moving]);
 
   // Scroll to "now" (or opening time) when the view changes.
   useLayoutEffect(() => {
@@ -192,15 +203,28 @@ export default function CalendarGrid({
         <div className="cal-head" style={{ gridTemplateColumns: `56px repeat(${columns.length}, minmax(var(--cal-col-min), 1fr))` }}>
           <div className="cal-corner">{headerExtra}</div>
           {columns.map((c) => (
-            <div key={c.key} className={`cal-col-head${c.isToday ? ' today' : ''}`} style={c.color ? { boxShadow: `inset 0 -3px 0 ${c.color}` } : undefined}>
-              <div className="cal-col-title">{c.label}</div>
-              {c.sub && <div className={`cal-col-sub${c.subClass ? ` ${c.subClass}` : ""}`}>{c.sub}</div>}
+            <div key={c.key} className={`cal-col-head${c.isToday ? ' today' : ''}`} style={c.color ? { '--col': c.color } : undefined}>
+              <div className="cal-col-title">
+                {c.color && <span className="cal-col-avatar" style={{ background: c.color }}>{initialsOf(c.label)}</span>}
+                <span>{c.label}</span>
+              </div>
+              <div className="cal-col-info">
+                {c.sub && <span className={`cal-col-sub${c.subClass ? ` ${c.subClass}` : ''}`}>{c.sub}</span>}
+                {c.people?.length > 0 && (
+                  <span className="cal-col-people">
+                    {c.people.map((p) => <i key={p.name} style={{ background: p.color || '#64748b' }} title={p.name}>{initialsOf(p.name)}</i>)}
+                  </span>
+                )}
+              </div>
             </div>
           ))}
         </div>
         <div className="cal-grid" style={{ gridTemplateColumns: `56px repeat(${columns.length}, minmax(var(--cal-col-min), 1fr))`, height }}>
           <div className="cal-gutter">
-            {hours.map((m) => <div key={m} className="cal-hour-label" style={{ top: (m - range.start) * pxPerMin }}>{label12(m)}</div>)}
+            {hours.map((m) => <div key={m} className="cal-hour-label" style={{ top: (m - range.start) * pxPerMin }}>{hourLabel(m)}</div>)}
+            {columns.some((c) => c.isToday) && nowMin != null && nowMin >= range.start && nowMin <= range.end && (
+              <div className="cal-now-label" style={{ top: (nowMin - range.start) * pxPerMin }}>{clock(nowMin)}</div>
+            )}
           </div>
           <div className="cal-body" ref={body} style={{ gridColumn: `2 / span ${columns.length}`, gridTemplateColumns: `repeat(${columns.length}, minmax(var(--cal-col-min), 1fr))`, '--hour': `${60 * pxPerMin}px`, '--step': `${step * pxPerMin}px` }}>
             {columns.map((col, ci) => {
@@ -259,10 +283,12 @@ export default function CalendarGrid({
                           </div>
                         )}
                         <div className="cal-appt-line">
-                          <strong>{a.premed_required ? '💊 ' : ''}{a.medical_alerts ? '⚠ ' : ''}{a.first_name} {a.last_name}</strong>
-                          {STATUS_ICON[a.status] && <span className="cal-status" title={a.status}>{STATUS_ICON[a.status]}</span>}
+                          {a.medical_alerts ? <TriangleAlert className="cal-alert" size={12} strokeWidth={2.5} aria-label="Medical alert" /> : null}
+                          {a.premed_required ? <Pill className="cal-alert" size={12} strokeWidth={2.5} aria-label="Premedication" /> : null}
+                          <strong>{a.first_name} {a.last_name}</strong>
+                          {STATUS_ICON[a.status] && (() => { const [Icon, text] = STATUS_ICON[a.status]; return <span className={`cal-status s-${a.status}`} title={text}><Icon size={11} strokeWidth={3} /></span>; })()}
                           {a.asap ? <span className="cal-asap" title="Wants an earlier time">ASAP</span> : null}
-                          {a.series_id ? <span className="cal-repeat" title="Recurring visit">↻</span> : null}
+                          {a.series_id ? <Repeat className="cal-repeat" size={11} strokeWidth={2.5} aria-label="Recurring visit" /> : null}
                           {(() => { const b = eligibilityBadge(a.eligibility); return b ? <span className={`cal-elig ${b.tone}`} title={b.text}>{b.icon}</span> : null; })()}
                           {col.isToday && nowMin != null && a.status === 'checked_in' && a.arrived_at && (
                             <span className={`cal-flow${nowMin - toMin(a.arrived_at.slice(11, 16)) >= 15 ? ' long' : ''}`} title="Waiting since arrival">⏱ {Math.max(0, nowMin - toMin(a.arrived_at.slice(11, 16)))}m</span>
@@ -271,9 +297,9 @@ export default function CalendarGrid({
                             <span className="cal-flow long" title="Not checked in yet">late</span>
                           )}
                         </div>
-                        {h >= 30 && <div className="cal-appt-meta">{label12(s)}–{label12(e)} · {a.type_name || a.reason || ''}</div>}
-                        {h >= 46 && <div className="cal-appt-meta">{col.showProvider ? a.provider_name : a.operatory_name || a.provider_name}{a.production ? ` · $${Math.round(a.production / 100)}` : ''}</div>}
-                        {h >= 62 && a.procedure_summary && <div className="cal-appt-meta">{a.procedure_summary}</div>}
+                        {h >= 28 && <div className="cal-appt-meta"><span className="cal-time">{clock(s)}–{clock(e)}</span> {a.type_name || a.reason || ''}</div>}
+                        {h >= 44 && <div className="cal-appt-meta">{col.showProvider ? a.provider_name : a.operatory_name || a.provider_name}{a.production ? <b className="cal-prod"> ${Math.round(a.production / 100).toLocaleString()}</b> : ''}</div>}
+                        {h >= 60 && a.procedure_summary && <div className="cal-appt-meta cal-codes">{a.procedure_summary}</div>}
                         <div className="cal-resize" onPointerDown={(ev) => startResize(ev, a, ci, s, e)} />
                       </div>
                     );
