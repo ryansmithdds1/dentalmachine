@@ -7,6 +7,7 @@ import CommandPalette from './components/CommandPalette.jsx';
 import IdleLogout from './components/IdleLogout.jsx';
 import { Suspense, lazy, useEffect, useState } from 'react';
 import { api, getLocationId, setLocationId } from './api.js';
+import { readOfflineDay } from './offline.js';
 import { useLiveEvents } from './live.js';
 import MfaSetup from './components/MfaSetup.jsx';
 
@@ -64,6 +65,36 @@ export default function App() {
   );
 }
 
+// No connection: the last copy of today's schedule saved on this computer, read-only.
+function OfflineSchedule({ onRetry }) {
+  const day = readOfflineDay();
+  const today = new Date().toLocaleDateString('en-CA');
+  return (
+    <div className="offline-page">
+      <div className="card">
+        <div className="inline" style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
+          <div>
+            <h1 style={{ margin: 0 }}>You’re offline</h1>
+            <div className="muted">Dental Machine can’t reach the internet. {day ? `Here’s ${day.date === today ? 'today’s' : `the ${day.date}`} schedule as of ${new Date(day.saved_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} — read-only.` : 'Open the schedule while online and today’s list will be kept here for times like this.'}</div>
+          </div>
+          <button className="primary" onClick={onRetry}>Try again</button>
+        </div>
+        {day && (
+          <table style={{ marginTop: 12 }}>
+            <thead><tr><th>Time</th><th>Patient</th><th>Visit</th><th>Provider</th><th>Chair</th><th>Phone</th></tr></thead>
+            <tbody>
+              {day.visits.map((v, i) => (
+                <tr key={i}><td>{v.start}–{v.end}</td><td>{v.alert ? '⚠ ' : ''}{v.name}</td><td>{v.reason}</td><td>{v.provider}</td><td>{v.chair}</td><td>{v.phone}</td></tr>
+              ))}
+              {!day.visits.length && <tr><td colSpan={6} className="muted">No visits.</td></tr>}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function UnreadBadge() {
   const [n, setN] = useState(0);
   const load = () => api.get('/conversations/unread').then((r) => setN(r.unread)).catch(() => {});
@@ -75,8 +106,9 @@ function UnreadBadge() {
 }
 
 function StaffApp() {
-  const { user, practice, loading, logout, can, refresh } = useAuth();
+  const { user, practice, loading, offline, logout, can, refresh } = useAuth();
   if (loading) return <div className="empty">Loading…</div>;
+  if (offline) return <OfflineSchedule onRetry={refresh} />;
   if (!user) {
     return (
       <Routes>

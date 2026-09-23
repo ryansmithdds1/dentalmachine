@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api, getLocationId } from '../api.js';
+import { saveOfflineDay } from '../offline.js';
 import { useLookup } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
 import { useLiveEvents } from '../live.js';
@@ -157,6 +158,10 @@ export default function Schedule() {
   const [selectedId, setSelectedId] = useState(null);
   const [modal, setModal] = useState(null);
   const [placing, setPlacing] = useState(null);
+  // Keep today's list on this computer for when the internet is down (see offline.js).
+  useEffect(() => {
+    if (data && from <= today && to >= today) saveOfflineDay(practice, today, data.appointments, operatories, providers);
+  }, [data]); // eslint-disable-line react-hooks/exhaustive-deps
   // ?book=<patient id> (from quick search "Book for…"): open a new appointment for them.
   useEffect(() => {
     const id = params.get('book');

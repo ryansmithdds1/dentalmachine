@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { api, getToken, setToken } from './api.js';
+import { clearOfflineDay } from './offline.js';
 
 const AuthContext = createContext(null);
 
@@ -36,7 +37,9 @@ export function AuthProvider({ children }) {
     try {
       const me = await api.get('/auth/me');
       setState({ loading: false, user: me.user, practice: me.practice });
-    } catch {
+    } catch (err) {
+      // No connection (not a rejected session): keep the session and show the offline schedule.
+      if (!err.status || [502, 503, 504].includes(err.status)) return setState({ loading: false, user: null, practice: null, offline: true });
       setToken(null);
       setState({ loading: false, user: null, practice: null });
     }
@@ -44,7 +47,7 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     refresh();
-    const onLogout = () => setState({ loading: false, user: null, practice: null });
+    const onLogout = () => { clearOfflineDay(); setState({ loading: false, user: null, practice: null }); };
     window.addEventListener('dm:logout', onLogout);
     return () => window.removeEventListener('dm:logout', onLogout);
   }, [refresh]);
@@ -61,6 +64,7 @@ export function AuthProvider({ children }) {
   };
   const logout = () => {
     setToken(null);
+    clearOfflineDay();
     setState({ loading: false, user: null, practice: null });
   };
   // After a password change or "sign out everywhere", the server hands this device a fresh session.
