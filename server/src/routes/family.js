@@ -20,13 +20,62 @@ export function installmentDate(plan, i) {
 }
 
 // Adds schedule, amount paid, amount due to date and next due date to a plan row.
+const customSchedule = (plan) => {
+  if (!plan.schedule) return null;
+  try { return JSON.parse(plan.schedule); } catch { return null; }
+};
+
+// A schedule typed in by staff: dated amounts in order that add up to what's financed.
+export function cleanSchedule(input, financed) {
+  if (!Array.isArray(input) || !input.length || input.length > 120) throw new HttpError(400, 'A schedule needs 1-120 payments');
+  const rows = input.map((s) => ({ due_date: String(s?.due_date || ''), amount: Math.round(Number(s?.amount)) }));
+  for (const [i, s] of rows.entries()) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(s.due_date)) throw new HttpError(400, `Payment ${i + 1} needs a date`);
+    if (!Number.isInteger(s.amount) || s.amount <= 0) throw new HttpError(400, `Payment ${i + 1} needs an amount above zero`);
+    if (i && s.due_date < rows[i - 1].due_date) throw new HttpError(400, 'Payments must be in date order');
+  }
+  const sum = rows.reduce((t, s) => t + s.amount, 0);
+  if (sum !== financed) throw new HttpError(400, `The payments add up to $${(sum / 100).toFixed(2)}; they need to add up to the $${(financed / 100).toFixed(2)} financed`);
+  return rows;
+}
+
+// Charges the plan's late fee once for each installment still unpaid a set number of days after it was due.
+export async function runPlanLateFees(db, { practiceId = null } = {}) {
+  const out = [];
+  const plans = await db.all(`SELECT * FROM payment_plans WHERE status = 'active' AND late_fee > 0${practiceId ? ' AND practice_id = ?' : ''}`, ...(practiceId ? [practiceId] : []));
+  for (const plan of plans) {
+    const today = (await practiceNow(db, plan.practice_id)).slice(0, 10);
+    const cutoff = new Date(Date.parse(`${today}T12:00:00Z`) - (plan.late_fee_days || 0) * 86400_000).toISOString().slice(0, 10);
+    const status = await planStatus(db, plan, today);
+    for (const s of status.schedule) {
+      if (s.due_date > cutoff || s.paid >= s.amount || s.late_fee) continue;
+      const fee = await db.tx(async () => {
+        const claimed = await db.run('INSERT INTO payment_plan_late_fees (plan_id, installment, amount) VALUES (?, ?, ?) ON CONFLICT (plan_id, installment) DO NOTHING', plan.id, s.n, plan.late_fee);
+        if (!claimed.changes) return null;
+        const entry = await insert(db, 'ledger_entries', {
+          practice_id: plan.practice_id, patient_id: plan.patient_id, type: 'adjustment', adjustment_type: 'Late fee', amount: plan.late_fee,
+          description: `Late fee — payment plan installment ${s.n} due ${s.due_date}`, entry_date: today,
+        });
+        await db.run('UPDATE payment_plan_late_fees SET ledger_entry_id = ? WHERE plan_id = ? AND installment = ?', entry, plan.id, s.n);
+        return entry;
+      });
+      if (fee) out.push({ plan_id: plan.id, installment: s.n, amount: plan.late_fee, ledger_entry_id: fee });
+    }
+  }
+  return out;
+}
+
 export async function planStatus(db, plan, today) {
   const financed = plan.total - plan.down_payment;
   const paid = -(await db.get('SELECT COALESCE(SUM(amount), 0) AS n FROM ledger_entries WHERE payment_plan_id = ?', plan.id)).n;
-  // Even installments; the leftover cents go on the first ones (so none is ever negative or short).
+  // A schedule edited by staff, else even installments with the leftover cents on the first ones
+  // (so none is ever negative or short).
+  const custom = customSchedule(plan);
   const base = Math.floor(financed / plan.installments);
   const extra = financed - base * plan.installments;
-  const schedule = Array.from({ length: plan.installments }, (_, i) => ({ n: i + 1, due_date: installmentDate(plan, i), amount: base + (i < extra ? 1 : 0) }));
+  const schedule = custom
+    ? custom.map((s, i) => ({ n: i + 1, due_date: s.due_date, amount: s.amount }))
+    : Array.from({ length: plan.installments }, (_, i) => ({ n: i + 1, due_date: installmentDate(plan, i), amount: base + (i < extra ? 1 : 0) }));
   let cumulative = 0;
   let dueToDate = 0;
   for (const s of schedule) {
@@ -35,8 +84,12 @@ export async function planStatus(db, plan, today) {
     if (s.due_date <= today) dueToDate = cumulative;
   }
   const next = schedule.find((s) => s.paid < s.amount);
+  const fees = await db.all('SELECT installment, amount, created_at FROM payment_plan_late_fees WHERE plan_id = ? ORDER BY installment', plan.id);
+  for (const f of fees) { const s = schedule.find((x) => x.n === f.installment); if (s) s.late_fee = f.amount; }
   return {
     ...plan,
+    schedule_edited: !!custom,
+    late_fees_charged: fees.reduce((t, f) => t + f.amount, 0),
     financed,
     paid,
     remaining: Math.max(0, financed - paid),
@@ -232,8 +285,20 @@ export default function familyRoutes({ db }) {
 
   r.put('/payment-plans/:planId', requirePermission('billing:write'), async (req, res) => {
     const plan = await findOr404(db, 'payment_plans', req.params.planId, req.user.practice_id, 'Payment plan');
-    const row = pick(req.body, ['status', 'notes', 'autopay_method_id']);
+    const row = pick(req.body, ['status', 'notes', 'autopay_method_id', 'late_fee', 'late_fee_days']);
     requireOneOf(row.status, ['active', 'completed', 'cancelled'], 'status');
+    if (row.late_fee !== undefined) row.late_fee = Math.max(0, toCents(row.late_fee || 0, 'late_fee'));
+    if (row.late_fee_days !== undefined) {
+      row.late_fee_days = Number(row.late_fee_days);
+      if (!Number.isInteger(row.late_fee_days) || row.late_fee_days < 0 || row.late_fee_days > 90) throw new HttpError(400, 'Days before a late fee must be 0-90');
+    }
+    if (req.body?.schedule !== undefined) {
+      // null goes back to even installments; otherwise the dated amounts must cover exactly what's financed.
+      const rows = req.body.schedule === null ? null : cleanSchedule(req.body.schedule, plan.total - plan.down_payment);
+      Object.assign(row, rows
+        ? { schedule: JSON.stringify(rows), installments: rows.length, installment_amount: rows[0].amount, start_date: rows[0].due_date }
+        : { schedule: null });
+    }
     if (row.autopay_method_id) {
       const m = await findOr404(db, 'payment_methods', row.autopay_method_id, req.user.practice_id, 'Card');
       if (m.patient_id !== plan.patient_id || m.removed_at) throw new HttpError(400, "That card isn't on file for this account");

@@ -6,6 +6,7 @@ import { initCluster, runExclusive } from './cluster.js';
 import { pollClearinghouse } from './clearinghouse.js';
 import { runRecallSequences } from './recalls.js';
 import { runAutopay } from './payments.js';
+import { runPlanLateFees } from './routes/family.js';
 import { runAutomaticBackups } from './backup.js';
 import { runFormSends } from './formtemplates.js';
 import { runMembershipBilling } from './memberships.js';
@@ -101,6 +102,14 @@ if (app.locals.payments.enabled && process.env.AUTOPAY !== 'off') {
     setInterval(run, 60 * 60 * 1000).unref();
     setTimeout(run, 90_000).unref();
   }
+}
+// Payment-plan late fees: an installment still unpaid after the plan's grace days gets its fee once.
+if (process.env.PLAN_LATE_FEES !== 'off') {
+  const run = () => runExclusive('plan-late-fees', 30 * 60 * 1000, () => runPlanLateFees(db))
+    .then((r) => r?.length && log.info(`Payment plans: ${r.length} late fees charged`))
+    .catch(jobFailed('Plan late fees'));
+  setInterval(run, 60 * 60 * 1000).unref();
+  setTimeout(run, 100_000).unref();
 }
 // Ortho contracts: each month's charge (and card payment, with autopay) once a day.
 if (process.env.ORTHO_BILLING !== 'off') {

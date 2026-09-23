@@ -9,13 +9,15 @@ export function PlanSummary({ plan }) {
   return (
     <div className="plan">
       <div className="inline" style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
-        <strong>{money(plan.total)} plan · {plan.installments} × {money(plan.installment_amount)} {label(plan.frequency).toLowerCase()}</strong>
+        <strong>{money(plan.total)} plan · {plan.schedule_edited ? `${plan.installments} payments (custom schedule)` : `${plan.installments} × ${money(plan.installment_amount)} ${label(plan.frequency).toLowerCase()}`}</strong>
         <span className={`badge ${plan.status === 'completed' ? 'ok' : plan.past_due > 0 ? 'danger' : 'info'}`}>{plan.past_due > 0 && plan.status === 'active' ? `${money(plan.past_due)} past due` : plan.status}</span>
       </div>
       <div className="plan-bar"><i style={{ width: `${Math.min(100, (plan.paid / Math.max(1, plan.financed)) * 100)}%` }} /></div>
       <div className="muted" style={{ fontSize: 12 }}>
         {money(plan.paid)} paid of {money(plan.financed)} financed{plan.down_payment ? ` (after ${money(plan.down_payment)} down)` : ''}
         {plan.next_due_date && plan.status === 'active' ? ` · next ${money(plan.next_due_amount)} due ${fmtDate(plan.next_due_date)}` : ''}
+        {plan.late_fee ? ` · ${money(plan.late_fee)} late fee after ${plan.late_fee_days} days` : ''}
+        {plan.late_fees_charged ? ` (${money(plan.late_fees_charged)} charged)` : ''}
         {plan.notes ? ` · ${plan.notes}` : ''}
       </div>
     </div>
@@ -30,6 +32,7 @@ export default function PaymentPlans({ patient, onChange }) {
   const { data: payCfg } = useApi('/payments/config');
   const [creating, setCreating] = useState(false);
   const [open, setOpen] = useState(null);
+  const [editing, setEditing] = useState(null);
   const [err, setErr] = useState(null);
   const [msg, setMsg] = useState(null);
   const act = async (fn, done) => {
@@ -78,16 +81,24 @@ export default function PaymentPlans({ patient, onChange }) {
           <button className="small link" onClick={() => setOpen(open === p.id ? null : p.id)}>{open === p.id ? 'Hide schedule' : 'Show schedule'}</button>
           {open === p.id && (
             <table style={{ marginTop: 6 }}>
-              <thead><tr><th>#</th><th>Due</th><th className="num">Amount</th><th className="num">Paid</th></tr></thead>
-              <tbody>{p.schedule.map((s) => <tr key={s.n}><td>{s.n}</td><td>{fmtDate(s.due_date)}</td><td className="num">{money(s.amount)}</td><td className="num">{s.paid >= s.amount ? '✓' : money(s.paid)}</td></tr>)}</tbody>
+              <thead><tr><th>#</th><th>Due</th><th className="num">Amount</th><th className="num">Paid</th><th className="num">Late fee</th></tr></thead>
+              <tbody>{p.schedule.map((s) => <tr key={s.n}><td>{s.n}</td><td>{fmtDate(s.due_date)}</td><td className="num">{money(s.amount)}</td><td className="num">{s.paid >= s.amount ? '✓' : money(s.paid)}</td><td className="num">{s.late_fee ? money(s.late_fee) : ''}</td></tr>)}</tbody>
             </table>
           )}
-          {can('billing:write') && p.status === 'active' && open === p.id && (
-            <button className="small danger" onClick={async () => { await api.put(`/payment-plans/${p.id}`, { status: 'cancelled' }); reload(); }}>Cancel plan</button>
+          {w && p.status === 'active' && open === p.id && (
+            <div className="form-actions" style={{ justifyContent: 'flex-start' }}>
+              <button className="small" onClick={() => setEditing(p)}>Edit schedule & late fee</button>
+              <button className="small danger" onClick={async () => { await api.put(`/payment-plans/${p.id}`, { status: 'cancelled' }); reload(); }}>Cancel plan</button>
+            </div>
           )}
         </div>
       ))}
       {payCfg?.cards_on_file && <CardsOnFile patient={patient} cards={cards} mode={payCfg.mode} onChange={() => { reloadCards(); reload(); }} />}
+      {editing && (
+        <Modal title="Edit payment plan" wide onClose={() => setEditing(null)}>
+          <ScheduleEditor plan={editing} onDone={() => { setEditing(null); reload(); onChange?.(); }} />
+        </Modal>
+      )}
       {creating && (
         <Modal title="New payment plan" onClose={() => setCreating(false)}>
           <PlanForm patient={patient} onDone={() => { setCreating(false); reload(); onChange?.(); }} />
@@ -181,5 +192,76 @@ function CardsOnFile({ patient, cards, mode, onChange }) {
         </div>
       ))}
     </div>
+  );
+}
+
+const addPeriod = (date, frequency, n) => {
+  const d = new Date(`${date}T12:00:00Z`);
+  if (frequency === 'monthly') {
+    const day = d.getUTCDate();
+    d.setUTCDate(1);
+    d.setUTCMonth(d.getUTCMonth() + n);
+    d.setUTCDate(Math.min(day, new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate()));
+  } else d.setUTCDate(d.getUTCDate() + n * (frequency === 'weekly' ? 7 : 14));
+  return d.toISOString().slice(0, 10);
+};
+
+// Re-arrange what's left: change dates and amounts, add or remove payments, or re-spread the unpaid balance.
+function ScheduleEditor({ plan, onDone }) {
+  const [rows, setRows] = useState(plan.schedule.map((s) => ({ due_date: s.due_date, amount: (s.amount / 100).toFixed(2), locked: s.paid >= s.amount })));
+  const [fee, setFee] = useState({ late_fee: plan.late_fee ? (plan.late_fee / 100).toFixed(2) : '', late_fee_days: plan.late_fee_days ?? 10 });
+  const [spread, setSpread] = useState({ count: Math.max(1, plan.schedule.filter((s) => s.paid < s.amount).length), frequency: plan.frequency || 'monthly', from: plan.next_due_date || plan.start_date });
+  const total = rows.reduce((t, r) => t + toCents(r.amount || 0), 0);
+  const off = total - plan.financed;
+  const set = (i, patch) => setRows(rows.map((r, k) => (k === i ? { ...r, ...patch } : r)));
+  const respread = () => {
+    const kept = rows.filter((r) => r.locked);
+    const left = plan.financed - kept.reduce((t, r) => t + toCents(r.amount), 0);
+    const n = Math.max(1, Number(spread.count) || 1);
+    const base = Math.floor(left / n);
+    const extra = left - base * n;
+    setRows([...kept, ...Array.from({ length: n }, (_, i) => ({ due_date: addPeriod(spread.from, spread.frequency, i), amount: ((base + (i < extra ? 1 : 0)) / 100).toFixed(2), locked: false }))]);
+  };
+  const { submit, busy, error } = useSubmit(async () => {
+    await api.put(`/payment-plans/${plan.id}`, {
+      schedule: rows.map((r) => ({ due_date: r.due_date, amount: toCents(r.amount) })),
+      late_fee: toCents(fee.late_fee || 0), late_fee_days: Number(fee.late_fee_days) || 0,
+    });
+    onDone();
+  });
+  return (
+    <form onSubmit={(e) => { e.preventDefault(); submit(); }}>
+      <ErrorBox error={error} />
+      <p className="muted" style={{ fontSize: 13 }}>Payments already made stay put. The schedule must add up to the {money(plan.financed)} financed.</p>
+      <div className="inline plan-respread" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 10 }}>
+        <span>Spread what&apos;s unpaid over</span>
+        <input type="number" min="1" max="120" aria-label="Number of payments" value={spread.count} onChange={(e) => setSpread({ ...spread, count: e.target.value })} style={{ width: 70 }} />
+        <select aria-label="How often" value={spread.frequency} onChange={(e) => setSpread({ ...spread, frequency: e.target.value })} style={{ width: 'auto' }}>
+          <option value="weekly">weekly</option><option value="biweekly">every 2 weeks</option><option value="monthly">monthly</option>
+        </select>
+        <span>payments from</span>
+        <input type="date" aria-label="First payment" value={spread.from} onChange={(e) => setSpread({ ...spread, from: e.target.value })} style={{ width: 'auto' }} />
+        <button type="button" className="small" onClick={respread}>Re-spread</button>
+      </div>
+      <table>
+        <thead><tr><th>#</th><th>Due</th><th className="num">Amount ($)</th><th /></tr></thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={i}>
+              <td>{i + 1}</td>
+              <td>{r.locked ? fmtDate(r.due_date) : <input type="date" aria-label={`Payment ${i + 1} date`} value={r.due_date} onChange={(e) => set(i, { due_date: e.target.value })} />}</td>
+              <td className="num">{r.locked ? <>{money(toCents(r.amount))} <span className="muted">paid</span></> : <input type="number" step="0.01" min="0.01" aria-label={`Payment ${i + 1} amount`} value={r.amount} onChange={(e) => set(i, { amount: e.target.value })} style={{ width: 110 }} />}</td>
+              <td>{!r.locked && rows.length > 1 && <button type="button" className="small link" onClick={() => setRows(rows.filter((_, k) => k !== i))}>Remove</button>}</td>
+            </tr>
+          ))}
+        </tbody>
+        <tfoot><tr><td /><td><button type="button" className="small link" onClick={() => setRows([...rows, { due_date: addPeriod(rows.at(-1)?.due_date || plan.start_date, spread.frequency, 1), amount: '', locked: false }])}>+ Add a payment</button></td><td className={`num ${off ? 'text-danger' : ''}`}><strong>{money(total)}</strong>{off ? ` (${off > 0 ? 'over' : 'short'} ${money(Math.abs(off))})` : ''}</td><td /></tr></tfoot>
+      </table>
+      <div className="form-grid" style={{ marginTop: 12 }}>
+        <label>Late fee ($)<input type="number" step="0.01" min="0" value={fee.late_fee} placeholder="none" onChange={(e) => setFee({ ...fee, late_fee: e.target.value })} /></label>
+        <label>Charged when a payment is this many days late<input type="number" min="0" max="90" value={fee.late_fee_days} onChange={(e) => setFee({ ...fee, late_fee_days: e.target.value })} /></label>
+      </div>
+      <div className="form-actions"><button className="primary" disabled={busy || off !== 0}>Save</button></div>
+    </form>
   );
 }

@@ -878,6 +878,17 @@ CREATE TABLE IF NOT EXISTS upload_links (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Late fees charged on payment-plan installments (one per installment at most).
+CREATE TABLE IF NOT EXISTS payment_plan_late_fees (
+  id INTEGER PRIMARY KEY,
+  plan_id INTEGER NOT NULL REFERENCES payment_plans(id),
+  installment INTEGER NOT NULL,
+  ledger_entry_id INTEGER REFERENCES ledger_entries(id),
+  amount INTEGER NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (plan_id, installment)
+);
+
 -- Card readers at the front desk (Stripe Terminal) and the in-person payments taken on them.
 CREATE TABLE IF NOT EXISTS terminal_readers (
   id INTEGER PRIMARY KEY,
@@ -1542,6 +1553,9 @@ const COLUMNS = [
   ['practices', 'financing', 'TEXT'],
   ['practices', 'auto_receipts', 'INTEGER NOT NULL DEFAULT 1'],
   ['practices', 'stripe_terminal_location', 'TEXT'],
+  ['payment_plans', 'schedule', 'TEXT'],
+  ['payment_plans', 'late_fee', 'INTEGER NOT NULL DEFAULT 0'],
+  ['payment_plans', 'late_fee_days', 'INTEGER NOT NULL DEFAULT 10'],
   ['documents', 'tags', 'TEXT'],
   ['patients', 'second_responsible_id', 'INTEGER REFERENCES patients(id)'],
   ['appointment_types', 'pattern', 'TEXT'],

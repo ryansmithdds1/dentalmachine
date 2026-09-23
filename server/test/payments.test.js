@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
 import { harness } from './helpers.js';
 import { runAutopay } from '../src/payments.js';
+import { runPlanLateFees } from '../src/routes/family.js';
 import { createMailer } from '../src/mail.js';
 
 // ---- Sandbox autopay ----
@@ -264,4 +265,40 @@ test('card readers: register, send an amount, tap, posted once with a receipt; d
   assert.equal((await api.del(`/terminal/readers/${reader.id}`)).status, 200);
   assert.equal((await api.get('/terminal/readers')).data.readers.length, 0);
   assert.equal((await api.post(`/patients/${patient.id}/terminal-payments`, { reader_id: reader.id, amount: 5000 })).status, 400);
+});
+
+test('payment plans: staff can re-arrange the schedule; late fees charged once per late installment', async () => {
+  const { api, patient } = await h.practice();
+  const plan = await planDue(api, patient); // $600 over 6 monthly, two already due
+  const s = plan.schedule;
+  // Must add up to what's financed, in date order.
+  assert.equal((await api.put(`/payment-plans/${plan.id}`, { schedule: [{ due_date: s[0].due_date, amount: 50000 }] })).status, 400);
+  assert.equal((await api.put(`/payment-plans/${plan.id}`, { schedule: [{ due_date: s[1].due_date, amount: 30000 }, { due_date: s[0].due_date, amount: 30000 }] })).status, 400);
+  // A smaller first payment, then the rest spread over four.
+  const edited = [{ due_date: s[0].due_date, amount: 4000 }, ...[1, 2, 3, 4].map((i) => ({ due_date: s[i].due_date, amount: 14000 }))];
+  const res = await api.put(`/payment-plans/${plan.id}`, { schedule: edited });
+  assert.equal(res.status, 200, JSON.stringify(res.data));
+  assert.equal(res.data.schedule_edited, true);
+  assert.deepEqual(res.data.schedule.map((x) => x.amount), [4000, 14000, 14000, 14000, 14000]);
+  assert.equal(res.data.past_due, 18000, 'the first two as re-arranged');
+  assert.equal(res.data.installments, 5);
+
+  // Late fees: $25 once an installment is 20 days late (only the first is; the second is about 10 days late), never twice.
+  await api.put(`/payment-plans/${plan.id}`, { late_fee: 2500, late_fee_days: 20 });
+  const first = await runPlanLateFees(h.db);
+  const mine = first.filter((f) => f.plan_id === plan.id);
+  assert.equal(mine.length, 1, 'only the installment more than 20 days late');
+  assert.deepEqual((await runPlanLateFees(h.db)).filter((f) => f.plan_id === plan.id), []);
+  const ledger = (await api.get(`/patients/${patient.id}/ledger`)).data.entries;
+  const fees = ledger.filter((e) => e.adjustment_type === 'Late fee');
+  assert.equal(fees.length, 1);
+  assert.equal(fees[0].amount, 2500);
+  const after = (await api.get(`/patients/${patient.id}/payment-plans`)).data.find((p) => p.id === plan.id);
+  assert.equal(after.late_fees_charged, 2500);
+  assert.equal(after.past_due, 18000, "a late fee isn't a plan payment");
+  assert.equal(after.schedule[0].late_fee, 2500);
+  // Going back to even installments.
+  const back = (await api.put(`/payment-plans/${plan.id}`, { schedule: null })).data;
+  assert.equal(back.schedule_edited, false);
+  assert.equal(back.schedule.reduce((t, x) => t + x.amount, 0), 60000);
 });
