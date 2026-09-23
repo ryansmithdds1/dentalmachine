@@ -86,11 +86,13 @@ export default function reportRoutes({ db }) {
     const pid = req.user.practice_id;
     const { from, to } = await range(req, db);
     const [f, t] = await utcRange(db, pid, from, to);
-    const hygienists = await db.all("SELECT id, name FROM providers WHERE practice_id = ? AND type = 'hygienist' ORDER BY name", pid);
+    const prov = Number(req.query.provider_id) || null;
+    const only = (col) => (prov ? ` AND ${col} = ${prov}` : '');
+    const hygienists = await db.all(`SELECT id, name FROM providers WHERE practice_id = ? AND type = 'hygienist'${only('id')} ORDER BY name`, pid);
     const byHyg = await db.all(
       `SELECT pr.provider_id, COALESCE(SUM(pr.fee), 0) AS production, COUNT(*) AS procedures
        FROM procedures pr JOIN providers pv ON pv.id = pr.provider_id
-       WHERE pr.practice_id = ? AND pv.type = 'hygienist' AND pr.status = 'completed' AND pr.completed_at >= ? AND pr.completed_at < ?
+       WHERE pr.practice_id = ? AND pv.type = 'hygienist' AND pr.status = 'completed' AND pr.completed_at >= ? AND pr.completed_at < ?${only('pr.provider_id')}
        GROUP BY pr.provider_id`, pid, f, t,
     );
     const visits = await db.all(
@@ -102,7 +104,7 @@ export default function reportRoutes({ db }) {
     );
     const codes = await db.all(
       `SELECT code, COUNT(*) AS n FROM procedures WHERE practice_id = ? AND status = 'completed' AND completed_at >= ? AND completed_at < ?
-         AND code IN (${[...PERIO, ...PROPHY].map(() => '?').join(',')}) GROUP BY code`, pid, f, t, ...PERIO, ...PROPHY,
+         AND code IN (${[...PERIO, ...PROPHY].map(() => '?').join(',')})${only('provider_id')} GROUP BY code`, pid, f, t, ...PERIO, ...PROPHY,
     );
     const perio = codes.filter((c) => PERIO.includes(c.code)).reduce((s, c) => s + c.n, 0);
     const prophy = codes.filter((c) => PROPHY.includes(c.code)).reduce((s, c) => s + c.n, 0);
@@ -143,7 +145,7 @@ export default function reportRoutes({ db }) {
          COALESCE(SUM(CASE WHEN pr.status = 'completed' THEN pr.fee ELSE 0 END), 0) AS completed,
          COUNT(DISTINCT CASE WHEN tp.status IN ('accepted','completed') OR tp.signed_at IS NOT NULL THEN tp.id END) AS accepted_plans
        FROM treatment_plans tp JOIN procedures pr ON pr.treatment_plan_id = tp.id LEFT JOIN providers pv ON pv.id = pr.provider_id
-       WHERE tp.practice_id = ? AND COALESCE(tp.presented_at, tp.created_at) >= ? AND COALESCE(tp.presented_at, tp.created_at) < ? AND pr.status != 'cancelled'
+       WHERE tp.practice_id = ? AND COALESCE(tp.presented_at, tp.created_at) >= ? AND COALESCE(tp.presented_at, tp.created_at) < ? AND pr.status != 'cancelled'${Number(req.query.provider_id) ? ` AND pr.provider_id = ${Number(req.query.provider_id)}` : ''}
        GROUP BY pr.provider_id, pv.name ORDER BY SUM(pr.fee) DESC`, pid, f, t,
     );
     const out = rows.map((x) => ({ ...x, provider_name: x.provider_name || 'No provider', unscheduled: Math.max(0, x.accepted - x.scheduled - x.completed), acceptance_pct: x.presented ? Math.round((x.accepted / x.presented) * 1000) / 10 : null }));

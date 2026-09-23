@@ -10,6 +10,7 @@ import CloseBooks from '../components/CloseBooks.jsx';
 import SavedReports from '../components/SavedReports.jsx';
 import ReportBuilder from '../components/ReportBuilder.jsx';
 import { downloadCsv, dollars, getLocationId } from '../api.js';
+import { ProviderSelect, CsvButton, PrintButton } from '../components/ReportControls.jsx';
 
 export default function Reports() {
   const [params, setParams] = useSearchParams();
@@ -42,22 +43,30 @@ function Operational() {
   // Multi-location: reports follow the office picked in the sidebar ("All offices" is consolidated).
   const office = getLocationId();
   const [prov, setProv] = useState('');
-  const providers = useLookup('/providers');
   const at = `${office ? `&location_id=${office}` : ''}${prov ? `&provider_id=${prov}` : ''}`;
-  const { data: prod } = useApi(`/reports/production?from=${from}&to=${to}${at}`);
+  // Only the part being looked at is loaded.
+  const [view, setView] = useState('sheet');
+  const { data: prod } = useApi(view === 'production' ? `/reports/production?from=${from}&to=${to}${at}` : null);
   const [agingGroup, setAgingGroup] = useState('patient');
   const [asOf, setAsOf] = useState('');
-  const { data: aging } = useApi(`/reports/aging?group=${agingGroup}${asOf ? `&as_of=${asOf}` : ''}`);
-  const { data: byProv } = useApi(`/reports/collections-by-provider?from=${from}&to=${to}${at}`);
-  const { data: adj } = useApi(`/reports/adjustments?from=${from}&to=${to}${at}`);
+  const { data: aging } = useApi(view === 'aging' ? `/reports/aging?group=${agingGroup}${asOf ? `&as_of=${asOf}` : ''}` : null);
+  const { data: byProv } = useApi(view === 'production' ? `/reports/collections-by-provider?from=${from}&to=${to}${at}` : null);
+  const { data: adj } = useApi(view === 'production' ? `/reports/adjustments?from=${from}&to=${to}${at}` : null);
   const [sheetDate, setSheetDate] = useState(today);
-  const { data: sheet } = useApi(`/reports/daysheet?date=${sheetDate}${at}`);
+  const { data: sheet } = useApi(view === 'sheet' ? `/reports/daysheet?date=${sheetDate}${at}` : null);
   const maxDay = Math.max(1, ...(prod?.by_day || []).map((d) => Math.max(d.production, d.collections)));
   const total = (key) => (prod?.by_day || []).reduce((s, d) => s + d[key], 0);
 
   return (
     <>
-      <DaySheet sheet={sheet} date={sheetDate} setDate={setSheetDate} />
+      <div className="inline no-print" style={{ gap: 8, margin: '12px 0', flexWrap: 'wrap' }}>
+        <div className="seg">
+          {[['sheet', 'Day sheet'], ['production', 'Production & collections'], ['aging', 'A/R aging']].map(([k, l]) => <button key={k} className={view === k ? 'active' : ''} onClick={() => setView(k)}>{l}</button>)}
+        </div>
+        {view !== 'aging' && <ProviderSelect value={prov} onChange={setProv} />}
+      </div>
+      {view === 'sheet' && <DaySheet sheet={sheet} date={sheetDate} setDate={setSheetDate} />}
+      {view === 'production' && <>
       {prod?.by_location && (
         <div className="card" style={{ marginTop: 16 }}>
           <div className="inline" style={{ justifyContent: 'space-between' }}>
@@ -78,11 +87,7 @@ function Operational() {
           <button onClick={() => { setFrom(`${today.slice(0, 7)}-01`); setTo(today); }}>MTD</button>
           <button onClick={() => { setFrom(shiftDate(today, -29)); setTo(today); }}>Last 30 days</button>
           <button onClick={() => { setFrom(`${today.slice(0, 4)}-01-01`); setTo(today); }}>YTD</button>
-          <button className="no-print" onClick={() => window.print()} title="Print, or choose “Save as PDF” in the print dialog">Print / PDF</button>
-          <select value={prov} onChange={(e) => setProv(e.target.value)} aria-label="Provider" style={{ width: 170 }}>
-            <option value="">All providers</option>
-            {providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
+          <PrintButton />
           <input type="date" aria-label="From" value={from} onChange={(e) => setFrom(e.target.value)} style={{ width: 150 }} />
           <span>to</span>
           <input type="date" aria-label="To" value={to} onChange={(e) => setTo(e.target.value)} style={{ width: 150 }} />
@@ -174,7 +179,9 @@ function Operational() {
         </div>
       </div>
 
-      <div className="card" style={{ marginTop: 16, padding: 0 }}>
+      </>}
+
+      {view === 'aging' && <div className="card" style={{ marginTop: 16, padding: 0 }}>
         <div style={{ padding: '14px 16px' }}>
           <TitleRow title="Accounts receivable aging">
             <div className="seg no-print">
@@ -221,7 +228,7 @@ function Operational() {
             </table>
           </details>
         )}
-      </div>
+      </div>}
     </>
   );
 }
@@ -232,13 +239,16 @@ function ReferralReport() {
   const today = practiceToday(practice?.timezone);
   const [from, setFrom] = useState(`${today.slice(0, 4)}-01-01`);
   const [to, setTo] = useState(today);
-  const { data } = useApi(`/reports/referrals?from=${from}&to=${to}`);
+  const [prov, setProv] = useState('');
+  const { data } = useApi(`/reports/referrals?from=${from}&to=${to}${prov ? `&provider_id=${prov}` : ''}`);
   const { data: open } = useApi('/referrals?open=true');
   return (
     <>
-      <div className="inline" style={{ margin: '12px 0', gap: 8 }}>
+      <div className="inline" style={{ margin: '12px 0', gap: 8, flexWrap: 'wrap' }}>
         <label className="inline">From<input type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></label>
         <label className="inline">To<input type="date" value={to} onChange={(e) => setTo(e.target.value)} /></label>
+        <ProviderSelect value={prov} onChange={setProv} label="Production: all providers" />
+        <PrintButton />
       </div>
       <div className="grid grid-2">
         <div className="card">
@@ -253,14 +263,20 @@ function ReferralReport() {
               {data?.sources.length === 0 && <tr><td colSpan={3} className="muted">No referrals recorded in this period.</td></tr>}
             </tbody>
           </table>
-          <h3>Other new-patient sources</h3>
+          <div className="inline" style={{ justifyContent: 'space-between' }}>
+            <h3>Other new-patient sources</h3>
+            <CsvButton name={`new-patient-sources-${from}-to-${to}`} rows={data?.free_text} columns={[['Source', (r) => r.source], ['Patients', (r) => r.patients], ['Production', (r) => dollars(r.production)]]} />
+          </div>
           <table className="compact-table">
             <thead><tr><th>Source</th><th className="num">Patients</th><th className="num">Production</th></tr></thead>
             <tbody>{data?.free_text.map((s) => <tr key={s.source}><td>{s.source}</td><td className="num">{s.patients}</td><td className="num">{money(s.production)}</td></tr>)}</tbody>
           </table>
         </div>
         <div className="card">
-          <h2>Referred out</h2>
+          <div className="inline" style={{ justifyContent: 'space-between' }}>
+            <h2 style={{ margin: 0 }}>Referred out</h2>
+            <CsvButton name={`referred-out-${from}-to-${to}`} rows={data?.outgoing} columns={[['Specialist', (r) => r.name], ['Specialty', (r) => r.specialty || ''], ['Sent', (r) => r.referrals], ['Seen', (r) => r.seen], ['Report back', (r) => r.reports]]} />
+          </div>
           <table className="compact-table">
             <thead><tr><th>Specialist</th><th className="num">Sent</th><th className="num">Seen</th><th className="num">Report back</th></tr></thead>
             <tbody>
@@ -283,25 +299,28 @@ function ReferralReport() {
   );
 }
 
-function useRange() {
+function useRange(providerType) {
   const { practice } = useAuth();
   const today = practiceToday(practice?.timezone);
   const [from, setFrom] = useState(`${today.slice(0, 7)}-01`);
   const [to, setTo] = useState(today);
+  const [prov, setProv] = useState('');
   const pickers = (
-    <div className="inline" style={{ margin: '12px 0', gap: 8 }}>
+    <div className="inline" style={{ margin: '12px 0', gap: 8, flexWrap: 'wrap' }}>
       <label className="inline">From<input type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></label>
       <label className="inline">To<input type="date" value={to} onChange={(e) => setTo(e.target.value)} /></label>
+      <ProviderSelect value={prov} onChange={setProv} type={providerType} label={providerType === 'hygienist' ? 'All hygienists' : 'All providers'} />
+      <PrintButton />
     </div>
   );
-  return { from, to, pickers };
+  return { from, to, pickers, q: `from=${from}&to=${to}${prov ? `&provider_id=${prov}` : ''}` };
 }
 const pctText = (v) => (v == null ? '—' : `${v}%`);
 
 // Hygiene: production and reappointment by hygienist, perio vs prophy, and whether due recalls got seen.
 function HygieneReport() {
-  const { from, to, pickers } = useRange();
-  const { data } = useApi(`/reports/hygiene?from=${from}&to=${to}`);
+  const { from, to, pickers, q } = useRange('hygienist');
+  const { data } = useApi(`/reports/hygiene?${q}`);
   return (
     <>
       {pickers}
@@ -335,8 +354,8 @@ function HygieneReport() {
 
 // Treatment plans presented in the dates, and how far each provider's got: accepted, scheduled, done.
 function PlanReport() {
-  const { from, to, pickers } = useRange();
-  const { data } = useApi(`/reports/treatment-plans?from=${from}&to=${to}`);
+  const { from, to, pickers, q } = useRange();
+  const { data } = useApi(`/reports/treatment-plans?${q}`);
   const rows = data ? [...data.providers, { ...data.total, provider_id: 'total', provider_name: 'Total' }] : [];
   return (
     <>
@@ -436,9 +455,6 @@ function DaySheet({ sheet, date, setDate }) {
 }
 
 // Spreadsheet export for a report table; money columns are in dollars.
-function CsvButton({ name, rows, columns }) {
-  return <button className="small no-print" disabled={!rows?.length} onClick={() => downloadCsv(name, rows, columns)} title="Download as a spreadsheet (CSV)">⬇ CSV</button>;
-}
 const TitleRow = ({ title, children }) => (
   <div className="inline" style={{ justifyContent: 'space-between' }}><h2 style={{ margin: 0 }}>{title}</h2><span className="inline">{children}</span></div>
 );

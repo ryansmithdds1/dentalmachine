@@ -3,6 +3,7 @@ import { api } from '../api.js';
 import { useApi, useLookup, invalidateLookup } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
 import { money, fmtDate, fullName } from '../format.js';
+import { CsvButton, PrintButton } from './ReportControls.jsx';
 import { Badge, ErrorBox, Modal, useSubmit } from './ui.jsx';
 
 const per = (p) => `${money(p.price)}/${p.interval === 'year' ? 'yr' : 'mo'}`;
@@ -210,7 +211,10 @@ export function MembershipReport() {
   return (
     <>
       <div className="card">
-        <h2 style={{ marginTop: 0 }}>Memberships · {fmtDate(data.from)} – {fmtDate(data.to)}</h2>
+        <div className="inline" style={{ justifyContent: 'space-between' }}>
+          <h2 style={{ marginTop: 0 }}>Memberships · {fmtDate(data.from)} – {fmtDate(data.to)}</h2>
+          <span className="inline"><CsvButton name="members" rows={data.members} columns={[['First name', (m) => m.first_name], ['Last name', (m) => m.last_name], ['Plan', (m) => m.plan_name], ['Since', (m) => m.start_date], ['Next bill', (m) => m.next_bill_date || ''], ['Status', (m) => m.status], ['Card on file', (m) => (m.payment_method_id ? 'yes' : 'no')]]} /><PrintButton /></span>
+        </div>
         <div className="grid grid-4" style={{ gap: 12 }}>
           {stat('Active members', data.active)}
           {stat('Monthly recurring', money(data.monthly_recurring))}

@@ -57,3 +57,65 @@ test('treatment plan report: presented, accepted, scheduled, completed by provid
   assert.equal(row.unscheduled, fee(c));
   assert.equal(r.total.presented, row.presented);
 });
+
+test('provider filters: KPIs, hygiene, treatment plans, referrals and reviews narrow to one provider', async () => {
+  const { api, patient, provider } = await h.practice({ timezone: 'UTC' });
+  const other = (await api.post('/providers', { name: 'Dr. Other', type: 'dentist' })).data;
+  const today = new Date().toISOString().slice(0, 10);
+  // $235 by the practice's dentist (paid in full), $1350 by the other.
+  await api.post(`/patients/${patient.id}/procedures`, { code: 'D2392', tooth: '30', surfaces: 'MO', provider_id: provider.id, complete: true });
+  await api.post(`/patients/${patient.id}/procedures`, { code: 'D2740', tooth: '3', provider_id: other.id, complete: true });
+  await api.post(`/patients/${patient.id}/payments`, { amount: 23500, method: 'cash' });
+  await api.post(`/patients/${patient.id}/treatment-plans`, { name: 'Next', procedures: [{ code: 'D2950', tooth: '3', provider_id: other.id }] });
+
+  const all = (await api.get(`/analytics?from=${today}&to=${today}`)).data;
+  const mine = (await api.get(`/analytics?from=${today}&to=${today}&provider_id=${provider.id}`)).data;
+  const theirs = (await api.get(`/analytics?from=${today}&to=${today}&provider_id=${other.id}`)).data;
+  assert.equal(all.production, 23500 + 135000);
+  assert.deepEqual([mine.production, theirs.production], [23500, 135000]);
+  // The payment pays off the oldest charge first: the dentist's filling.
+  assert.equal(all.collections, 23500);
+  assert.equal(mine.collections + theirs.collections, 23500);
+  assert.equal(mine.by_provider.length, 1);
+  assert.equal(theirs.case_acceptance.presented > 0, true);
+  assert.equal(mine.case_acceptance.presented, 0);
+  assert.ok(mine.monthly.every((m) => m.production <= 23500));
+
+  const plans = (await api.get(`/reports/treatment-plans?from=${today}&to=${today}&provider_id=${provider.id}`)).data;
+  assert.equal(plans.providers.length, 0);
+  assert.equal((await api.get(`/reports/treatment-plans?from=${today}&to=${today}&provider_id=${other.id}`)).data.providers.length, 1);
+
+  const hyg = (await api.post('/providers', { name: 'Hyg. Bea', type: 'hygienist' })).data;
+  const h1 = (await api.get(`/reports/hygiene?from=${today}&to=${today}&provider_id=${hyg.id}`)).data;
+  assert.deepEqual(h1.hygienists.map((x) => x.provider_id), [hyg.id]);
+
+  await h.db.run("UPDATE patients SET referral_source = 'Google' WHERE id = ?", patient.id);
+  const ref = (await api.get(`/reports/referrals?from=2000-01-01&to=${today}&provider_id=${other.id}`)).data;
+  assert.equal(ref.free_text.find((x) => x.source === 'Google').production, 135000);
+  assert.equal((await api.get(`/reports/reviews?from=${today}&to=${today}&provider_id=${other.id}`)).status, 200);
+});
+
+test('A/R aging groups families and splits what insurance still owes, in a fixed number of queries', async () => {
+  const { api, patient, provider } = await h.practice({ timezone: 'UTC' });
+  const kid = (await api.post(`/patients/${patient.id}/family`, { first_name: 'Kid', dob: '2015-01-01' })).data;
+  await api.post(`/patients/${kid.id}/procedures`, { code: 'D1120', provider_id: provider.id, complete: true });
+  const proc = (await api.post(`/patients/${patient.id}/procedures`, { code: 'D2392', tooth: '30', surfaces: 'MO', provider_id: provider.id, complete: true })).data;
+  const carrier = (await api.post('/carriers', { name: 'Delta Dental', payer_id: '94276' })).data;
+  const policy = (await api.post(`/patients/${patient.id}/insurance`, { carrier_id: carrier.id, subscriber_name: 'Jane Doe', subscriber_id: 'W1', annual_max: 150000, deductible: 0, pct_basic: 80 })).data;
+  await api.post('/claims', { patient_insurance_id: policy.id, procedure_ids: [proc.id] });
+  let queries = 0;
+  const get = h.db.get.bind(h.db); const all = h.db.all.bind(h.db);
+  h.db.get = (...a) => { queries++; return get(...a); };
+  h.db.all = (...a) => { queries++; return all(...a); };
+  const { agingReport } = await import('../src/aging.js');
+  const pid = (await get('SELECT practice_id FROM patients WHERE id = ?', patient.id)).practice_id;
+  let rep;
+  try { rep = await agingReport(h.db, pid, new Date().toISOString().slice(0, 10), { family: true }); } finally { h.db.get = get; h.db.all = all; }
+  assert.ok(queries <= 3, `${queries} queries`);
+  const row = rep.rows.find((r) => r.id === patient.id);
+  assert.equal(row.balance, 23500 + 8000);
+  assert.equal(row.current, row.balance);
+  assert.equal(row.insurance_pending, 18800);
+  assert.equal(row.patient_portion, row.balance - 18800);
+  assert.equal(row.first_name, 'Jane');
+});

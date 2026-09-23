@@ -115,7 +115,7 @@ export default function engagementRoutes({ db, messenger, config }) {
          t.status AS task_status, pv.name AS provider_name
        FROM review_feedback rf JOIN patients p ON p.id = rf.patient_id LEFT JOIN tasks t ON t.id = rf.task_id
        LEFT JOIN appointments a ON a.id = rf.appointment_id LEFT JOIN providers pv ON pv.id = a.provider_id
-       WHERE rf.practice_id = ? AND substr(rf.sent_at, 1, 10) BETWEEN ? AND ? ORDER BY rf.id DESC`, pid, from, to,
+       WHERE rf.practice_id = ? AND substr(rf.sent_at, 1, 10) BETWEEN ? AND ?${Number(req.query.provider_id) ? ` AND a.provider_id = ${Number(req.query.provider_id)}` : ''} ORDER BY rf.id DESC`, pid, from, to,
     );
     const rated = rows.filter((x) => x.rating != null);
     const threshold = (await db.get('SELECT review_threshold FROM practices WHERE id = ?', pid)).review_threshold || 4;
@@ -126,6 +126,7 @@ export default function engagementRoutes({ db, messenger, config }) {
       went_to_review: rows.filter((x) => x.went_to_review).length,
       by_stars: [5, 4, 3, 2, 1].map((n) => ({ stars: n, count: rated.filter((x) => x.rating === n).length })),
       feedback: rows.filter((x) => x.rating != null && (x.rating < threshold || x.comment)),
+      responses: rated,
     });
   });
 

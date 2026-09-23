@@ -264,8 +264,8 @@ Works well: drag, resize and create; undo; live updates; conflict checks; open-t
 3. **P2** Portal: download statements and receipts; update insurance with card photos.
 
 ### Reports and dashboard
-1. **P1** CSV/PDF export and provider filter on every report (items 20–21).
-2. **P1** Load only the selected tab; aging as one query.
+1. ✅ **P1** CSV/PDF export and provider filter on every report (items 20–21). _(Done: provider filter on KPIs (collections credited by allocation), day sheet, production, hygiene (by hygienist), treatment plans, referrals and reviews; CSV and Print/PDF on every report.)_
+2. ✅ **P1** Load only the selected tab; aging as one query. _(Done: the operational report is split into Day sheet / Production & collections / A/R aging and loads only the one shown; aging runs three grouped queries however many accounts there are.)_
 3. **P2** Configurable KPI targets (currently hard-coded).
 4. **P2** Separate insurance write-offs from discounts in the KPIs.
 

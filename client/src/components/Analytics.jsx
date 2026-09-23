@@ -3,6 +3,7 @@ import { useApi } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
 import { money, shiftDate, practiceToday, label } from '../format.js';
 import { downloadCsv, dollars } from '../api.js';
+import { ProviderSelect, CsvButton, PrintButton } from './ReportControls.jsx';
 
 const RANGES = [[29, '30 days'], [89, '90 days'], [364, '12 months']];
 // Industry rules of thumb, shown as context next to each KPI.
@@ -22,11 +23,20 @@ function Kpi({ label: l, value, suffix = '', target, invert, sub }) {
 }
 
 // Practice KPIs the leading PMS dashboards track.
+// The headline numbers as rows, for the spreadsheet download.
+const kpiRows = (k) => [
+  ['From', k.from], ['To', k.to], ['Gross production', dollars(k.production)], ['Collections', dollars(k.collections)], ['Adjustments', dollars(k.adjustments)],
+  ['Net production', dollars(k.net_production)], ['Collection rate %', k.collection_rate ?? ''], ['Average daily production', dollars(k.avg_daily_production)],
+  ['Case acceptance %', k.case_acceptance.rate ?? ''], ['Hygiene reappointment %', k.hygiene_reappointment.rate ?? ''], ['No-show & cancel rate %', k.appointments.no_show_rate ?? ''],
+  ['Patients current on recall %', k.recall_current_rate ?? ''], ['New patients', k.new_patients.total], ['Hygiene production', dollars(k.hygiene_production)],
+];
+
 export default function Analytics() {
   const { practice } = useAuth();
   const today = practiceToday(practice?.timezone);
   const [days, setDays] = useState(89);
-  const { data: k } = useApi(`/analytics?from=${shiftDate(today, -days)}&to=${today}`);
+  const [prov, setProv] = useState('');
+  const { data: k } = useApi(`/analytics?from=${shiftDate(today, -days)}&to=${today}${prov ? `&provider_id=${prov}` : ''}`);
   if (!k) return <div className="empty">Crunching numbers…</div>;
   const maxMonth = Math.max(1, ...k.monthly.map((m) => Math.max(m.production, m.collections)));
   const maxProv = Math.max(1, ...k.by_provider.map((p) => p.production));
@@ -34,9 +44,15 @@ export default function Analytics() {
 
   return (
     <>
-      <div className="seg" style={{ marginBottom: 14 }}>
-        {RANGES.map(([d, l]) => <button key={d} className={days === d ? 'active' : ''} onClick={() => setDays(d)}>Last {l}</button>)}
+      <div className="inline no-print" style={{ gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
+        <div className="seg">
+          {RANGES.map(([d, l]) => <button key={d} className={days === d ? 'active' : ''} onClick={() => setDays(d)}>Last {l}</button>)}
+        </div>
+        <ProviderSelect value={prov} onChange={setProv} />
+        <CsvButton name={`kpis-${k.from}-to-${k.to}`} rows={kpiRows(k)} columns={[['Measure', (r) => r[0]], ['Value', (r) => r[1]]]} />
+        <PrintButton />
       </div>
+      {prov && <p className="muted" style={{ marginTop: -6 }}>One provider: their production, visits and plans; collections and write-offs are the payments credited to their work. New patients and recall are practice-wide.</p>}
       <div className="grid grid-4">
         <Kpi label="Gross production" value={short(k.production)} sub={`${short(k.avg_daily_production)} / day avg`} />
         <Kpi label="Collections" value={short(k.collections)} sub={`net production ${short(k.net_production)}`} />

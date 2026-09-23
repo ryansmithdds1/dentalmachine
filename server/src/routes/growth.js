@@ -7,6 +7,7 @@ import { mailable, statementHtml } from '../mail.js';
 import { statementData } from './billing.js';
 import { portalKey } from './portal.js';
 import { pendingInsurance } from '../services.js';
+import { allocationsForRange } from '../allocation.js';
 
 const requireAdmin = (req, _res, next) => (req.user.role === 'admin' ? next() : next(new HttpError(403, 'Administrator access required')));
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -26,16 +27,28 @@ export default function growthRoutes({ db, messenger, config, mailer = { enabled
     const range = [pid, from, to];
     const [fromUtc, toUtc] = await utcRange(db, pid, from, to); // for UTC created_at columns
     const one = async (sql, ...p) => (await db.get(sql, ...p)).n;
+    // One provider's numbers: their production, visits and plans; payments and write-offs credited to
+    // their work (the same allocation as Collections by provider).
+    const prov = Number(req.query.provider_id) || null;
+    const byProv = (col = 'provider_id') => (prov ? ` AND ${col} = ${prov}` : '');
 
-    const production = await one("SELECT COALESCE(SUM(amount),0) AS n FROM ledger_entries WHERE practice_id = ? AND type = 'charge' AND entry_date BETWEEN ? AND ?", ...range);
-    const collections = -(await one("SELECT COALESCE(SUM(amount),0) AS n FROM ledger_entries WHERE practice_id = ? AND type IN ('payment','insurance_payment') AND entry_date BETWEEN ? AND ?", ...range));
-    const adjustments = -(await one("SELECT COALESCE(SUM(amount),0) AS n FROM ledger_entries WHERE practice_id = ? AND type = 'adjustment' AND amount < 0 AND entry_date BETWEEN ? AND ?", ...range));
+    const production = await one(`SELECT COALESCE(SUM(amount),0) AS n FROM ledger_entries WHERE practice_id = ? AND type = 'charge' AND entry_date BETWEEN ? AND ?${byProv()}`, ...range);
+    let collections;
+    let adjustments;
+    if (prov) {
+      const alloc = (await allocationsForRange(db, pid, from, to)).filter((a) => a.provider_id === prov);
+      collections = alloc.filter((a) => ['payment', 'insurance_payment'].includes(a.credit_type)).reduce((s, a) => s + a.amount, 0);
+      adjustments = alloc.filter((a) => a.credit_type === 'adjustment').reduce((s, a) => s + a.amount, 0);
+    } else {
+      collections = -(await one("SELECT COALESCE(SUM(amount),0) AS n FROM ledger_entries WHERE practice_id = ? AND type IN ('payment','insurance_payment') AND entry_date BETWEEN ? AND ?", ...range));
+      adjustments = -(await one("SELECT COALESCE(SUM(amount),0) AS n FROM ledger_entries WHERE practice_id = ? AND type = 'adjustment' AND amount < 0 AND entry_date BETWEEN ? AND ?", ...range));
+    }
     const hygieneProduction = await one(
       `SELECT COALESCE(SUM(l.amount),0) AS n FROM ledger_entries l JOIN providers pv ON pv.id = l.provider_id
-       WHERE l.practice_id = ? AND l.type = 'charge' AND pv.type = 'hygienist' AND l.entry_date BETWEEN ? AND ?`, ...range,
+       WHERE l.practice_id = ? AND l.type = 'charge' AND pv.type = 'hygienist' AND l.entry_date BETWEEN ? AND ?${byProv('l.provider_id')}`, ...range,
     );
     const appts = await db.all(
-      `SELECT status, COUNT(*) AS n FROM appointments WHERE practice_id = ? AND start_time >= ? AND start_time < ? AND start_time < ? GROUP BY status`,
+      `SELECT status, COUNT(*) AS n FROM appointments WHERE practice_id = ? AND start_time >= ? AND start_time < ? AND start_time < ?${byProv()} GROUP BY status`,
       pid, `${from} 00:00`, `${to} 24:00`, `${today} 24:00`,
     );
     const count = (s) => appts.filter((a) => s.includes(a.status)).reduce((x, a) => x + a.n, 0);
@@ -48,7 +61,7 @@ export default function growthRoutes({ db, messenger, config, mailer = { enabled
       `SELECT COALESCE(SUM(pr.fee),0) AS presented, COALESCE(SUM(CASE WHEN tp.status IN ('accepted','completed') THEN pr.fee ELSE 0 END),0) AS accepted,
          COUNT(DISTINCT tp.id) AS plans, COUNT(DISTINCT CASE WHEN tp.status IN ('accepted','completed') THEN tp.id END) AS accepted_plans
        FROM treatment_plans tp JOIN procedures pr ON pr.treatment_plan_id = tp.id
-       WHERE tp.practice_id = ? AND tp.created_at >= ? AND tp.created_at < ? AND pr.status != 'cancelled'`, pid, fromUtc, toUtc,
+       WHERE tp.practice_id = ? AND tp.created_at >= ? AND tp.created_at < ? AND pr.status != 'cancelled'${byProv('pr.provider_id')}`, pid, fromUtc, toUtc,
     );
 
     // Hygiene reappointment: hygiene visits completed in range whose patient left with their next visit
@@ -57,7 +70,7 @@ export default function growthRoutes({ db, messenger, config, mailer = { enabled
       `SELECT COUNT(*) AS visits, SUM(CASE WHEN EXISTS (SELECT 1 FROM appointments b WHERE b.patient_id = a.patient_id AND b.start_time > a.start_time
            AND b.status NOT IN ('cancelled','no_show') AND substr(b.created_at, 1, 10) <= substr(a.start_time, 1, 10)) THEN 1 ELSE 0 END) AS reappointed
        FROM appointments a JOIN providers pv ON pv.id = a.provider_id
-       WHERE a.practice_id = ? AND pv.type = 'hygienist' AND a.status = 'completed' AND a.start_time >= ? AND a.start_time < ?`,
+       WHERE a.practice_id = ? AND pv.type = 'hygienist' AND a.status = 'completed' AND a.start_time >= ? AND a.start_time < ?${byProv('a.provider_id')}`,
       pid, `${from} 00:00`, `${to} 24:00`,
     );
 
@@ -77,7 +90,7 @@ export default function growthRoutes({ db, messenger, config, mailer = { enabled
     const byProvider = await db.all(
       `SELECT pv.id, pv.name, pv.type, COALESCE(SUM(l.amount),0) AS production, COUNT(DISTINCT l.patient_id) AS patients
        FROM providers pv LEFT JOIN ledger_entries l ON l.provider_id = pv.id AND l.type = 'charge' AND l.entry_date BETWEEN ? AND ?
-       WHERE pv.practice_id = ? AND pv.active = 1 GROUP BY pv.id ORDER BY production DESC`, from, to, pid,
+       WHERE pv.practice_id = ? AND pv.active = 1${byProv('pv.id')} GROUP BY pv.id ORDER BY production DESC`, from, to, pid,
     );
     const days = Math.max(1, (Date.parse(to) - Date.parse(from)) / 86400_000 + 1);
     const monthly = await db.all(
@@ -86,9 +99,19 @@ export default function growthRoutes({ db, messenger, config, mailer = { enabled
          -SUM(CASE WHEN type IN ('payment','insurance_payment') THEN amount ELSE 0 END) AS collections
        FROM ledger_entries WHERE practice_id = ? AND entry_date >= ? GROUP BY month ORDER BY month`, pid, `${addDays(today, -365).slice(0, 7)}-01`,
     );
+    if (prov) {
+      // For one provider: their production each month, and the payments credited to their work.
+      const start = `${addDays(today, -365).slice(0, 7)}-01`;
+      const prodRows = await db.all(`SELECT substr(entry_date, 1, 7) AS month, SUM(amount) AS n FROM ledger_entries WHERE practice_id = ? AND type = 'charge' AND entry_date >= ?${byProv()} GROUP BY month`, pid, start);
+      const alloc = (await allocationsForRange(db, pid, start, today)).filter((a) => a.provider_id === prov && ['payment', 'insurance_payment'].includes(a.credit_type));
+      const months = new Map(monthly.map((m) => [m.month, { month: m.month, production: 0, collections: 0 }]));
+      for (const p of prodRows) (months.get(p.month) || months.set(p.month, { month: p.month, production: 0, collections: 0 }).get(p.month)).production = p.n;
+      for (const a of alloc) { const k = a.credit_date.slice(0, 7); (months.get(k) || months.set(k, { month: k, production: 0, collections: 0 }).get(k)).collections += a.amount; }
+      monthly.splice(0, monthly.length, ...[...months.values()].sort((a, b) => a.month.localeCompare(b.month)));
+    }
 
     res.json({
-      from, to,
+      from, to, provider_id: prov,
       production, collections, adjustments, hygiene_production: hygieneProduction,
       net_production: production - adjustments,
       collection_rate: pct(collections, production - adjustments),

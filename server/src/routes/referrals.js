@@ -118,10 +118,13 @@ export default function referralRoutes({ db }) {
     const pid = req.user.practice_id;
     const to = DATE.test(req.query.to || '') ? req.query.to : (await practiceNow(db, pid)).slice(0, 10);
     const from = DATE.test(req.query.from || '') ? req.query.from : `${to.slice(0, 4)}-01-01`;
+    // With a provider chosen, production counts only that provider's work on the referred patients.
+    const prov = Number(req.query.provider_id) || null;
+    const byProv = prov ? ` AND pr.provider_id = ${prov}` : '';
     const sources = await db.all(
       `SELECT c.id, c.name, c.practice_name, c.specialty,
          COUNT(DISTINCT x.patient_id) AS patients,
-         COALESCE(SUM((SELECT COALESCE(SUM(pr.fee), 0) FROM procedures pr WHERE pr.patient_id = x.patient_id AND pr.status = 'completed' AND pr.completed_at >= x.referral_date)), 0) AS production
+         COALESCE(SUM((SELECT COALESCE(SUM(pr.fee), 0) FROM procedures pr WHERE pr.patient_id = x.patient_id AND pr.status = 'completed' AND pr.completed_at >= x.referral_date${byProv})), 0) AS production
        FROM referrals x JOIN referral_contacts c ON c.id = x.contact_id
        WHERE x.practice_id = ? AND x.direction = 'in' AND x.referral_date BETWEEN ? AND ?
        GROUP BY c.id, c.name, c.practice_name, c.specialty ORDER BY COUNT(DISTINCT x.patient_id) DESC`,
@@ -130,7 +133,7 @@ export default function referralRoutes({ db }) {
     // New patients whose source is only the free-text "referral source" (Google, a friend, …).
     const freeText = await db.all(
       `SELECT COALESCE(p.referral_source, 'Not recorded') AS source, COUNT(*) AS patients,
-         COALESCE(SUM((SELECT COALESCE(SUM(pr.fee), 0) FROM procedures pr WHERE pr.patient_id = p.id AND pr.status = 'completed')), 0) AS production
+         COALESCE(SUM((SELECT COALESCE(SUM(pr.fee), 0) FROM procedures pr WHERE pr.patient_id = p.id AND pr.status = 'completed'${byProv})), 0) AS production
        FROM patients p
        WHERE p.practice_id = ? AND p.referred_by_id IS NULL AND substr(p.created_at, 1, 10) BETWEEN ? AND ?
        GROUP BY COALESCE(p.referral_source, 'Not recorded') ORDER BY COUNT(*) DESC`,

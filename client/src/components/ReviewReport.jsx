@@ -4,6 +4,7 @@ import { useApi } from '../hooks.js';
 import { fmtDate, fmtUtcDate } from '../format.js';
 import { useAuth } from '../auth.jsx';
 import { Badge } from './ui.jsx';
+import { ProviderSelect, CsvButton, PrintButton } from './ReportControls.jsx';
 
 // Reports → Reviews: how patients rated their visits, who went on to post a review, and what unhappy
 // patients told the office.
@@ -11,7 +12,8 @@ export default function ReviewReport() {
   const { practice } = useAuth();
   const today = new Date().toISOString().slice(0, 10);
   const [range, setRange] = useState({ from: `${today.slice(0, 7)}-01`, to: today });
-  const { data } = useApi(`/reports/reviews?from=${range.from}&to=${range.to}`);
+  const [prov, setProv] = useState('');
+  const { data } = useApi(`/reports/reviews?from=${range.from}&to=${range.to}${prov ? `&provider_id=${prov}` : ''}`);
   const stat = (label, value, sub) => <div className="card stat" style={{ margin: 0 }}><div className="label">{label}</div><div className="value">{value}</div>{sub && <div className="sub">{sub}</div>}</div>;
   return (
     <>
@@ -21,6 +23,9 @@ export default function ReviewReport() {
           <div className="inline" style={{ gap: 6 }}>
             <input type="date" value={range.from} onChange={(e) => setRange({ ...range, from: e.target.value })} aria-label="From" />
             <input type="date" value={range.to} onChange={(e) => setRange({ ...range, to: e.target.value })} aria-label="To" />
+            <ProviderSelect value={prov} onChange={setProv} />
+            <CsvButton name={`reviews-${range.from}-to-${range.to}`} rows={data?.responses} columns={[['Patient', (r) => `${r.first_name} ${r.last_name}`], ['Provider', (r) => r.provider_name || ''], ['Stars', (r) => r.rating], ['Comment', (r) => r.comment || ''], ['Went to review site', (r) => (r.went_to_review ? 'yes' : '')], ['Asked', (r) => r.sent_at]]} />
+            <PrintButton />
           </div>
         </div>
         {!data ? <div className="muted">Loading…</div> : (
