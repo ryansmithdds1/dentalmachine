@@ -5,12 +5,12 @@ import { saveOfflineDay } from '../offline.js';
 import { useLookup } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
 import { useLiveEvents } from '../live.js';
-import { money, fmtTime, shiftDate, practiceToday } from '../format.js';
+import { money, fmtTime, shiftDate, practiceToday, label } from '../format.js';
 import { Modal } from '../components/ui.jsx';
 import AppointmentForm from '../components/AppointmentForm.jsx';
 import BlockoutForm from '../components/calendar/BlockoutForm.jsx';
 import AppointmentDrawer from '../components/calendar/AppointmentDrawer.jsx';
-import CalendarGrid, { toMin } from '../components/calendar/CalendarGrid.jsx';
+import CalendarGrid, { toMin, STATUS_COLORS } from '../components/calendar/CalendarGrid.jsx';
 
 const ZOOMS = [{ label: 'S', px: 1 }, { label: 'M', px: 1.5 }, { label: 'L', px: 2.2 }];
 const pref = (k, d) => {
@@ -64,6 +64,8 @@ export default function Schedule() {
   // Grid step (5/10/15 min) and how the week view splits each day.
   const [step, setStepState] = useState(() => Number(pref('step', 10)));
   const setStep = (v) => { setStepState(v); savePref('step', v); };
+  const [colorBy, setColorByState] = useState(() => pref('colorBy', 'type'));
+  const setColorBy = (v) => { setColorByState(v); savePref('colorBy', v); };
   const [weekSplit, setWeekSplitState] = useState(() => pref('week_split', 'days'));
   const setWeekSplit = (v) => { setWeekSplitState(v); savePref('week_split', v); };
   const go = (patch) => {
@@ -422,6 +424,12 @@ export default function Schedule() {
               {[5, 10, 15].map((m) => <option key={m} value={m}>{m} min</option>)}
             </select>
           )}
+          {view !== 'agenda' && (
+            <select value={colorBy} onChange={(e) => setColorBy(e.target.value)} aria-label="Color by" title="Color appointments by" style={{ width: 'auto' }}>
+              <option value="type">Color: type</option><option value="provider">Color: provider</option><option value="status">Color: status</option>
+            </select>
+          )}
+          <button onClick={() => window.open(`/schedule/print?date=${date}${providerFilter ? `&provider_id=${providerFilter}` : ''}`, '_blank')} title="Print the day, one page per provider">Print</button>
           <button onClick={() => setShowAsap(!showAsap)} className={showAsap ? 'active' : ''}>Waitlist</button>
           {can('schedule:write') && <button onClick={() => setModal({ type: 'block', defaults: { date } })}>Block time</button>}
           {can('schedule:write') && <button className="primary" onClick={() => setModal({ type: 'new', defaults: { date } })}>+ Appointment</button>}
@@ -444,14 +452,21 @@ export default function Schedule() {
             {can('schedule:write') && <button className="link" onClick={() => setModal({ type: 'new', defaults: { date } })}>Book anyway</button>}
           </div>
         ) : (
+          <>
+          {colorBy === 'status' && (
+            <div className="legend no-print" style={{ justifyContent: 'flex-start', margin: '0 0 6px' }}>
+              {Object.entries(STATUS_COLORS).map(([k, c]) => <span key={k}><i style={{ background: c }} />{label(k)}</span>)}
+            </div>
+          )}
           <CalendarGrid
-            columns={columns} appointments={appts} range={timeRange} pxPerMin={zoom} nowMin={nowMin} step={step}
+            columns={columns} appointments={appts} range={timeRange} pxPerMin={zoom} nowMin={nowMin} step={step} colorBy={colorBy}
             onMove={onMove} onResize={onResize} readOnly={!can('schedule:write')}
             onSelectRange={onSelectRange} onOpen={(a) => setSelectedId(a.id)}
             onOpenBlockout={(b) => can('schedule:write') && setModal({ type: 'block', blockout: b })}
             placing={placing} onPlace={onPlace} selectedId={selectedId} scrollKey={`${view}|${from}`}
             onPin={can('schedule:write') ? onPin : undefined}
           />
+          </>
         )}
 
         {showAsap && (

@@ -705,3 +705,4 @@ p a, .muted a, li a, .public-notice a { text-decoration: underline; }
 .cal-pattern i { display: block; flex: none; }
 .cal-pattern i.x { background: var(--p, var(--primary)); opacity: .55; }
 .cal-pattern i.a { background: repeating-linear-gradient(45deg, rgba(100,116,139,.45) 0 2px, transparent 2px 4px); }
+.schedule-print .print-page { margin-bottom: 28px; } .schedule-print table td { vertical-align: top; } @media print { .schedule-print .print-page { break-after: page; } .schedule-print .print-page:last-child { break-after: auto; } }

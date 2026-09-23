@@ -195,7 +195,7 @@ Works well: drag, resize and create; undo; live updates; conflict checks; open-t
 5. ✅ **P2** Blockouts: linked repeats (edit or delete the series), date ranges (holiday week), drag and resize, and rules like "only crown seats here" instead of hard blocks.
 6. ✅ **P2** Per-appointment history (moved, rescheduled, who changed it) in the drawer.
 7. ✅ **P2** Recurring series: "every 2nd Tuesday", an end date, and adding visits to an existing series.
-8. **P3** Colour by provider, type or status as a toggle; print the day's schedule per provider.
+8. ✅ **P3** Colour by provider, type or status as a toggle; print the day's schedule per provider. _(Done: “Color: type / provider / status” on the schedule (remembered; status shows a legend); Print gives one page per provider with times, patients, alerts, procedures and production.)_
 
 ### Front desk: huddle, route slip, follow-ups, requests
 1. ✅ **P1** Follow-ups "Book" should carry the patient and their planned procedures into the booking form.

@@ -35,9 +35,12 @@ function layoutLanes(items) {
  * Time-grid calendar with pointer drag-to-move, resize, drag-to-create and tap-to-place.
  * columns: [{ key, label, sub, date, hours, isToday, accepts(appt) -> bool, blockouts: [] , assign: {date, provider_id?, operatory_id?} }]
  */
+// "Color by status": one color per step of the visit, the same as the legend.
+export const STATUS_COLORS = { scheduled: '#64748b', confirmed: '#16a34a', checked_in: '#d97706', in_chair: '#7c3aed', completed: '#0f766e', no_show: '#dc2626', cancelled: '#94a3b8' };
+
 export default function CalendarGrid({
   columns, appointments, range, pxPerMin, nowMin, onMove, onResize, onSelectRange, onOpen, onOpenBlockout, onPin,
-  placing, onPlace, selectedId, scrollKey, headerExtra, readOnly = false, step = 10,
+  placing, onPlace, selectedId, scrollKey, headerExtra, readOnly = false, step = 10, colorBy = 'type',
 }) {
   // The grid step (5, 10 or 15 minutes) is what drags and new appointments snap to.
   const SNAP = step;
@@ -232,7 +235,7 @@ export default function CalendarGrid({
                   )}
                   {perColumn[ci].map(({ appt: a, s, e, lane, lanes }) => {
                     const dragging = drag?.appt?.id === a.id && drag.active;
-                    const color = a.type_color || a.provider_color || '#64748b';
+                    const color = colorBy === 'provider' ? a.provider_color || '#64748b' : colorBy === 'status' ? STATUS_COLORS[a.status] || '#64748b' : a.type_color || a.provider_color || '#64748b';
                     const h = (e - s) * pxPerMin;
                     return (
                       <div key={a.id}
