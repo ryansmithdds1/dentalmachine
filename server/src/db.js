@@ -526,6 +526,17 @@ CREATE TABLE IF NOT EXISTS statement_runs (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS appointment_series (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  every INTEGER NOT NULL DEFAULT 1,
+  unit TEXT NOT NULL CHECK (unit IN ('week','month')),
+  count INTEGER NOT NULL,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS tasks (
   id INTEGER PRIMARY KEY,
   practice_id INTEGER NOT NULL REFERENCES practices(id),
@@ -589,6 +600,8 @@ const COLUMNS = [
   ['appointments', 'review_sent_at', 'TEXT'],
   ['claim_items', 'write_off', 'INTEGER NOT NULL DEFAULT 0'],
   ['claims', 'write_off_estimate', 'INTEGER NOT NULL DEFAULT 0'],
+  ['providers', 'working_hours', 'TEXT'],
+  ['appointments', 'series_id', 'INTEGER REFERENCES appointment_series(id)'],
 ];
 
 const INDEXES = `

@@ -49,7 +49,10 @@ await db.tx(async () => {
   await user('billing@demo.dentalmachine.app', 'Casey Park', 'billing');
 
   const drChen = await insert(db, 'providers', { practice_id: practiceId, user_id: drUser, name: 'Dr. Alex Chen, DDS', type: 'dentist', npi: '1234567893', license_number: 'TX-28841', dea_number: 'BC1234563', color: '#2563eb' });
-  const drRivera = await insert(db, 'providers', { practice_id: practiceId, name: 'Dr. Priya Rivera, DMD', type: 'dentist', npi: '1234567901', color: '#7c3aed' });
+  const drRivera = await insert(db, 'providers', {
+    practice_id: practiceId, name: 'Dr. Priya Rivera, DMD', type: 'dentist', npi: '1234567901', color: '#7c3aed',
+    working_hours: JSON.stringify({ 0: [], 1: [['08:00', '17:00']], 2: [['08:00', '17:00']], 3: [['08:00', '17:00']], 4: [['08:00', '17:00']], 5: [], 6: [] }), // Mon–Thu
+  });
   const hyg = await insert(db, 'providers', { practice_id: practiceId, user_id: hygUser, name: 'Sam Okafor, RDH', type: 'hygienist', color: '#059669' });
   const ops = (await db.all('SELECT id FROM operatories WHERE practice_id = ? ORDER BY id', practiceId)).map((o) => o.id);
 
@@ -193,6 +196,7 @@ await db.tx(async () => {
     const cursor = { [drChen]: 8 * 60, [drRivera]: 8 * 60, [hyg]: 8 * 60 };
     for (let k = 0; k < 14; k++) {
       const [name, prov, opIdx, procs] = plan[(k + d) % plan.length];
+      if (prov === drRivera && dow === 5) continue; // Dr. Rivera doesn't work Fridays
       const type = await typeId(name);
       let start = cursor[prov];
       if (start < 13 * 60 && start + type.duration > 12 * 60) start = 13 * 60; // skip lunch
@@ -212,6 +216,24 @@ await db.tx(async () => {
           description: 'Zirconia crown #3', tooth: '3', shade: 'A2', status: 'sent', sent_date: day, due_date: dayOffset(d + 10), cost: 12900,
         });
       }
+    }
+  }
+
+  // A perio patient on 3-month maintenance, booked as a recurring series.
+  {
+    const pid = patients[5];
+    const seriesId = await insert(db, 'appointment_series', { practice_id: practiceId, patient_id: pid, every: 3, unit: 'month', count: 4, created_by: adminId });
+    const perio = await typeId('Perio maintenance');
+    for (let q = 0; q < 4; q++) {
+      const d = new Date(`${dayOffset(15)}T12:00:00Z`);
+      d.setUTCMonth(d.getUTCMonth() + 3 * q);
+      let day = d.toISOString().slice(0, 10);
+      const dow = new Date(`${day}T12:00:00Z`).getUTCDay();
+      if (dow === 0 || dow === 6) day = dayOffset(Math.round((Date.parse(`${day}T12:00:00Z`) - Date.parse(`${today}T12:00:00Z`)) / 86400_000) + (dow === 6 ? 2 : 1));
+      await insert(db, 'appointments', {
+        practice_id: practiceId, patient_id: pid, provider_id: hyg, operatory_id: ops[2], appointment_type_id: perio.id, reason: perio.name, series_id: seriesId,
+        start_time: `${day} 16:00`, end_time: `${day} ${hhmm(16 * 60 + perio.duration)}`, status: 'scheduled',
+      });
     }
   }
 

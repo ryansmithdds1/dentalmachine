@@ -440,3 +440,12 @@ button.active, .seg button.active { background: var(--primary-soft); color: var(
   .huddle-row { break-inside: avoid; }
   .chip, .tabs, .page-header .actions { display: none !important; }
 }
+
+/* Recurring visits & provider hours */
+.cal-repeat { font-size: 11px; font-weight: 700; color: var(--info); }
+.repeat-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 160px); gap: 8px 14px; align-items: end; }
+.repeat-hint { grid-column: 1 / -1; font-size: 12px; }
+.seg-choice { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.confirm-box { margin-top: 12px; padding: 12px; border: 1px solid #fed7aa; background: var(--danger-soft); border-radius: 10px; }
+.confirm-box .drawer-actions { margin-bottom: 0; }
+.series-chip { font-size: 12px; font-weight: 600; color: var(--info); background: var(--info-soft); border-radius: 99px; padding: 2px 9px; }

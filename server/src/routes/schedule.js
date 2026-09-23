@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { requirePermission, HttpError } from '../auth.js';
 import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, normalizeDateTime, practiceNow, mapSeq } from '../util.js';
-import { hoursFor } from '../hours.js';
+import { hoursFor, providerHours, providerHoursFor } from '../hours.js';
 import { publish, eventStream } from '../events.js';
 
 export const STATUSES = ['scheduled', 'confirmed', 'checked_in', 'in_chair', 'completed', 'cancelled', 'no_show'];
@@ -49,7 +49,7 @@ export async function validateAppt(db, practiceId, row, { overrideBlockout = fal
   if (row.start_time.slice(0, 10) !== row.end_time.slice(0, 10)) throw new HttpError(400, 'Appointments must start and end on the same day');
   requireOneOf(row.status, STATUSES, 'status');
   await findOr404(db, 'patients', row.patient_id, practiceId, 'Patient');
-  await findOr404(db, 'providers', row.provider_id, practiceId, 'Provider');
+  const provider = await findOr404(db, 'providers', row.provider_id, practiceId, 'Provider');
   if (row.operatory_id) await findOr404(db, 'operatories', row.operatory_id, practiceId, 'Operatory');
   if (row.appointment_type_id) await findOr404(db, 'appointment_types', row.appointment_type_id, practiceId, 'Appointment type');
   const conflicts = await findConflicts(db, practiceId, row, row.id);
@@ -65,6 +65,13 @@ export async function validateAppt(db, practiceId, row, { overrideBlockout = fal
   if (!overrideBlockout) {
     const blocks = await findBlockouts(db, practiceId, row);
     if (blocks.length) throw new HttpError(409, `That time is blocked: ${blocks[0].reason}`, { blockouts: blocks, can_override: true });
+    // Providers with their own hours (part-time hygienists, visiting specialists) aren't booked outside them.
+    if (providerHours(provider)) {
+      const date = row.start_time.slice(0, 10);
+      const ranges = providerHoursFor(null, provider, date);
+      const inside = ranges.some(([o, c]) => row.start_time.slice(11) >= o && row.end_time.slice(11) <= c);
+      if (!inside) throw new HttpError(409, `${provider.name} isn't scheduled to work then`, { outside_hours: ranges, can_override: true });
+    }
   }
 }
 
@@ -84,7 +91,8 @@ export async function openSlots(
   { duration = 60, step = 10, after = null, open = null, close = null } = {}
 ) {
   const practice = await db.get('SELECT office_hours FROM practices WHERE id = ?', practiceId);
-  const ranges = open && close ? [[open, close]] : hoursFor(practice, date);
+  const provider = await db.get('SELECT working_hours FROM providers WHERE id = ?', providerId);
+  const ranges = open && close ? [[open, close]] : providerHoursFor(practice, provider, date);
   const busy = [
     ...(await db.all(
       `SELECT start_time, end_time FROM appointments WHERE practice_id = ? AND provider_id = ? AND status NOT IN ${INACTIVE}
@@ -106,6 +114,34 @@ export async function openSlots(
   return slots;
 }
 
+// ---- Recurring visits ----
+// repeat: { every: 1-12, unit: 'week' | 'month', count: 2-52 }
+export function parseRepeat(repeat) {
+  if (!repeat) return null;
+  const every = Number(repeat.every || 1);
+  const count = Number(repeat.count);
+  if (!['week', 'month'].includes(repeat.unit)) throw new HttpError(400, "repeat.unit must be 'week' or 'month'");
+  if (!Number.isInteger(every) || every < 1 || every > 12) throw new HttpError(400, 'repeat.every must be 1-12');
+  if (!Number.isInteger(count) || count < 2 || count > 52) throw new HttpError(400, 'repeat.count must be 2-52 visits');
+  return { every, unit: repeat.unit, count };
+}
+// The i-th visit: weekly steps, or the same day of the month (clamped to the month's last day).
+export function shiftVisit(dateTime, { every, unit }, i) {
+  const d = new Date(`${dateTime.slice(0, 10)}T12:00:00Z`);
+  if (unit === 'week') d.setUTCDate(d.getUTCDate() + 7 * every * i);
+  else {
+    const day = d.getUTCDate();
+    d.setUTCDate(1);
+    d.setUTCMonth(d.getUTCMonth() + every * i);
+    const last = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
+    d.setUTCDate(Math.min(day, last));
+  }
+  return `${d.toISOString().slice(0, 10)} ${dateTime.slice(11, 16)}`;
+}
+const stamp = (dt) => Date.parse(`${dt.slice(0, 10)}T${dt.slice(11, 16)}:00Z`);
+const minutesBetween = (a, b) => Math.round((stamp(b) - stamp(a)) / 60_000);
+const shiftMinutes = (dt, minutes) => new Date(stamp(dt) + minutes * 60_000).toISOString().slice(0, 16).replace('T', ' ');
+
 const datesBetween = (from, to) => {
   const out = [];
   for (let d = from; d <= to && out.length < 62; d = new Date(Date.parse(`${d}T12:00:00Z`) + 86400_000).toISOString().slice(0, 10)) out.push(d);
@@ -115,6 +151,12 @@ const datesBetween = (from, to) => {
 export default function scheduleRoutes({ db }) {
   const r = Router();
   const FIELDS = ['patient_id', 'provider_id', 'operatory_id', 'start_time', 'end_time', 'status', 'reason', 'notes', 'appointment_type_id', 'asap'];
+  const seriesInfo = async (appt) => {
+    const s = await db.get('SELECT id, every, unit, count FROM appointment_series WHERE id = ?', appt.series_id);
+    const visits = await db.all('SELECT id, start_time, status FROM appointments WHERE series_id = ? ORDER BY start_time', appt.series_id);
+    const active = visits.filter((v) => !['cancelled', 'no_show'].includes(v.status));
+    return { ...s, position: active.findIndex((v) => v.id === appt.id) + 1, total: active.length, remaining: active.filter((v) => v.start_time > appt.start_time).length };
+  };
   const changed = (req, ...dates) => publish(req.user.practice_id, { type: 'schedule', dates: [...new Set(dates.filter(Boolean).map((d) => d.slice(0, 10)))], by: req.user.id });
 
   r.get('/appointments', requirePermission('schedule:read'), async (req, res) => {
@@ -137,8 +179,22 @@ export default function scheduleRoutes({ db }) {
     const row = await db.get(`${SELECT} WHERE a.id = ? AND a.practice_id = ?`, Number(req.params.id), req.user.practice_id);
     if (!row) throw new HttpError(404, 'Appointment not found');
     row.procedures = await db.all('SELECT * FROM procedures WHERE appointment_id = ? ORDER BY id', row.id);
+    if (row.series_id) row.series = await seriesInfo(row);
     res.json(row);
   });
+
+  // Appointment types can pre-load their procedures (e.g. exam + prophy + BWX) so scheduled production is known.
+  const addTypeProcedures = async (req, type, apptId, row) => {
+    if (!type?.procedure_codes) return;
+    for (const code of JSON.parse(type.procedure_codes)) {
+      const pc = await db.get('SELECT * FROM procedure_codes WHERE practice_id = ? AND code = ? AND active = 1', req.user.practice_id, code);
+      if (!pc || pc.requires_tooth) continue;
+      await insert(db, 'procedures', {
+        practice_id: req.user.practice_id, patient_id: row.patient_id, appointment_id: apptId, provider_id: row.provider_id,
+        code_id: pc.id, code: pc.code, description: pc.description, category: pc.category, fee: pc.fee,
+      });
+    }
+  };
 
   r.post('/appointments', requirePermission('schedule:write'), async (req, res) => {
     const row = pick(req.body, FIELDS);
@@ -146,18 +202,29 @@ export default function scheduleRoutes({ db }) {
     if (type && row.start_time && !row.end_time) row.end_time = addMinutes(normalizeDateTime(row.start_time, 'start_time'), type.duration);
     if (type && !row.reason) row.reason = type.name;
     requireFields(row, ['patient_id', 'provider_id', 'start_time', 'end_time']);
+    const repeat = parseRepeat(req.body.repeat);
     await validateAppt(db, req.user.practice_id, row, { overrideBlockout: !!req.body.override_blockout });
+    const withTypeProcs = req.body.add_type_procedures !== false && !(req.body.procedure_ids || []).length;
+    let series = null;
     const id = await db.tx(async () => {
+      if (repeat) {
+        const seriesId = await insert(db, 'appointment_series', { practice_id: req.user.practice_id, patient_id: row.patient_id, ...repeat, created_by: req.user.id });
+        row.series_id = seriesId;
+        series = { id: seriesId, ...repeat, created: 1, skipped: [] };
+      }
       const newId = await insert(db, 'appointments', { ...row, practice_id: req.user.practice_id });
-      // Appointment types can pre-load their procedures (e.g. exam + prophy + BWX) so scheduled production is known.
-      if (type?.procedure_codes && req.body.add_type_procedures !== false && !(req.body.procedure_ids || []).length) {
-        for (const code of JSON.parse(type.procedure_codes)) {
-          const pc = await db.get('SELECT * FROM procedure_codes WHERE practice_id = ? AND code = ? AND active = 1', req.user.practice_id, code);
-          if (!pc || pc.requires_tooth) continue;
-          await insert(db, 'procedures', {
-            practice_id: req.user.practice_id, patient_id: row.patient_id, appointment_id: newId, provider_id: row.provider_id,
-            code_id: pc.id, code: pc.code, description: pc.description, category: pc.category, fee: pc.fee,
-          });
+      if (withTypeProcs) await addTypeProcedures(req, type, newId, row);
+      // Later visits in the series: book what's free and report what isn't.
+      for (let i = 1; repeat && i < repeat.count; i++) {
+        const next = { ...row, start_time: shiftVisit(row.start_time, repeat, i), end_time: shiftVisit(row.end_time, repeat, i) };
+        try {
+          await validateAppt(db, req.user.practice_id, next);
+          const occId = await insert(db, 'appointments', { ...next, practice_id: req.user.practice_id, status: 'scheduled' });
+          if (req.body.add_type_procedures !== false) await addTypeProcedures(req, type, occId, next);
+          series.created++;
+        } catch (err) {
+          if (!(err instanceof HttpError)) throw err;
+          series.skipped.push({ start_time: next.start_time, reason: err.message });
         }
       }
       return newId;
@@ -168,8 +235,8 @@ export default function scheduleRoutes({ db }) {
     }
     await db.run("UPDATE recalls SET status = 'scheduled' WHERE practice_id = ? AND patient_id = ? AND status IN ('due','contacted')", req.user.practice_id, row.patient_id);
     await audit(db, req, 'appointment.create', 'appointments', id);
-    changed(req, row.start_time);
-    res.status(201).json(await db.get(`${SELECT} WHERE a.id = ?`, id));
+    changed(req, row.start_time, ...(series ? Array.from({ length: repeat.count }, (_, i) => shiftVisit(row.start_time, repeat, i)) : []));
+    res.status(201).json({ ...(await db.get(`${SELECT} WHERE a.id = ?`, id)), ...(series ? { series } : {}) });
   });
 
   r.put('/appointments/:id', requirePermission('schedule:write'), async (req, res) => {
@@ -185,8 +252,34 @@ export default function scheduleRoutes({ db }) {
     // Keep attached procedures with the provider the patient is now seeing.
     if (Number(row.provider_id) !== existing.provider_id) await db.run("UPDATE procedures SET provider_id = ? WHERE appointment_id = ? AND status = 'planned'", row.provider_id, existing.id);
     await audit(db, req, 'appointment.update', 'appointments', existing.id, { fields: Object.keys(changes) });
+    // "This and following": apply the same shift (and provider/chair/length changes) to later visits in the series.
+    let seriesUpdate = null;
+    if (req.body.scope === 'following' && existing.series_id) {
+      const shift = minutesBetween(existing.start_time, row.start_time);
+      const length = minutesBetween(row.start_time, row.end_time);
+      const later = await db.all(
+        `SELECT * FROM appointments WHERE series_id = ? AND practice_id = ? AND id != ? AND start_time > ? AND status IN ('scheduled','confirmed') ORDER BY start_time`,
+        existing.series_id, req.user.practice_id, existing.id, existing.start_time,
+      );
+      seriesUpdate = { updated: 0, skipped: [] };
+      for (const occ of later) {
+        const start = shiftMinutes(occ.start_time, shift);
+        const next = { ...occ, provider_id: row.provider_id, operatory_id: row.operatory_id, appointment_type_id: row.appointment_type_id, reason: row.reason, start_time: start, end_time: shiftMinutes(start, length) };
+        try {
+          await validateAppt(db, req.user.practice_id, next);
+          const moved = next.start_time !== occ.start_time;
+          await update(db, 'appointments', occ.id, req.user.practice_id, { ...pick(next, ['provider_id', 'operatory_id', 'appointment_type_id', 'reason', 'start_time', 'end_time']), ...(moved ? { reminder_sent_at: null, confirmed_at: null, status: 'scheduled' } : {}) });
+          if (Number(next.provider_id) !== occ.provider_id) await db.run("UPDATE procedures SET provider_id = ? WHERE appointment_id = ? AND status = 'planned'", next.provider_id, occ.id);
+          seriesUpdate.updated++;
+          changed(req, occ.start_time, next.start_time);
+        } catch (err) {
+          if (!(err instanceof HttpError)) throw err;
+          seriesUpdate.skipped.push({ id: occ.id, start_time: next.start_time, reason: err.message });
+        }
+      }
+    }
     changed(req, existing.start_time, row.start_time);
-    res.json(await db.get(`${SELECT} WHERE a.id = ?`, existing.id));
+    res.json({ ...(await db.get(`${SELECT} WHERE a.id = ?`, existing.id)), ...(seriesUpdate ? { series_update: seriesUpdate } : {}) });
   });
 
   r.patch('/appointments/:id/status', requirePermission('schedule:write'), async (req, res) => {
@@ -204,6 +297,15 @@ export default function scheduleRoutes({ db }) {
     );
     if (status === 'cancelled' || status === 'no_show') {
       await db.run("UPDATE procedures SET appointment_id = NULL WHERE appointment_id = ? AND status = 'planned'", existing.id);
+    }
+    if (status === 'cancelled' && req.body.scope === 'following' && existing.series_id) {
+      const later = await db.all("SELECT id, start_time FROM appointments WHERE series_id = ? AND practice_id = ? AND start_time > ? AND status IN ('scheduled','confirmed')", existing.series_id, req.user.practice_id, existing.start_time);
+      for (const occ of later) {
+        await db.run("UPDATE appointments SET status = 'cancelled' WHERE id = ?", occ.id);
+        // Their pre-loaded type procedures are only placeholders; drop them rather than leave "planned" work behind.
+        await db.run("DELETE FROM procedures WHERE appointment_id = ? AND status = 'planned' AND treatment_plan_id IS NULL", occ.id);
+      }
+      changed(req, ...later.map((o) => o.start_time));
     }
     await audit(db, req, 'appointment.status', 'appointments', existing.id, { from: existing.status, to: status });
     changed(req, existing.start_time);
@@ -234,10 +336,12 @@ export default function scheduleRoutes({ db }) {
       pid, `${from} 00:00`, `${to} 24:00`,
     );
     const production = Object.fromEntries(dates.map((d) => [d, 0]));
+    const custom = (await db.all('SELECT id, working_hours FROM providers WHERE practice_id = ? AND active = 1 AND working_hours IS NOT NULL', pid));
     for (const a of appointments) if (!['cancelled', 'no_show'].includes(a.status)) production[a.start_time.slice(0, 10)] += a.production;
     res.json({
       from, to, daily_goal: practice.daily_goal,
       hours: Object.fromEntries(dates.map((d) => [d, hoursFor(practice, d)])),
+      provider_hours: Object.fromEntries(custom.map((pv) => [pv.id, Object.fromEntries(dates.map((d) => [d, providerHoursFor(practice, pv, d)]))])),
       appointments,
       blockouts: await db.all('SELECT * FROM blockouts WHERE practice_id = ? AND start_time < ? AND end_time > ? ORDER BY start_time', pid, `${to} 24:00`, `${from} 00:00`),
       production,

@@ -15,6 +15,20 @@ export function officeHours(practice) {
 export const weekday = (date) => new Date(`${date}T12:00:00Z`).getUTCDay();
 export const hoursFor = (practice, date) => officeHours(practice)[weekday(date)] || [];
 
+// A provider's own weekly hours (e.g. hygienist Tue/Thu only); null means they follow office hours.
+export function providerHours(provider) {
+  if (!provider?.working_hours) return null;
+  try {
+    return JSON.parse(provider.working_hours);
+  } catch {
+    return null;
+  }
+}
+export const providerHoursFor = (practice, provider, date) => {
+  const own = providerHours(provider);
+  return own ? own[weekday(date)] || [] : hoursFor(practice, date);
+};
+
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 export function validateHours(hours) {
   if (!hours || typeof hours !== 'object') throw new HttpError(400, 'office_hours must be an object keyed by weekday');

@@ -1,4 +1,5 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import { api } from '../../api.js';
 import { fmtTime, fmtDateTime, money } from '../../format.js';
 import { Badge } from '../ui.jsx';
 
@@ -17,6 +18,13 @@ export default function AppointmentDrawer({ appt: a, can, onClose, onStatus, onE
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
   const w = can('schedule:write');
+  const [series, setSeries] = useState(null);
+  useEffect(() => {
+    setSeries(null);
+    if (a.series_id) api.get(`/appointments/${a.id}`).then((d) => setSeries(d.series)).catch(() => {});
+  }, [a.id, a.series_id]);
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  useEffect(() => setConfirmCancel(false), [a.id]);
   const active = !['completed', 'cancelled', 'no_show'].includes(a.status);
   const date = new Date(`${a.start_time.slice(0, 10)}T12:00:00Z`).toLocaleDateString('en-US', { timeZone: 'UTC', weekday: 'long', month: 'long', day: 'numeric' });
 
@@ -35,6 +43,7 @@ export default function AppointmentDrawer({ appt: a, can, onClose, onStatus, onE
           <Badge value={a.status} />
           {a.type_name && <span className="badge" style={{ background: `${a.type_color}22`, color: a.type_color }}>{a.type_name}</span>}
           {a.asap ? <span className="badge warn">ASAP</span> : null}
+          {a.series_id ? <span className="series-chip" title="Recurring visit">↻ {series ? `${series.position} of ${series.total} · every ${series.every > 1 ? `${series.every} ` : ''}${series.unit}${series.every > 1 ? 's' : ''}` : 'Recurring'}</span> : null}
           {a._pending && <span className="muted">Saving…</span>}
         </div>
         {w && active && (
@@ -63,7 +72,17 @@ export default function AppointmentDrawer({ appt: a, can, onClose, onStatus, onE
         {w && active && (
           <div className="drawer-actions" style={{ marginTop: 16, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
             <button className="danger" onClick={() => onStatus('no_show')}>No-show</button>
-            <button className="danger" onClick={() => confirm('Cancel this appointment?') && onStatus('cancelled')}>Cancel appointment</button>
+            <button className="danger" onClick={() => setConfirmCancel(true)}>Cancel appointment</button>
+          </div>
+        )}
+        {w && active && confirmCancel && (
+          <div className="confirm-box">
+            <strong>Cancel {a.first_name}&apos;s {fmtTime(a.start_time)} visit?</strong>
+            <div className="drawer-actions">
+              <button className="danger" onClick={() => onStatus('cancelled')}>{series?.remaining ? 'Only this visit' : 'Yes, cancel it'}</button>
+              {series?.remaining > 0 && <button className="danger" onClick={() => onStatus('cancelled', 'following')}>This and {series.remaining} later visit{series.remaining === 1 ? '' : 's'}</button>}
+              <button onClick={() => setConfirmCancel(false)}>Keep it</button>
+            </div>
           </div>
         )}
       </div>

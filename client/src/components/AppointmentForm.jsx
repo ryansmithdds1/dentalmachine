@@ -4,6 +4,16 @@ import { useLookup } from '../hooks.js';
 import { fmtTime } from '../format.js';
 import { ErrorBox, PatientPicker, useSubmit } from './ui.jsx';
 
+export const REPEATS = [
+  { value: '', label: 'Does not repeat' },
+  { value: 'w1', label: 'Every week', every: 1, unit: 'week' },
+  { value: 'w2', label: 'Every 2 weeks', every: 2, unit: 'week' },
+  { value: 'w3', label: 'Every 3 weeks', every: 3, unit: 'week' },
+  { value: 'w4', label: 'Every 4 weeks', every: 4, unit: 'week' },
+  { value: 'm1', label: 'Every month (same date)', every: 1, unit: 'month' },
+  { value: 'm3', label: 'Every 3 months', every: 3, unit: 'month' },
+  { value: 'm6', label: 'Every 6 months', every: 6, unit: 'month' },
+];
 const STATUSES = ['scheduled', 'confirmed', 'checked_in', 'in_chair', 'completed', 'cancelled', 'no_show'];
 const addMinutes = (hhmm, mins) => {
   const [h, m] = hhmm.split(':').map(Number);
@@ -38,6 +48,8 @@ export default function AppointmentForm({ appointment, defaults = {}, patient: i
   const [selectedProcs, setSelectedProcs] = useState([]);
   const [slots, setSlots] = useState(null);
   const [override, setOverride] = useState(null);
+  const [repeat, setRepeat] = useState({ rule: '', count: 6 });
+  const [scope, setScope] = useState('this');
   const chooseType = (id) => {
     const t = types.find((x) => String(x.id) === String(id));
     // A dragged selection keeps its length; otherwise the type sets it.
@@ -69,10 +81,15 @@ export default function AppointmentForm({ appointment, defaults = {}, patient: i
       reason: form.reason,
       notes: form.notes,
     };
+    const rule = REPEATS.find((r) => r.value === repeat.rule);
     try {
       const saved = appointment
-        ? await api.put(`/appointments/${appointment.id}`, body)
-        : await api.post('/appointments', { ...body, procedure_ids: selectedProcs });
+        ? await api.put(`/appointments/${appointment.id}`, { ...body, ...(appointment.series_id && scope === 'following' ? { scope: 'following' } : {}) })
+        : await api.post('/appointments', { ...body, procedure_ids: selectedProcs, ...(rule ? { repeat: { every: rule.every, unit: rule.unit, count: Number(repeat.count) } } : {}) });
+      const report = saved.series || saved.series_update;
+      if (report?.skipped?.length) {
+        alert(`${saved.series ? `Booked ${report.created} visits.` : `Updated ${report.updated} later visits.`} These couldn't be booked:\n\n${report.skipped.map((s) => `• ${s.start_time.slice(0, 10)} ${fmtTime(s.start_time)} — ${s.reason}`).join('\n')}`);
+      }
       onSaved(saved);
     } catch (e) {
       if (e.details?.can_override) setOverride(e.message);
@@ -137,6 +154,32 @@ export default function AppointmentForm({ appointment, defaults = {}, patient: i
         <label className="full">Reason<input value={form.reason} onChange={set('reason')} placeholder="e.g. Recall exam & cleaning" /></label>
         <label className="full">Notes<textarea rows={2} value={form.notes} onChange={set('notes')} /></label>
         <label className="checkbox full"><input type="checkbox" checked={form.asap} onChange={(e) => setForm({ ...form, asap: e.target.checked })} /> Add to ASAP list (patient wants an earlier opening)</label>
+        {!appointment && (
+          <div className="full repeat-row">
+            <label>
+              Repeat
+              <select value={repeat.rule} onChange={(e) => setRepeat({ ...repeat, rule: e.target.value })}>
+                {REPEATS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+              </select>
+            </label>
+            {repeat.rule && (
+              <label>
+                Number of visits
+                <input type="number" min={2} max={52} value={repeat.count} onChange={(e) => setRepeat({ ...repeat, count: e.target.value })} />
+              </label>
+            )}
+            {repeat.rule && <span className="muted repeat-hint">Times that are taken are skipped and listed after booking.</span>}
+          </div>
+        )}
+        {appointment?.series_id && (
+          <div className="full seg-choice">
+            <span className="muted">Apply changes to</span>
+            <div className="seg">
+              <button type="button" className={scope === 'this' ? 'active' : ''} onClick={() => setScope('this')}>This visit</button>
+              <button type="button" className={scope === 'following' ? 'active' : ''} onClick={() => setScope('following')}>This and following</button>
+            </div>
+          </div>
+        )}
       </div>
 
       <div style={{ marginTop: 10 }}>

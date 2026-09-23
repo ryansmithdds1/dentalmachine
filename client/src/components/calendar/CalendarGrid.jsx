@@ -64,6 +64,16 @@ export default function CalendarGrid({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scrollKey]);
 
+  // Keep the selected appointment in view (e.g. a new 7am visit before opening time).
+  useEffect(() => {
+    if (!selectedId) return;
+    const el = scroller.current?.querySelector(`[data-appt-id="${selectedId}"]`);
+    if (!el) return;
+    const box = el.getBoundingClientRect();
+    const view = scroller.current.getBoundingClientRect();
+    if (box.top < view.top + 40 || box.top > view.bottom - 40) scroller.current.scrollTop += box.top - view.top - 60;
+  }, [selectedId, columns]);
+
   const geometry = useCallback((clientX, clientY) => {
     const rect = body.current.getBoundingClientRect();
     const colWidth = rect.width / columns.length;
@@ -223,6 +233,7 @@ export default function CalendarGrid({
                     const h = (e - s) * pxPerMin;
                     return (
                       <div key={a.id}
+                        data-appt-id={a.id}
                         className={`cal-appt status-${a.status}${dragging ? ' dragging' : ''}${selectedId === a.id ? ' selected' : ''}${a._pending ? ' pending' : ''}`}
                         style={{ top: (s - range.start) * pxPerMin, height: Math.max(h - 2, 14), left: `calc(${(lane / lanes) * 100}% + 2px)`, width: `calc(${100 / lanes}% - 4px)`, '--c': color, '--p': a.provider_color || color }}
                         onPointerDown={(ev) => startMove(ev, a, ci, s, e)}
@@ -238,6 +249,7 @@ export default function CalendarGrid({
                           <strong>{a.medical_alerts ? '⚠ ' : ''}{a.first_name} {a.last_name}</strong>
                           {STATUS_ICON[a.status] && <span className="cal-status" title={a.status}>{STATUS_ICON[a.status]}</span>}
                           {a.asap ? <span className="cal-asap" title="Wants an earlier time">ASAP</span> : null}
+                          {a.series_id ? <span className="cal-repeat" title="Recurring visit">↻</span> : null}
                         </div>
                         {h >= 30 && <div className="cal-appt-meta">{label12(s)}–{label12(e)} · {a.type_name || a.reason || ''}</div>}
                         {h >= 46 && <div className="cal-appt-meta">{col.showProvider ? a.provider_name : a.operatory_name || a.provider_name}{a.production ? ` · $${Math.round(a.production / 100)}` : ''}</div>}

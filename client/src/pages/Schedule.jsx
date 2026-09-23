@@ -200,11 +200,12 @@ export default function Schedule() {
     saveMove(appt, { start_time: `${col.date} ${start}`, end_time: `${col.date} ${hhmm(toMin(start) + dur)}`, ...col.assign });
   }, [placing, saveMove]);
 
-  const setStatus = async (a, status) => {
+  const setStatus = async (a, status, scope) => {
     replaceAppt({ ...a, status, _pending: true });
     try {
-      replaceAppt(await api.patch(`/appointments/${a.id}/status`, { status }));
+      replaceAppt(await api.patch(`/appointments/${a.id}/status`, { status, ...(scope ? { scope } : {}) }));
       cache.current.clear();
+      if (scope === 'following') toast('Cancelled this and the following visits in the series');
       if (['cancelled', 'no_show'].includes(status)) {
         setSelectedId(null);
         reload({ silent: true });
@@ -260,6 +261,7 @@ export default function Schedule() {
     if (mode === 'provider') {
       return providers.map((p) => ({
         ...base, key: `p${p.id}`, label: p.name, color: p.color, assign: { provider_id: p.id }, showProvider: false,
+        hours: data.provider_hours?.[p.id]?.[date] ?? base.hours,
         sub: short(appts.filter((a) => a.provider_id === p.id).reduce((s, a) => s + a.production, 0)),
         accepts: (a) => a.start_time.startsWith(date) && a.provider_id === p.id,
         blockouts: blockouts.filter((b) => onDate(b, date) && (officeWide(b) || b.provider_id === p.id)),
@@ -399,7 +401,7 @@ export default function Schedule() {
       {selected && (
         <AppointmentDrawer
           appt={selected} can={can} onClose={() => setSelectedId(null)}
-          onStatus={(s) => setStatus(selected, s)}
+          onStatus={(s, scope) => setStatus(selected, s, scope)}
           onEdit={() => setModal({ type: 'edit', appt: selected })}
           onChart={() => nav(`/patients/${selected.patient_id}`)}
           onMove={() => {

@@ -19,7 +19,7 @@ function resource(r, db, { path, table, fields, required, validate = () => {}, o
   r.post(`/${path}`, requireAdmin, async (req, res) => {
     const row = pick(req.body, fields);
     requireFields(row, required);
-    validate(row, req);
+    await validate(row, req);
     const id = await insert(db, table, { ...row, practice_id: req.user.practice_id });
     await audit(db, req, `${table}.create`, table, id);
     res.status(201).json(await db.get(`SELECT * FROM ${table} WHERE id = ?`, id));
@@ -27,7 +27,7 @@ function resource(r, db, { path, table, fields, required, validate = () => {}, o
   r.put(`/${path}/:rid`, requireAdmin, async (req, res) => {
     const existing = await findOr404(db, table, req.params.rid, req.user.practice_id);
     const row = pick(req.body, fields);
-    validate(row, req);
+    await validate(row, req);
     await update(db, table, existing.id, req.user.practice_id, row);
     await audit(db, req, `${table}.update`, table, existing.id);
     res.json(await db.get(`SELECT * FROM ${table} WHERE id = ?`, existing.id));
@@ -110,8 +110,9 @@ export default function settingsRoutes({ db }) {
 
   resource(r, db, {
     path: 'providers', table: 'providers', required: ['name'],
-    fields: ['name', 'type', 'npi', 'license_number', 'dea_number', 'color', 'active', 'user_id'],
+    fields: ['name', 'type', 'npi', 'license_number', 'dea_number', 'color', 'active', 'user_id', 'working_hours'],
     validate: async (row, req) => {
+      if (row.working_hours != null) row.working_hours = JSON.stringify(validateHours(typeof row.working_hours === 'string' ? JSON.parse(row.working_hours) : row.working_hours));
       requireOneOf(row.type, ['dentist', 'hygienist', 'specialist'], 'type');
       if (row.npi && !/^\d{10}$/.test(row.npi)) throw new HttpError(400, 'NPI must be 10 digits');
       if (row.user_id) await findOr404(db, 'users', row.user_id, req.user.practice_id, 'User');

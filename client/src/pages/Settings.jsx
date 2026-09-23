@@ -12,21 +12,21 @@ const CATEGORIES = ['diagnostic', 'preventive', 'restorative', 'endodontics', 'p
 // Field specs: [name, label, type, options]
 const RESOURCES = {
   providers: {
-    title: 'Providers', path: '/providers', columns: ['name', 'type', 'npi', 'color'],
-    fields: [['name', 'Name', 'text'], ['type', 'Type', 'select', ['dentist', 'hygienist', 'specialist']], ['npi', 'NPI (10 digits)', 'text'], ['license_number', 'License #', 'text'], ['dea_number', 'DEA # (for printed Rx)', 'text'], ['color', 'Schedule color', 'color'], ['active', 'Active', 'checkbox']],
+    title: 'Providers', singular: 'provider', path: '/providers', columns: ['name', 'type', 'npi', 'color', 'working_hours'],
+    fields: [['name', 'Name', 'text'], ['type', 'Type', 'select', ['dentist', 'hygienist', 'specialist']], ['npi', 'NPI (10 digits)', 'text'], ['license_number', 'License #', 'text'], ['dea_number', 'DEA # (for printed Rx)', 'text'], ['color', 'Schedule color', 'color'], ['active', 'Active', 'checkbox'], ['working_hours', 'Working hours', 'hours']],
   },
-  operatories: { title: 'Operatories', path: '/operatories', columns: ['name'], fields: [['name', 'Name', 'text'], ['active', 'Active', 'checkbox']] },
+  operatories: { title: 'Operatories', singular: 'operatory', path: '/operatories', columns: ['name'], fields: [['name', 'Name', 'text'], ['active', 'Active', 'checkbox']] },
   codes: {
-    title: 'Fee schedule', path: '/procedure-codes', columns: ['code', 'description', 'category', 'fee'],
+    title: 'Fee schedule', singular: 'procedure code', path: '/procedure-codes', columns: ['code', 'description', 'category', 'fee'],
     fields: [['code', 'Code', 'text'], ['description', 'Description', 'text'], ['category', 'Category', 'select', CATEGORIES], ['fee', 'Fee ($)', 'money'], ['requires_tooth', 'Requires tooth', 'checkbox'], ['requires_surface', 'Requires surfaces', 'checkbox'], ['active', 'Active', 'checkbox']],
   },
   types: {
-    title: 'Appointment types', path: '/appointment-types', columns: ['name', 'duration', 'color', 'procedure_codes', 'online_bookable'],
+    title: 'Appointment types', singular: 'appointment type', path: '/appointment-types', columns: ['name', 'duration', 'color', 'procedure_codes', 'online_bookable'],
     fields: [['name', 'Name', 'text'], ['duration', 'Length (minutes)', 'number'], ['color', 'Calendar color', 'color'], ['procedure_codes', 'Procedures added when booked (e.g. D0120, D1110)', 'codes'],
       ['provider_type', 'Usually booked with', 'select', ['dentist', 'hygienist', 'specialist']], ['online_bookable', 'Patients can book online', 'checkbox'], ['sort', 'Sort order', 'number'], ['active', 'Active', 'checkbox']],
   },
   carriers: {
-    title: 'Insurance carriers', path: '/carriers', columns: ['name', 'payer_id', 'phone'], writePerm: 'billing:write',
+    title: 'Insurance carriers', singular: 'insurance carrier', path: '/carriers', columns: ['name', 'payer_id', 'phone'], writePerm: 'billing:write',
     fields: [['name', 'Name', 'text'], ['payer_id', 'Payer ID', 'text'], ['phone', 'Phone', 'text'], ['address', 'Claims address', 'text'], ['active', 'Active', 'checkbox']],
   },
 };
@@ -299,6 +299,7 @@ function ResourceTable({ spec, canWrite }) {
     if (col === 'duration') return `${row.duration} min`;
     if (col === 'procedure_codes') return (row.procedure_codes ? JSON.parse(row.procedure_codes) : []).join(', ') || '—';
     if (col === 'online_bookable') return row.online_bookable ? 'Online' : '—';
+    if (col === 'working_hours') return row.working_hours ? summarizeHours(JSON.parse(row.working_hours)) : 'Office hours';
     return row[col] ?? '—';
   };
   return (
@@ -322,7 +323,7 @@ function ResourceTable({ spec, canWrite }) {
         </table>
       </div>
       {editing && (
-        <Modal title={editing.id ? `Edit ${spec.title.toLowerCase()}` : `Add to ${spec.title.toLowerCase()}`} onClose={() => setEditing(null)}>
+        <Modal title={`${editing.id ? 'Edit' : 'Add'} ${spec.singular || spec.title.toLowerCase()}`} onClose={() => setEditing(null)}>
           <ResourceForm spec={spec} row={editing} onDone={done} />
         </Modal>
       )}
@@ -331,11 +332,14 @@ function ResourceTable({ spec, canWrite }) {
 }
 
 function ResourceForm({ spec, row, onDone }) {
+  const { data: practice } = useApi(spec.fields.some((f) => f[2] === 'hours') ? '/practice' : null);
+  const practiceHours = practice?.office_hours ? JSON.parse(practice.office_hours) : DEFAULT_HOURS;
   const [form, setForm] = useState(() => Object.fromEntries(spec.fields.map(([name, , type]) => {
     if (type === 'checkbox') return [name, row.id ? !!row[name] : name === 'active'];
     if (type === 'money') return [name, row.id ? fromCents(row[name]) : ''];
     if (type === 'color') return [name, row[name] || '#3b82f6'];
     if (type === 'codes') return [name, row[name] ? JSON.parse(row[name]).join(', ') : ''];
+    if (type === 'hours') return [name, row[name] ? JSON.parse(row[name]) : null];
     return [name, row[name] ?? ''];
   })));
   const { submit, busy, error } = useSubmit(async () => {
@@ -355,6 +359,15 @@ function ResourceForm({ spec, row, onDone }) {
         {spec.fields.map(([name, text, type, options]) => {
           const set = (v) => setForm({ ...form, [name]: v });
           if (type === 'checkbox') return <label key={name} className="checkbox"><input type="checkbox" checked={form[name]} onChange={(e) => set(e.target.checked)} /> {text}</label>;
+          if (type === 'hours') return (
+            <div key={name} className="full">
+              <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>{text}</div>
+              <label className="checkbox" style={{ color: 'var(--text)', marginBottom: 8 }}>
+                <input type="checkbox" checked={!form[name]} onChange={(e) => set(e.target.checked ? null : practiceHours)} /> Same as office hours
+              </label>
+              {form[name] && <OfficeHours value={form[name]} onChange={set} note="Outside these hours the provider's column is shaded, online booking won't offer them, and staff are asked before booking." />}
+            </div>
+          );
           if (type === 'select') return <label key={name}>{text}<select value={form[name]} onChange={(e) => set(e.target.value)}><option value="">—</option>{options.map((o) => <option key={o} value={o}>{label(o)}</option>)}</select></label>;
           return <label key={name} className={type === 'codes' ? 'full' : ''}>{text}<input type={type === 'money' || type === 'number' ? 'number' : type === 'codes' ? 'text' : type} step={type === 'money' ? '0.01' : undefined} value={form[name]} onChange={(e) => set(e.target.value)} /></label>;
         })}
@@ -413,7 +426,7 @@ const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 
 const DEFAULT_HOURS = { 0: [], 1: [['08:00', '17:00']], 2: [['08:00', '17:00']], 3: [['08:00', '17:00']], 4: [['08:00', '17:00']], 5: [['08:00', '17:00']], 6: [] };
 
 // Weekly hours editor; used by the schedule shading and online booking.
-function OfficeHours({ value, onChange }) {
+function OfficeHours({ value, onChange, note }) {
   const hours = typeof value === 'string' ? JSON.parse(value) : value || DEFAULT_HOURS;
   const setDay = (d, ranges) => onChange({ ...hours, [d]: ranges });
   return (
@@ -440,7 +453,7 @@ function OfficeHours({ value, onChange }) {
           </div>
         );
       })}
-      <p className="muted" style={{ fontSize: 12 }}>Closed times are shaded on the schedule and never offered for online booking. Use blocked time for lunches and one-off closures.</p>
+      <p className="muted" style={{ fontSize: 12 }}>{note || 'Closed times are shaded on the schedule and never offered for online booking. Use blocked time for lunches and one-off closures.'}</p>
     </div>
   );
 }
@@ -608,4 +621,12 @@ function Messaging() {
       <div className="form-actions">{saved && <span className="badge ok">Saved</span>}<button className="primary" disabled={busy} onClick={submit}>Save</button></div>
     </>
   );
+}
+
+// "Tue, Thu 7:00–15:00" style summary of weekly hours.
+function summarizeHours(hours) {
+  const days = [1, 2, 3, 4, 5, 6, 0].filter((d) => (hours[d] || []).length);
+  if (!days.length) return 'Not scheduled';
+  const spans = new Set(days.map((d) => hours[d].map((r) => r.join('–')).join(', ')));
+  return `${days.map((d) => DAYS[d].slice(0, 3)).join(', ')}${spans.size === 1 ? ` ${[...spans][0]}` : ''}`;
 }
