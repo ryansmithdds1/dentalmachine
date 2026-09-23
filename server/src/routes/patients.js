@@ -5,12 +5,13 @@ import { schemaInfo } from '../db.js';
 import { emitPatient } from '../webhooks.js';
 import { patientBalance, primaryPolicy } from '../services.js';
 import { isOptedOutAddress, clearOptOut } from '../messaging.js';
+import { patientScope, checkOffice } from '../officeaccess.js';
 
 const FIELDS = [
   'first_name', 'last_name', 'preferred_name', 'dob', 'gender', 'email', 'phone', 'address', 'city', 'state', 'zip',
   'emergency_contact', 'medical_alerts', 'allergies', 'medications', 'notes', 'primary_provider_id', 'status', 'sms_opt_in', 'email_opt_in', 'guarantor_id', 'referral_source', 'office_alert',
   'asa_class', 'premed_required', 'medical_conditions',
-  'phone_home', 'phone_work', 'preferred_contact', 'language', 'primary_hygienist_id', 'photo', 'custom', 'fee_schedule_id',
+  'phone_home', 'phone_work', 'preferred_contact', 'language', 'primary_hygienist_id', 'photo', 'custom', 'fee_schedule_id', 'location_id',
 ];
 
 export const MEDICAL_CONDITIONS = [
@@ -116,6 +117,16 @@ export async function findDuplicates(db, practiceId, p, excludeId = 0) {
 
 export default function patientRoutes({ db }) {
   const r = Router();
+  // The home office: one of the practice's, and (for someone limited to some offices) one of theirs.
+  const checkHomeOffice = async (req, row) => {
+    if (row.location_id == null || row.location_id === '') {
+      if ('location_id' in row) row.location_id = null;
+      return;
+    }
+    row.location_id = Number(row.location_id);
+    await findOr404(db, 'locations', row.location_id, req.user.practice_id, 'Office');
+    checkOffice(req.user, row.location_id);
+  };
 
   r.get('/custom-fields', requirePermission('patients:read'), async (req, res) => res.json(await customFieldDefs(db, req.user.practice_id)));
   r.put('/custom-fields', requirePermission('patients:write'), async (req, res) => {
@@ -219,7 +230,9 @@ export default function patientRoutes({ db }) {
       const like = `%${q}%`;
       params.push(like, like, like, like, like, q, q, ...(digits.length >= 4 ? [`%${digits}%`] : []));
     }
-    const whereSql = where.join(' AND ');
+    const scope = patientScope(req.user);
+    const whereSql = where.join(' AND ') + scope.sql;
+    params.push(...scope.args);
     const total = (await db.get(`SELECT COUNT(*) AS n FROM patients p WHERE ${whereSql}`, ...params)).n;
     const rows = await db.all(
       `SELECT p.id, p.first_name, p.last_name, p.preferred_name, p.dob, p.phone, p.email, p.status, p.medical_alerts,
@@ -243,6 +256,9 @@ export default function patientRoutes({ db }) {
     if (row.guarantor_id && (await findOr404(db, 'patients', row.guarantor_id, req.user.practice_id, 'Guarantor')).guarantor_id) throw new HttpError(400, 'Choose the head of household as guarantor');
     // A number that already replied STOP starts with texting off.
     if (row.phone && await isOptedOutAddress(db, req.user.practice_id, 'sms', row.phone)) row.sms_opt_in = 0;
+    // New charts belong to the office they're made in.
+    if (row.location_id === undefined && req.location_id) row.location_id = req.location_id;
+    await checkHomeOffice(req, row);
     const id = await insert(db, 'patients', { ...row, practice_id: req.user.practice_id });
     await audit(db, req, 'patient.create', 'patients', id);
     await emitPatient(db, id, 'patient.created');
@@ -285,6 +301,7 @@ export default function patientRoutes({ db }) {
     validate(row);
     await validateCustom(db, req.user.practice_id, row, existing.custom);
     if (row.first_name === null || row.last_name === null) throw new HttpError(400, 'Name cannot be blank');
+    await checkHomeOffice(req, row);
     if (row.primary_provider_id) await findOr404(db, 'providers', row.primary_provider_id, req.user.practice_id, 'Provider');
     if (row.primary_hygienist_id) await findOr404(db, 'providers', row.primary_hygienist_id, req.user.practice_id, 'Hygienist');
     else if ('primary_hygienist_id' in row) row.primary_hygienist_id = null;

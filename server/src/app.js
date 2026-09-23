@@ -57,6 +57,7 @@ import { createErx, erxConfig } from './erx.js';
 import { createPayments } from './payments.js';
 import { createMailer } from './mail.js';
 import { createErrorReporter, requestLogger, routeOf, log } from './monitoring.js';
+import { officeAccess } from './officeaccess.js';
 
 // Runtime configuration, from the environment unless overridden (tests pass their own).
 export function loadConfig(env = process.env) {
@@ -161,6 +162,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
 
   const api = express.Router();
   api.use(authenticate(db, secret));
+  api.use(officeAccess(db));
   api.use((_req, res, next) => {
     res.set('Cache-Control', 'no-store'); // PHI must not be cached by intermediaries
     next();

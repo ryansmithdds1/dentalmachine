@@ -3,6 +3,7 @@ import { requirePermission, HttpError, can } from '../auth.js';
 import { practiceNow, utcRange, mapSeq, paged } from '../util.js';
 import { allocationsForRange } from '../allocation.js';
 import { agingReport } from '../aging.js';
+import { restricted } from '../officeaccess.js';
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -15,12 +16,18 @@ async function range(req, db) {
 }
 
 // Report filters on ledger rows: ?location_id= (one office of a multi-location practice) and ?provider_id=.
+// Someone limited to some offices only ever sees theirs.
 const atLocation = (req, alias = '') => {
   const where = [];
   const args = [];
   for (const k of ['location_id', 'provider_id']) {
     const id = Number(req.query[k]) || null;
-    if (id) { where.push(` AND ${alias}${k} = ?`); args.push(id); }
+    if (k === 'location_id' && restricted(req.user)) {
+      if (id && !req.user.location_ids.includes(id)) throw new HttpError(403, "That office isn't one of yours");
+      const ids = id ? [id] : req.user.location_ids;
+      where.push(` AND ${alias}location_id IN (${ids.map(() => '?').join(',')})`);
+      args.push(...ids);
+    } else if (id) { where.push(` AND ${alias}${k} = ?`); args.push(id); }
   }
   return { sql: where.join(''), args };
 };
@@ -186,7 +193,7 @@ export default function reportRoutes({ db }) {
          GROUP BY pr.code HAVING SUM(l.amount) > 0 ORDER BY SUM(l.amount) DESC LIMIT 10`, pid, from, to, ...loc.args,
       ),
       // Consolidated view across offices (insurance payments aren't tied to an office).
-      by_location: multi ? await db.all(
+      by_location: multi && !restricted(req.user) ? await db.all(
         `SELECT l.location_id AS id, COALESCE(lo.name, 'No office') AS name,
            SUM(CASE WHEN l.type = 'charge' THEN l.amount ELSE 0 END) AS production,
            -SUM(CASE WHEN l.type = 'payment' THEN l.amount ELSE 0 END) AS patient_collections,

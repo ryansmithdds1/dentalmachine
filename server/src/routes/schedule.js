@@ -9,6 +9,7 @@ import { recallTypes, typesForCode } from '../recalls.js';
 import { officeFee } from '../fees.js';
 import { videoRoomFor } from '../video.js';
 import { cleanPattern, fitPattern, providerOverlap, typeDuration } from '../patterns.js';
+import { appointmentScope, checkOffice, canSeePatient } from '../officeaccess.js';
 
 export const STATUSES = ['scheduled', 'confirmed', 'checked_in', 'in_chair', 'completed', 'cancelled', 'no_show'];
 export const INACTIVE = "('cancelled','no_show')";
@@ -278,7 +279,8 @@ export default function scheduleRoutes({ db }) {
       }
     }
     if (req.query.include_cancelled !== 'true') where.push(`a.status NOT IN ${INACTIVE}`);
-    res.json(await withEligibility(db, await db.all(`${SELECT} WHERE ${where.join(' AND ')} ORDER BY a.start_time`, ...params)));
+    const scope = appointmentScope(req.user);
+    res.json(await withEligibility(db, await db.all(`${SELECT} WHERE ${where.join(' AND ')}${scope.sql} ORDER BY a.start_time`, ...params, ...scope.args)));
   });
 
 
@@ -313,6 +315,8 @@ export default function scheduleRoutes({ db }) {
     if (type?.pattern && row.pattern === undefined) row.pattern = type.pattern;
     if (type && !row.reason) row.reason = type.name;
     if (!row.location_id && req.location_id) row.location_id = req.location_id;
+    checkOffice(req.user, row.location_id);
+    if (row.patient_id && !(await canSeePatient(db, req.user, row.patient_id))) throw new HttpError(404, 'Patient not found');
     // A video visit (asked for, or the visit type is one) gets its meeting link now.
     if (req.body.video || type?.is_video) row.video_url = videoRoomFor(await db.get('SELECT * FROM providers WHERE id = ? AND practice_id = ?', Number(row.provider_id), req.user.practice_id));
     requireFields(row, ['patient_id', 'provider_id', 'start_time', 'end_time']);
@@ -402,6 +406,8 @@ export default function scheduleRoutes({ db }) {
     const existing = await findOr404(db, 'appointments', req.params.id, req.user.practice_id, 'Appointment');
     const changes = pick(req.body, FIELDS);
     const merged = { ...existing, ...changes };
+    if ('location_id' in changes) checkOffice(req.user, changes.location_id);
+    if (changes.patient_id && !(await canSeePatient(db, req.user, changes.patient_id))) throw new HttpError(404, 'Patient not found');
     if (!['cancelled', 'no_show'].includes(merged.status)) await validateAppt(db, req.user.practice_id, merged, { overrideBlockout: !!req.body.override_blockout });
     else {
       requireOneOf(merged.status, STATUSES, 'status');
@@ -578,11 +584,13 @@ export default function scheduleRoutes({ db }) {
     const office = await db.get('SELECT office_hours, daily_goal FROM practices WHERE id = ?', pid);
     // One office of a multi-location practice: its visits, chairs and hours.
     const location = req.query.location_id ? await findOr404(db, 'locations', req.query.location_id, pid, 'Location') : null;
+    if (location) checkOffice(req.user, location.id);
+    const scope = appointmentScope(req.user);
     const practice = location?.office_hours ? { ...office, office_hours: location.office_hours } : office;
     const dates = datesBetween(from, to);
     const appointments = await db.all(
-      `${SELECT} WHERE a.practice_id = ? AND a.start_time >= ? AND a.start_time < ? ${req.query.include_cancelled === 'true' ? '' : `AND a.status NOT IN ${INACTIVE}`}${location ? ' AND a.location_id = ?' : ''} ORDER BY a.start_time`,
-      pid, `${from} 00:00`, `${to} 24:00`, ...(location ? [location.id] : []),
+      `${SELECT} WHERE a.practice_id = ? AND a.start_time >= ? AND a.start_time < ? ${req.query.include_cancelled === 'true' ? '' : `AND a.status NOT IN ${INACTIVE}`}${location ? ' AND a.location_id = ?' : ''}${scope.sql} ORDER BY a.start_time`,
+      pid, `${from} 00:00`, `${to} 24:00`, ...(location ? [location.id] : []), ...scope.args,
     );
     await withEligibility(db, appointments);
     const blockouts = await db.all(

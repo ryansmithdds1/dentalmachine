@@ -653,7 +653,7 @@ function UserForm({ user, roles = [], perms, onDone }) {
       </div>
       {offices.length > 0 && (
         <div style={{ marginTop: 10 }}>
-          <div className="muted" style={{ fontSize: 12 }}>Works at (none ticked = every office)</div>
+          <div className="muted" style={{ fontSize: 12 }}>Works at (none ticked = every office). Someone limited to some offices sees only those offices' schedule and patients, and only office-level reports.</div>
           <div className="inline" style={{ flexWrap: 'wrap', gap: 12 }}>
             {offices.map((l) => (
               <label key={l.id} className="checkbox"><input type="checkbox" checked={form.location_ids.includes(l.id)} onChange={(e) => setForm({ ...form, location_ids: e.target.checked ? [...form.location_ids, l.id] : form.location_ids.filter((x) => x !== l.id) })} /> {l.name}</label>

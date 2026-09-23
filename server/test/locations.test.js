@@ -77,3 +77,48 @@ test('multi-location online booking: patients choose an office', async () => {
   assert.equal((await pub.post(`/public/practices/${slug}/booking-requests`, { ...body, location_id: a.id })).status, 201);
   assert.equal((await h.db.get('SELECT location_id FROM booking_requests WHERE last_name = ?', 'Online')).location_id, a.id);
 });
+
+test('location restrictions: someone limited to one office sees only its patients, schedule and reports', async () => {
+  const { api, provider, patient } = await h.practice({ timezone: 'UTC' });
+  const main = (await api.post('/locations', { name: 'Main St' })).data;
+  const west = (await api.post('/locations', { name: 'Westside' })).data;
+  const opMain = (await api.post('/operatories', { name: 'M1', location_id: main.id })).data;
+  const opWest = (await api.post('/operatories', { name: 'W1', location_id: west.id })).data;
+  // Jane is seen at Main St; Wes at Westside; Nia is a new chart with no visits yet.
+  const mainVisit = (await api.post('/appointments', { patient_id: patient.id, provider_id: provider.id, operatory_id: opMain.id, start_time: `${MON} 08:00`, end_time: `${MON} 09:00` })).data;
+  const wes = (await api.post('/patients', { first_name: 'Wes', last_name: 'Tside', location_id: west.id })).data;
+  const westVisit = (await api.post('/appointments', { patient_id: wes.id, provider_id: provider.id, operatory_id: opWest.id, start_time: `${MON} 10:00`, end_time: `${MON} 11:00` })).data;
+  const nia = (await api.post('/patients', { first_name: 'Nia', last_name: 'New' })).data;
+  const westNote = (await api.post(`/patients/${wes.id}/notes`, { body: 'Westside note' })).data;
+
+  const email = `west-${Date.now()}@example.com`;
+  const staff = (await api.post('/users', { email, name: 'West Desk', role: 'dentist', password: 'west-desk-password' })).data;
+  await api.put(`/users/${staff.id}`, { location_ids: [main.id] });
+  const desk = h.client((await h.client().post('/auth/login', { email, password: 'west-desk-password' })).data.token);
+
+  const names = (await desk.get('/patients?status=all')).data.rows.map((p) => p.first_name).sort();
+  assert.deepEqual(names, ['Jane', 'Nia']);
+  assert.equal((await desk.get(`/patients/${wes.id}`)).status, 404);
+  assert.equal((await desk.get(`/patients/${wes.id}/notes`)).status, 404);
+  assert.equal((await desk.get(`/appointments/${westVisit.id}`)).status, 404);
+  assert.equal((await desk.put(`/notes/${westNote.id}`, { body: 'x' })).status, 404);
+  assert.equal((await desk.get(`/search?q=Tside`)).data.patients.length, 0);
+  assert.equal((await desk.get(`/patients/${patient.id}`)).status, 200);
+  assert.equal((await desk.get(`/patients/${nia.id}`)).status, 200);
+  assert.deepEqual((await desk.get(`/appointments?date=${MON}`)).data.map((a) => a.id), [mainVisit.id]);
+  assert.deepEqual((await desk.get(`/schedule?from=${MON}&to=${MON}`)).data.appointments.map((a) => a.id), [mainVisit.id]);
+  // Can't book at the other office, or book a patient they can't see.
+  assert.equal((await desk.post('/appointments', { patient_id: patient.id, provider_id: provider.id, operatory_id: opWest.id, location_id: west.id, start_time: `${MON} 13:00`, end_time: `${MON} 14:00` })).status, 403);
+  assert.equal((await desk.post('/appointments', { patient_id: wes.id, provider_id: provider.id, operatory_id: opMain.id, start_time: `${MON} 13:00`, end_time: `${MON} 14:00` })).status, 404);
+  // Lists drop the other office's patients.
+  await api.post('/tasks', { title: 'Call Wes', patient_id: wes.id });
+  await api.post('/tasks', { title: 'Call Jane', patient_id: patient.id });
+  const tasks = (await desk.get('/tasks')).data;
+  assert.deepEqual((tasks.tasks || tasks).map((t) => t.title), ['Call Jane']);
+  // Practice-wide reports are closed; office reports are held to Main St.
+  assert.equal((await desk.get('/reports/aging')).status, 403);
+  assert.equal((await desk.get(`/reports/production?location_id=${west.id}`)).status, 403);
+  assert.equal((await desk.get('/reports/production')).status, 200);
+  // Everyone else still sees everything.
+  assert.equal((await api.get('/patients?status=all')).data.rows.length, 3);
+});

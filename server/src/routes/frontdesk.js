@@ -6,6 +6,7 @@ import { messageText, patientLang, subjectFor } from '../templates.js';
 import { primaryPolicy, patientBalance, estimateCoverage, completeProcedure } from '../services.js';
 import { recallTypes } from '../recalls.js';
 import { historyChanges } from '../forms.js';
+import { patientScope, appointmentScope } from '../officeaccess.js';
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const addDays = (d, n) => new Date(Date.parse(`${d}T12:00:00Z`) + n * 86400_000).toISOString().slice(0, 10);
@@ -191,8 +192,8 @@ export default function frontDeskRoutes({ db, messenger }) {
          (SELECT COALESCE(SUM(fee),0) FROM procedures x WHERE x.appointment_id = a.id AND x.status != 'cancelled') AS production
        FROM appointments a JOIN patients p ON p.id = a.patient_id JOIN providers pv ON pv.id = a.provider_id
        LEFT JOIN appointment_types t ON t.id = a.appointment_type_id
-       WHERE a.practice_id = ? AND a.start_time >= ? AND a.start_time < ? AND a.status NOT IN ('cancelled','no_show')
-       ORDER BY a.start_time`, pid, `${date} 00:00`, `${date} 24:00`,
+       WHERE a.practice_id = ? AND a.start_time >= ? AND a.start_time < ? AND a.status NOT IN ('cancelled','no_show')${appointmentScope(req.user).sql}
+       ORDER BY a.start_time`, pid, `${date} 00:00`, `${date} 24:00`, ...appointmentScope(req.user).args,
     );
     const mmdd = date.slice(5);
     const soon = [0, 1, 2, 3, 4, 5, 6].map((n) => addDays(date, n).slice(5));
@@ -401,14 +402,15 @@ export default function frontDeskRoutes({ db, messenger }) {
     const pid = req.user.practice_id;
     const like = `%${q}%`;
     const digits = q.replace(/\D/g, '');
+    const scope = patientScope(req.user);
     const patients = await db.all(
-      `SELECT id, first_name, last_name, preferred_name, dob, phone, status, medical_alerts FROM patients
-       WHERE practice_id = ? AND status != 'archived' AND (
+      `SELECT id, first_name, last_name, preferred_name, dob, phone, status, medical_alerts FROM patients p
+       WHERE practice_id = ? AND status != 'archived'${scope.sql} AND (
          (first_name || ' ' || last_name) LIKE ? OR (last_name || ', ' || first_name) LIKE ? OR preferred_name LIKE ? OR email LIKE ?
          OR (? != '' AND length(?) >= 4 AND replace(replace(replace(replace(phone,'(',''),')',''),'-',''),' ','') LIKE ?)
          OR dob = ? OR CAST(id AS TEXT) = ?)
        ORDER BY last_name, first_name LIMIT 8`,
-      pid, like, like, like, like, digits, digits, `%${digits}%`, q, q.replace(/^#/, ''),
+      pid, ...scope.args, like, like, like, like, digits, digits, `%${digits}%`, q, q.replace(/^#/, ''),
     );
     const claims = /^#?\d+$/.test(q)
       ? await db.all('SELECT c.id, c.status, p.first_name, p.last_name FROM claims c JOIN patients p ON p.id = c.patient_id WHERE c.practice_id = ? AND c.id = ?', pid, Number(q.replace('#', '')))
