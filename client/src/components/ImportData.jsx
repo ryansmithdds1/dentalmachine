@@ -4,6 +4,7 @@ import { useApi } from '../hooks.js';
 import { fmtUtcDateTime } from '../format.js';
 import { useAuth } from '../auth.jsx';
 import { ErrorBox, Badge, useSubmit } from './ui.jsx';
+import FullConversion from './FullConversion.jsx';
 
 const KIND_INFO = {
   patients: ['Patients', 'Names, birthdays, contact details, family (guarantor), provider, alerts, and optionally each account balance.'],
@@ -12,6 +13,9 @@ const KIND_INFO = {
   appointments: ['Appointments', 'Patient ID, date and time, length, provider, chair, status. Past visits come in as completed.'],
   recalls: ['Recalls', 'Patient ID, recall type, interval, and due date.'],
   treatment: ['Treatment & history', 'Procedure code, tooth, surfaces, fee, status (planned or completed) and date. No charges are posted.'],
+  payments: ['Payment & adjustment history', 'Patient ID, date, amount, type (payment, insurance payment, refund, adjustment), payment method and check number.'],
+  notes: ['Clinical notes', 'Patient ID, date and note text. Brought in as signed notes.'],
+  full: ['Full conversion', ''],
 };
 
 const FIELD_LABELS = {
@@ -23,8 +27,9 @@ const FIELD_LABELS = {
   relationship: 'Relationship', priority: 'Primary / secondary', annual_max: 'Annual max', deductible: 'Deductible', pct_preventive: 'Preventive %', pct_basic: 'Basic %',
   pct_major: 'Major %', datetime: 'Date & time', date: 'Date', time: 'Time', duration: 'Length', operatory: 'Chair', reason: 'Reason / procedures', type: 'Type',
   interval: 'Interval', due_date: 'Due date', code: 'Procedure code', description: 'Description', tooth: 'Tooth', surfaces: 'Surfaces', fee: 'Fee',
+  amount: 'Amount', method: 'Payment method', reference: 'Check / reference #', note: 'Note',
 };
-const REQUIRED = { patients: ['first_name', 'last_name'], insurance: ['patient', 'carrier', 'subscriber_id'], appointments: ['patient'], recalls: ['patient', 'due_date'], treatment: ['patient', 'code'], balances: ['patient', 'balance'] };
+const REQUIRED = { patients: ['first_name', 'last_name'], insurance: ['patient', 'carrier', 'subscriber_id'], appointments: ['patient'], recalls: ['patient', 'due_date'], treatment: ['patient', 'code'], balances: ['patient', 'balance'], payments: ['patient', 'amount', 'date'], notes: ['patient', 'note'] };
 
 // CSV or tab-separated text → rows of cells. Handles quotes, doubled quotes, and newlines inside quotes.
 export function parseDelimited(text) {
@@ -130,11 +135,12 @@ export default function ImportData() {
 
   return (
     <>
+      <FullConversion onDone={reload} />
       <div className="card">
         <h2 style={{ marginTop: 0 }}>Import from another system</h2>
         <div className="muted" style={{ fontSize: 13, marginBottom: 12 }}>
           Export each list from your old software as a CSV file, then bring them in here in this order: <strong>patients</strong> first, then insurance, balances,
-          appointments, recalls and treatment (they find patients by the ID in the old system). Columns are matched by name; check the matches before importing.
+          appointments, recalls, treatment, payment history and notes (they find patients by the ID in the old system). Columns are matched by name; check the matches before importing.
           Importing the same file again updates what's already here instead of making duplicates.
         </div>
         <ErrorBox error={runPreview.error || run.error} />

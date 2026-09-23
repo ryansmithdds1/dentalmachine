@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { HttpError } from '../auth.js';
 import { insert, audit } from '../util.js';
 import { FIELDS, KINDS, SOURCES, SOURCE_NAMES, Importer, detectMapping, missingRequired, undoBatch } from '../importer.js';
+import { OD_TABLES, stageRows, runConversion } from '../conversion/opendental.js';
 
 const requireAdmin = (req, _res, next) => (req.user.role === 'admin' ? next() : next(new HttpError(403, 'Only administrators can import data')));
 const ROLLBACK = Symbol('rollback');
@@ -109,6 +110,44 @@ export default function importRoutes({ db }) {
     if (b.status !== 'running') throw new HttpError(409, 'This import is already finished');
     return b;
   };
+
+  // ---- Full conversion from an Open Dental backup ----
+  // The browser reads the backup and sends the rows of the tables we convert (staged), then asks the server
+  // to run the conversion a slice at a time until it's done.
+  r.post('/imports/opendental', async (req, res) => {
+    const id = await insert(db, 'import_batches', {
+      practice_id: req.user.practice_id, source: 'opendental', kind: 'full', filename: String(req.body?.filename || '').slice(0, 200) || null, created_by: req.user.id,
+    });
+    await audit(db, req, 'import.start', 'import_batches', id, { kind: 'full', source: 'opendental' });
+    res.status(201).json({ id, tables: OD_TABLES });
+  });
+
+  const fullBatch = async (req) => {
+    const b = await openBatch(req);
+    if (b.kind !== 'full') throw new HttpError(400, 'Not a full conversion');
+    return b;
+  };
+
+  r.post('/imports/opendental/:bid/rows', async (req, res) => {
+    const batch = await fullBatch(req);
+    if (JSON.parse(batch.pending || '{}').step) throw new HttpError(409, 'The conversion has started — no more rows can be added');
+    const rows = req.body?.rows;
+    if (!Array.isArray(rows) || rows.length > 2000) throw new HttpError(400, 'rows must be a list of up to 2000 rows');
+    try {
+      await db.tx(() => stageRows(db, batch, req.body?.table, rows));
+    } catch (err) {
+      if (err.status === 400) throw new HttpError(400, err.message);
+      throw err;
+    }
+    res.json({ ok: true, staged: rows.length });
+  });
+
+  r.post('/imports/opendental/:bid/run', async (req, res) => {
+    const batch = await fullBatch(req);
+    const out = await runConversion(db, batch, { budgetMs: Math.min(Number(req.body?.budget_ms) || 15_000, 20_000) });
+    if (out.done) await audit(db, req, 'import.finish', 'import_batches', batch.id, { kind: 'full', counts: out.counts });
+    res.json(out);
+  });
 
   r.post('/imports/:bid/rows', async (req, res) => {
     const batch = await openBatch(req);

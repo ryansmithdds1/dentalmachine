@@ -1365,6 +1365,18 @@ CREATE TABLE IF NOT EXISTS external_ids (
   UNIQUE (practice_id, source, kind, external_id)
 );
 
+-- Rows from another system's full backup, held while a conversion runs (then cleared). "ref" groups the rows
+-- a step reads together (a perio exam's measurements, a payment's splits).
+CREATE TABLE IF NOT EXISTS conversion_rows (
+  id INTEGER PRIMARY KEY,
+  batch_id INTEGER NOT NULL REFERENCES import_batches(id),
+  tbl TEXT NOT NULL,
+  ref TEXT,
+  data TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_conversion_rows ON conversion_rows(batch_id, tbl, id);
+CREATE INDEX IF NOT EXISTS idx_conversion_ref ON conversion_rows(batch_id, tbl, ref);
+
 CREATE TABLE IF NOT EXISTS waitlist (
   id INTEGER PRIMARY KEY,
   practice_id INTEGER NOT NULL REFERENCES practices(id),

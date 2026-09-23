@@ -8,7 +8,7 @@ import { savePolicy } from './benefits.js';
 // imported record remembers its ID in the old system so re-running an import updates instead of duplicating.
 
 export const SOURCES = ['opendental', 'dentrix', 'eaglesoft', 'curve', 'other'];
-export const KINDS = ['patients', 'insurance', 'appointments', 'recalls', 'treatment', 'balances'];
+export const KINDS = ['patients', 'insurance', 'appointments', 'recalls', 'treatment', 'balances', 'payments', 'notes'];
 
 const PATIENT_REF = ['patnum', 'patientid', 'patid', 'patientnumber', 'patientno', 'chartnumber', 'chartno', 'chart', 'patient'];
 
@@ -92,6 +92,24 @@ export const FIELDS = {
     patient: PATIENT_REF,
     balance: ['baltotal', 'balance', 'currentbalance', 'accountbalance', 'amount', 'totalbalance'],
   },
+  // Payment and adjustment history (Dentrix and Eaglesoft ledger exports).
+  payments: {
+    external_id: ['paynum', 'paymentid', 'transactionid', 'transid', 'id'],
+    patient: PATIENT_REF,
+    date: ['paydate', 'datepay', 'date', 'transactiondate', 'postdate', 'entrydate'],
+    amount: ['payamt', 'splitamt', 'amount', 'paymentamount', 'amt', 'credit'],
+    type: ['transactiontype', 'type', 'entrytype', 'category'],
+    method: ['paytype', 'paymenttype', 'method', 'paymentmethod', 'tender'],
+    reference: ['checknum', 'checknumber', 'reference', 'ref', 'refnumber'],
+    description: ['paynote', 'note', 'description', 'memo', 'comment'],
+  },
+  notes: {
+    external_id: ['procnotenum', 'noteid', 'clinicalnoteid', 'id'],
+    patient: PATIENT_REF,
+    date: ['entrydatetime', 'notedate', 'date', 'datetime', 'created', 'servicedate'],
+    note: ['note', 'notetext', 'clinicalnote', 'text', 'body', 'progressnote'],
+    provider: ['provnum', 'provider', 'providerid', 'dentist', 'author'],
+  },
 };
 
 const REQUIRED = {
@@ -101,6 +119,8 @@ const REQUIRED = {
   recalls: ['patient', 'due_date'],
   treatment: ['patient', 'code'],
   balances: ['patient', 'balance'],
+  payments: ['patient', 'amount', 'date'],
+  notes: ['patient', 'note'],
 };
 
 // Dates, amounts and codes are short: anything longer is refused before it reaches a pattern.
@@ -205,8 +225,9 @@ function parsePatientStatus(v, source) {
   const s = String(v ?? '').trim().toLowerCase();
   if (!s) return 'active';
   if (source === 'opendental' && /^\d$/.test(s)) {
-    if (s === '5') return 'skip'; // deleted
-    return { 0: 'active', 1: 'active', 2: 'inactive', 3: 'archived', 4: 'archived' }[s] || 'active';
+    // 0 patient, 1 non-patient, 2 inactive, 3 archived, 4 deleted, 5 deceased, 6 prospective
+    if (s === '4') return 'skip';
+    return { 0: 'active', 1: 'inactive', 2: 'inactive', 3: 'archived', 5: 'archived', 6: 'active' }[s] || 'active';
   }
   if (/^(deleted)$/.test(s)) return 'skip';
   if (/^(inactive|false|no|n|0|nonpatient|non-patient)$/.test(s)) return 'inactive';
@@ -286,7 +307,11 @@ const CDT_CATEGORY = [
   [/^D60[0-9]/, 'implants'], [/^D[56]/, 'prosthodontics'], [/^D7/, 'oral_surgery'], [/^D8/, 'orthodontics'], [/^D9/, 'adjunctive'],
 ];
 
-export const TABLE = { patients: 'patients', insurance: 'patient_insurance', appointments: 'appointments', recalls: 'recalls', treatment: 'procedures', balances: 'ledger_entries', plans: 'treatment_plans' };
+export const TABLE = {
+  patients: 'patients', insurance: 'patient_insurance', appointments: 'appointments', recalls: 'recalls', treatment: 'procedures', balances: 'ledger_entries', plans: 'treatment_plans',
+  // Full conversions (and the payment and note files) also make these.
+  providers: 'providers', operatories: 'operatories', procedures: 'procedures', ledger: 'ledger_entries', notes: 'clinical_notes', commlogs: 'followups', perio: 'perio_exams', payments: 'ledger_entries',
+};
 
 // ---- Import engine ----
 export class Importer {
@@ -546,6 +571,51 @@ export class Importer {
     return 'created';
   }
 
+  // A payment (money in: the amount as a positive number), an insurance payment, a refund or an adjustment.
+  async payments(r) {
+    const p = await this.patientFor(r.patient);
+    const date = parseDate(r.date);
+    if (!date) throw new Error('Date is required');
+    const amount = parseMoney(r.amount);
+    if (!amount) return 'skipped';
+    const t = String(r.type || '').toLowerCase();
+    const m = String(r.method || '').toLowerCase();
+    const type = /adj|discount|write|credit adj/.test(t) ? 'adjustment' : /refund/.test(t) ? 'refund' : /ins|claim|eob|era/.test(t) || /ins/.test(m) ? 'insurance_payment' : 'payment';
+    const method = /care ?credit/.test(m) ? 'care_credit' : /cash/.test(m) ? 'cash' : /check|chk/.test(m) ? 'check' : /debit/.test(m) ? 'debit_card' : /credit|card|visa|master|amex|disc/.test(m) ? 'credit_card' : /ach|eft/.test(m) ? 'ach' : 'other';
+    // Payments and insurance payments reduce the balance; an adjustment keeps the sign it came with.
+    const signed = type === 'adjustment' ? amount : type === 'refund' ? Math.abs(amount) : -Math.abs(amount);
+    const key = blank(r.external_id) ? `${String(r.patient).trim()}|${date}|${amount}|${type}|${String(r.reference || '').trim()}` : String(r.external_id).trim();
+    const known = await this.externalId('payments', key);
+    if (known && await this.db.get('SELECT id FROM ledger_entries WHERE id = ? AND practice_id = ?', known.local_id, this.pid)) return 'skipped';
+    const id = await insert(this.db, 'ledger_entries', {
+      practice_id: this.pid, patient_id: p.id, type, amount: signed, entry_date: date, created_by: this.batch.created_by,
+      method: type === 'adjustment' ? null : method, reference: blank(r.reference) ? null : String(r.reference).trim().slice(0, 60),
+      adjustment_type: type === 'adjustment' ? (String(r.type || '').trim() || 'Adjustment').slice(0, 60) : null,
+      description: (blank(r.description) ? { payment: 'Payment', insurance_payment: 'Insurance payment', refund: 'Refund', adjustment: 'Adjustment' }[type] : String(r.description).trim()).slice(0, 200),
+    });
+    await this.remember('payments', key, id, true);
+    return 'created';
+  }
+
+  // Clinical notes come in signed, as history.
+  async notes(r) {
+    const p = await this.patientFor(r.patient);
+    const body = String(r.note || '').trim();
+    if (!body) return 'skipped';
+    const when = String(r.date || '').trim();
+    const date = parseDate(when);
+    const time = parseTime(when);
+    const key = blank(r.external_id) ? `${String(r.patient).trim()}|${date || ''}|${body.slice(0, 60)}` : String(r.external_id).trim();
+    if (await this.externalId('notes', key)) return 'skipped';
+    const at = date ? `${date} ${time || '00:00'}:00` : null;
+    const id = await insert(this.db, 'clinical_notes', {
+      practice_id: this.pid, patient_id: p.id, author_id: this.batch.created_by, provider_id: this.provider(r.provider),
+      body: `${body}\n\n(From ${SOURCE_NAMES[this.source]})`, signed: 1, signed_at: at, ...(at ? { created_at: at } : {}),
+    });
+    await this.remember('notes', key, id, true);
+    return 'created';
+  }
+
   async finish() {
     await this.linkGuarantors();
   }
@@ -556,7 +626,7 @@ export const SOURCE_NAMES = { opendental: 'Open Dental', dentrix: 'Dentrix', eag
 // Deletes what an import created, newest first. Anything that has been used since (a payment against
 // an imported patient, a claim on an imported procedure) makes the delete fail, and nothing is removed.
 export async function undoBatch(db, practiceId, batchId) {
-  const order = ['balances', 'treatment', 'plans', 'appointments', 'recalls', 'insurance', 'patients'];
+  const order = ['ledger', 'payments', 'balances', 'notes', 'commlogs', 'perio', 'procedures', 'treatment', 'plans', 'appointments', 'recalls', 'insurance', 'patients', 'operatories', 'providers'];
   const removed = {};
   await db.tx(async () => {
     const rows = await db.all('SELECT kind, local_id FROM external_ids WHERE practice_id = ? AND batch_id = ? AND created = 1', practiceId, batchId);
@@ -573,6 +643,7 @@ export async function undoBatch(db, practiceId, batchId) {
       }
     }
     await db.run('DELETE FROM external_ids WHERE practice_id = ? AND batch_id = ?', practiceId, batchId);
+    await db.run('DELETE FROM conversion_rows WHERE batch_id = ?', batchId);
     await db.run("UPDATE import_batches SET status = 'undone' WHERE id = ?", batchId);
   });
   return removed;
