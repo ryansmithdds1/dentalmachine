@@ -22,6 +22,7 @@ import familyRoutes from './routes/family.js';
 import conversationRoutes, { smsWebhook } from './routes/sms.js';
 import { deliveryWebhooks } from './routes/delivery.js';
 import financeRoutes, { financePublicRoutes } from './routes/finance.js';
+import scribeRoutes from './routes/scribe.js';
 import { createPlaid } from './finance/plaid.js';
 import { createQuickBooks } from './finance/quickbooks.js';
 import ediRoutes from './routes/edi.js';
@@ -206,6 +207,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(developerRoutes({ db, fetchImpl }));
   api.use(assistantRoutes({ db, config, secret, app: () => app }));
   api.use(financeRoutes({ db, config, secret, plaid, qbo }));
+  api.use(scribeRoutes({ db, config }));
   api.use(attachmentRoutes({ db, storage, sender: attachmentSender ?? createAttachmentSender(attachmentConfig(process.env, config.ediMode), fetchImpl) }));
   api.use(billingRoutes({ db, payments, config, messenger }));
   api.use(insuranceRoutes({ db }));

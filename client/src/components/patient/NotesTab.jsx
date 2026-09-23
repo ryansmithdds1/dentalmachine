@@ -5,6 +5,7 @@ import { useAuth } from '../../auth.jsx';
 import { fmtDateTime, fmtDate } from '../../format.js';
 import { ErrorBox } from '../ui.jsx';
 import NoteComposer from '../NoteComposer.jsx';
+import Scribe from './Scribe.jsx';
 
 export default function NotesTab({ patient }) {
   const { user, can } = useAuth();
@@ -30,9 +31,12 @@ export default function NotesTab({ patient }) {
   return (
     <div className="grid" style={{ gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1.3fr)' }}>
       {can('clinical:write') && (
-        <div className="card">
-          <h2>New note</h2>
-          <NoteComposer patient={patient} providerId={patient.primary_provider_id} onSaved={reload} />
+        <div>
+          <Scribe patient={patient} onSaved={reload} />
+          <div className="card">
+            <h2>New note</h2>
+            <NoteComposer patient={patient} providerId={patient.primary_provider_id} onSaved={reload} />
+          </div>
         </div>
       )}
       <div>

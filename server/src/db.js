@@ -727,6 +727,21 @@ CREATE TABLE IF NOT EXISTS qbo_pl (
 );
 CREATE INDEX IF NOT EXISTS idx_qbo_pl ON qbo_pl(practice_id, month);
 
+-- The AI scribe's drafts (not the conversation, which is never kept): who, how long, and the note it became.
+CREATE TABLE IF NOT EXISTS scribe_sessions (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  user_id INTEGER REFERENCES users(id),
+  appointment_id INTEGER REFERENCES appointments(id),
+  minutes INTEGER,
+  words INTEGER,
+  ms INTEGER,
+  note_id INTEGER REFERENCES clinical_notes(id),
+  edited INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS assistant_log (
   id INTEGER PRIMARY KEY,
   practice_id INTEGER NOT NULL REFERENCES practices(id),

@@ -1305,3 +1305,9 @@ button.assist-fab.busy { animation: assist-busy 1.4s ease-in-out infinite; }
 .range-bar i.high { background: var(--danger); }
 .text-ok { color: var(--ok); }
 .text-warn { color: var(--warn); }
+
+/* AI scribe */
+.scribe-live { color: var(--danger); font-weight: 600; font-size: 13px; animation: scribe-pulse 1.6s ease-in-out infinite; }
+@keyframes scribe-pulse { 50% { opacity: 0.45; } }
+.scribe-transcript { width: 100%; font-family: inherit; font-size: 13px; margin-top: 8px; }
+.scribe h3 { margin: 12px 0 4px; font-size: 13px; }
