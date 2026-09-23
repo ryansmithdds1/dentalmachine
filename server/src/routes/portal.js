@@ -16,6 +16,7 @@ import { sniffMime } from './imaging.js';
 import { MAX_UPLOAD_BYTES } from './documents.js';
 import { runMembershipBilling } from '../memberships.js';
 import { planPass } from './casepres.js';
+import { formPass } from './public.js';
 import { buildRecordExport } from '../recordexport.js';
 
 const CODE_TTL_MINUTES = 10;
@@ -424,8 +425,9 @@ export function portalRoutes({ db, secret, config, payments, messenger, storage 
     const f = await db.get(`SELECT * FROM form_requests WHERE id = ? AND patient_id IN (${inList(req.portal.ids)}) AND completed_at IS NULL`, Number(req.params.fid), ...req.portal.ids);
     if (!f) throw new HttpError(404, 'Form not found');
     const { token, hash } = newToken();
-    await db.run('UPDATE form_requests SET token_hash = ? WHERE id = ?', hash, f.id);
-    res.json({ url: `/f/${token}` });
+    await db.run('UPDATE form_requests SET token_hash = ?, dob_failures = 0 WHERE id = ?', hash, f.id);
+    // Signed in already: the birth-date pass rides in the #fragment, which browsers never send to a server.
+    res.json({ url: `/f/${token}#pass=${formPass(f.id, secret)}` });
   });
 
   r.post('/treatment-plans/:tid/open', async (req, res) => {

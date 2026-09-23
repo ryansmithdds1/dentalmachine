@@ -84,7 +84,9 @@ test('patient portal: code sign-in, household view, confirm/cancel, pay, forms a
   assert.equal((await pub.get(`/public/tp/${tpToken}`)).status, 403);
   assert.equal((await h.client(null, { 'X-Plan-Pass': tpPass }).get(`/public/tp/${tpToken}`)).status, 200);
   const formLink = (await portal.post(`/portal/forms/${me.forms[0].id}/open`)).data.url;
-  assert.equal((await pub.get(`/public/forms/${formLink.split('/').pop()}`)).status, 200);
+  const [formToken, formPass] = formLink.split('/').pop().split('#pass=');
+  assert.equal((await pub.get(`/public/forms/${formToken}`)).status, 403);
+  assert.equal((await h.client(null, { 'X-Form-Pass': formPass }).get(`/public/forms/${formToken}`)).status, 200);
 
   assert.equal((await portal.put('/portal/contact', { phone: '(512) 555-0199', sms_opt_in: false })).status, 200);
   assert.equal((await api.get(`/patients/${patient.id}`)).data.phone, '(512) 555-0199');

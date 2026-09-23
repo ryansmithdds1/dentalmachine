@@ -46,6 +46,8 @@ Cloud practice management software for dental offices: scheduling, patient recor
 | **Admin** | Users and roles, providers (NPI, licence, DEA and schedule colour), operatories, fee schedule, practice details and time zone, a full audit log, and a one-click **export of all practice data** (JSON). |
 
 ### Security and HIPAA-related safeguards
+
+Before real patient data goes in, see [docs/HIPAA-vendors.md](docs/HIPAA-vendors.md): which outside services need a Business Associate Agreement, and a go-live checklist.
 - **Separate data per practice.** Every query is limited to the signed-in user's practice. Tests confirm one practice can't read another's records.
 - **Role-based access.** Roles are `admin`, `dentist`, `hygienist`, `assistant`, `front_desk` and `billing`, each with its own permissions (see `server/src/auth.js`).
 - **Audit log.** Records every view of a patient record or chart, every change, every login and every failed login, with user, time and IP.

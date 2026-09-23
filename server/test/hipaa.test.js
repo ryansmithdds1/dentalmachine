@@ -155,3 +155,13 @@ test("a patient's record export: summary PDF, all the data, and their files, for
   const other = await fetch(`${h.origin}/api/portal/record-export?patient_id=999999`, { headers: { Authorization: `Bearer ${portal}` } });
   assert.equal(other.status, 404);
 });
+
+test('a form link turns itself off after five wrong birth dates', async () => {
+  const p = await h.practice();
+  const token = (await p.api.post(`/patients/${p.patient.id}/form-requests`, {})).data.url.split('/f/')[1];
+  const pub = h.client();
+  assert.equal((await pub.post(`/public/forms/${token}`, { answers: {} })).status, 403, 'no submitting without the birth date either');
+  for (let i = 0; i < 4; i++) assert.equal((await pub.post(`/public/forms/${token}/verify`, { dob: '2000-01-01' })).status, 403);
+  assert.equal((await pub.post(`/public/forms/${token}/verify`, { dob: '2000-01-01' })).status, 410);
+  assert.equal((await pub.post(`/public/forms/${token}/verify`, { dob: '1985-04-12' })).status, 410);
+});

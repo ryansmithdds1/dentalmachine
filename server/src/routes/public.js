@@ -1,5 +1,5 @@
 import express, { Router } from 'express';
-import { HttpError, rateLimit } from '../auth.js';
+import { HttpError, rateLimit, signToken, verifyToken } from '../auth.js';
 import { insert, update, hashToken, practiceNow, normalizeDateTime, audit, mapSeq, publicPractice } from '../util.js';
 import { MEDICAL_CONDITIONS, parseMedicalHistory, contactUpdatesFromHistory } from '../forms.js';
 import { fillFields, checkAnswers, formPdf } from '../formtemplates.js';
@@ -25,7 +25,10 @@ const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 // Unauthenticated endpoints reached from links sent to patients and the public booking page.
 // They expose only the minimum needed and are rate limited.
-export default function publicRoutes({ db, storage, payments, messenger, config }) {
+// A short pass to one form packet (see /forms/:token/verify); the portal hands one out with its links.
+export const formPass = (requestId, secret) => signToken({ sub: requestId, aud: 'form-view' }, secret, 2 * 3600);
+
+export default function publicRoutes({ db, storage, payments, messenger, config, secret }) {
   // Books a request right away; if the slot can't be booked after all it stays a request for the office.
   const bookInstantly = async (b) => {
     try {
@@ -285,7 +288,14 @@ export default function publicRoutes({ db, storage, payments, messenger, config 
 
   // ---- Patient forms ----
   // A link opens a packet: the health history and/or practice forms sent together.
-  const packetForToken = async (token) => {
+  // Like plan links: the link alone doesn't open the forms (they show contact details and take health
+  // history); the patient confirms their birth date and gets a short pass (X-Form-Pass). Portal links carry one.
+  const formPassOk = (req, f) => {
+    if (!f.dob) return true; // nothing on file to check against
+    const pass = verifyToken(req.get('X-Form-Pass') || '', secret);
+    return !!pass && pass.aud === 'form-view' && pass.sub === f.id;
+  };
+  const packetForToken = async (token, req = null) => {
     const f = await db.get(
       `SELECT fr.*, p.first_name, p.last_name, p.dob, p.phone, p.email, p.address, p.city, p.state, p.zip, p.emergency_contact,
          p.allergies, p.medications, p.language, pr.name AS practice_name
@@ -300,15 +310,31 @@ export default function publicRoutes({ db, storage, payments, messenger, config 
        WHERE fr.patient_id = ? AND (fr.id = ? OR fr.packet_id = ?) ORDER BY fr.id`, f.patient_id, f.packet_id || f.id, f.packet_id || f.id,
     );
     if (items.every((x) => x.status === 'completed')) throw new HttpError(410, 'These forms have already been submitted. Thank you!');
+    if (req && !formPassOk(req, f)) throw new HttpError(403, 'Enter your date of birth to open your forms', { dob_required: true, practice_name: f.practice_name, language: patientLang(f) });
     return { f, items };
   };
+
+  r.post('/forms/:token/verify', limiter, async (req, res) => {
+    const { f } = await packetForToken(req.params.token);
+    if (f.dob && String(req.body?.dob || '').trim() !== f.dob) {
+      await db.run('UPDATE form_requests SET dob_failures = dob_failures + 1 WHERE id = ?', f.id);
+      const tries = Number((await db.get('SELECT dob_failures AS n FROM form_requests WHERE id = ?', f.id)).n);
+      await logPublic(req, f.practice_id, 'forms.link_dob_failed', 'patients', f.patient_id, { tries });
+      if (tries >= 5) {
+        await db.run('UPDATE form_requests SET expires_at = ? WHERE id = ?', new Date().toISOString(), f.id);
+        throw new HttpError(410, 'This link has been turned off after too many tries. Please ask the office for a new one.');
+      }
+      throw new HttpError(403, "That date of birth doesn't match our records", { dob_required: true });
+    }
+    res.json({ pass: formPass(f.id, secret) });
+  });
   const contextFor = (f, item) => ({
     ...JSON.parse(item.context || '{}'), patient: `${f.first_name} ${f.last_name}`, first_name: f.first_name, practice: f.practice_name,
     date: new Date().toISOString().slice(0, 10),
   });
 
   r.get('/forms/:token', reader, async (req, res) => {
-    const { f, items } = await packetForToken(req.params.token);
+    const { f, items } = await packetForToken(req.params.token, req);
     const history = items.find((x) => x.kind === 'medical_history');
     // Prefill contact details only; clinical history is always re-entered by the patient.
     res.json({
@@ -322,7 +348,7 @@ export default function publicRoutes({ db, storage, payments, messenger, config 
   });
 
   r.post('/forms/:token', limiter, async (req, res) => {
-    const { f, items } = await packetForToken(req.params.token);
+    const { f, items } = await packetForToken(req.params.token, req);
     const item = items.find((x) => x.kind === 'medical_history' && x.status === 'pending');
     if (!item) throw new HttpError(410, 'Your health history has already been submitted. Thank you!');
     const { answers, signatureName, signatureImage } = parseMedicalHistory(req.body);
@@ -347,7 +373,7 @@ export default function publicRoutes({ db, storage, payments, messenger, config 
   // One practice form from the packet: answers are checked against its fields, and the signed form is
   // filed in the chart as a PDF (photos of insurance cards and IDs are filed as images).
   r.post('/forms/:token/:rid', limiter, async (req, res) => {
-    const { f, items } = await packetForToken(req.params.token);
+    const { f, items } = await packetForToken(req.params.token, req);
     const item = items.find((x) => x.id === Number(req.params.rid) && x.kind === 'custom');
     if (!item) throw new HttpError(404, 'Form not found');
     if (item.status === 'completed') throw new HttpError(410, 'This form has already been submitted. Thank you!');

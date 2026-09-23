@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { api } from '../../api.js';
 import { ErrorBox, useSubmit } from '../../components/ui.jsx';
 import SignaturePad from '../../components/SignaturePad.jsx';
 import FormFields, { formComplete } from '../../components/FormFields.jsx';
 import PublicLayout from './PublicLayout.jsx';
 import { suggestLang, useT, HEARD_FROM } from './i18n.js';
+import { DobGate, publicCall, readPass, savePass } from './LinkPass.jsx';
+
+const formCall = (method, path, body, pass) => publicCall(method, path, body, 'X-Form-Pass', pass);
 
 export default function IntakePage() {
   const t = useT();
@@ -13,11 +15,21 @@ export default function IntakePage() {
   const [info, setInfo] = useState(null);
   const [loadError, setLoadError] = useState(null);
   const [finished, setFinished] = useState([]);
+  const [pass, setPass] = useState(() => readPass('form', token));
+  const [locked, setLocked] = useState(null);
 
   useEffect(() => {
-    api.get(`/public/forms/${token}`).then((i) => { suggestLang(i.language); setInfo(i); }).catch(setLoadError);
-  }, [token]);
+    formCall('GET', `/forms/${token}`, null, pass)
+      .then((i) => { suggestLang(i.language); setLocked(null); setInfo(i); })
+      .catch((err) => (err.details?.dob_required ? (suggestLang(err.details.language), setLocked(err.details)) : setLoadError(err)));
+  }, [token, pass]);
 
+  if (locked && !info) {
+    return (
+      <DobGate title={t('Patient forms')} practice={{ name: locked.practice_name }} onPass={(p) => { savePass('form', token, p); setPass(p); }}
+        verify={async (dob) => (await formCall('POST', `/forms/${token}/verify`, { dob })).pass} />
+    );
+  }
   if (loadError) return <PublicLayout title={t('Patient forms')}><ErrorBox error={loadError} /></PublicLayout>;
   if (!info) return <PublicLayout title={t('Patient forms')}><p>{t('Loading…')}</p></PublicLayout>;
   const practice = { name: info.practice_name };
@@ -34,16 +46,16 @@ export default function IntakePage() {
   }
   const step = forms.length > 1 ? <div className="muted" style={{ marginBottom: 8 }}>{t('Form {n} of {total}', { n: forms.indexOf(current) + 1, total: forms.length })}{forms.length > 1 ? ` · ${forms.map((f) => (f.kind === 'medical_history' ? t('Health history') : f.name)).join(' · ')}` : ''}</div> : null;
   return current.kind === 'medical_history'
-    ? <HistoryForm key={current.id} info={info} token={token} practice={practice} step={step} onDone={() => done(current.id)} />
-    : <PracticeForm key={current.id} form={current} info={info} token={token} practice={practice} step={step} onDone={() => done(current.id)} />;
+    ? <HistoryForm key={current.id} info={info} token={token} pass={pass} practice={practice} step={step} onDone={() => done(current.id)} />
+    : <PracticeForm key={current.id} form={current} info={info} token={token} pass={pass} practice={practice} step={step} onDone={() => done(current.id)} />;
 }
 
-function PracticeForm({ form, info, token, practice, step, onDone }) {
+function PracticeForm({ form, info, token, pass, practice, step, onDone }) {
   const t = useT();
   const [answers, setAnswers] = useState({});
   const [signatureName, setSignatureName] = useState('');
   const { submit, busy, error } = useSubmit(async () => {
-    await api.post(`/public/forms/${token}/${form.id}`, { answers, signature_name: signatureName });
+    await formCall('POST', `/forms/${token}/${form.id}`, { answers, signature_name: signatureName }, pass);
     onDone();
   });
   return (
@@ -60,14 +72,14 @@ function PracticeForm({ form, info, token, practice, step, onDone }) {
   );
 }
 
-function HistoryForm({ info, token, practice, step, onDone }) {
+function HistoryForm({ info, token, pass, practice, step, onDone }) {
   const t = useT();
   const [a, setA] = useState(() => ({ conditions: [], consent_hipaa: false, consent_treatment: false, ...Object.fromEntries(Object.entries(info.prefill).map(([k, v]) => [k, v || ''])) }));
   const [signatureName, setSignatureName] = useState('');
   const [signatureImage, setSignatureImage] = useState(null);
 
   const { submit, busy, error } = useSubmit(async () => {
-    await api.post(`/public/forms/${token}`, { answers: a, signature_name: signatureName, signature_image: signatureImage });
+    await formCall('POST', `/forms/${token}`, { answers: a, signature_name: signatureName, signature_image: signatureImage }, pass);
     onDone();
   });
 

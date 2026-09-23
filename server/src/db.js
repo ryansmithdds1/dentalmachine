@@ -1500,6 +1500,7 @@ const COLUMNS = [
   ['perio_exams', 'deleted_at', 'TEXT'],
   ['patients', 'location_id', 'INTEGER REFERENCES locations(id)'],
   ['treatment_plans', 'sign_token_failures', 'INTEGER NOT NULL DEFAULT 0'],
+  ['form_requests', 'dob_failures', 'INTEGER NOT NULL DEFAULT 0'],
   ['practices', 'message_templates', 'TEXT'],
   ['practices', 'hygiene_goal', 'INTEGER NOT NULL DEFAULT 0'],
   ['providers', 'dea_number', 'TEXT'],

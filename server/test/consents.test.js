@@ -56,7 +56,10 @@ test('procedure consent: suggested, filled in, signed, filed as a PDF', async ()
   const packet = await api.post(`/patients/${patient.id}/form-packets`, { template_ids: [suggested[0].id], procedure_ids: [proc.id], history: true });
   assert.equal(packet.status, 201, JSON.stringify(packet.data));
   const token = tokenOf(packet.data.url);
-  const pub = h.client();
+  // The link alone shows nothing; the birth date opens it.
+  assert.equal((await h.client().get(`/public/forms/${token}`)).data.details.dob_required, true);
+  assert.equal((await h.client().post(`/public/forms/${token}/verify`, { dob: '1985-04-21' })).status, 403);
+  const pub = h.client(null, { 'X-Form-Pass': (await h.client().post(`/public/forms/${token}/verify`, { dob: '1985-04-12' })).data.pass });
   const form = (await pub.get(`/public/forms/${token}`)).data;
   assert.equal(form.forms.length, 2);
   const consent = form.forms.find((f) => f.kind === 'custom');
@@ -103,10 +106,11 @@ test('insurance card photos are filed as images', async () => {
   const t = (await api.get('/form-templates')).data.find((x) => x.name === 'Insurance card and photo ID');
   const packet = (await api.post(`/patients/${patient.id}/form-packets`, { template_ids: [t.id] })).data;
   const token = tokenOf(packet.url);
-  const form = (await h.client().get(`/public/forms/${token}`)).data.forms[0];
+  const pub = h.client(null, { 'X-Form-Pass': (await h.client().post(`/public/forms/${token}/verify`, { dob: '1985-04-12' })).data.pass });
+  const form = (await pub.get(`/public/forms/${token}`)).data.forms[0];
   const front = form.fields.find((f) => f.label === 'Insurance card — front').key;
   const sig = form.fields.find((f) => f.type === 'signature').key;
-  const res = await h.client().post(`/public/forms/${token}/${form.id}`, { answers: { [front]: signaturePng(), [sig]: signaturePng() }, signature_name: 'Jane Doe' });
+  const res = await pub.post(`/public/forms/${token}/${form.id}`, { answers: { [front]: signaturePng(), [sig]: signaturePng() }, signature_name: 'Jane Doe' });
   assert.equal(res.status, 201, JSON.stringify(res.data));
   const docs = (await api.get(`/patients/${patient.id}/documents`)).data;
   assert.ok(docs.some((d) => d.category === 'insurance_card' && d.mime === 'image/png'));
