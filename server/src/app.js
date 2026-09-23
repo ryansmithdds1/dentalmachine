@@ -31,6 +31,7 @@ import referralRoutes from './routes/referrals.js';
 import importRoutes from './routes/imports.js';
 import backupRoutes from './routes/backup.js';
 import formRoutes from './routes/forms.js';
+import membershipRoutes from './routes/memberships.js';
 import { createMessenger } from './messaging.js';
 import { createStorage } from './storage.js';
 import { createClearinghouse, clearinghouseConfig } from './clearinghouse.js';
@@ -120,6 +121,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(importRoutes({ db }));
   api.use(backupRoutes({ db, storage, config }));
   api.use(formRoutes({ db, messenger, config }));
+  api.use(membershipRoutes({ db, payments }));
   api.use(billingRoutes({ db, payments }));
   api.use(insuranceRoutes({ db }));
   api.use(settingsRoutes({ db, secret, config }));

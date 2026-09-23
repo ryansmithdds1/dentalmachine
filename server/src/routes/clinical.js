@@ -1,9 +1,10 @@
 import { Router } from 'express';
 import { requirePermission, HttpError } from '../auth.js';
 import {
-  pick, requireFields, requireOneOf, insert, update, findOr404, audit, validTooth, normalizeSurfaces, mapSeq, codeArea, QUADRANTS, ARCHES } from '../util.js';
+  pick, requireFields, requireOneOf, insert, update, findOr404, audit, validTooth, normalizeSurfaces, mapSeq, codeArea, QUADRANTS, ARCHES, practiceNow } from '../util.js';
 import { completeProcedure, estimateCoverage, primaryPolicy, voidLedgerEntry } from '../services.js';
 import { signedVersion } from './casepres.js';
+import { memberSavings } from '../memberships.js';
 
 export const CONDITIONS = [
   'caries', 'missing', 'filling', 'crown', 'root_canal', 'implant', 'bridge_pontic', 'fracture',
@@ -194,8 +195,14 @@ export default function clinicalRoutes({ db }) {
     const procedures = await db.all("SELECT * FROM procedures WHERE treatment_plan_id = ? AND status != 'cancelled' ORDER BY phase, priority, id", plan.id);
     const planned = procedures.filter((p) => p.status === 'planned');
     const estimate = await estimateCoverage(db, await primaryPolicy(db, plan.practice_id, plan.patient_id), planned);
-    // A plan discount comes off the patient's share of each procedure (posted as an adjustment when it's done).
-    const discount = plan.discount_pct ? (estimate.items || []).reduce((s, i) => s + Math.round((i.patient * plan.discount_pct) / 100), 0) : 0;
+    // Membership benefits, or else the plan discount, come off the patient's share of each procedure
+    // (posted as adjustments when the work is done).
+    const today = (await practiceNow(db, plan.practice_id)).slice(0, 10);
+    const membership = await memberSavings(db, plan.patient_id, (estimate.items || []).map((i) => ({ ...i, code: planned.find((p) => p.id === i.procedure_id)?.code })), today);
+    const discount = (estimate.items || []).reduce((s, i) => {
+      const member = membership?.items.find((x) => x.procedure_id === i.procedure_id)?.off || 0;
+      return s + (member || (plan.discount_pct ? Math.round((i.patient * plan.discount_pct) / 100) : 0));
+    }, 0);
     const phases = [...new Set(procedures.map((p) => p.phase || 1))].map((phase) => {
       const list = procedures.filter((p) => (p.phase || 1) === phase);
       const items = estimate.items?.filter((i) => list.some((p) => p.id === i.procedure_id)) || [];
@@ -207,7 +214,7 @@ export default function clinicalRoutes({ db }) {
     });
     return {
       ...plan, sign_token_hash: undefined, signed_snapshot: undefined, procedures, phases,
-      estimate: { ...estimate, discount, patient_after_discount: Math.max(0, (estimate.total_patient ?? 0) - discount) },
+      estimate: { ...estimate, discount, membership, patient_after_discount: Math.max(0, (estimate.total_patient ?? 0) - discount) },
       signed_version: signedVersion(plan, procedures),
     };
   };

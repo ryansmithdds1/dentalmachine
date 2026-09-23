@@ -2,6 +2,7 @@ import { HttpError } from './auth.js';
 import { insert, practiceNow } from './util.js';
 import { benefitYear, deductibleMet, estimateCoverage } from './benefits.js';
 import { resetRecalls } from './recalls.js';
+import { applyMemberBenefit } from './memberships.js';
 
 export { benefitYear, deductibleMet, benefitsUsed, estimateCoverage, withPlan, planFor } from './benefits.js';
 
@@ -73,11 +74,13 @@ export async function completeProcedure(db, user, procedure, { providerId, appoi
 
     await resetRecalls(db, procedure, today);
 
-    // A treatment plan discount comes off the patient's share of this procedure.
+    // Membership plan benefits (included services, or the member discount) come off the patient's share.
+    // A treatment plan discount applies instead when there's no membership benefit; the two don't stack.
     const plan = procedure.treatment_plan_id ? await db.get('SELECT name, discount_pct FROM treatment_plans WHERE id = ?', procedure.treatment_plan_id) : null;
-    if (plan?.discount_pct > 0) {
-      const est = await estimateCoverage(db, await primaryPolicy(db, procedure.practice_id, procedure.patient_id), [procedure]);
-      const off = Math.round((est.items[0].patient * plan.discount_pct) / 100);
+    const share = async () => (await estimateCoverage(db, await primaryPolicy(db, procedure.practice_id, procedure.patient_id), [procedure])).items[0].patient;
+    const member = await applyMemberBenefit(db, procedure, await share(), { date: today, userId: user.id, providerId: provider });
+    if (!member && plan?.discount_pct > 0) {
+      const off = Math.round(((await share()) * plan.discount_pct) / 100);
       if (off > 0) {
         await insert(db, 'ledger_entries', {
           practice_id: procedure.practice_id, patient_id: procedure.patient_id, type: 'adjustment', adjustment_type: 'Treatment plan discount', amount: -off,

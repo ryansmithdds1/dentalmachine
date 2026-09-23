@@ -207,7 +207,7 @@ function PlanTable({ plan, codes, canEdit, act, onBook, canBook }) {
               <td className="num">{money(plan.estimate.total_insurance)}</td>
               <td className="num">
                 {money(plan.estimate.total_patient)}
-                {plan.estimate.discount > 0 && <div className="est-note">−{money(plan.estimate.discount)} discount → {money(plan.estimate.patient_after_discount)}</div>}
+                {plan.estimate.discount > 0 && <div className="est-note">−{money(plan.estimate.discount)} {plan.estimate.membership?.total ? `${plan.estimate.membership.plan_name} member savings` : 'discount'} → {money(plan.estimate.patient_after_discount)}</div>}
               </td>
               <td />
             </tr>

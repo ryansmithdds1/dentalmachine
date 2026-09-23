@@ -8,6 +8,7 @@ import { runRecallSequences } from './recalls.js';
 import { runAutopay } from './payments.js';
 import { runAutomaticBackups } from './backup.js';
 import { runFormSends } from './formtemplates.js';
+import { runMembershipBilling } from './memberships.js';
 
 let secret = process.env.JWT_SECRET;
 if (!secret) {
@@ -41,6 +42,14 @@ if (ch?.batch && process.env.CLEARINGHOUSE_POLL !== 'off') {
     .catch((err) => console.error('Clearinghouse poll failed:', err.message));
   setInterval(poll, ch.pollMinutes * 60 * 1000).unref();
   setTimeout(poll, 15_000).unref();
+}
+// Membership fees: each period is posted (and the card on file charged) on its billing date; checked hourly.
+if (process.env.MEMBERSHIP_BILLING !== 'off') {
+  const bill = () => runExclusive('memberships', 30 * 60 * 1000, () => runMembershipBilling(db, app.locals.payments))
+    .then((r) => r?.length && console.log(`Memberships: ${r.filter((x) => x.charged).length} charged, ${r.filter((x) => x.declined).length} declined, ${r.length} billed`))
+    .catch((err) => console.error('Membership billing failed:', err.message));
+  setInterval(bill, 60 * 60 * 1000).unref();
+  setTimeout(bill, 45_000).unref();
 }
 // Nightly backups of every practice to BACKUP_DIR (checked hourly; a day's file is only written once).
 // Documents are included when they live on this server's disk, unless BACKUP_DOCUMENTS says otherwise.

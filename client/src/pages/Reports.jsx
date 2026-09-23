@@ -4,6 +4,7 @@ import Analytics from '../components/Analytics.jsx';
 import { useApi } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
 import { money, label, practiceToday, shiftDate } from '../format.js';
+import { MembershipReport } from '../components/Memberships.jsx';
 import { downloadCsv, dollars } from '../api.js';
 
 export default function Reports() {
@@ -16,8 +17,9 @@ export default function Reports() {
         <button className={tab === 'kpis' ? 'active' : ''} onClick={() => setParams({ tab: 'kpis' })}>Practice KPIs</button>
         <button className={tab === 'ops' ? 'active' : ''} onClick={() => setParams({ tab: 'ops' })}>Day sheet, production & A/R</button>
         <button className={tab === 'referrals' ? 'active' : ''} onClick={() => setParams({ tab: 'referrals' })}>Referrals</button>
+        <button className={tab === 'memberships' ? 'active' : ''} onClick={() => setParams({ tab: 'memberships' })}>Memberships</button>
       </div>
-      {tab === 'kpis' ? <Analytics /> : tab === 'referrals' ? <ReferralReport /> : <Operational />}
+      {tab === 'kpis' ? <Analytics /> : tab === 'referrals' ? <ReferralReport /> : tab === 'memberships' ? <MembershipReport /> : <Operational />}
     </>
   );
 }

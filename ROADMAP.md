@@ -88,7 +88,7 @@ The "OD / Curve" column shows which competitor has the feature: ✓ = has it, ~ 
 | 7 | ✅ **Corrected and void claims** (claim frequency codes 7 and 8), and the prior-auth reference (`REF*G1`) on the claim. | Fixing claims without phone calls. | ✓ / ✓ | P2 | S |
 | 8 | ✅ **Payment allocation.** Split payments across procedures and providers; show unapplied credit. | Collections by provider, for associate pay. | ✓ / ✓ | P1 | M |
 | 9 | ✅ **Adjustment types and write-off approval.** Configurable codes (courtesy, senior, bad debt, insurance write-off); optional manager approval above a threshold. | Reporting and loss control. | ✓ / ✓ | P2 | S |
-| 10 | **In-house membership / discount plans.** Monthly or annual fee, discount fee schedule, included cleanings, auto-billing on the saved card. | Big revenue driver for uninsured patients; Curve and Open Dental both support it. | ~ / ✓ | P1 | M |
+| 10 | ✅ **In-house membership / discount plans.** Monthly or annual fee, discount fee schedule, included cleanings, auto-billing on the saved card. | Big revenue driver for uninsured patients; Curve and Open Dental both support it. | ~ / ✓ | P1 | M |
 | 11 | **Multiple office fee schedules:** standard, cash, per provider, and fee history. | Associates and specialists often have different fees. | ✓ / ✓ | P2 | M |
 | 12 | **Collections workflow.** Finance charges, late fees, collection letters (30/60/90), bad-debt write-off, sending to a collection agency. | Standard A/R control. | ✓ / ~ | P2 | M |
 | 13 | ✅ **Balance transfers between family members,** and income transfers. | Common front-desk correction. | ✓ / ✓ | P2 | S |

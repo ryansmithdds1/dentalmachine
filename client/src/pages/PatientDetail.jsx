@@ -19,6 +19,7 @@ import RxTab from '../components/patient/RxTab.jsx';
 import { LabCaseForm, TaskForm, WaitlistForm, LAB_STATUSES } from '../components/OfficeForms.jsx';
 import { api } from '../api.js';
 import { CustomFieldValues, MergeDialog } from '../components/Switching.jsx';
+import { MembershipCard } from '../components/Memberships.jsx';
 
 export default function PatientDetail() {
   const { id } = useParams();
@@ -204,6 +205,7 @@ function Overview({ p, reload }) {
         </div>
         <VisitHistory visits={p.past_appointments || []} />
         <Referrals patient={p} onChange={reload} />
+        <MembershipCard patient={p} onChange={reload} />
         <div className="card">
           <h2>Recall</h2>
           {p.recalls.length === 0 ? <div className="muted">No recall set. Completing a prophy creates one automatically.</div> : p.recalls.map((r) => (

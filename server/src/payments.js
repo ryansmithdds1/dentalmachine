@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { HttpError } from './auth.js';
 import { insert, practiceNow } from './util.js';
 import { planStatus } from './routes/family.js';
@@ -78,12 +79,12 @@ export function createPayments({ config, fetchImpl = globalThis.fetch }) {
       mode: 'sandbox', enabled: true,
       async refund({ reference }) {
         if (!String(reference || '').startsWith('sbx_')) throw new HttpError(400, "That payment wasn't made by card — refund it by cash or check");
-        return { reference: `sbx_re_${Date.now().toString(36)}`, status: 'succeeded' };
+        return { reference: `sbx_re_${Date.now().toString(36)}${randomBytes(4).toString('hex')}`, status: 'succeeded' };
       },
       async charge({ method, amount }) {
         if (method.last4 === '0002') return { ok: false, reason: 'Card declined (generic decline)' };
         if (amount < 50) return { ok: false, reason: 'Amount too small' };
-        return { ok: true, reference: `sbx_pi_${Date.now().toString(36)}` };
+        return { ok: true, reference: `sbx_pi_${Date.now().toString(36)}${randomBytes(4).toString('hex')}` };
       },
     };
   }

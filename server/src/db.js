@@ -660,6 +660,40 @@ CREATE TABLE IF NOT EXISTS portal_codes (
 CREATE INDEX IF NOT EXISTS idx_portal_codes ON portal_codes(practice_id, contact);
 
 -- Patients without an appointment who want one (or an earlier one), and when they can come.
+-- In-house membership plans and the patients enrolled in them.
+CREATE TABLE IF NOT EXISTS membership_plans (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  name TEXT NOT NULL,
+  description TEXT,
+  price INTEGER NOT NULL,
+  interval TEXT NOT NULL DEFAULT 'month' CHECK (interval IN ('month','year')),
+  discount_pct INTEGER NOT NULL DEFAULT 0,
+  included TEXT NOT NULL DEFAULT '[]',
+  min_age INTEGER,
+  max_age INTEGER,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS memberships (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  plan_id INTEGER NOT NULL REFERENCES membership_plans(id),
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','past_due','cancelled')),
+  start_date TEXT NOT NULL,
+  next_bill_date TEXT NOT NULL,
+  paid_through TEXT,
+  payment_method_id INTEGER REFERENCES payment_methods(id),
+  autopay INTEGER NOT NULL DEFAULT 1,
+  billing_failures INTEGER NOT NULL DEFAULT 0,
+  billing_message TEXT,
+  billing_lock TEXT,
+  cancelled_at TEXT,
+  cancel_reason TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 -- Practice-defined forms (consents, policies, intake): a list of fields, versioned when edited.
 CREATE TABLE IF NOT EXISTS form_templates (
   id INTEGER PRIMARY KEY,
@@ -1046,6 +1080,7 @@ const COLUMNS = [
   ['practices', 'reminder_steps', 'TEXT'],
   ['practices', 'custom_fields', 'TEXT'],
   ['patients', 'custom', 'TEXT'],
+  ['ledger_entries', 'membership_id', 'INTEGER REFERENCES memberships(id)'],
   ['form_requests', 'template_id', 'INTEGER REFERENCES form_templates(id)'],
   ['form_requests', 'appointment_id', 'INTEGER REFERENCES appointments(id)'],
   ['form_requests', 'packet_id', 'INTEGER'],
