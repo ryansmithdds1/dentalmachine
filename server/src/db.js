@@ -658,6 +658,61 @@ CREATE TABLE IF NOT EXISTS portal_codes (
 );
 CREATE INDEX IF NOT EXISTS idx_portal_codes ON portal_codes(practice_id, contact);
 
+-- One insurance check or EFT and the claims it paid (from an ERA, or posted by hand from a paper EOB).
+CREATE TABLE IF NOT EXISTS insurance_checks (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  carrier_id INTEGER REFERENCES insurance_carriers(id),
+  payer_name TEXT,
+  check_number TEXT,
+  check_date TEXT NOT NULL,
+  amount INTEGER NOT NULL,
+  method TEXT NOT NULL DEFAULT 'check',
+  provider_adjustments TEXT,
+  era_import_id INTEGER,
+  deposit_id INTEGER,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Kinds of ledger adjustment (courtesy discount, bad debt, NSF fee...), for reporting and approval.
+CREATE TABLE IF NOT EXISTS adjustment_types (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  name TEXT NOT NULL,
+  direction TEXT NOT NULL DEFAULT 'credit' CHECK (direction IN ('credit','debit')),
+  active INTEGER NOT NULL DEFAULT 1,
+  UNIQUE (practice_id, name)
+);
+
+-- An employer group's dental coverage, shared by everyone enrolled in it.
+CREATE TABLE IF NOT EXISTS insurance_plans (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  carrier_id INTEGER NOT NULL REFERENCES insurance_carriers(id),
+  name TEXT,
+  group_number TEXT,
+  annual_max INTEGER NOT NULL DEFAULT 150000,
+  deductible INTEGER NOT NULL DEFAULT 5000,
+  family_deductible INTEGER NOT NULL DEFAULT 0,
+  pct_preventive INTEGER NOT NULL DEFAULT 100,
+  pct_basic INTEGER NOT NULL DEFAULT 80,
+  pct_major INTEGER NOT NULL DEFAULT 50,
+  benefit_month INTEGER NOT NULL DEFAULT 1,
+  ortho_max INTEGER NOT NULL DEFAULT 0,
+  ortho_pct INTEGER NOT NULL DEFAULT 50,
+  ortho_age_limit INTEGER,
+  wait_basic_months INTEGER NOT NULL DEFAULT 0,
+  wait_major_months INTEGER NOT NULL DEFAULT 0,
+  downgrade_composites INTEGER NOT NULL DEFAULT 0,
+  frequencies TEXT,
+  coverage_overrides TEXT,
+  fee_schedule_id INTEGER,
+  notes TEXT,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- One-off changes to a provider schedule: a day off, vacation, or different hours on a date.
 CREATE TABLE IF NOT EXISTS provider_exceptions (
   id INTEGER PRIMARY KEY,
@@ -787,6 +842,26 @@ const COLUMNS = [
   ['ledger_entries', 'refund_of_id', 'INTEGER'],
   ['practices', 'lock_date', 'TEXT'],
   ['recalls', 'appointment_id', 'INTEGER'],
+  ['patient_insurance', 'plan_id', 'INTEGER'],
+  ['claim_items', 'paid_amount', 'INTEGER NOT NULL DEFAULT 0'],
+  ['claim_items', 'adjusted_amount', 'INTEGER NOT NULL DEFAULT 0'],
+  ['claim_items', 'patient_resp', 'INTEGER NOT NULL DEFAULT 0'],
+  ['claim_items', 'allowed_amount', 'INTEGER'],
+  ['claim_items', 'adjustments', 'TEXT'],
+  ['claims', 'primary_claim_id', 'INTEGER'],
+  ['claims', 'frequency_code', "TEXT NOT NULL DEFAULT '1'"],
+  ['claims', 'original_reference', 'TEXT'],
+  ['claims', 'corrected_from_id', 'INTEGER'],
+  ['claims', 'preauth_number', 'TEXT'],
+  ['claims', 'paid_date', 'TEXT'],
+  ['ledger_entries', 'adjustment_type', 'TEXT'],
+  ['ledger_entries', 'insurance_check_id', 'INTEGER'],
+  ['ledger_entries', 'transfer_id', 'TEXT'],
+  ['practices', 'adjustment_approval_limit', 'INTEGER'],
+  ['preauths', 'expires_at', 'TEXT'],
+  ['preauths', 'reference_number', 'TEXT'],
+  ['era_imports', 'provider_adjustments', 'TEXT'],
+  ['patient_insurance', 'effective_date', 'TEXT'],
   ['patient_forms', 'review_status', 'TEXT'],
   ['treatment_plans', 'signed_snapshot', 'TEXT'],
   ['clinical_notes', 'signed_by', 'INTEGER'],

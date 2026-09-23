@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api.js';
 import { useApi } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
@@ -10,6 +10,7 @@ import { Badge, ErrorBox, Modal, useSubmit } from '../components/ui.jsx';
 export default function ClaimDetail() {
   const { id } = useParams();
   const { can } = useAuth();
+  const navigate = useNavigate();
   const { data: c, reload, error: loadErr } = useApi(`/claims/${id}`);
   const [modal, setModal] = useState(null);
   const [err, setErr] = useState(null);
@@ -26,13 +27,14 @@ export default function ClaimDetail() {
   if (loadErr) return <div className="error">{loadErr.message}</div>;
   if (!c) return <div className="empty">Loading…</div>;
   const w = can('billing:write');
+  const paidLines = c.items.some((i) => i.paid_amount || i.adjusted_amount);
   const sendElectronic = () => act(() => sendClaims([c.id], ch));
 
   return (
     <>
       <div className="page-header">
         <div>
-          <h1>Claim #{c.id} <Badge value={c.status} /> <ChStatus claim={c} /></h1>
+          <h1>Claim #{c.id} <Badge value={c.status} /> <ChStatus claim={c} />{c.frequency_code === '7' ? <span className="badge info">Corrected claim</span> : c.frequency_code === '8' ? <span className="badge warn">Void notice</span> : null}</h1>
           <div className="muted"><Link to={`/patients/${c.patient_id}`}>{c.first_name} {c.last_name}</Link> · {c.carrier_name}</div>
         </div>
         <div className="actions no-print">
@@ -42,6 +44,18 @@ export default function ClaimDetail() {
           {w && ['submitted', 'partially_paid'].includes(c.status) && <button className="primary" onClick={() => setModal('pay')}>Enter EOB payment</button>}
           {w && c.status === 'submitted' && <button className="danger" onClick={() => setModal('deny')}>Denied</button>}
           {w && ['draft', 'denied'].includes(c.status) && <button className="danger" onClick={() => confirm('Void this claim? Procedures become billable again.') && act(() => api.post(`/claims/${c.id}/void`))}>Void</button>}
+          {w && ['submitted', 'denied'].includes(c.status) && (
+            <>
+              <button title="Send a replacement claim (frequency 7) — the payer's claim number is needed" onClick={() => {
+                const ref = window.prompt("Corrected claim: a new claim replaces this one at the payer.\n\nPayer's claim number for the original:", c.payer_claim_number || '');
+                if (ref?.trim()) act(async () => { const n = await api.post(`/claims/${c.id}/correct`, { original_reference: ref }); navigate(`/claims/${n.id}`); });
+              }}>Corrected claim…</button>
+              <button className="danger" title="Tell the payer to cancel this claim (frequency 8)" onClick={() => {
+                const ref = window.prompt("Void at the payer: sends a cancellation for this claim.\n\nPayer's claim number for the original:", c.payer_claim_number || '');
+                if (ref?.trim()) act(async () => { const n = await api.post(`/claims/${c.id}/correct`, { kind: 'void', original_reference: ref }); navigate(`/claims/${n.id}`); });
+              }}>Void at payer…</button>
+            </>
+          )}
           {w && ['paid', 'partially_paid'].includes(c.status) && (
             <button onClick={() => {
               const reason = window.prompt('Reopen this claim? Its insurance payments and write-offs are reversed on the ledger and it goes back to waiting on the payer.\n\nReason:');
@@ -79,16 +93,17 @@ export default function ClaimDetail() {
       <div className="card">
         <h2>Services</h2>
         <table>
-          <thead><tr><th>Date</th><th>Code</th><th>Description</th><th>Tooth</th><th>Surf</th><th>Provider (NPI)</th><th className="num">Fee</th><th className="num">Est. ins.</th></tr></thead>
+          <thead><tr><th>Date</th><th>Code</th><th>Description</th><th>Tooth</th><th>Surf</th><th>Provider (NPI)</th><th className="num">Fee</th><th className="num">Est. ins.</th>{paidLines && <><th className="num">Paid</th><th className="num">Write-off</th><th className="num">Patient</th></>}</tr></thead>
           <tbody>
             {c.items.map((i) => (
               <tr key={i.id}>
                 <td>{fmtDate(i.completed_at)}</td><td>{i.code}</td><td>{i.description}</td><td>{i.tooth}</td><td>{i.surfaces}</td>
                 <td>{i.provider_name} {i.provider_npi ? `(${i.provider_npi})` : ''}</td>
                 <td className="num">{money(i.fee)}</td><td className="num">{money(i.estimated_amount)}</td>
+                {paidLines && <><td className="num">{money(i.paid_amount)}</td><td className="num">{money(i.adjusted_amount)}</td><td className="num">{money(i.patient_resp)}</td></>}
               </tr>
             ))}
-            <tr className="totals-row"><td colSpan={6}>Totals · paid {money(c.paid_amount)}</td><td className="num">{money(c.total_fee)}</td><td className="num">{money(c.estimated_amount)}</td></tr>
+            <tr className="totals-row"><td colSpan={6}>Totals · paid {money(c.paid_amount)}</td><td className="num">{money(c.total_fee)}</td><td className="num">{money(c.estimated_amount)}</td>{paidLines && <td colSpan={3} />}</tr>
           </tbody>
         </table>
         <div className="muted" style={{ marginTop: 8 }}>

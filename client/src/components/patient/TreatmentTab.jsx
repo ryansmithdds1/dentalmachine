@@ -99,7 +99,7 @@ function ProcTable({ procs, estimate, canEdit, act }) {
               <td>{p.tooth ? `#${p.tooth}` : ''} {p.surfaces || ''}</td>
               <td><Badge value={p.status} />{p.appointment_id && p.status === 'planned' ? <div className="muted" style={{ fontSize: 11 }}>scheduled</div> : null}</td>
               <td className="num">{money(p.fee)}</td>
-              {estimate && <>{estimate.total_write_off > 0 && <td className="num muted">{est[p.id]?.write_off ? `−${money(est[p.id].write_off)}` : '—'}</td>}<td className="num">{est[p.id] ? money(est[p.id].insurance) : '—'}</td><td className="num">{est[p.id] ? money(est[p.id].patient) : '—'}</td></>}
+              {estimate && <>{estimate.total_write_off > 0 && <td className="num muted">{est[p.id]?.write_off ? `−${money(est[p.id].write_off)}` : '—'}</td>}<td className="num">{est[p.id] ? money(est[p.id].insurance) : '—'}{est[p.id]?.notes?.length ? <div className="est-note" title={est[p.id].notes.join('\n')}>{est[p.id].notes.join(' · ')}</div> : null}</td><td className="num">{est[p.id] ? money(est[p.id].patient) : '—'}</td></>}
               <td style={{ whiteSpace: 'nowrap' }}>
                 {canEdit && p.status === 'planned' && (
                   <>

@@ -108,8 +108,12 @@ export default function ppoRoutes({ db, config }) {
 
   r.put('/preauths/:aid', requirePermission('billing:write'), async (req, res) => {
     const pa = await findOr404(db, 'preauths', req.params.aid, req.user.practice_id, 'Pre-authorization');
-    const row = pick(req.body, ['status', 'approved_amount', 'payer_reference', 'notes']);
+    const row = pick(req.body, ['status', 'approved_amount', 'payer_reference', 'notes', 'expires_at']);
     requireOneOf(row.status, ['draft', 'submitted', 'approved', 'denied'], 'status');
+    // Status only moves forward: draft → submitted → approved/denied (a denial can be resubmitted).
+    const allowed = { draft: ['draft', 'submitted'], submitted: ['submitted', 'approved', 'denied'], approved: ['approved'], denied: ['denied', 'submitted'] };
+    if (row.status && !allowed[pa.status]?.includes(row.status)) throw new HttpError(409, `A ${pa.status} pre-authorization can't go back to ${row.status}`);
+    if (row.expires_at && !/^\d{4}-\d{2}-\d{2}$/.test(row.expires_at)) throw new HttpError(400, 'expires_at must be YYYY-MM-DD');
     if (row.approved_amount != null) row.approved_amount = toCents(row.approved_amount, 'approved_amount');
     if (row.status === 'submitted' && pa.status !== 'submitted') row.submitted_at = new Date().toISOString();
     if (['approved', 'denied'].includes(row.status)) row.responded_at = new Date().toISOString();

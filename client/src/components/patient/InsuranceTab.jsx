@@ -6,6 +6,7 @@ import { useAuth } from '../../auth.jsx';
 import { money, fmtDate, toCents, fromCents } from '../../format.js';
 import { Badge, ErrorBox, Modal, useSubmit } from '../ui.jsx';
 import Eligibility from './Eligibility.jsx';
+import InsurancePlanForm from '../InsurancePlanForm.jsx';
 
 export default function InsuranceTab({ patient, onChange }) {
   const { can } = useAuth();
@@ -50,7 +51,10 @@ export default function InsuranceTab({ patient, onChange }) {
                   <td>{p.carrier_name}</td>
                   <td>{p.subscriber_name}<div className="muted">{p.relationship}</div></td>
                   <td>{p.subscriber_id}<div className="muted">{p.group_number}</div></td>
-                  <td>{p.pct_preventive}% / {p.pct_basic}% / {p.pct_major}%</td>
+                  <td>
+                    {p.pct_preventive}% / {p.pct_basic}% / {p.pct_major}%
+                    {p.plan && <div className="muted" style={{ fontSize: 11 }}>{p.plan.name || 'Plan'}{p.plan.members > 1 ? ` · shared by ${p.plan.members}` : ''} · <button className="link" style={{ fontSize: 11 }} onClick={() => setModal({ plan: p.plan })}>limits & rules</button></div>}
+                  </td>
                   <td className="num">{money(p.annual_max)}</td>
                   <td className="num">{money(p.deductible_met)} of {money(p.deductible)}{p.benefit_month > 1 && <div className="muted" style={{ fontSize: 12 }}>year starts {new Date(2000, p.benefit_month - 1, 1).toLocaleString('en-US', { month: 'short' })} 1</div>}</td>
                   <td>{can('patients:write') && <button className="small" onClick={() => setModal({ policy: p })}>Edit</button>}</td>
@@ -108,7 +112,12 @@ export default function InsuranceTab({ patient, onChange }) {
         </div>
       )}
 
-      {modal && (
+      {modal?.plan && (
+        <Modal title={`Plan: ${modal.plan.name || modal.plan.group_number || 'benefits'}`} wide onClose={() => setModal(null)}>
+          <InsurancePlanForm plan={modal.plan} onDone={() => { setModal(null); refresh(); }} />
+        </Modal>
+      )}
+      {modal && !modal.plan && (
         <Modal title={modal.policy ? 'Edit policy' : 'Add insurance policy'} wide onClose={() => setModal(null)}>
           <PolicyForm patient={patient} policy={modal.policy} onDone={() => { setModal(null); refresh(); }} />
         </Modal>
@@ -135,13 +144,27 @@ function PolicyForm({ patient, policy, onDone }) {
     pct_major: policy?.pct_major ?? 50,
     active: policy ? !!policy.active : true,
     benefit_month: policy?.benefit_month ?? 1,
+    plan_id: policy?.plan_id ?? '',
+    effective_date: policy?.effective_date || '',
   }));
+  // Existing plans for the carrier (employer groups): choosing one fills in its benefits.
+  const { data: plans } = useApi(form.carrier_id ? `/insurance-plans?carrier_id=${form.carrier_id}` : null);
+  const pickPlan = (id) => {
+    const pl = plans?.find((x) => String(x.id) === String(id));
+    if (!pl) return setForm({ ...form, plan_id: '' });
+    setForm({
+      ...form, plan_id: pl.id, group_number: pl.group_number || form.group_number,
+      annual_max: fromCents(pl.annual_max), deductible: fromCents(pl.deductible), pct_preventive: pl.pct_preventive, pct_basic: pl.pct_basic, pct_major: pl.pct_major, benefit_month: pl.benefit_month,
+    });
+  };
+  const chosenPlan = plans?.find((x) => String(x.id) === String(form.plan_id));
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value });
   const { submit, busy, error } = useSubmit(async () => {
     const body = {
       ...form, carrier_id: Number(form.carrier_id),
       annual_max: toCents(form.annual_max), deductible: toCents(form.deductible), deductible_met: toCents(form.deductible_met),
       pct_preventive: Number(form.pct_preventive), pct_basic: Number(form.pct_basic), pct_major: Number(form.pct_major), benefit_month: Number(form.benefit_month),
+      plan_id: form.plan_id ? Number(form.plan_id) : null, effective_date: form.effective_date || null,
     };
     if (policy) await api.put(`/insurance/${policy.id}`, body);
     else await api.post(`/patients/${patient.id}/insurance`, body);
@@ -160,6 +183,16 @@ function PolicyForm({ patient, policy, onDone }) {
           </select>
         </label>
         <label>Priority<select value={form.priority} onChange={set('priority')}><option value="primary">Primary</option><option value="secondary">Secondary</option></select></label>
+        {plans?.length > 0 && (
+          <label className="full">
+            Employer plan
+            <select value={form.plan_id} onChange={(e) => pickPlan(e.target.value)}>
+              <option value="">New plan (or match by group #)</option>
+              {plans.map((pl) => <option key={pl.id} value={pl.id}>{pl.name || 'Plan'} · group {pl.group_number || '—'} · {pl.members} patient{pl.members === 1 ? '' : 's'}</option>)}
+            </select>
+          </label>
+        )}
+        {chosenPlan?.members > (policy?.plan_id === chosenPlan.id ? 1 : 0) && <div className="full muted" style={{ fontSize: 12 }}>Benefit changes below apply to everyone on this plan ({chosenPlan.members} patient{chosenPlan.members === 1 ? '' : 's'}).</div>}
         <label>Subscriber name *<input required value={form.subscriber_name} onChange={set('subscriber_name')} /></label>
         <label>Member ID *<input required value={form.subscriber_id} onChange={set('subscriber_id')} /></label>
         <label>Subscriber DOB<input type="date" value={form.subscriber_dob} onChange={set('subscriber_dob')} /></label>
@@ -170,6 +203,7 @@ function PolicyForm({ patient, policy, onDone }) {
           </select>
         </label>
         <label>Group #<input value={form.group_number} onChange={set('group_number')} /></label>
+        <label>Coverage start date<input type="date" value={form.effective_date} onChange={set('effective_date')} /></label>
         <label>Annual max ($)<input type="number" step="0.01" value={form.annual_max} onChange={set('annual_max')} /></label>
         <label>Deductible ($)<input type="number" step="0.01" value={form.deductible} onChange={set('deductible')} /></label>
         <label>Deductible met this benefit year ($)<input type="number" step="0.01" value={form.deductible_met} onChange={set('deductible_met')} /></label>

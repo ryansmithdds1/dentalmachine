@@ -79,21 +79,21 @@ The "OD / Curve" column shows which competitor has the feature: ✓ = has it, ~ 
 
 | # | Feature | Why | OD / Curve | Pri | Size |
 |---|---|---|---|---|---|
-| 1 | **Secondary claims and coordination of benefits.** Estimates across primary and secondary; generate the secondary claim once primary pays, carrying the primary payment in the 837 (loops 2320/2330). | About 15–20% of patients have dual coverage. | ✓ / ✓ | P1 | L |
-| 2 | **Insurance plan benefits.** Frequency limits (BWX 1/12 mo, FMX 1/60 mo, prophy 2/yr), waiting periods, downgrades (posterior composite → amalgam), per-code coverage overrides, ortho lifetime max, family deductible and max, benefit year start. | Estimates are wrong without these; it's the #1 front-desk complaint. | ✓ / ✓ | P1 | L |
-| 3 | **Shared insurance plans (employer plans)** instead of free-text subscribers per patient. Edit a plan once and every subscriber updates. | Data quality; how every PMS models it. | ✓ / ✓ | P1 | M |
-| 4 | **Bulk insurance payments / EOB batch posting.** One check spread across several claims, with procedure-level posting, plus insurance deposit batches. | Paper EOBs still happen daily. | ✓ / ✓ | P1 | M |
-| 5 | **Procedure-level ERA posting.** Post service lines (`SVC`) per procedure, handle the check-level adjustments (`PLB`), and separate contractual (CO) from other (PI/OA) adjustments for review. | Accurate write-offs and provider collections. | ✓ / ✓ | P1 | M |
+| 1 | ✅ **Secondary claims and coordination of benefits.** Estimates across primary and secondary; generate the secondary claim once primary pays, carrying the primary payment in the 837 (loops 2320/2330). | About 15–20% of patients have dual coverage. | ✓ / ✓ | P1 | L |
+| 2 | ✅ **Insurance plan benefits.** Frequency limits (BWX 1/12 mo, FMX 1/60 mo, prophy 2/yr), waiting periods, downgrades (posterior composite → amalgam), per-code coverage overrides, ortho lifetime max, family deductible and max, benefit year start. | Estimates are wrong without these; it's the #1 front-desk complaint. | ✓ / ✓ | P1 | L |
+| 3 | ✅ **Shared insurance plans (employer plans)** instead of free-text subscribers per patient. Edit a plan once and every subscriber updates. | Data quality; how every PMS models it. | ✓ / ✓ | P1 | M |
+| 4 | ✅ **Bulk insurance payments / EOB batch posting.** One check spread across several claims, with procedure-level posting, plus insurance deposit batches. | Paper EOBs still happen daily. | ✓ / ✓ | P1 | M |
+| 5 | ✅ **Procedure-level ERA posting.** Post service lines (`SVC`) per procedure, handle the check-level adjustments (`PLB`), and separate contractual (CO) from other (PI/OA) adjustments for review. | Accurate write-offs and provider collections. | ✓ / ✓ | P1 | M |
 | 6 | **Claim attachments** (x-rays, perio charts, narratives) via NEA/Vyne or DentalXChange, with the attachment reference (`PWK`) in the 837. | Crowns, SRP and perio claims are denied without them. | ✓ / ✓ | P1 | L |
-| 7 | **Corrected and void claims** (claim frequency codes 7 and 8), and the prior-auth reference (`REF*G1`) on the claim. | Fixing claims without phone calls. | ✓ / ✓ | P2 | S |
-| 8 | **Payment allocation.** Split payments across procedures and providers; show unapplied credit. | Collections by provider, for associate pay. | ✓ / ✓ | P1 | M |
-| 9 | **Adjustment types and write-off approval.** Configurable codes (courtesy, senior, bad debt, insurance write-off); optional manager approval above a threshold. | Reporting and loss control. | ✓ / ✓ | P2 | S |
+| 7 | ✅ **Corrected and void claims** (claim frequency codes 7 and 8), and the prior-auth reference (`REF*G1`) on the claim. | Fixing claims without phone calls. | ✓ / ✓ | P2 | S |
+| 8 | ✅ **Payment allocation.** Split payments across procedures and providers; show unapplied credit. | Collections by provider, for associate pay. | ✓ / ✓ | P1 | M |
+| 9 | ✅ **Adjustment types and write-off approval.** Configurable codes (courtesy, senior, bad debt, insurance write-off); optional manager approval above a threshold. | Reporting and loss control. | ✓ / ✓ | P2 | S |
 | 10 | **In-house membership / discount plans.** Monthly or annual fee, discount fee schedule, included cleanings, auto-billing on the saved card. | Big revenue driver for uninsured patients; Curve and Open Dental both support it. | ~ / ✓ | P1 | M |
 | 11 | **Multiple office fee schedules:** standard, cash, per provider, and fee history. | Associates and specialists often have different fees. | ✓ / ✓ | P2 | M |
 | 12 | **Collections workflow.** Finance charges, late fees, collection letters (30/60/90), bad-debt write-off, sending to a collection agency. | Standard A/R control. | ✓ / ~ | P2 | M |
-| 13 | **Balance transfers between family members,** and income transfers. | Common front-desk correction. | ✓ / ✓ | P2 | S |
+| 13 | ✅ **Balance transfers between family members,** and income transfers. | Common front-desk correction. | ✓ / ✓ | P2 | S |
 | 14 | **Batch eligibility** for tomorrow's schedule, parsing frequency and history from the 271 response. | Saves 1–2 hours of front-desk work a day. | ✓ / ✓ | P2 | M |
-| 15 | **Pre-auth expiry dates,** with approved amounts feeding estimates. | Accuracy. | ✓ / ✓ | P3 | S |
+| 15 | ✅ (expiry & status rules) **Pre-auth expiry dates,** with approved amounts feeding estimates. | Accuracy. | ✓ / ✓ | P3 | S |
 | 16 | **Deposit slips and bank reconciliation.** | Office manager close-out. | ✓ / ~ | P2 | S |
 
 ### 2.2 Platform and practice operations
@@ -171,12 +171,12 @@ The "OD / Curve" column shows which competitor has the feature: ✓ = has it, ~ 
 
 | # | Report | Pri | Size |
 |---|---|---|---|
-| 68 | **Collections by provider** (needs item 8) and **production by provider with adjustments**; associate compensation basis. | P1 | M |
-| 69 | **Aging by guarantor**, split into insurance and patient, "as of" any date; credit-balance report. | P1 | M |
+| 68 | ✅ **Collections by provider** (needs item 8) and **production by provider with adjustments**; associate compensation basis. | P1 | M |
+| 69 | ✅ **Aging by guarantor**, split into insurance and patient, "as of" any date; credit-balance report. | P1 | M |
 | 70 | **Referral sources and referring-doctor report**, with production per source. | P2 | S |
 | 71 | **Hygiene report:** production, reappointment, perio vs prophy ratio, recall effectiveness. | P2 | S |
 | 72 | **Treatment plan report:** presented vs accepted vs scheduled vs completed, by provider. | P2 | S |
-| 73 | **Write-off and adjustment report** by type. | P2 | S |
+| 73 | ✅ **Write-off and adjustment report** by type. | P2 | S |
 | 74 | ✅ **Audit log search** (date range, patient, user, action) with CSV export, beyond the current 500-row cap. | P1 | S |
 | 75 | **End-of-day / month-end close** with locking (pairs with the lock date in Part 1). | P2 | S |
 

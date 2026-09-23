@@ -1,43 +1,14 @@
 import { HttpError } from './auth.js';
-import { coverageTier } from './defaults.js';
-import { insert, addMonths, practiceNow, mapSeq } from './util.js';
+import { insert, addMonths, practiceNow } from './util.js';
+import { benefitYear, deductibleMet, estimateCoverage } from './benefits.js';
+
+export { benefitYear, deductibleMet, benefitsUsed, estimateCoverage, withPlan, planFor } from './benefits.js';
 
 export async function patientBalance(db, practiceId, patientId) {
   return (await db.get(
     'SELECT COALESCE(SUM(amount), 0) AS balance FROM ledger_entries WHERE practice_id = ? AND patient_id = ?',
     practiceId, patientId,
   )).balance;
-}
-
-// A plan's benefit year starts on the first of `benefit_month` (1 = calendar year).
-export function benefitYear(policy, date) {
-  const month = Math.min(12, Math.max(1, Number(policy?.benefit_month) || 1));
-  let year = Number(date.slice(0, 4));
-  if (Number(date.slice(5, 7)) < month) year -= 1;
-  const mm = String(month).padStart(2, '0');
-  return { start: `${year}-${mm}-01`, end: `${year + 1}-${mm}-01` };
-}
-
-// Deductible met in the benefit year containing `date`: it starts again at zero each new benefit year.
-export const deductibleMet = (policy, date) => {
-  const { start } = benefitYear(policy, date);
-  return !policy.deductible_year || policy.deductible_year === start ? policy.deductible_met || 0 : 0;
-};
-
-// Benefits used in the benefit year containing `date`, counted by date of service: what paid claims
-// paid, plus what open claims are expected to pay (so two claims can't both spend the same maximum).
-export async function benefitsUsed(db, policy, date) {
-  const today = date || (await practiceNow(db, policy.practice_id)).slice(0, 10);
-  const { start, end } = benefitYear(policy, today);
-  return (await db.get(
-    `SELECT COALESCE(SUM(CASE WHEN c.status = 'paid' THEN c.paid_amount
-         WHEN c.paid_amount > c.estimated_amount THEN c.paid_amount ELSE c.estimated_amount END), 0) AS used
-     FROM claims c
-     WHERE c.patient_insurance_id = ? AND c.status IN ('draft','submitted','partially_paid','paid')
-       AND (SELECT MIN(pr.completed_at) FROM claim_items ci JOIN procedures pr ON pr.id = ci.procedure_id WHERE ci.claim_id = c.id) >= ?
-       AND (SELECT MIN(pr.completed_at) FROM claim_items ci JOIN procedures pr ON pr.id = ci.procedure_id WHERE ci.claim_id = c.id) < ?`,
-    policy.id, start, end,
-  )).used;
 }
 
 // What an account still expects from insurance: the payers' remaining estimates on open claims, and the
@@ -62,69 +33,6 @@ export async function primaryPolicy(db, practiceId, patientId) {
      ORDER BY CASE pi.priority WHEN 'primary' THEN 0 ELSE 1 END LIMIT 1`,
     practiceId, patientId,
   );
-}
-
-// Estimates insurance vs patient portion for a list of procedures, applying the
-// remaining deductible (not to preventive) and the remaining annual maximum in order.
-// For a secondary policy, pass `primary`: procedure id → { covered, write_off } from the primary claim.
-// The secondary then pays at most what's left after the primary, and nothing is written off twice.
-export async function estimateCoverage(db, policy, procedures, { primary = null } = {}) {
-  if (!policy) {
-    return {
-      policy: null,
-      items: procedures.map((p) => ({ procedure_id: p.id, fee: p.fee, allowed: p.fee, write_off: 0, deductible: 0, insurance: 0, patient: p.fee })),
-      total_fee: procedures.reduce((s, p) => s + p.fee, 0),
-      total_write_off: 0,
-      total_deductible: 0,
-      total_insurance: 0,
-      total_patient: procedures.reduce((s, p) => s + p.fee, 0),
-    };
-  }
-  // In-network (PPO) carriers pay from their fee schedule; the difference is written off.
-  const scheduleId = policy.fee_schedule_id ?? (await db.get('SELECT fee_schedule_id FROM insurance_carriers WHERE id = ?', policy.carrier_id))?.fee_schedule_id;
-  const allowedFor = async (p) => {
-    if (!scheduleId) return p.fee;
-    const row = await db.get('SELECT fee FROM fee_schedule_items WHERE fee_schedule_id = ? AND code = ?', scheduleId, p.code);
-    return row ? Math.min(row.fee, p.fee) : p.fee;
-  };
-  const today = (await practiceNow(db, policy.practice_id)).slice(0, 10);
-  let remainingMax = Math.max(0, policy.annual_max - (await benefitsUsed(db, policy, today)));
-  let remainingDeductible = Math.max(0, policy.deductible - deductibleMet(policy, today));
-  const items = await mapSeq(procedures, async (p) => {
-    const tier = coverageTier(p.category);
-    const pct = policy[`pct_${tier}`] ?? 0;
-    const contracted = await allowedFor(p);
-    let allowed = contracted;
-    let deductible = 0;
-    if (tier !== 'preventive' && remainingDeductible > 0) {
-      deductible = Math.min(remainingDeductible, allowed);
-      remainingDeductible -= deductible;
-      allowed -= deductible;
-    }
-    let insurance = Math.round((allowed * pct) / 100);
-    let writeOff = p.fee - contracted;
-    let owed = contracted;
-    const prior = primary?.get(p.id);
-    if (prior) {
-      // Coordination of benefits: the primary's allowed amount stands and its write-off isn't repeated.
-      owed = Math.max(0, p.fee - prior.write_off - prior.covered);
-      writeOff = 0;
-      insurance = Math.min(insurance, owed);
-    }
-    insurance = Math.min(insurance, remainingMax);
-    remainingMax -= insurance;
-    return { procedure_id: p.id, fee: p.fee, allowed: prior ? p.fee - prior.write_off : contracted, write_off: writeOff, tier, pct, deductible, insurance, primary_covered: prior?.covered ?? 0, patient: owed - insurance };
-  });
-  const sum = (k) => items.reduce((s, i) => s + i[k], 0);
-  return {
-    policy: { id: policy.id, carrier_name: policy.carrier_name, annual_max: policy.annual_max },
-    items,
-    total_fee: sum('fee'),
-    total_write_off: sum('write_off'),
-    total_deductible: sum('deductible'),
-    total_insurance: sum('insurance'),
-    total_patient: sum('patient'),
-  };
 }
 
 const RECALL_CODES = { D1110: 'prophy', D1120: 'prophy', D4910: 'perio_maint' };
@@ -187,7 +95,7 @@ export async function completeProcedure(db, user, procedure, { providerId, appoi
 export async function postClaimPayment(
   db,
   claim,
-  { amount, writeOff = 0, final = true, method = 'check', reference = null, userId = null, date, payerClaimNumber = null, deductible = null }
+  { amount, writeOff = 0, final = true, method = 'check', reference = null, userId = null, date, payerClaimNumber = null, deductible = null, lines = null, checkId = null }
 ) {
   const carrier = await db.get('SELECT ic.name FROM patient_insurance pi JOIN insurance_carriers ic ON ic.id = pi.carrier_id WHERE pi.id = ?', claim.patient_insurance_id);
   await db.tx(async () => {
@@ -195,14 +103,17 @@ export async function postClaimPayment(
       await insert(db, 'ledger_entries', {
         practice_id: claim.practice_id, patient_id: claim.patient_id, type: 'insurance_payment', amount: -amount,
         description: `Insurance payment - ${carrier.name} (claim #${claim.id})`, method, reference, claim_id: claim.id, entry_date: date, created_by: userId,
+        insurance_check_id: checkId,
       });
     }
     if (writeOff > 0) {
       await insert(db, 'ledger_entries', {
-        practice_id: claim.practice_id, patient_id: claim.patient_id, type: 'adjustment', amount: -writeOff,
+        practice_id: claim.practice_id, patient_id: claim.patient_id, type: 'adjustment', amount: -writeOff, adjustment_type: 'Insurance write-off',
         description: `Insurance write-off - ${carrier.name} (claim #${claim.id})`, claim_id: claim.id, entry_date: date, created_by: userId,
+        insurance_check_id: checkId,
       });
     }
+    await postClaimLines(db, claim, { amount, writeOff, lines });
     // Only an open claim takes a payment; a concurrent post rolls this one back instead of doubling it.
     const updated = await db.run(
       "UPDATE claims SET paid_amount = paid_amount + ?, status = ?, paid_at = datetime('now'), denial_reason = NULL, payer_claim_number = COALESCE(?, payer_claim_number) WHERE id = ? AND status IN ('submitted','partially_paid','denied')",
@@ -223,7 +134,117 @@ export async function postClaimPayment(
         await db.run('UPDATE patient_insurance SET deductible_met = ?, deductible_year = ? WHERE id = ?', met, start, policy.id);
       }
     }
+    await db.run('UPDATE claims SET paid_date = ? WHERE id = ?', date, claim.id);
   });
+  if (final) await createSecondaryClaim(db, claim.id, { userId }).catch(() => null);
+}
+
+// Records what a payment paid per procedure: the payer's own lines (835 service lines or an EOB entered
+// line by line), or else the amounts shared across the claim's procedures by their estimates.
+async function postClaimLines(db, claim, { amount, writeOff, lines }) {
+  const items = await db.all('SELECT ci.*, pr.code FROM claim_items ci JOIN procedures pr ON pr.id = ci.procedure_id WHERE ci.claim_id = ? ORDER BY ci.id', claim.id);
+  if (!items.length) return;
+  const byItem = new Map();
+  if (lines?.length) {
+    const unused = [...items];
+    for (const l of lines) {
+      const i = l.claim_item_id ? unused.findIndex((x) => x.id === l.claim_item_id)
+        : l.procedure_id ? unused.findIndex((x) => x.procedure_id === l.procedure_id)
+          : Math.max(unused.findIndex((x) => x.code === l.code && x.fee === l.billed), unused.findIndex((x) => x.code === l.code));
+      if (i < 0) continue;
+      byItem.set(unused[i].id, l);
+      unused.splice(i, 1);
+    }
+  }
+  const share = (total, key) => {
+    const weights = items.map((x) => (key === 'paid' ? x.estimated_amount || x.fee : x.write_off || x.fee));
+    const sumW = weights.reduce((s, w) => s + w, 0) || 1;
+    let left = total;
+    return items.map((x, i) => {
+      const part = i === items.length - 1 ? left : Math.round((total * weights[i]) / sumW);
+      left -= part;
+      return part;
+    });
+  };
+  const paidParts = share(amount, 'paid');
+  const woParts = share(writeOff, 'write_off');
+  for (const [i, x] of items.entries()) {
+    const l = byItem.get(x.id);
+    const paid = l ? l.paid || 0 : byItem.size ? 0 : paidParts[i];
+    const adjusted = l ? l.write_off || 0 : byItem.size ? 0 : woParts[i];
+    await db.run(
+      'UPDATE claim_items SET paid_amount = paid_amount + ?, adjusted_amount = adjusted_amount + ?, patient_resp = ?, allowed_amount = COALESCE(?, allowed_amount), adjustments = COALESCE(?, adjustments) WHERE id = ?',
+      paid, adjusted, l?.patient_resp ?? x.patient_resp, l?.allowed ?? null, l?.adjustments ? JSON.stringify(l.adjustments) : null, x.id,
+    );
+  }
+}
+
+// Creates a claim for completed procedures on one policy, with the estimate. For a secondary policy the
+// estimate covers what the primary leaves (from the primary claim's payment when it has paid).
+export async function createClaim(db, { practiceId, policyId, procedureIds, userId = null, extra = {} }) {
+  const policy = await db.get('SELECT * FROM patient_insurance WHERE id = ? AND practice_id = ?', policyId, practiceId);
+  if (!policy) throw new HttpError(404, 'Policy not found');
+  if (!Array.isArray(procedureIds) || !procedureIds.length) throw new HttpError(400, 'procedure_ids is required');
+  const procs = [];
+  for (const id of procedureIds) {
+    const p = await db.get('SELECT * FROM procedures WHERE id = ? AND practice_id = ?', Number(id), practiceId);
+    if (!p) throw new HttpError(404, 'Procedure not found');
+    if (p.patient_id !== policy.patient_id) throw new HttpError(400, `Procedure ${p.id} belongs to another patient`);
+    if (p.status !== 'completed') throw new HttpError(400, `Procedure ${p.id} is not completed`);
+    const onClaim = await db.get("SELECT c.id FROM claim_items ci JOIN claims c ON c.id = ci.claim_id WHERE ci.procedure_id = ? AND c.status != 'void' AND c.patient_insurance_id = ?", p.id, policy.id);
+    if (onClaim) throw new HttpError(409, `Procedure ${p.id} is already on claim ${onClaim.id} for this insurance`);
+    procs.push(p);
+  }
+  let primary = null;
+  let primaryClaimId = null;
+  if (policy.priority === 'secondary') {
+    primary = new Map();
+    for (const p of procs) {
+      const line = await db.get(
+        `SELECT ci.*, c.id AS claim_id, c.status AS claim_status, c.paid_amount AS claim_paid, c.estimated_amount AS claim_estimated, c.total_fee AS claim_fee
+         FROM claim_items ci JOIN claims c ON c.id = ci.claim_id JOIN patient_insurance pi ON pi.id = c.patient_insurance_id
+         WHERE ci.procedure_id = ? AND c.status != 'void' AND pi.priority = 'primary' ORDER BY c.id DESC LIMIT 1`, p.id,
+      );
+      if (!line) continue;
+      primaryClaimId ??= line.claim_id;
+      const paidClaim = ['paid', 'partially_paid'].includes(line.claim_status);
+      // Prefer what the payer paid on this line; otherwise share the claim payment by estimate.
+      const lineKnown = paidClaim && (line.paid_amount > 0 || line.adjusted_amount > 0);
+      const share = line.claim_estimated > 0 ? line.estimated_amount / line.claim_estimated : line.fee / (line.claim_fee || 1);
+      primary.set(p.id, {
+        covered: lineKnown ? line.paid_amount : paidClaim ? Math.round(line.claim_paid * share) : line.estimated_amount,
+        write_off: lineKnown ? line.adjusted_amount : line.write_off,
+      });
+    }
+  }
+  const carrier = await db.get('SELECT name FROM insurance_carriers WHERE id = ?', policy.carrier_id);
+  const est = await estimateCoverage(db, { ...policy, carrier_name: carrier.name }, procs, { primary });
+  return db.tx(async () => {
+    const claimId = await insert(db, 'claims', {
+      practice_id: practiceId, patient_id: policy.patient_id, patient_insurance_id: policy.id,
+      total_fee: est.total_fee, estimated_amount: est.total_insurance, deductible_applied: est.total_deductible, write_off_estimate: est.total_write_off,
+      primary_claim_id: primaryClaimId, ...extra,
+    });
+    for (const item of est.items) {
+      await insert(db, 'claim_items', { claim_id: claimId, procedure_id: item.procedure_id, fee: item.fee, estimated_amount: item.insurance, write_off: item.write_off });
+    }
+    return claimId;
+  });
+}
+
+// Once the primary has paid, the secondary claim for the same work is drafted automatically.
+export async function createSecondaryClaim(db, primaryClaimId, { userId = null } = {}) {
+  const claim = await db.get('SELECT c.*, pi.priority FROM claims c JOIN patient_insurance pi ON pi.id = c.patient_insurance_id WHERE c.id = ?', primaryClaimId);
+  if (!claim || claim.priority !== 'primary' || !['paid', 'partially_paid'].includes(claim.status)) return null;
+  const secondary = await db.get("SELECT * FROM patient_insurance WHERE patient_id = ? AND priority = 'secondary' AND active = 1 ORDER BY id LIMIT 1", claim.patient_id);
+  if (!secondary) return null;
+  const procIds = (await db.all(
+    `SELECT ci.procedure_id FROM claim_items ci WHERE ci.claim_id = ?
+     AND NOT EXISTS (SELECT 1 FROM claim_items x JOIN claims c2 ON c2.id = x.claim_id WHERE x.procedure_id = ci.procedure_id AND c2.patient_insurance_id = ? AND c2.status != 'void')`,
+    claim.id, secondary.id,
+  )).map((r) => r.procedure_id);
+  if (!procIds.length) return null;
+  return createClaim(db, { practiceId: claim.practice_id, policyId: secondary.id, procedureIds: procIds, userId });
 }
 
 // Posting dates: nothing on or before the practice's lock date (closed books), nothing in the future.

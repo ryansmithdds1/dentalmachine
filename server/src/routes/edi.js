@@ -5,7 +5,8 @@ import { build837D, build270, build276, parse271, parse277, sandbox277, x12Type 
 import { pollClearinghouse, processInbound } from '../clearinghouse.js';
 import { claimEvent } from '../era.js';
 import { runExclusive } from '../cluster.js';
-import { benefitsUsed } from '../services.js';
+import { benefitsUsed, benefitYear } from '../services.js';
+import { savePolicy } from '../benefits.js';
 import { importEra, parseControl } from '../era.js';
 
 // Electronic claims (837D), eligibility (270/271) and remittance (835) through a clearinghouse.
@@ -26,12 +27,31 @@ export default function ediRoutes({ db, config, clearinghouse: ch }) {
       await db.run('UPDATE claims SET control_number = ? WHERE id = ?', claim.control_number, claim.id);
     }
     const policy = await db.get('SELECT * FROM patient_insurance WHERE id = ?', claim.patient_insurance_id);
+    // A secondary claim carries the primary payer's adjudication.
+    let primary = null;
+    if (policy.priority === 'secondary') {
+      const pc = claim.primary_claim_id
+        ? await db.get('SELECT * FROM claims WHERE id = ?', claim.primary_claim_id)
+        : await db.get(
+          `SELECT c.* FROM claims c JOIN patient_insurance pi ON pi.id = c.patient_insurance_id WHERE pi.priority = 'primary' AND c.status IN ('paid','partially_paid')
+           AND EXISTS (SELECT 1 FROM claim_items a JOIN claim_items b ON b.procedure_id = a.procedure_id WHERE a.claim_id = c.id AND b.claim_id = ?) ORDER BY c.id DESC LIMIT 1`, claim.id,
+        );
+      if (pc && ['paid', 'partially_paid'].includes(pc.status)) {
+        const ppolicy = await db.get('SELECT * FROM patient_insurance WHERE id = ?', pc.patient_insurance_id);
+        primary = {
+          claim: pc, policy: ppolicy, paid: pc.paid_amount, paid_date: pc.paid_date || pc.paid_at?.slice(0, 10),
+          carrier: await db.get('SELECT * FROM insurance_carriers WHERE id = ?', ppolicy.carrier_id),
+          lines: (await db.all('SELECT procedure_id, paid_amount, adjusted_amount, adjustments FROM claim_items WHERE claim_id = ?', pc.id))
+            .map((l) => ({ ...l, adjustments: l.adjustments ? JSON.parse(l.adjustments) : [] })),
+        };
+      }
+    }
     return {
-      claim, policy,
+      claim, policy, primary,
       patient: await db.get('SELECT * FROM patients WHERE id = ?', claim.patient_id),
       carrier: await db.get('SELECT * FROM insurance_carriers WHERE id = ?', policy.carrier_id),
       items: await db.all(
-        `SELECT ci.fee, pr.code, pr.tooth, pr.surfaces, pr.completed_at, pv.name AS provider_name, pv.npi AS provider_npi
+        `SELECT ci.fee, ci.procedure_id, pr.code, pr.tooth, pr.surfaces, pr.completed_at, pv.name AS provider_name, pv.npi AS provider_npi
          FROM claim_items ci JOIN procedures pr ON pr.id = ci.procedure_id LEFT JOIN providers pv ON pv.id = pr.provider_id WHERE ci.claim_id = ?`, claim.id,
       ),
     };
@@ -47,6 +67,8 @@ export default function ediRoutes({ db, config, clearinghouse: ch }) {
     if (!bundle.patient.dob) p.push('Patient date of birth missing');
     if (!bundle.items.length) p.push('Claim has no procedures');
     if (bundle.items.some((i) => !i.provider_npi)) p.push('Treating provider NPI missing');
+    if (bundle.policy.priority === 'secondary' && !bundle.primary) p.push('Secondary claim: post the primary insurance payment first (the secondary payer needs it)');
+    if (['7', '8'].includes(String(bundle.claim.frequency_code)) && !bundle.claim.original_reference) p.push("Corrected or void claim: the payer's original claim number is required");
     return p;
   }
 
@@ -302,7 +324,12 @@ export default function ediRoutes({ db, config, clearinghouse: ch }) {
     if (s.deductible != null) row.deductible = s.deductible;
     if (s.deductible != null && s.deductible_remaining != null) row.deductible_met = Math.max(0, s.deductible - s.deductible_remaining);
     for (const tier of ['preventive', 'basic', 'major']) if (s.coinsurance?.[tier] != null) row[`pct_${tier}`] = s.coinsurance[tier];
-    await update(db, 'patient_insurance', e.patient_insurance_id, req.user.practice_id, row);
+    if (row.deductible_met != null) {
+      const policy = await db.get('SELECT * FROM patient_insurance WHERE id = ?', e.patient_insurance_id);
+      row.deductible_year = benefitYear(policy, (await practiceNow(db, req.user.practice_id)).slice(0, 10)).start;
+    }
+    // Plan-wide numbers (max, deductible, percentages) update the shared plan; the deductible met is this patient's.
+    await db.tx(() => savePolicy(db, req.user.practice_id, e.patient_insurance_id, row));
     await audit(db, req, 'eligibility.apply', 'patient_insurance', e.patient_insurance_id, { fields: Object.keys(row) });
     res.json(await db.get('SELECT * FROM patient_insurance WHERE id = ?', e.patient_insurance_id));
   });

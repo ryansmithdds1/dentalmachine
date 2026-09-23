@@ -15,6 +15,7 @@ function splitName(full) {
 }
 
 const PAT_REL = { spouse: '01', child: '19', other: 'G8' };
+const REL_2320 = { spouse: '01', child: '19', other: 'G8' };
 const GENDER = (g) => ({ female: 'F', male: 'M' })[String(g || '').toLowerCase()] || 'U';
 
 function envelope({ functionalId, version, senderId, receiverId, control, now, body }) {
@@ -58,7 +59,7 @@ export function build837D({ practice, claims, senderId, receiverId, control = 1,
     `N4*${clean(practice.city, 30)}*${clean(practice.state, 2)}*${digitsOnly(practice.zip)}`,
     `REF*EI*${digitsOnly(practice.tax_id)}`,
   );
-  for (const { claim, patient, policy, carrier, items } of claims) {
+  for (const { claim, patient, policy, carrier, items, primary: other } of claims) {
     const isSelf = policy.relationship === 'self';
     const subHl = ++hl;
     const sub = splitName(policy.subscriber_name);
@@ -84,17 +85,43 @@ export function build837D({ practice, claims, senderId, receiverId, control = 1,
         `DMG*D8*${d8(patient.dob)}*${GENDER(patient.gender)}`,
       );
     }
+    // CLM05-3 is the claim frequency: 1 original, 7 replacement (corrected), 8 void.
     // CLM19 = PB marks a predetermination of benefits (pre-authorization) rather than a claim for payment.
-    segs.push(`CLM*${clean(claim.control_number, 20)}*${money(claim.total_fee)}***11:B:1*Y*A*Y*Y${claim.predetermination ? `${'*'.repeat(10)}PB` : ''}`);
+    const freq = ['7', '8'].includes(String(claim.frequency_code)) ? claim.frequency_code : '1';
+    segs.push(`CLM*${clean(claim.control_number, 20)}*${money(claim.total_fee)}***11:B:${freq}*Y*A*Y*Y${claim.predetermination ? `${'*'.repeat(10)}PB` : ''}`);
+    if (claim.preauth_number) segs.push(`REF*G1*${clean(claim.preauth_number, 50)}`);
+    if (freq !== '1' && claim.original_reference) segs.push(`REF*F8*${clean(claim.original_reference, 50)}`);
     const rendering = items.find((i) => i.provider_npi);
     if (rendering) {
       const rn = splitName(rendering.provider_name.replace(/,.*$/, '').replace(/^DR\.?\s*/i, ''));
       segs.push(`NM1*82*1*${rn.last}*${rn.first}****XX*${digitsOnly(rendering.provider_npi)}`, `PRV*PE*PXC*${taxonomy}`);
     }
+    // Coordination of benefits: a secondary claim reports the primary payer and what it paid (loops 2320/2330).
+    if (other) {
+      const osub = splitName(other.policy.subscriber_name);
+      segs.push(
+        `SBR*P*${other.policy.relationship === 'self' ? '18' : REL_2320[other.policy.relationship] || 'G8'}*${clean(other.policy.group_number, 50)}******CI`,
+        `AMT*D*${money(other.paid)}`,
+        'OI***Y***Y',
+        `NM1*IL*1*${osub.last}*${osub.first}****MI*${clean(other.policy.subscriber_id, 80)}`,
+        `NM1*PR*2*${clean(other.carrier.name)}*****PI*${clean(other.carrier.payer_id || 'UNKNOWN', 80)}`,
+      );
+      if (other.paid_date) segs.push(`DTP*573*D8*${d8(other.paid_date)}`);
+    }
     items.forEach((item, i) => {
       segs.push(`LX*${i + 1}`, `SV3*AD:${clean(item.code, 5)}*${money(item.fee)}****1`);
       if (item.tooth) segs.push(`TOO*JP*${clean(item.tooth, 2)}${item.surfaces ? `*${item.surfaces.split('').join(':')}` : ''}`);
       if (item.completed_at) segs.push(`DTP*472*D8*${d8(item.completed_at)}`);
+      // Line adjudication by the primary payer (loop 2430).
+      const adj = other?.lines?.find((l) => l.procedure_id === item.procedure_id);
+      if (adj) {
+        segs.push(`SVD*${clean(other.carrier.payer_id || 'UNKNOWN', 80)}*${money(adj.paid_amount)}*AD:${clean(item.code, 5)}**1`);
+        const groups = {};
+        for (const a of adj.adjustments || []) (groups[a.group] ||= []).push(a);
+        if (!adj.adjustments?.length && adj.adjusted_amount) groups.CO = [{ reason: '45', amount: adj.adjusted_amount }];
+        for (const [g, list] of Object.entries(groups)) segs.push(`CAS*${g}*${list.slice(0, 6).map((a) => `${a.reason}*${money(a.amount)}`).join('**')}`);
+        if (other.paid_date) segs.push(`DTP*573*D8*${d8(other.paid_date)}`);
+      }
     });
   }
   return envelope({ functionalId: 'HC', version: '005010X224A2', senderId, receiverId, control, now, body: transaction('837', '005010X224A2', segs) });
@@ -204,7 +231,7 @@ export function parse835All(text) {
 export const parse835 = (text) => parse835All(text)[0];
 
 function parse835Segments(segs) {
-  const era = { payer_name: null, check_number: null, payment_date: null, total_paid: 0, claims: [] };
+  const era = { payer_name: null, check_number: null, payment_date: null, total_paid: 0, claims: [], provider_adjustments: [] };
   let claim = null;
   let inPayer = false;
   for (const s of segs) {
@@ -237,6 +264,14 @@ function parse835Segments(segs) {
       case 'SVC':
         if (claim) claim.services.push({ code: s.c(1)[1] || s.e[1], billed: cents(s.e[2]), paid: cents(s.e[3]), adjustments: [] });
         break;
+      case 'PLB':
+        // Provider-level adjustments (interest, recoupments, withholds): pairs of reason:reference and amount.
+        for (let i = 3; i < s.e.length; i += 2) {
+          if (!s.e[i]) continue;
+          const [reason, reference] = s.e[i].split(/[:>]/);
+          era.provider_adjustments.push({ reason, reference: reference || null, amount: cents(s.e[i + 1]) });
+        }
+        break;
       default:
     }
   }
@@ -247,6 +282,10 @@ function parse835Segments(segs) {
     // Patient-responsibility reason 1 is the deductible the payer applied.
     c.deductible = all.filter((a) => a.group === 'PR' && a.reason === '1').reduce((s, a) => s + a.amount, 0);
     c.reason_codes = [...new Set(all.map((a) => `${a.group}-${a.reason}`))];
+    for (const sv of c.services) {
+      sv.patient_resp = sv.adjustments.filter((a) => a.group === 'PR').reduce((s, a) => s + a.amount, 0);
+      sv.write_off = Math.max(0, sv.billed - sv.paid - sv.patient_resp);
+    }
     c.status = { 1: 'processed_primary', 2: 'processed_secondary', 3: 'processed_tertiary', 4: 'denied', 22: 'reversal', 23: 'not_our_claim' }[c.status_code] || 'other';
   }
   return era;

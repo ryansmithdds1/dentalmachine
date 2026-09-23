@@ -3,6 +3,7 @@ import { requirePermission, HttpError } from '../auth.js';
 import { pick, requireFields, requireOneOf, insert, findOr404, audit, toCents, practiceNow, publicPractice } from '../util.js';
 import { patientBalance, pendingInsurance, checkPostingDate, voidLedgerEntry } from '../services.js';
 import { planStatus } from './family.js';
+import { allocate } from '../allocation.js';
 
 export const PAYMENT_METHODS = ['cash', 'check', 'credit_card', 'debit_card', 'ach', 'care_credit', 'other'];
 
@@ -21,7 +22,16 @@ export default function billingRoutes({ db, payments = { enabled: false } }) {
     for (const e of entries) e.running_balance = running += e.amount;
     const pending = await pendingInsurance(db, req.user.practice_id, patient.id);
     const lock = (await db.get('SELECT lock_date FROM practices WHERE id = ?', req.user.practice_id)).lock_date;
-    res.json({ entries, balance: running, pending_insurance: pending.insurance, pending_write_off: pending.write_off, patient_portion: running - pending.total, lock_date: lock });
+    // What each credit paid for, and credit not yet applied to any charge.
+    const lines = await db.all('SELECT ci.claim_id, ci.procedure_id, ci.paid_amount, ci.adjusted_amount FROM claim_items ci JOIN claims c ON c.id = ci.claim_id WHERE c.patient_id = ?', patient.id);
+    const { allocations, unapplied } = allocate(entries, lines);
+    const paidBy = new Map();
+    for (const a of allocations) paidBy.set(a.charge_id, (paidBy.get(a.charge_id) || 0) + a.amount);
+    for (const e of entries) if (e.amount > 0 && e.type === 'charge') e.paid_off = paidBy.get(e.id) || 0;
+    res.json({
+      entries, balance: running, pending_insurance: pending.insurance, pending_write_off: pending.write_off, patient_portion: running - pending.total, lock_date: lock,
+      unapplied_credit: unapplied.reduce((s, u) => s + u.amount, 0),
+    });
   });
 
   // Patient payment. Amount is positive cents; stored as a credit (negative).
@@ -48,14 +58,41 @@ export default function billingRoutes({ db, payments = { enabled: false } }) {
     res.status(201).json({ entry: await db.get('SELECT * FROM ledger_entries WHERE id = ?', id), balance: await patientBalance(db, req.user.practice_id, patient.id) });
   });
 
-  // Adjustment: negative = credit (discount/write-off), positive = debit (e.g. NSF fee).
+  // ---- Adjustment types ----
+  const DEFAULT_TYPES = [['Courtesy discount', 'credit'], ['Senior discount', 'credit'], ['Professional courtesy', 'credit'], ['Small balance write-off', 'credit'], ['Bad debt write-off', 'credit'], ['Insurance write-off', 'credit'], ['NSF / returned check fee', 'debit'], ['Finance charge', 'debit'], ['Other', 'credit']];
+  const adjustmentTypes = async (pid) => {
+    let rows = await db.all('SELECT * FROM adjustment_types WHERE practice_id = ? ORDER BY name', pid);
+    if (!rows.length) {
+      for (const [name, direction] of DEFAULT_TYPES) await db.run('INSERT INTO adjustment_types (practice_id, name, direction) VALUES (?, ?, ?) ON CONFLICT (practice_id, name) DO NOTHING', pid, name, direction);
+      rows = await db.all('SELECT * FROM adjustment_types WHERE practice_id = ? ORDER BY name', pid);
+    }
+    return rows;
+  };
+  r.get('/adjustment-types', requirePermission('billing:read'), async (req, res) => res.json(await adjustmentTypes(req.user.practice_id)));
+  r.post('/adjustment-types', requirePermission('billing:write'), async (req, res) => {
+    if (req.user.role !== 'admin') throw new HttpError(403, 'Only administrators can add adjustment types');
+    const name = String(req.body?.name || '').trim().slice(0, 60);
+    if (!name) throw new HttpError(400, 'name is required');
+    requireOneOf(req.body?.direction || 'credit', ['credit', 'debit'], 'direction');
+    await db.run('INSERT INTO adjustment_types (practice_id, name, direction) VALUES (?, ?, ?) ON CONFLICT (practice_id, name) DO UPDATE SET active = 1', req.user.practice_id, name, req.body?.direction || 'credit');
+    res.status(201).json(await adjustmentTypes(req.user.practice_id));
+  });
+
+  // Adjustment: negative = credit (discount/write-off), positive = debit (e.g. NSF fee). Credits above the
+  // practice's approval limit need an administrator.
   r.post('/patients/:id/adjustments', requirePermission('billing:write'), async (req, res) => {
     const patient = await patientOr404(req);
-    const row = pick(req.body, ['amount', 'description', 'entry_date']);
+    const row = pick(req.body, ['amount', 'description', 'entry_date', 'adjustment_type']);
     requireFields(row, ['amount', 'description']);
     const amount = toCents(row.amount);
     if (amount === 0) throw new HttpError(400, 'Adjustment amount cannot be zero');
+    if (row.adjustment_type && !(await adjustmentTypes(req.user.practice_id)).some((t) => t.name === row.adjustment_type)) throw new HttpError(400, 'Unknown adjustment type');
+    const limit = (await db.get('SELECT adjustment_approval_limit FROM practices WHERE id = ?', req.user.practice_id)).adjustment_approval_limit;
+    if (amount < 0 && limit != null && -amount > limit && req.user.role !== 'admin') {
+      throw new HttpError(403, `Write-offs over $${(limit / 100).toFixed(2)} need an administrator`, { approval_required: true });
+    }
     const id = await insert(db, 'ledger_entries', {
+      adjustment_type: row.adjustment_type || null,
       practice_id: req.user.practice_id, patient_id: patient.id, type: 'adjustment', amount,
       description: row.description, entry_date: await checkPostingDate(db, req.user.practice_id, row.entry_date), created_by: req.user.id,
     });
@@ -95,6 +132,27 @@ export default function billingRoutes({ db, payments = { enabled: false } }) {
     });
     await audit(db, req, 'ledger.refund', 'ledger_entries', id, { amount, payment_id: original?.id ?? null });
     res.status(201).json({ entry: await db.get('SELECT * FROM ledger_entries WHERE id = ?', id), balance: await patientBalance(db, req.user.practice_id, patient.id) });
+  });
+
+  // Moves part of a balance (or credit) to another member of the same family, e.g. a parent's overpayment
+  // to a child's account. Posted as a matched pair of adjustments.
+  r.post('/patients/:id/transfer', requirePermission('billing:write'), async (req, res) => {
+    const from = await patientOr404(req);
+    const to = await findOr404(db, 'patients', req.body?.to_patient_id, req.user.practice_id, 'Patient');
+    const head = (p) => p.guarantor_id || p.id;
+    if (from.id === to.id || head(from) !== head(to)) throw new HttpError(400, 'Transfers are between members of the same family');
+    const amount = toCents(req.body?.amount);
+    if (amount === 0) throw new HttpError(400, 'Enter an amount');
+    const note = String(req.body?.note || '').trim().slice(0, 200);
+    const date = (await practiceNow(db, req.user.practice_id)).slice(0, 10);
+    const transfer = `T${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+    // Positive amount moves a balance (the other account now owes it); negative moves a credit.
+    await db.tx(async () => {
+      await insert(db, 'ledger_entries', { practice_id: req.user.practice_id, patient_id: from.id, type: 'adjustment', adjustment_type: 'Transfer', amount: -amount, description: `Transfer to ${to.first_name} ${to.last_name}${note ? ` — ${note}` : ''}`, entry_date: date, created_by: req.user.id, transfer_id: transfer });
+      await insert(db, 'ledger_entries', { practice_id: req.user.practice_id, patient_id: to.id, type: 'adjustment', adjustment_type: 'Transfer', amount, description: `Transfer from ${from.first_name} ${from.last_name}${note ? ` — ${note}` : ''}`, entry_date: date, created_by: req.user.id, transfer_id: transfer });
+    });
+    await audit(db, req, 'ledger.transfer', 'patients', from.id, { to: to.id, amount });
+    res.status(201).json({ balance: await patientBalance(db, req.user.practice_id, from.id), to_balance: await patientBalance(db, req.user.practice_id, to.id) });
   });
 
   r.post('/ledger/:eid/void', requirePermission('billing:write'), async (req, res) => {

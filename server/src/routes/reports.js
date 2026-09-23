@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import { requirePermission, HttpError } from '../auth.js';
 import { practiceNow, utcRange, mapSeq } from '../util.js';
+import { allocationsForRange } from '../allocation.js';
+import { pendingInsurance } from '../services.js';
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -87,11 +89,16 @@ export default function reportRoutes({ db }) {
   // recent debits. Voided entries and their reversals cancel out. Accounts in credit are listed separately.
   r.get('/reports/aging', requirePermission('reports:read'), async (req, res) => {
     const pid = req.user.practice_id;
-    const { today } = await range(req, db);
+    const { today: now } = await range(req, db);
+    const today = /^\d{4}-\d{2}-\d{2}$/.test(req.query.as_of || '') && req.query.as_of <= now ? req.query.as_of : now;
+    // By family: each account is the head of household (guarantor) with everyone they're responsible for.
+    const family = req.query.group === 'family';
+    const acct = family ? 'COALESCE(p.guarantor_id, p.id)' : 'p.id';
     const patients = await db.all(
-      `SELECT p.id, p.first_name, p.last_name, p.phone, SUM(l.amount) AS balance FROM ledger_entries l JOIN patients p ON p.id = l.patient_id
-       WHERE l.practice_id = ? GROUP BY p.id, p.first_name, p.last_name, p.phone HAVING SUM(l.amount) <> 0 ORDER BY SUM(l.amount) DESC`, pid,
+      `SELECT ${acct} AS id, SUM(l.amount) AS balance FROM ledger_entries l JOIN patients p ON p.id = l.patient_id
+       WHERE l.practice_id = ? AND l.entry_date <= ? GROUP BY ${acct} HAVING SUM(l.amount) <> 0 ORDER BY SUM(l.amount) DESC`, pid, today,
     );
+    for (const p of patients) Object.assign(p, await db.get('SELECT first_name, last_name, phone FROM patients WHERE id = ?', p.id));
     const owing = patients.filter((p) => p.balance > 0);
     const buckets = ['current', 'd31_60', 'd61_90', 'd90_plus'];
     const totals = Object.fromEntries(buckets.map((b) => [b, 0]));
@@ -99,9 +106,9 @@ export default function reportRoutes({ db }) {
     // Every charge-type debit for those accounts in one query. Voided entries and reversals are left out:
     // they cancel each other in the balance, and the balance is what gets spread over the real charges.
     const debits = owing.length ? await db.all(
-      `SELECT patient_id, amount, entry_date FROM ledger_entries WHERE practice_id = ? AND amount > 0 AND voided_at IS NULL AND reverses_id IS NULL
-       AND patient_id IN (SELECT l.patient_id FROM ledger_entries l WHERE l.practice_id = ? GROUP BY l.patient_id HAVING SUM(l.amount) > 0)
-       ORDER BY patient_id, entry_date DESC, id DESC`, pid, pid,
+      `SELECT ${family ? 'COALESCE(p.guarantor_id, p.id)' : 'l.patient_id'} AS patient_id, l.amount, l.entry_date FROM ledger_entries l JOIN patients p ON p.id = l.patient_id
+       WHERE l.practice_id = ? AND l.amount > 0 AND l.voided_at IS NULL AND l.reverses_id IS NULL AND l.entry_date <= ?
+       ORDER BY 1, l.entry_date DESC, l.id DESC`, pid, today,
     ) : [];
     const byPatient = new Map();
     for (const d of debits) {
@@ -125,9 +132,54 @@ export default function reportRoutes({ db }) {
       buckets.forEach((b) => (totals[b] += row[b]));
       return row;
     });
+    // What insurance is still expected to cover vs what the patient owes (open claims today).
+    for (const row of rows) {
+      const members = family ? (await db.all('SELECT id FROM patients WHERE practice_id = ? AND (id = ? OR guarantor_id = ?)', pid, row.id, row.id)).map((m) => m.id) : [row.id];
+      const pending = await pendingInsurance(db, pid, members);
+      row.insurance_pending = Math.min(row.balance, pending.total);
+      row.patient_portion = row.balance - row.insurance_pending;
+    }
+    totals.insurance_pending = rows.reduce((s, r) => s + r.insurance_pending, 0);
+    totals.patient_portion = rows.reduce((s, r) => s + r.patient_portion, 0);
     const credits = patients.filter((p) => p.balance < 0).map((p) => ({ ...p, credit: -p.balance }));
     res.json({
-      as_of: today, totals: { ...totals, total: rows.reduce((s, r) => s + r.balance, 0), credits: credits.reduce((s, c) => s + c.credit, 0) }, rows, credits,
+      as_of: today, group: family ? 'family' : 'patient', totals: { ...totals, total: rows.reduce((s, r) => s + r.balance, 0), credits: credits.reduce((s, c) => s + c.credit, 0) }, rows, credits,
+    });
+  });
+
+  // Production and collections per provider: payments are credited to the provider whose work they paid
+  // for (insurance by the procedures on the claim, patient payments oldest charge first).
+  r.get('/reports/collections-by-provider', requirePermission('reports:read'), async (req, res) => {
+    const pid = req.user.practice_id;
+    const { from, to } = await range(req, db);
+    const providers = await db.all('SELECT id, name, type FROM providers WHERE practice_id = ? ORDER BY name', pid);
+    const rows = new Map(providers.map((p) => [p.id, { ...p, production: 0, adjustments: 0, patient_collections: 0, insurance_collections: 0 }]));
+    const unassigned = { id: null, name: 'Unapplied credit', production: 0, adjustments: 0, patient_collections: 0, insurance_collections: 0 };
+    for (const r of await db.all(
+      `SELECT provider_id, SUM(amount) AS n FROM ledger_entries WHERE practice_id = ? AND type = 'charge' AND entry_date BETWEEN ? AND ? GROUP BY provider_id`, pid, from, to,
+    )) (rows.get(r.provider_id) || unassigned).production += r.n;
+    for (const a of await allocationsForRange(db, pid, from, to)) {
+      const row = (a.provider_id && rows.get(a.provider_id)) || unassigned;
+      if (a.credit_type === 'payment') row.patient_collections += a.amount;
+      else if (a.credit_type === 'insurance_payment') row.insurance_collections += a.amount;
+      else if (a.credit_type === 'adjustment') row.adjustments += a.amount;
+    }
+    const list = [...rows.values(), unassigned].filter((r) => r.production || r.adjustments || r.patient_collections || r.insurance_collections)
+      .map((r) => ({ ...r, collections: r.patient_collections + r.insurance_collections, net_production: r.production - r.adjustments }));
+    res.json({ from, to, rows: list });
+  });
+
+  // Adjustments by type (write-offs, discounts, fees), for loss control.
+  r.get('/reports/adjustments', requirePermission('reports:read'), async (req, res) => {
+    const pid = req.user.practice_id;
+    const { from, to } = await range(req, db);
+    res.json({
+      from, to,
+      rows: await db.all(
+        `SELECT COALESCE(adjustment_type, CASE WHEN claim_id IS NOT NULL THEN 'Insurance write-off' ELSE 'Other' END) AS type,
+           COUNT(*) AS count, SUM(amount) AS amount FROM ledger_entries
+         WHERE practice_id = ? AND type = 'adjustment' AND entry_date BETWEEN ? AND ? GROUP BY 1 ORDER BY SUM(amount)`, pid, from, to,
+      ),
     });
   });
 

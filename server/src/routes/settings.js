@@ -71,7 +71,7 @@ export default function settingsRoutes({ db, secret, config = {} }) {
 
   r.get('/message-templates/defaults', (_req, res) => res.json(DEFAULT_TEMPLATES));
   r.put('/practice', requireAdmin, async (req, res) => {
-    const row = pick(req.body, ['name', 'address', 'city', 'state', 'zip', 'phone', 'email', 'tax_id', 'npi', 'timezone', 'slug', 'online_booking', 'reminder_hours', 'require_mfa', 'office_hours', 'daily_goal', 'sms_number', 'review_url', 'review_requests', 'idle_timeout_minutes', 'message_templates', 'hygiene_goal', 'portal_enabled', 'lock_date']);
+    const row = pick(req.body, ['name', 'address', 'city', 'state', 'zip', 'phone', 'email', 'tax_id', 'npi', 'timezone', 'slug', 'online_booking', 'reminder_hours', 'require_mfa', 'office_hours', 'daily_goal', 'sms_number', 'review_url', 'review_requests', 'idle_timeout_minutes', 'message_templates', 'hygiene_goal', 'portal_enabled', 'lock_date', 'adjustment_approval_limit']);
     if (row.message_templates != null) row.message_templates = validateTemplates(row.message_templates);
     if (row.review_url && !/^https:\/\/\S+$/.test(row.review_url)) throw new HttpError(400, 'Review link must start with https://');
     if (row.idle_timeout_minutes != null) {
@@ -81,6 +81,7 @@ export default function settingsRoutes({ db, secret, config = {} }) {
     if (row.hygiene_goal != null) row.hygiene_goal = toCents(row.hygiene_goal, 'hygiene_goal');
     if (row.office_hours != null) row.office_hours = JSON.stringify(validateHours(typeof row.office_hours === 'string' ? JSON.parse(row.office_hours) : row.office_hours));
     if (row.daily_goal != null) row.daily_goal = toCents(row.daily_goal, 'daily_goal');
+    if (row.adjustment_approval_limit !== undefined) row.adjustment_approval_limit = row.adjustment_approval_limit === null || row.adjustment_approval_limit === '' ? null : Math.max(0, toCents(row.adjustment_approval_limit, 'adjustment_approval_limit'));
     if (row.lock_date !== undefined) {
       row.lock_date = row.lock_date || null;
       if (row.lock_date && !/^\d{4}-\d{2}-\d{2}$/.test(row.lock_date)) throw new HttpError(400, 'Lock date must be YYYY-MM-DD');

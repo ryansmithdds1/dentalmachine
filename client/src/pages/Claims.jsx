@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { api, getToken } from '../api.js';
 import { useApi } from '../hooks.js';
@@ -7,6 +7,8 @@ import { money, fmtDate, fmtDateTime, toCents } from '../format.js';
 import { Badge, ErrorBox, Modal } from '../components/ui.jsx';
 import { PlanSummary } from '../components/patient/PaymentPlans.jsx';
 import { ChStatus, ClearinghousePanel, sendClaims, describeResponses } from '../components/ClaimEdi.jsx';
+import InsurancePlanForm from '../components/InsurancePlanForm.jsx';
+import { useLookup } from '../hooks.js';
 import { downloadCsv, dollars } from '../api.js';
 
 const FILTERS = [['draft', 'Ready to send'], ['submitted', 'Submitted'], ['partially_paid', 'Partially paid'], ['denied', 'Denied'], ['paid', 'Paid'], ['void', 'Void'], ['', 'All']];
@@ -19,13 +21,15 @@ export default function Claims() {
     <>
       <div className="page-header"><h1>Billing</h1></div>
       <div className="tabs">
-        {[['claims', 'Claims'], ['followup', 'Insurance follow-up'], ['preauths', 'Pre-authorizations'], ['era', 'Remittance (ERA)'], ['statements', 'Statements'], ['plans', 'Payment plans']].map(([k, l]) => (
+        {[['claims', 'Claims'], ['checks', 'Insurance payments'], ['followup', 'Insurance follow-up'], ['preauths', 'Pre-authorizations'], ['era', 'Remittance (ERA)'], ['insplans', 'Insurance plans'], ['statements', 'Statements'], ['plans', 'Payment plans']].map(([k, l]) => (
           <button key={k} className={tab === k ? 'active' : ''} onClick={() => setParams({ tab: k })}>{l}</button>
         ))}
       </div>
       {tab === 'claims' && <ClaimList />}
       {tab === 'era' && <EraImport />}
       {tab === 'plans' && <Plans />}
+      {tab === 'insplans' && <InsurancePlans />}
+      {tab === 'checks' && <InsuranceChecks />}
       {tab === 'followup' && <InsuranceFollowup />}
       {tab === 'preauths' && <Preauths />}
       {tab === 'statements' && <Statements />}
@@ -401,5 +405,179 @@ function Statements() {
         </div>
       )}
     </>
+  );
+}
+
+// Employer group plans: the benefits every patient enrolled in them shares.
+function InsurancePlans() {
+  const { can } = useAuth();
+  const { data: plans, reload } = useApi('/insurance-plans');
+  const [editing, setEditing] = useState(null);
+  const [q, setQ] = useState('');
+  const shown = (plans || []).filter((p) => !q || `${p.carrier_name} ${p.name || ''} ${p.group_number || ''}`.toLowerCase().includes(q.toLowerCase()));
+  return (
+    <>
+      <div className="card inline" style={{ justifyContent: 'space-between', marginBottom: 12 }}>
+        <input placeholder="Search carrier, employer or group #" value={q} onChange={(e) => setQ(e.target.value)} style={{ maxWidth: 320 }} />
+        {can('billing:write') && <button className="primary" onClick={() => setEditing({})}>+ New plan</button>}
+      </div>
+      <div className="card" style={{ padding: 0 }}>
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>Carrier</th><th>Employer / plan</th><th>Group #</th><th className="num">Patients</th><th className="num">Annual max</th><th className="num">Deductible</th><th>Coverage (P/B/M)</th><th>Limits</th><th /></tr></thead>
+            <tbody>
+              {shown.map((p) => (
+                <tr key={p.id}>
+                  <td>{p.carrier_name}</td>
+                  <td>{p.name || <span className="muted">—</span>}</td>
+                  <td>{p.group_number || '—'}</td>
+                  <td className="num">{p.members}</td>
+                  <td className="num">{money(p.annual_max)}</td>
+                  <td className="num">{money(p.deductible)}{p.family_deductible ? <div className="muted" style={{ fontSize: 11 }}>family {money(p.family_deductible)}</div> : null}</td>
+                  <td>{p.pct_preventive}/{p.pct_basic}/{p.pct_major}%</td>
+                  <td className="muted" style={{ fontSize: 12 }}>
+                    {p.frequencies.length} frequency limits{p.wait_major_months ? ` · ${p.wait_major_months}-mo major wait` : ''}{p.downgrade_composites ? ' · composites downgraded' : ''}{p.ortho_max ? ` · ortho ${money(p.ortho_max)}` : ''}
+                  </td>
+                  <td>{can('billing:write') && <button className="small" onClick={() => setEditing(p)}>Edit</button>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {plans?.length === 0 && <div className="empty">No plans yet — they're created when you add a patient's insurance.</div>}
+        </div>
+      </div>
+      {editing && (
+        <Modal title={editing.id ? `${editing.carrier_name}${editing.name ? ` · ${editing.name}` : ''}` : 'New insurance plan'} wide onClose={() => setEditing(null)}>
+          <InsurancePlanForm plan={editing.id ? editing : null} onDone={() => { setEditing(null); reload(); }} />
+        </Modal>
+      )}
+    </>
+  );
+}
+
+// Insurance checks and EFTs: post one payment across the claims it covers (paper EOBs), or review ERAs.
+function InsuranceChecks() {
+  const { can } = useAuth();
+  const { data: checks, reload } = useApi('/insurance-checks');
+  const [posting, setPosting] = useState(false);
+  return (
+    <>
+      <div className="card inline" style={{ justifyContent: 'space-between', marginBottom: 12 }}>
+        <div className="muted">Every insurance check and EFT, and the claims it paid. ERAs are recorded here automatically.</div>
+        {can('billing:write') && <button className="primary" onClick={() => setPosting(true)}>Post an insurance check</button>}
+      </div>
+      <div className="card" style={{ padding: 0 }}>
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>Date</th><th>Payer</th><th>Check / EFT #</th><th>How</th><th className="num">Claims</th><th className="num">Amount</th><th>Provider adjustments</th><th>By</th></tr></thead>
+            <tbody>
+              {checks?.map((k) => (
+                <tr key={k.id}>
+                  <td>{fmtDate(k.check_date)}</td>
+                  <td>{k.carrier_name || k.payer_name || '—'}</td>
+                  <td>{k.check_number || '—'}</td>
+                  <td>{k.era_import_id ? 'ERA' : k.method === 'eft' ? 'EFT' : 'Paper check'}</td>
+                  <td className="num">{k.claims}</td>
+                  <td className="num"><strong>{money(k.amount)}</strong></td>
+                  <td className="muted" style={{ fontSize: 12 }}>{k.provider_adjustments.map((a) => `${a.reason}${a.reference ? ` ${a.reference}` : ''}: ${money(a.amount)}`).join(', ') || '—'}</td>
+                  <td className="muted">{k.created_by_name || '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {checks?.length === 0 && <div className="empty">No insurance payments yet.</div>}
+        </div>
+      </div>
+      {posting && <Modal title="Post an insurance check" wide onClose={() => setPosting(false)}><CheckForm onDone={() => { setPosting(false); reload(); }} /></Modal>}
+    </>
+  );
+}
+
+function CheckForm({ onDone }) {
+  const carriers = useLookup('/carriers');
+  const [head, setHead] = useState({ carrier_id: '', check_number: '', check_date: new Date().toLocaleDateString('en-CA'), amount: '', method: 'check' });
+  const { data: open } = useApi(head.carrier_id ? `/insurance-checks/open-claims?carrier_id=${head.carrier_id}` : null);
+  const [rows, setRows] = useState({});
+  const [lineMode, setLineMode] = useState({});
+  const [err, setErr] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const row = (id) => rows[id] || { paid: '', write_off: '', final: true, lines: {} };
+  const setRow = (id, patch) => setRows({ ...rows, [id]: { ...row(id), ...patch } });
+  const chosen = (open || []).filter((c) => row(c.id).paid !== '' || row(c.id).write_off !== '');
+  const total = chosen.reduce((s, c) => s + toCents(row(c.id).paid || 0), 0);
+  const diff = toCents(head.amount || 0) - total;
+  const submit = async () => {
+    setErr(null);
+    setBusy(true);
+    try {
+      await api.post('/insurance-checks', {
+        ...head, carrier_id: Number(head.carrier_id), amount: toCents(head.amount || 0),
+        claims: chosen.map((c) => {
+          const r = row(c.id);
+          const lines = lineMode[c.id] ? c.items.map((i) => ({ claim_item_id: i.id, paid: toCents(r.lines[i.id]?.paid || 0), write_off: toCents(r.lines[i.id]?.write_off || 0) })) : null;
+          return { claim_id: c.id, paid: toCents(r.paid || 0), write_off: toCents(r.write_off || 0), final: r.final, ...(lines ? { lines } : {}) };
+        }),
+      });
+      onDone();
+    } catch (e) {
+      setErr(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+  // Line-by-line entry keeps the claim totals in step.
+  const setLine = (c, itemId, k, v) => {
+    const r = row(c.id);
+    const lines = { ...r.lines, [itemId]: { ...(r.lines[itemId] || {}), [k]: v } };
+    const sum = (key) => (Object.values(lines).reduce((s, l) => s + toCents(l[key] || 0), 0) / 100).toFixed(2);
+    setRow(c.id, { lines, paid: sum('paid'), write_off: sum('write_off') });
+  };
+  return (
+    <div>
+      <ErrorBox error={err} />
+      <div className="form-grid">
+        <label>Carrier<select value={head.carrier_id} onChange={(e) => { setHead({ ...head, carrier_id: e.target.value }); setRows({}); }}><option value="">Select…</option>{carriers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
+        <label>Check / EFT #<input value={head.check_number} onChange={(e) => setHead({ ...head, check_number: e.target.value })} /></label>
+        <label>Date<input type="date" value={head.check_date} onChange={(e) => setHead({ ...head, check_date: e.target.value })} /></label>
+        <label>Check amount ($)<input type="number" step="0.01" value={head.amount} onChange={(e) => setHead({ ...head, amount: e.target.value })} /></label>
+        <label>How<select value={head.method} onChange={(e) => setHead({ ...head, method: e.target.value })}><option value="check">Paper check</option><option value="eft">EFT</option></select></label>
+      </div>
+      {head.carrier_id && (
+        <table className="compact-table" style={{ marginTop: 12 }}>
+          <thead><tr><th>Claim</th><th>Patient</th><th className="num">Billed</th><th className="num">Expected</th><th>Paid ($)</th><th>Write-off ($)</th><th>Final</th><th /></tr></thead>
+          <tbody>
+            {open?.map((c) => (
+              <Fragment key={c.id}>
+                <tr>
+                  <td>#{c.id}</td>
+                  <td>{c.first_name} {c.last_name}</td>
+                  <td className="num">{money(c.total_fee)}</td>
+                  <td className="num">{money(c.estimated_amount - c.paid_amount)}</td>
+                  <td><input type="number" step="0.01" style={{ width: 100 }} value={row(c.id).paid} readOnly={!!lineMode[c.id]} onChange={(e) => setRow(c.id, { paid: e.target.value })} /></td>
+                  <td><input type="number" step="0.01" style={{ width: 100 }} value={row(c.id).write_off} readOnly={!!lineMode[c.id]} onChange={(e) => setRow(c.id, { write_off: e.target.value })} /></td>
+                  <td><input type="checkbox" checked={row(c.id).final} onChange={(e) => setRow(c.id, { final: e.target.checked })} /></td>
+                  <td><button type="button" className="small" onClick={() => setLineMode({ ...lineMode, [c.id]: !lineMode[c.id] })}>{lineMode[c.id] ? 'Claim total' : 'By line'}</button></td>
+                </tr>
+                {lineMode[c.id] && c.items.map((i) => (
+                  <tr key={`${c.id}-${i.id}`} className="muted">
+                    <td />
+                    <td colSpan={2}>{i.code} {i.tooth ? `#${i.tooth}` : ''} · {money(i.fee)}</td>
+                    <td className="num">{money(i.estimated_amount)}</td>
+                    <td><input type="number" step="0.01" style={{ width: 100 }} value={row(c.id).lines[i.id]?.paid || ''} onChange={(e) => setLine(c, i.id, 'paid', e.target.value)} /></td>
+                    <td><input type="number" step="0.01" style={{ width: 100 }} value={row(c.id).lines[i.id]?.write_off || ''} onChange={(e) => setLine(c, i.id, 'write_off', e.target.value)} /></td>
+                    <td colSpan={2} />
+                  </tr>
+                ))}
+              </Fragment>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {open?.length === 0 && <div className="muted" style={{ marginTop: 10 }}>No open claims for this carrier.</div>}
+      <div className="form-actions" style={{ justifyContent: 'space-between' }}>
+        <span className={diff === 0 ? 'badge ok' : 'badge warn'}>{chosen.length} claim{chosen.length === 1 ? '' : 's'} · {money(total)} posted · {diff === 0 ? 'balanced' : `${money(Math.abs(diff))} ${diff > 0 ? 'left to post' : 'over the check'}`}</span>
+        <button className="primary" disabled={busy || !chosen.length || diff !== 0} onClick={submit}>Post check</button>
+      </div>
+    </div>
   );
 }

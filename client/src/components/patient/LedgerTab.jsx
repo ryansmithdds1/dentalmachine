@@ -29,6 +29,7 @@ export default function LedgerTab({ patient, onChange }) {
         {data.patient_portion < 0
           ? <div className="card stat"><div className="label">Est. credit after insurance</div><div className="value" style={{ color: 'var(--ok, #15803d)' }}>{money(-data.patient_portion)}</div></div>
           : <div className="card stat"><div className="label">Est. patient portion</div><div className="value" style={{ color: data.patient_portion > 0 ? 'var(--danger)' : undefined }}>{money(data.patient_portion)}</div></div>}
+        {data.unapplied_credit > 0 && <div className="card stat"><div className="label">Unapplied credit</div><div className="value">{money(data.unapplied_credit)}</div><div className="muted" style={{ fontSize: 12 }}>paid ahead — applies to the next charges</div></div>}
       </div>
       <div className="card" style={{ padding: 0 }}>
         <div className="page-header" style={{ padding: '14px 16px', marginBottom: 0 }}>
@@ -41,6 +42,7 @@ export default function LedgerTab({ patient, onChange }) {
                 {payConfig?.enabled && <button onClick={() => setModal('paylink')}>Send card payment link</button>}
                 <button onClick={() => setModal('adjustment')}>Adjustment</button>
                 {data.balance < 0 && <button onClick={() => setModal('refund')}>Refund credit</button>}
+                {(patient.guarantor || patient.family_size > 1) && <button onClick={() => setModal('transfer')} title="Move a balance or credit to another family member">Transfer</button>}
                 <button className="primary" onClick={() => setModal('payment')}>Take payment</button>
               </>
             )}
@@ -95,6 +97,7 @@ export default function LedgerTab({ patient, onChange }) {
       )}
       {modal === 'paylink' && <Modal title="Send card payment link" onClose={() => setModal(null)}><PayLinkForm patient={patient} balance={data.patient_portion} onDone={() => { setModal(null); reloadRequests(); }} /></Modal>}
       {modal === 'adjustment' && <Modal title="Ledger adjustment" onClose={() => setModal(null)}><AdjustmentForm patient={patient} lockDate={data.lock_date} onDone={done} /></Modal>}
+      {modal === 'transfer' && <Modal title="Transfer within the family" onClose={() => setModal(null)}><TransferForm patient={patient} balance={data.balance} onDone={done} /></Modal>}
       {modal === 'refund' && <Modal title="Refund credit" onClose={() => setModal(null)}><RefundForm patient={patient} credit={-data.balance} entries={data.entries} onDone={done} /></Modal>}
       {modal?.void && <Modal title={`Void ${label(modal.void.type).toLowerCase()}`} onClose={() => setModal(null)}><VoidForm entry={modal.void} onDone={done} /></Modal>}
     </>
@@ -236,11 +239,35 @@ function PayLinkForm({ patient, balance, onDone }) {
   );
 }
 
-function AdjustmentForm({ patient, lockDate, onDone }) {
-  const [form, setForm] = useState({ amount: '', direction: 'credit', description: 'Courtesy discount', entry_date: '' });
+function TransferForm({ patient, balance, onDone }) {
+  const { data: family } = useApi(`/patients/${patient.id}/family`);
+  const members = (family?.members || []).filter((m) => m.id !== patient.id);
+  const [form, setForm] = useState({ to: '', kind: balance < 0 ? 'credit' : 'balance', amount: (Math.abs(balance) / 100).toFixed(2), note: '' });
   const { submit, busy, error } = useSubmit(async () => {
     const cents = toCents(form.amount);
-    await api.post(`/patients/${patient.id}/adjustments`, { amount: form.direction === 'credit' ? -cents : cents, description: form.description, entry_date: form.entry_date || undefined });
+    await api.post(`/patients/${patient.id}/transfer`, { to_patient_id: Number(form.to), amount: form.kind === 'credit' ? -cents : cents, note: form.note });
+    onDone();
+  });
+  return (
+    <form onSubmit={(e) => { e.preventDefault(); submit(); }}>
+      <ErrorBox error={error} />
+      <div className="form-grid">
+        <label>To<select required value={form.to} onChange={(e) => setForm({ ...form, to: e.target.value })}><option value="">Choose…</option>{members.map((m) => <option key={m.id} value={m.id}>{m.first_name} {m.last_name}</option>)}</select></label>
+        <label>Move<select value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value })}><option value="balance">Balance owed</option><option value="credit">Credit</option></select></label>
+        <label>Amount ($)<input type="number" step="0.01" min="0.01" required value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} /></label>
+        <label>Note<input value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} placeholder="Overpayment applied to son's visit" /></label>
+      </div>
+      <div className="form-actions"><button className="primary" disabled={busy}>Transfer</button></div>
+    </form>
+  );
+}
+
+function AdjustmentForm({ patient, lockDate, onDone }) {
+  const { data: types } = useApi('/adjustment-types');
+  const [form, setForm] = useState({ amount: '', direction: 'credit', description: 'Courtesy discount', entry_date: '', adjustment_type: 'Courtesy discount' });
+  const { submit, busy, error } = useSubmit(async () => {
+    const cents = toCents(form.amount);
+    await api.post(`/patients/${patient.id}/adjustments`, { amount: form.direction === 'credit' ? -cents : cents, description: form.description, entry_date: form.entry_date || undefined, adjustment_type: form.adjustment_type || null });
     onDone();
   });
   return (
@@ -250,9 +277,11 @@ function AdjustmentForm({ patient, lockDate, onDone }) {
         <label>Amount ($)<input type="number" step="0.01" min="0.01" required value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} /></label>
         <label>
           Type
-          <select value={form.direction} onChange={(e) => setForm({ ...form, direction: e.target.value })}>
-            <option value="credit">Credit (reduces balance)</option>
-            <option value="debit">Debit (increases balance)</option>
+          <select value={form.adjustment_type} onChange={(e) => {
+            const t = types?.find((x) => x.name === e.target.value);
+            setForm({ ...form, adjustment_type: e.target.value, direction: t?.direction || form.direction, description: form.description === form.adjustment_type || !form.description ? e.target.value : form.description });
+          }}>
+            {(types || []).filter((t) => t.active && t.name !== 'Insurance write-off').map((t) => <option key={t.id} value={t.name}>{t.name} ({t.direction === 'credit' ? 'reduces balance' : 'adds to balance'})</option>)}
           </select>
         </label>
         <label>Reason<input required value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></label>

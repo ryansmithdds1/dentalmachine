@@ -238,6 +238,10 @@ function Practice() {
             </select>
           </label>
           <label>
+            Write-offs over this need an administrator ($)
+            <input type="number" min="0" step="1" value={current.adjustment_approval_limit != null ? current.adjustment_approval_limit / 100 : ''} placeholder="No limit" onChange={(e) => change('adjustment_approval_limit', e.target.value === '' ? null : Math.round(Number(e.target.value) * 100))} />
+          </label>
+          <label>
             Books closed through
             <input type="date" value={current.lock_date || ''} max={new Date(Date.now() - 86400_000).toLocaleDateString('en-CA')} onChange={(e) => change('lock_date', e.target.value || null)} />
             <span className="muted" style={{ fontSize: 12 }}>Nothing can be posted or backdated on or before this date (month-end close). Corrections post today.</span>

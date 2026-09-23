@@ -82,6 +82,11 @@ export async function postEra(db, practiceId, era, { userId = null, filename = n
     }
   }
   const id = await db.tx(async () => {
+    // The check (or EFT) itself, so the deposit and each claim's payment can be traced to it.
+    const checkId = await insert(db, 'insurance_checks', {
+      practice_id: practiceId, payer_name: era.payer_name, check_number: era.check_number, check_date: era.payment_date || date,
+      amount: era.total_paid, method: 'eft', provider_adjustments: era.provider_adjustments?.length ? JSON.stringify(era.provider_adjustments) : null, created_by: userId,
+    });
     for (const { claim: found, lines } of groups.values()) {
       const merged = {
         order: lines[0].base.order, control_number: found.control_number, claim_id: found.id,
@@ -118,7 +123,9 @@ export async function postEra(db, practiceId, era, { userId = null, filename = n
       }
       await postClaimPayment(db, claim, {
         amount: merged.paid, writeOff: merged.write_off, final: true, method: 'eft', reference: era.check_number, userId, date, payerClaimNumber: lines[0].c.payer_claim_number,
-        deductible: lines.reduce((s, l) => s + (l.c.deductible || 0), 0),
+        deductible: lines.reduce((s, l) => s + (l.c.deductible || 0), 0), checkId,
+        // Service lines, when the payer sent them, so each procedure's payment is known.
+        lines: lines.flatMap((l) => l.c.services).map((sv) => ({ code: sv.code, billed: sv.billed, paid: sv.paid, patient_resp: sv.patient_resp, write_off: sv.write_off, adjustments: sv.adjustments })),
       });
       const splitNote = lines.length > 1 ? ` across ${lines.length} lines` : '';
       await claimEvent(db, claim, '835', 'paid', `Paid $${(merged.paid / 100).toFixed(2)}${merged.write_off ? `, $${(merged.write_off / 100).toFixed(2)} written off` : ''}${splitNote} (EFT ${era.check_number || '—'})`);
@@ -129,13 +136,16 @@ export async function postEra(db, practiceId, era, { userId = null, filename = n
     details.sort((a, b) => a.order - b.order);
     for (const d of details) delete d.order;
     const matched = details.filter((d) => d.result === 'posted' || d.result === 'denied').length;
-    return insert(db, 'era_imports', {
+    const importId = await insert(db, 'era_imports', {
       practice_id: practiceId, filename: filename ? String(filename).slice(0, 200) : null, payer_name: era.payer_name, check_number: era.check_number,
       payment_date: era.payment_date, total_paid: era.total_paid, claims_matched: matched, claims_unmatched: details.length - matched,
       details: JSON.stringify(details), raw, created_by: userId,
+      provider_adjustments: era.provider_adjustments?.length ? JSON.stringify(era.provider_adjustments) : null,
     });
+    await db.run('UPDATE insurance_checks SET era_import_id = ? WHERE id = ?', importId, checkId);
+    return importId;
   });
-  return { id, practice_id: practiceId, payer_name: era.payer_name, check_number: era.check_number, payment_date: era.payment_date, total_paid: era.total_paid, claims: details };
+  return { id, practice_id: practiceId, payer_name: era.payer_name, check_number: era.check_number, payment_date: era.payment_date, total_paid: era.total_paid, claims: details, provider_adjustments: era.provider_adjustments || [] };
 }
 
 // Timeline entry for a claim's electronic journey, and its latest status on the claim itself.

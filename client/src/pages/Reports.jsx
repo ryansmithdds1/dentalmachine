@@ -27,7 +27,11 @@ function Operational() {
   const [from, setFrom] = useState(`${today.slice(0, 7)}-01`);
   const [to, setTo] = useState(today);
   const { data: prod } = useApi(`/reports/production?from=${from}&to=${to}`);
-  const { data: aging } = useApi('/reports/aging');
+  const [agingGroup, setAgingGroup] = useState('patient');
+  const [asOf, setAsOf] = useState('');
+  const { data: aging } = useApi(`/reports/aging?group=${agingGroup}${asOf ? `&as_of=${asOf}` : ''}`);
+  const { data: byProv } = useApi(`/reports/collections-by-provider?from=${from}&to=${to}`);
+  const { data: adj } = useApi(`/reports/adjustments?from=${from}&to=${to}`);
   const [sheetDate, setSheetDate] = useState(today);
   const { data: sheet } = useApi(`/reports/daysheet?date=${sheetDate}`);
   const maxDay = Math.max(1, ...(prod?.by_day || []).map((d) => Math.max(d.production, d.collections)));
@@ -105,17 +109,52 @@ function Operational() {
         </div>
       </div>
 
+      <div className="grid grid-2" style={{ marginTop: 16 }}>
+        <div className="card">
+          <TitleRow title="Collections by provider">
+            <CsvButton name={`collections-by-provider-${from}-to-${to}`} rows={byProv?.rows} columns={[['Provider', (r) => r.name], ['Production', (r) => dollars(r.production)], ['Adjustments', (r) => dollars(r.adjustments)], ['Net production', (r) => dollars(r.net_production)], ['Patient payments', (r) => dollars(r.patient_collections)], ['Insurance payments', (r) => dollars(r.insurance_collections)], ['Collections', (r) => dollars(r.collections)]]} />
+          </TitleRow>
+          <div className="muted" style={{ fontSize: 12, margin: '4px 0 8px' }}>Payments are credited to the provider whose work they paid for (insurance by the procedures on the claim; patient payments oldest charge first).</div>
+          <table>
+            <thead><tr><th>Provider</th><th className="num">Net production</th><th className="num">Collections</th><th className="num">Rate</th></tr></thead>
+            <tbody>
+              {byProv?.rows.map((r) => (
+                <tr key={r.id ?? 'none'}>
+                  <td>{r.name}</td>
+                  <td className="num">{money(r.net_production)}</td>
+                  <td className="num" title={`Patients ${money(r.patient_collections)} · Insurance ${money(r.insurance_collections)}`}>{money(r.collections)}</td>
+                  <td className="num">{r.net_production > 0 ? `${Math.round((r.collections / r.net_production) * 100)}%` : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="card">
+          <TitleRow title="Adjustments by type"><CsvButton name={`adjustments-${from}-to-${to}`} rows={adj?.rows} columns={[['Type', (r) => r.type], ['Count', (r) => r.count], ['Amount', (r) => dollars(r.amount)]]} /></TitleRow>
+          <table style={{ marginTop: 8 }}>
+            <thead><tr><th>Type</th><th className="num">Count</th><th className="num">Amount</th></tr></thead>
+            <tbody>{adj?.rows.map((r) => <tr key={r.type}><td>{r.type}</td><td className="num">{r.count}</td><td className="num">{money(r.amount)}</td></tr>)}</tbody>
+          </table>
+          {adj?.rows.length === 0 && <div className="muted">No adjustments in this range.</div>}
+        </div>
+      </div>
+
       <div className="card" style={{ marginTop: 16, padding: 0 }}>
         <div style={{ padding: '14px 16px' }}>
           <TitleRow title="Accounts receivable aging">
-            <CsvButton name={`ar-aging-${aging?.as_of}`} rows={aging?.rows} columns={[['Patient #', (r) => r.id], ['First name', (r) => r.first_name], ['Last name', (r) => r.last_name], ['Phone', (r) => r.phone], ['0-30', (r) => dollars(r.current)], ['31-60', (r) => dollars(r.d31_60)], ['61-90', (r) => dollars(r.d61_90)], ['90+', (r) => dollars(r.d90_plus)], ['Total', (r) => dollars(r.balance)]]} />
+            <div className="seg no-print">
+              <button className={agingGroup === 'patient' ? 'active' : ''} onClick={() => setAgingGroup('patient')}>By patient</button>
+              <button className={agingGroup === 'family' ? 'active' : ''} onClick={() => setAgingGroup('family')}>By family</button>
+            </div>
+            <input type="date" className="no-print" value={asOf} max={today} onChange={(e) => setAsOf(e.target.value)} title="As of (leave blank for today)" style={{ width: 150 }} />
+            <CsvButton name={`ar-aging-${aging?.as_of}`} rows={aging?.rows} columns={[['Patient #', (r) => r.id], ['First name', (r) => r.first_name], ['Last name', (r) => r.last_name], ['Phone', (r) => r.phone], ['0-30', (r) => dollars(r.current)], ['31-60', (r) => dollars(r.d31_60)], ['61-90', (r) => dollars(r.d61_90)], ['90+', (r) => dollars(r.d90_plus)], ['Total', (r) => dollars(r.balance)], ['Insurance pending', (r) => dollars(r.insurance_pending)], ['Patient owes', (r) => dollars(r.patient_portion)]]} />
             <button className="small no-print" onClick={() => window.print()}>Print / PDF</button>
           </TitleRow>
           <div className="muted">As of {aging?.as_of}. Payments and credits are applied to the oldest charges first.</div>
         </div>
         <div className="table-wrap">
           <table>
-            <thead><tr><th>Patient</th><th>Phone</th><th className="num">0–30</th><th className="num">31–60</th><th className="num">61–90</th><th className="num">90+</th><th className="num">Total</th></tr></thead>
+            <thead><tr><th>{agingGroup === 'family' ? 'Account (head of household)' : 'Patient'}</th><th>Phone</th><th className="num">0–30</th><th className="num">31–60</th><th className="num">61–90</th><th className="num">90+</th><th className="num">Total</th><th className="num">Insurance pending</th><th className="num">Patient owes</th></tr></thead>
             <tbody>
               {aging?.rows.map((r) => (
                 <tr key={r.id}>
@@ -123,6 +162,8 @@ function Operational() {
                   <td>{r.phone}</td>
                   <td className="num">{money(r.current)}</td><td className="num">{money(r.d31_60)}</td><td className="num">{money(r.d61_90)}</td><td className="num">{money(r.d90_plus)}</td>
                   <td className="num"><strong>{money(r.balance)}</strong></td>
+                  <td className="num muted">{money(r.insurance_pending)}</td>
+                  <td className="num">{money(r.patient_portion)}</td>
                 </tr>
               ))}
               {aging && (
@@ -130,6 +171,8 @@ function Operational() {
                   <td colSpan={2}>Total ({aging.rows.length} accounts)</td>
                   <td className="num">{money(aging.totals.current)}</td><td className="num">{money(aging.totals.d31_60)}</td><td className="num">{money(aging.totals.d61_90)}</td><td className="num">{money(aging.totals.d90_plus)}</td>
                   <td className="num">{money(aging.totals.total)}</td>
+                  <td className="num">{money(aging.totals.insurance_pending)}</td>
+                  <td className="num">{money(aging.totals.patient_portion)}</td>
                 </tr>
               )}
             </tbody>
