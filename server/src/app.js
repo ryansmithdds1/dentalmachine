@@ -24,6 +24,7 @@ import frontDeskRoutes from './routes/frontdesk.js';
 import casePresentationRoutes, { publicCasePresentation } from './routes/casepres.js';
 import growthRoutes from './routes/growth.js';
 import collectionRoutes from './routes/collections.js';
+import depositRoutes from './routes/deposits.js';
 import imagingRoutes, { bridgeAgentRoutes } from './routes/imaging.js';
 import { portalPublicRoutes, portalRoutes } from './routes/portal.js';
 import systemRoutes from './routes/system.js';
@@ -150,6 +151,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(casePresentationRoutes({ db, messenger, config, erx }));
   api.use(growthRoutes({ db, messenger, config, mailer }));
   api.use(collectionRoutes({ db, messenger }));
+  api.use(depositRoutes({ db }));
   api.use(imagingRoutes({ db }));
   api.use(systemRoutes({ db, config, messenger, storage, payments, clearinghouse, erx, mailer }));
   app.use('/api', api);

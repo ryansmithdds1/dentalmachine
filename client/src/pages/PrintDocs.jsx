@@ -302,3 +302,29 @@ export function CollectionLetterPrint() {
     </div>
   );
 }
+
+// Bank deposit slip: every check and the cash total.
+export function DepositSlipPrint() {
+  const { id } = useParams();
+  const { data: d } = useApi(`/deposits/${id}`);
+  useAutoPrint(!!d);
+  if (!d) return <div className="empty">Loading…</div>;
+  const checks = d.entries.filter((e) => e.method !== 'cash');
+  return (
+    <div className="print-doc">
+      <div className="no-print" style={{ marginBottom: 12 }}><Link to="/claims?tab=deposits">← Back</Link> <button onClick={() => window.print()}>Print</button></div>
+      <header className="doc-head">
+        <div><h1>{d.practice.name}</h1><div>{[d.practice.address, d.practice.city, d.practice.state, d.practice.zip].filter(Boolean).join(', ')}</div></div>
+        <div style={{ textAlign: 'right' }}><h2>Deposit slip</h2><div>{fmtDate(d.deposit_date)}</div>{d.reference && <div>Ref. {d.reference}</div>}</div>
+      </header>
+      <table>
+        <thead><tr><th>From</th><th>Method</th><th>Check #</th><th style={{ textAlign: 'right' }}>Amount</th></tr></thead>
+        <tbody>
+          {checks.map((e) => <tr key={e.id}><td>{e.type === 'insurance_payment' ? e.description : `${e.first_name} ${e.last_name}`}</td><td>{e.method || 'check'}</td><td>{e.reference || ''}</td><td style={{ textAlign: 'right' }}>{money(e.amount)}</td></tr>)}
+          {d.by_method.cash ? <tr><td>Cash</td><td>cash</td><td /><td style={{ textAlign: 'right' }}>{money(d.by_method.cash)}</td></tr> : null}
+          <tr><th colSpan={3}>Total ({d.entries.length} items)</th><th style={{ textAlign: 'right' }}>{money(d.total)}</th></tr>
+        </tbody>
+      </table>
+    </div>
+  );
+}

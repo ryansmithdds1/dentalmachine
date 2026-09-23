@@ -94,7 +94,7 @@ The "OD / Curve" column shows which competitor has the feature: ✓ = has it, ~ 
 | 13 | ✅ **Balance transfers between family members,** and income transfers. | Common front-desk correction. | ✓ / ✓ | P2 | S |
 | 14 | ✅ _(Done: Billing → Eligibility checks a day's patients at once and runs each evening for tomorrow; frequency limits and last-done dates are read from the 271 and applied to the plan.)_ **Batch eligibility** for tomorrow's schedule, parsing frequency and history from the 271 response. | Saves 1–2 hours of front-desk work a day. | ✓ / ✓ | P2 | M |
 | 15 | ✅ (expiry & status rules) **Pre-auth expiry dates,** with approved amounts feeding estimates. | Accuracy. | ✓ / ✓ | P3 | S |
-| 16 | **Deposit slips and bank reconciliation.** | Office manager close-out. | ✓ / ~ | P2 | S |
+| 16 | ✅ _(Done: Billing → Deposits: pick undeposited checks/cash or card batches, print the slip, reconcile with the bank statement; mismatches are flagged.)_ **Deposit slips and bank reconciliation.** | Office manager close-out. | ✓ / ~ | P2 | S |
 
 ### 2.2 Platform and practice operations
 

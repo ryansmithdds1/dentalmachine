@@ -787,6 +787,24 @@ CREATE TABLE IF NOT EXISTS fee_history (
 );
 CREATE INDEX IF NOT EXISTS idx_fee_history ON fee_history(practice_id, code);
 
+-- Bank deposits: the checks and cash (or card batches) taken to the bank together, and the bank's figure for reconciling.
+CREATE TABLE IF NOT EXISTS deposits (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  location_id INTEGER,
+  deposit_date TEXT NOT NULL,
+  total INTEGER NOT NULL,
+  reference TEXT,
+  notes TEXT,
+  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','reconciled','discrepancy')),
+  bank_amount INTEGER,
+  bank_date TEXT,
+  reconciled_by INTEGER,
+  reconciled_at TEXT,
+  created_by INTEGER,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Collections: letters, finance charges, agency referrals and bad-debt write-offs on an account (the guarantor).
 CREATE TABLE IF NOT EXISTS collection_actions (
   id INTEGER PRIMARY KEY,
@@ -1275,6 +1293,7 @@ const COLUMNS = [
   ['practices', 'late_fee', 'INTEGER NOT NULL DEFAULT 0'],
   ['practices', 'collection_agency', 'TEXT'],
   ['practices', 'eligibility_batch_date', 'TEXT'],
+  ['ledger_entries', 'deposit_id', 'INTEGER REFERENCES deposits(id)'],
   ['users', 'custom_role_id', 'INTEGER REFERENCES custom_roles(id)'],
   ['users', 'permissions_add', 'TEXT'],
   ['users', 'permissions_remove', 'TEXT'],
