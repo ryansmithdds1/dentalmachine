@@ -217,6 +217,18 @@ export default function PerioTab({ patient }) {
     setViewing(null);
   };
 
+  // An exam already started today (by someone else, or by voice through the assistant) opens ready to
+  // carry on, rather than a blank new exam beside it.
+  useEffect(() => {
+    if (!exams?.length || viewing || editingId || Object.keys(readings).length) return;
+    const d = new Date();
+    const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const started = exams.find((x) => x.exam_date === today);
+    if (!started) return;
+    if (can('clinical:write')) startEdit(started);
+    else setViewing(started);
+  }, [exams]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const siteInput = (t, key, i, color) => {
     const v = get(t);
     const d = v[key][i];
