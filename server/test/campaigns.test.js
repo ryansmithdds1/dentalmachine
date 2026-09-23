@@ -4,9 +4,6 @@ import { harness } from './helpers.js';
 import { runCampaigns } from '../src/campaigns.js';
 
 const h = harness();
-const today = new Date().toISOString().slice(0, 10);
-const noon = new Date(`${today}T15:00:00Z`);
-const night = new Date(`${today}T23:30:00Z`);
 
 async function setup() {
   const ctx = await h.practice({ timezone: 'UTC' });
@@ -53,11 +50,14 @@ test('sending: waits for daytime, sends once, emails carry an unsubscribe link t
   const { api, patient, emailOnly } = await setup();
   const c = (await api.post('/campaigns', { name: 'Closed Monday', segment: 'all_active', channel: 'auto', subject: 'Office closed', body: 'Hi {first_name}, {practice} is closed Monday. Book online: {booking_link}' })).data;
   assert.equal(c.status, 'draft');
-  await api.post(`/campaigns/${c.id}/send`, { send_at: '2020-01-01T00:00:00Z' });
+  // Scheduled a minute ahead, so it waits for the runs below (tomorrow night, then tomorrow at noon) whatever the time now.
+  await api.post(`/campaigns/${c.id}/send`, { send_at: new Date(Date.now() + 60_000).toISOString() });
+  const tomorrow = new Date(Date.now() + 86400_000).toISOString().slice(0, 10);
+  const [lateNight, midday] = [new Date(`${tomorrow}T02:30:00Z`), new Date(`${tomorrow}T15:00:00Z`)];
   const before = h.sent.length;
-  assert.equal(await runCampaigns(h.db, h.messenger, { appUrl: 'https://app.example.com', campaignId: c.id, now: night }), 0); // quiet hours
-  assert.equal(await runCampaigns(h.db, h.messenger, { appUrl: 'https://app.example.com', campaignId: c.id, now: noon }), 2);
-  assert.equal(await runCampaigns(h.db, h.messenger, { appUrl: 'https://app.example.com', campaignId: c.id, now: noon }), 0);
+  assert.equal(await runCampaigns(h.db, h.messenger, { appUrl: 'https://app.example.com', campaignId: c.id, now: lateNight }), 0); // quiet hours
+  assert.equal(await runCampaigns(h.db, h.messenger, { appUrl: 'https://app.example.com', campaignId: c.id, now: midday }), 2);
+  assert.equal(await runCampaigns(h.db, h.messenger, { appUrl: 'https://app.example.com', campaignId: c.id, now: midday }), 0);
   const out = h.sent.slice(before);
   assert.equal(out.length, 2);
   const text = out.find((m) => m.channel === 'sms');
