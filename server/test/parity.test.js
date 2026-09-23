@@ -94,7 +94,8 @@ test('pre-authorizations: create from a plan, export as 837 predetermination, re
 
 test('morning huddle flags, route slip and follow-up lists', async () => {
   const { api, dentist, hygienist, patient } = await setup();
-  const d = today();
+  // Tomorrow's huddle, so the test doesn't depend on the time of day.
+  const d = new Date(Date.parse(`${today()}T12:00:00Z`) + 86400_000).toISOString().slice(0, 10);
   await api.post(`/patients/${patient.id}/treatment-plans`, { name: 'Tx', procedures: [{ code: 'D2392', tooth: '19', surfaces: 'MO', provider_id: dentist.id }] });
   await api.post(`/patients/${patient.id}/procedures`, { code: 'D0150', provider_id: dentist.id, complete: true });
   await api.put(`/patients/${patient.id}`, { office_alert: 'Prefers morning appointments' });
