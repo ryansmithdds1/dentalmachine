@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { requirePermission, HttpError, can } from '../auth.js';
 import { pick, requireFields, insert, update, findOr404, audit, practiceNow, mapSeq, friendlyDateTime } from '../util.js';
 import { sendMessage, preferredChannel } from '../messaging.js';
+import { messageText, patientLang, subjectFor } from '../templates.js';
 import { primaryPolicy, patientBalance, estimateCoverage, completeProcedure } from '../services.js';
 import { recallTypes } from '../recalls.js';
 import { historyChanges } from '../forms.js';
@@ -164,8 +165,8 @@ export default function frontDeskRoutes({ db, messenger }) {
       if (!target) continue;
       const msg = await sendMessage(db, messenger, {
         practiceId: req.user.practice_id, patientId: w.patient_id, userId: req.user.id, kind: 'waitlist_offer', channel: target.channel, to: target.to,
-        subject: `An opening at ${practice.name}`,
-        body: `Hi ${w.first_name}, an appointment just opened at ${practice.name}: ${when}. Reply or call ${practice.phone || 'us'} to take it — first come, first served.`,
+        subject: subjectFor(patientLang(w), 'waitlist_offer', `An opening at ${practice.name}`, practice.name),
+        body: await messageText(db, req.user.practice_id, 'waitlist_offer', { first_name: w.first_name, when: patientLang(w) === 'es' ? friendlyDateTime(`${date} ${time}`, 'es') : when }, patientLang(w)),
       });
       await db.run("UPDATE waitlist SET last_offered_at = datetime('now') WHERE id = ?", w.id);
       sent.push({ waitlist_id: w.id, patient_id: w.patient_id, name: `${w.first_name} ${w.last_name}`, status: msg.status });

@@ -1130,6 +1130,7 @@ function Messaging() {
   const { data: practice } = useApi('/practice');
   const { data: meta } = useApi('/message-templates/meta');
   const [tplLang, setTplLang] = useState('en');
+  const [focus, setFocus] = useState('reminder');
   const [form, setForm] = useState(null);
   const [saved, setSaved] = useState(false);
   const { refresh } = useAuth();
@@ -1150,7 +1151,7 @@ function Messaging() {
   };
   const setStep = (list, i, patch) => change({ [list]: cur[list].map((s, j) => (j === i ? { ...s, ...patch } : s)) });
   const change = (patch) => { setSaved(false); setForm({ ...cur, ...patch }); };
-  const sample = { first_name: 'Maria', practice: practice.name, when: 'Tue, Oct 6 at 9:00 AM', provider: 'Dr. Chen', link: 'https://…/c/abc123', phone: practice.phone || '(555) 555-0100', forms: '3 forms', amount: '$125.00', reason: 'Card declined (insufficient funds)' };
+  const sample = { first_name: 'Maria', practice: practice.name, when: 'Tue, Oct 6 at 9:00 AM', provider: 'Dr. Chen', link: 'https://…/c/abc123', phone: practice.phone || '(555) 555-0100', forms: '3 forms', amount: '$125.00', reason: 'Card declined (insufficient funds)', date: 'Oct 6', method: 'credit card', balance: '$80.00', receipt: '#1042', code: '482913', minutes: '10' };
   const render = (t, extra = {}) => t.replace(/\{(\w+)\}/g, (_, k) => extra[k] ?? sample[k] ?? '');
   return (
     <>
@@ -1234,13 +1235,15 @@ function Messaging() {
           <button type="button" className={tplLang === 'en' ? 'active' : ''} onClick={() => setTplLang('en')}>English</button>
           <button type="button" className={tplLang === 'es' ? 'active' : ''} onClick={() => setTplLang('es')}>Español</button>
         </div>
+        <div className="templates-layout">
+        <div>
         {Object.entries(meta).map(([base, m]) => {
           const k = tplLang === 'es' ? `${base}_es` : base;
           const std = tplLang === 'es' ? m.es : m.text;
           const value = cur.templates[k] ?? '';
           const out = render(value || std, base === 'booking_declined' ? { reason: tplLang === 'es' ? 'Ya no tenemos espacio esa mañana.' : 'We are fully booked that morning.' } : {});
           return (
-            <div key={k} className="template-row">
+            <div key={k} className={`template-row${focus === base ? ' focused' : ''}`} onFocus={() => setFocus(base)} onClick={() => setFocus(base)}>
               <label>{m.label}{tplLang === 'es' ? ' (Spanish)' : ''}<textarea rows={2} value={value} placeholder={std} lang={tplLang} onChange={(e) => change({ templates: { ...cur.templates, [k]: e.target.value } })} /></label>
               <div className="muted" style={{ fontSize: 12 }}>
                 {m.help} Uses {m.vars.map((v) => <code key={v} style={{ cursor: 'pointer' }} title="Add to the message" onClick={() => change({ templates: { ...cur.templates, [k]: `${value || std} {${v}}` } })}>{`{${v}}`}</code>).reduce((a, b) => [a, ' ', b])}
@@ -1251,6 +1254,15 @@ function Messaging() {
             </div>
           );
         })}
+        </div>
+        {meta[focus] && (() => {
+          const m = meta[focus];
+          const k = tplLang === 'es' ? `${focus}_es` : focus;
+          const body = render(cur.templates[k] || (tplLang === 'es' ? m.es : m.text), focus === 'booking_declined' ? { reason: tplLang === 'es' ? 'Ya no tenemos espacio esa mañana.' : 'We are fully booked that morning.' } : {})
+            + (focus === 'reminder' ? (tplLang === 'es' ? ' Responda C para confirmar, o llámenos para cambiar su cita. Responda STOP para no recibir mensajes.' : ' Reply C to confirm, or call us to reschedule. Reply STOP to opt out.') : '');
+          return <PhonePreview from={practice.sms_number || practice.name} label={m.label} body={body} emailOnly={focus === 'statement'} subject={practice.name} />;
+        })()}
+        </div>
       </div>
       <ErrorBox error={error} />
       <div className="form-actions">{saved && <span className="badge ok">Saved</span>}<button className="primary" disabled={busy} onClick={submit}>Save</button></div>
@@ -1519,5 +1531,25 @@ function TimeOff({ canWrite }) {
         </table>
       ) : <div className="muted" style={{ marginTop: 10 }}>Nothing coming up.</div>}
     </div>
+  );
+}
+
+// A phone showing how a text arrives (or an inbox, for email-only messages), with the sample details filled in.
+function PhonePreview({ from, label, body, emailOnly, subject }) {
+  const links = (text) => text.split(/(https?:\/\/\S+)/).map((part, i) => (/^https?:/.test(part) ? <u key={i}>{part}</u> : part));
+  return (
+    <aside className="phone-preview" aria-label={`Preview: ${label}`}>
+      <div className="phone-frame">
+        <div className="phone-notch" />
+        <div className="phone-top"><span className="phone-avatar">{String(from).replace(/[^A-Za-z]/g, '').slice(0, 1) || '#'}</span><div><strong>{from}</strong><div className="muted">{emailOnly ? 'Email' : 'Text message'}</div></div></div>
+        <div className="phone-screen">
+          <div className="phone-time">Today 9:41 AM</div>
+          {emailOnly
+            ? <div className="phone-email"><strong>{subject}</strong><p>{links(body)}</p></div>
+            : <div className="phone-bubble">{links(body)}</div>}
+        </div>
+      </div>
+      <div className="muted" style={{ fontSize: 12, textAlign: 'center', marginTop: 6 }}>{label} · {body.length} characters{!emailOnly && body.length > 160 ? ` · sent as ${Math.ceil(body.length / 153)} texts` : ''}</div>
+    </aside>
   );
 }

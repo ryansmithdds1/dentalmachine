@@ -52,7 +52,8 @@ export default function engagementRoutes({ db, messenger, config }) {
       if (heads) {
         await sendMessage(db, messenger, {
           practiceId: practice.id, patientId: patient.id, userId: req.user.id, kind: 'portal_notice', channel: heads.channel, to: heads.to,
-          subject: `New message from ${practice.name}`, body: `${practice.name} sent you a secure message. Read it in your patient portal: ${config.appUrl}/portal/${portalKey(practice)}`,
+          subject: subjectFor(patientLang(patient), 'portal_notice', `New message from ${practice.name}`, practice.name),
+          body: await messageText(db, practice.id, 'portal_notice', { first_name: patient.first_name, link: `${config.appUrl}/portal/${portalKey(practice)}` }, patientLang(patient)),
         });
       }
       await audit(db, req, 'message.send', 'messages', id, { channel: 'portal' });

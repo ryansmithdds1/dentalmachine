@@ -58,6 +58,26 @@ export const TEMPLATE_META = {
     text: "Hi {first_name}, would you take a minute to tell {practice} how we're doing? {link}",
     es: 'Hola {first_name}, ¿nos regala un minuto para decirle a {practice} cómo lo estamos haciendo? {link}',
   },
+  waitlist_offer: {
+    label: 'Opening offered (waitlist / ASAP)', help: 'Sent to waitlist and ASAP patients when an earlier time opens.', vars: ['first_name', 'practice', 'when', 'phone'], required: ['when'],
+    text: 'Hi {first_name}, an appointment just opened at {practice}: {when}. Reply or call {phone} to take it — first come, first served.',
+    es: 'Hola {first_name}, se abrió una cita en {practice}: {when}. Responda o llame al {phone} para tomarla — el primero que responda se la lleva.',
+  },
+  statement: {
+    label: 'Balance statement (email)', help: 'Emailed with each statement run to accounts with an email address.', vars: ['first_name', 'practice', 'amount', 'link', 'phone'], required: ['amount'],
+    text: 'Hi {first_name}, your account balance at {practice} is {amount}. You can see the details and pay online at {link}. Questions? Call {phone}.',
+    es: 'Hola {first_name}, el saldo de su cuenta con {practice} es {amount}. Puede ver los detalles y pagar en línea en {link}. ¿Preguntas? Llame al {phone}.',
+  },
+  portal_notice: {
+    label: 'New secure message', help: 'Tells the patient there is a message waiting in their portal (the message itself stays in the portal).', vars: ['first_name', 'practice', 'link'], required: ['link'],
+    text: '{practice} sent you a secure message. Read it in your patient portal: {link}',
+    es: '{practice} le envió un mensaje seguro. Léalo en su portal de paciente: {link}',
+  },
+  portal_code: {
+    label: 'Portal sign-in code', help: 'The one-time code for signing in to the patient portal.', vars: ['code', 'practice', 'minutes'], required: ['code'],
+    text: "{code} is your {practice} patient portal code. It expires in {minutes} minutes. If you didn't ask for it, you can ignore this message.",
+    es: '{code} es su código del portal de pacientes de {practice}. Vence en {minutes} minutos. Si no lo pidió, puede ignorar este mensaje.',
+  },
   review: {
     label: 'Review request', help: 'After a visit. The link asks how the visit went: happy patients are sent on to your review page, others can tell you privately.', vars: ['first_name', 'practice', 'link', 'phone'], required: ['link'],
     text: 'Thanks for visiting {practice} today, {first_name}! How did we do? {link}',
@@ -128,6 +148,7 @@ const SUBJECTS_ES = {
   reminder: 'Su cita en {practice}', booking_confirmation: 'Su cita en {practice}', review: 'Gracias por visitar {practice}',
   recall: 'Ya le toca su próxima visita en {practice}', card_declined: 'Su pago no se procesó — {practice}', forms: 'Por favor complete sus formularios para {practice}',
   booking_declined: 'Su solicitud de cita en {practice}', card_setup: 'Guarde una tarjeta para sus pagos — {practice}', payment_link: 'Solicitud de pago de {practice}',
-  treatment_plan: 'Su plan de tratamiento de {practice}', receipt: 'Su recibo de {practice}', survey: '¿Cómo lo hicimos? — {practice}',
+  treatment_plan: 'Su plan de tratamiento de {practice}', receipt: 'Su recibo de {practice}', waitlist_offer: 'Se abrió una cita en {practice}',
+  statement: 'Su estado de cuenta de {practice}', portal_notice: 'Nuevo mensaje de {practice}', portal_code: 'Su código del portal de {practice}', survey: '¿Cómo lo hicimos? — {practice}',
 };
 export const subjectFor = (lang, key, english, practice) => (lang === 'es' && SUBJECTS_ES[key] ? SUBJECTS_ES[key].replace('{practice}', practice) : english);

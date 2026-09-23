@@ -7,7 +7,7 @@ import { sendMessage } from '../messaging.js';
 import { publish } from '../events.js';
 import { planStatus } from './family.js';
 import { estimateCoverage, primaryPolicy, pendingInsurance } from '../services.js';
-import { patientLang } from '../templates.js';
+import { patientLang, messageText, subjectFor } from '../templates.js';
 import { openSlots, validateAppt } from './schedule.js';
 import { emitAppointment } from '../webhooks.js';
 import { PdfDoc } from '../pdf.js';
@@ -60,11 +60,11 @@ export function portalPublicRoutes({ db, secret, messenger }) {
     });
     // Sent in the background: the answer takes the same time whether or not the patient exists.
     if (patient && !flood) {
-      sendMessage(db, messenger, {
+      (async () => sendMessage(db, messenger, {
         practiceId: practice.id, patientId: patient.id, kind: 'portal_code', channel: isEmail ? 'email' : 'sms', to: isEmail ? patient.email : patient.phone,
-        subject: `Your ${practice.name} sign-in code`,
-        body: `${code} is your ${practice.name} patient portal code. It expires in ${CODE_TTL_MINUTES} minutes. If you didn't ask for it, you can ignore this message.`,
-      }).catch(() => {});
+        subject: subjectFor(patientLang(patient), 'portal_code', `Your ${practice.name} sign-in code`, practice.name),
+        body: await messageText(db, practice.id, 'portal_code', { code, minutes: String(CODE_TTL_MINUTES) }, patientLang(patient)),
+      }))().catch(() => {});
     }
     res.json({ sent: true, channel: isEmail ? 'email' : 'sms' });
   });

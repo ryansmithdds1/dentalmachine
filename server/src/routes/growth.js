@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { requirePermission, HttpError } from '../auth.js';
 import { insert, audit, practiceNow, toCents, utcRange, publicPractice } from '../util.js';
 import { sendMessage, preferredChannel } from '../messaging.js';
-import { renderTemplate, templatesFor, patientLang, fixedText, subjectFor } from '../templates.js';
+import { renderTemplate, templatesFor, patientLang, fixedText, subjectFor, messageText } from '../templates.js';
 import { mailable, statementHtml } from '../mail.js';
 import { statementData } from './billing.js';
 import { portalKey } from './portal.js';
@@ -174,8 +174,8 @@ export default function growthRoutes({ db, messenger, config, mailer = { enabled
       if (req.body?.email !== false && a.email && a.email_opt_in) {
         const msg = await sendMessage(db, messenger, {
           practiceId: pid, patientId: a.id, userId: req.user.id, kind: 'statement', channel: 'email', to: a.email,
-          subject: `Your statement from ${practice.name}`,
-          body: `Hi ${a.first_name}, your account balance at ${practice.name} is $${(a.patient_portion / 100).toFixed(2)}. You can see the details and pay online at ${portalUrl}. Questions? Call ${practice.phone || 'the office'}.`,
+          subject: subjectFor(patientLang(a), 'statement', `Your statement from ${practice.name}`, practice.name),
+          body: await messageText(db, pid, 'statement', { first_name: a.first_name, amount: a.patient_portion, link: portalUrl }, patientLang(a)),
         });
         if (msg.status === 'sent') {
           method = 'email';
