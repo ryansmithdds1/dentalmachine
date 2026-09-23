@@ -3,6 +3,7 @@ import { requirePermission, HttpError } from '../auth.js';
 import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, toCents, practiceNow, mapSeq, publicPractice } from '../util.js';
 import { estimateCoverage } from '../services.js';
 import { build837D } from '../x12.js';
+import { recordFeeChange } from '../fees.js';
 
 const requireAdmin = (req, _res, next) => (req.user.role === 'admin' ? next() : next(new HttpError(403, 'Administrator access required')));
 
@@ -22,8 +23,9 @@ export default function ppoRoutes({ db, config }) {
   });
 
   r.post('/fee-schedules', requireAdmin, async (req, res) => {
-    const row = pick(req.body, ['name', 'notes']);
+    const row = pick(req.body, ['name', 'notes', 'kind']);
     requireFields(row, ['name']);
+    requireOneOf(row.kind, ['ppo', 'office'], 'kind');
     const id = await insert(db, 'fee_schedules', { ...row, practice_id: req.user.practice_id });
     // Optionally start from a percentage of the office (UCR) fees — how most PPO schedules are negotiated.
     const pct = Number(req.body.percent_of_ucr);
@@ -44,8 +46,11 @@ export default function ppoRoutes({ db, config }) {
         for (const it of req.body.items) {
           const code = String(it.code || '').toUpperCase();
           if (!/^D\d{4}$/.test(code)) throw new HttpError(400, `Invalid code ${it.code}`);
-          if (it.fee === null || it.fee === '') await db.run('DELETE FROM fee_schedule_items WHERE fee_schedule_id = ? AND code = ?', fs.id, code);
-          else await db.run('INSERT INTO fee_schedule_items (fee_schedule_id, code, fee) VALUES (?, ?, ?) ON CONFLICT(fee_schedule_id, code) DO UPDATE SET fee = excluded.fee', fs.id, code, toCents(it.fee, 'fee'));
+          const old = (await db.get('SELECT fee FROM fee_schedule_items WHERE fee_schedule_id = ? AND code = ?', fs.id, code))?.fee ?? null;
+          const fee = it.fee === null || it.fee === '' ? null : toCents(it.fee, 'fee');
+          await recordFeeChange(db, { practiceId: req.user.practice_id, scheduleId: fs.id, code, oldFee: old, newFee: fee, userId: req.user.id });
+          if (fee === null) await db.run('DELETE FROM fee_schedule_items WHERE fee_schedule_id = ? AND code = ?', fs.id, code);
+          else await db.run('INSERT INTO fee_schedule_items (fee_schedule_id, code, fee) VALUES (?, ?, ?) ON CONFLICT(fee_schedule_id, code) DO UPDATE SET fee = excluded.fee', fs.id, code, fee);
         }
       });
     }
@@ -60,6 +65,16 @@ export default function ppoRoutes({ db, config }) {
     }
     await audit(db, req, 'fee_schedule.update', 'fee_schedules', fs.id);
     res.json(await withItems(await db.get('SELECT * FROM fee_schedules WHERE id = ?', fs.id)));
+  });
+
+  // What a code has cost over time, on the standard fees and every schedule.
+  r.get('/fee-history', requirePermission('billing:read'), async (req, res) => {
+    const code = String(req.query.code || '').toUpperCase();
+    res.json(await db.all(
+      `SELECT h.*, f.name AS schedule_name, u.name AS changed_by_name FROM fee_history h LEFT JOIN fee_schedules f ON f.id = h.fee_schedule_id
+       LEFT JOIN users u ON u.id = h.changed_by WHERE h.practice_id = ?${code ? ' AND h.code = ?' : ''} ORDER BY h.id DESC LIMIT 500`,
+      req.user.practice_id, ...(code ? [code] : []),
+    ));
   });
 
   // ---- Pre-authorizations (predeterminations) ----

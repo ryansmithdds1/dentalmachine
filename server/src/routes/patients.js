@@ -9,7 +9,7 @@ const FIELDS = [
   'first_name', 'last_name', 'preferred_name', 'dob', 'gender', 'email', 'phone', 'address', 'city', 'state', 'zip',
   'emergency_contact', 'medical_alerts', 'allergies', 'medications', 'notes', 'primary_provider_id', 'status', 'sms_opt_in', 'email_opt_in', 'guarantor_id', 'referral_source', 'office_alert',
   'asa_class', 'premed_required', 'medical_conditions',
-  'phone_home', 'phone_work', 'preferred_contact', 'language', 'primary_hygienist_id', 'photo', 'custom',
+  'phone_home', 'phone_work', 'preferred_contact', 'language', 'primary_hygienist_id', 'photo', 'custom', 'fee_schedule_id',
 ];
 
 export const MEDICAL_CONDITIONS = [
@@ -17,6 +17,14 @@ export const MEDICAL_CONDITIONS = [
   'Bleeding disorder', 'Anticoagulant therapy', 'Hepatitis', 'HIV', 'Kidney disease', 'Liver disease', 'Seizures', 'Cancer / chemotherapy',
   'Radiation to head or neck', 'Bisphosphonates', 'Osteoporosis', 'Pregnant', 'Thyroid disorder', 'Tobacco use', 'Sleep apnea',
 ];
+
+// A patient's own fees (e.g. cash / uninsured) come from an office fee schedule.
+async function checkFeeSchedule(db, row, req) {
+  if (!('fee_schedule_id' in row)) return;
+  if (!row.fee_schedule_id) { row.fee_schedule_id = null; return; }
+  const fs = await db.get("SELECT id FROM fee_schedules WHERE id = ? AND practice_id = ? AND kind = 'office'", row.fee_schedule_id, req.user.practice_id);
+  if (!fs) throw new HttpError(400, 'Choose an office fee schedule');
+}
 
 function validate(row) {
   requireOneOf(row.status, ['active', 'inactive', 'archived'], 'status');
@@ -230,6 +238,7 @@ export default function patientRoutes({ db }) {
     if (row.primary_provider_id) await findOr404(db, 'providers', row.primary_provider_id, req.user.practice_id, 'Provider');
     if (row.primary_hygienist_id) await findOr404(db, 'providers', row.primary_hygienist_id, req.user.practice_id, 'Hygienist');
     else if ('primary_hygienist_id' in row) row.primary_hygienist_id = null;
+    await checkFeeSchedule(db, row, req);
     if (row.guarantor_id && (await findOr404(db, 'patients', row.guarantor_id, req.user.practice_id, 'Guarantor')).guarantor_id) throw new HttpError(400, 'Choose the head of household as guarantor');
     const id = await insert(db, 'patients', { ...row, practice_id: req.user.practice_id });
     await audit(db, req, 'patient.create', 'patients', id);
@@ -276,6 +285,7 @@ export default function patientRoutes({ db }) {
     if (row.primary_provider_id) await findOr404(db, 'providers', row.primary_provider_id, req.user.practice_id, 'Provider');
     if (row.primary_hygienist_id) await findOr404(db, 'providers', row.primary_hygienist_id, req.user.practice_id, 'Hygienist');
     else if ('primary_hygienist_id' in row) row.primary_hygienist_id = null;
+    await checkFeeSchedule(db, row, req);
     if (row.guarantor_id) {
       const g = await findOr404(db, 'patients', row.guarantor_id, req.user.practice_id, 'Guarantor');
       if (g.id === existing.id) row.guarantor_id = null;

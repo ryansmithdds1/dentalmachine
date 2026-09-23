@@ -8,12 +8,13 @@ import { CustomFieldInputs, DuplicateWarning, parseCustom } from './Switching.js
 const EMPTY = {
   first_name: '', last_name: '', preferred_name: '', dob: '', gender: '', phone: '', email: '', address: '', city: '', state: '', zip: '',
   emergency_contact: '', referral_source: '', office_alert: '', medical_alerts: '', allergies: '', medications: '', notes: '', primary_provider_id: '', status: 'active',
-  phone_home: '', phone_work: '', preferred_contact: '', language: '', primary_hygienist_id: '',
+  phone_home: '', phone_work: '', preferred_contact: '', language: '', primary_hygienist_id: '', fee_schedule_id: '',
 };
 
 export default function PatientForm({ patient, onSaved, onCancel }) {
   const [form, setForm] = useState(() => ({ ...EMPTY, ...Object.fromEntries(Object.entries(patient || {}).filter(([k]) => k in EMPTY).map(([k, v]) => [k, v ?? ''])) }));
   const providers = useLookup('/providers?active=true');
+  const officeFees = useLookup('/fee-schedules').filter((f) => f.kind === 'office');
   const [custom, setCustom] = useState(() => parseCustom(patient?.custom));
   const [dupes, setDupes] = useState(null);
   const nav = useNavigate();
@@ -24,7 +25,7 @@ export default function PatientForm({ patient, onSaved, onCancel }) {
       const found = await api.get(`/patients/duplicates?${q}`);
       if (found.length) return setDupes(found);
     }
-    const body = { ...form, custom, primary_provider_id: form.primary_provider_id ? Number(form.primary_provider_id) : null, primary_hygienist_id: form.primary_hygienist_id ? Number(form.primary_hygienist_id) : null };
+    const body = { ...form, custom, primary_provider_id: form.primary_provider_id ? Number(form.primary_provider_id) : null, primary_hygienist_id: form.primary_hygienist_id ? Number(form.primary_hygienist_id) : null, fee_schedule_id: form.fee_schedule_id ? Number(form.fee_schedule_id) : null };
     const saved = patient ? await api.put(`/patients/${patient.id}`, body) : await api.post('/patients', body);
     onSaved(saved);
   });
@@ -95,6 +96,15 @@ export default function PatientForm({ patient, onSaved, onCancel }) {
             {providers.filter((p) => p.type === 'hygienist').map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
         </label>
+        {officeFees.length > 0 && (
+          <label>
+            Fees
+            <select value={form.fee_schedule_id} onChange={(e) => setForm({ ...form, fee_schedule_id: e.target.value })}>
+              <option value="">Standard fees</option>
+              {officeFees.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+            </select>
+          </label>
+        )}
         {patient && (
           <label>
             Status

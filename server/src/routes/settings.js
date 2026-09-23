@@ -7,6 +7,7 @@ import { validateReminderSteps } from '../messaging.js';
 import { validateRecallSteps, recallTypes } from '../recalls.js';
 import { PROVIDERS, sealSecret } from '../sso.js';
 import { validateTemplates, DEFAULT_TEMPLATES, TEMPLATE_META } from '../templates.js';
+import { recordFeeChange } from '../fees.js';
 
 const ROLES = ['admin', 'dentist', 'hygienist', 'assistant', 'front_desk', 'billing'];
 const CATEGORIES = ['diagnostic', 'preventive', 'restorative', 'endodontics', 'periodontics', 'prosthodontics', 'oral_surgery', 'orthodontics', 'implants', 'adjunctive'];
@@ -14,7 +15,7 @@ const CATEGORIES = ['diagnostic', 'preventive', 'restorative', 'endodontics', 'p
 const requireAdmin = (req, _res, next) => (req.user.role === 'admin' ? next() : next(new HttpError(403, 'Administrator access required')));
 
 // Simple practice-scoped resources share one CRUD shape.
-function resource(r, db, { path, table, fields, required, validate = () => {}, order = 'name', afterCreate = null }) {
+function resource(r, db, { path, table, fields, required, validate = () => {}, order = 'name', afterCreate = null, afterUpdate = null }) {
   r.get(`/${path}`, async (req, res) => {
     const activeOnly = req.query.active === 'true' ? ' AND active = 1' : '';
     res.json(await db.all(`SELECT * FROM ${table} WHERE practice_id = ?${activeOnly} ORDER BY ${order}`, req.user.practice_id));
@@ -33,6 +34,7 @@ function resource(r, db, { path, table, fields, required, validate = () => {}, o
     const row = pick(req.body, fields);
     await validate(row, req);
     await update(db, table, existing.id, req.user.practice_id, row);
+    if (afterUpdate) await afterUpdate(existing, row, req);
     await audit(db, req, `${table}.update`, table, existing.id);
     res.json(await db.get(`SELECT * FROM ${table} WHERE id = ?`, existing.id));
   });
@@ -230,21 +232,31 @@ export default function settingsRoutes({ db, secret, config = {} }) {
 
   resource(r, db, {
     path: 'providers', table: 'providers', required: ['name'],
-    fields: ['name', 'type', 'npi', 'license_number', 'dea_number', 'erx_user_id', 'color', 'active', 'user_id', 'working_hours', 'daily_goal'],
+    fields: ['name', 'type', 'npi', 'license_number', 'dea_number', 'erx_user_id', 'color', 'active', 'user_id', 'working_hours', 'daily_goal', 'fee_schedule_id'],
     validate: async (row, req) => {
       if (row.working_hours != null) row.working_hours = JSON.stringify(validateWorkingHours(typeof row.working_hours === 'string' ? JSON.parse(row.working_hours) : row.working_hours));
       requireOneOf(row.type, ['dentist', 'hygienist', 'specialist'], 'type');
       if (row.npi && !/^\d{10}$/.test(row.npi)) throw new HttpError(400, 'NPI must be 10 digits');
       if (row.user_id) await findOr404(db, 'users', row.user_id, req.user.practice_id, 'User');
+      await checkOfficeSchedule(row, req);
     },
   });
+
+  // A provider's, office's or patient's own fees come from an office (not PPO) fee schedule.
+  const checkOfficeSchedule = async (row, req) => {
+    if (!('fee_schedule_id' in row)) return;
+    if (!row.fee_schedule_id) { row.fee_schedule_id = null; return; }
+    const fs = await findOr404(db, 'fee_schedules', row.fee_schedule_id, req.user.practice_id, 'Fee schedule');
+    if (fs.kind !== 'office') throw new HttpError(400, `${fs.name} is an insurance fee schedule — choose an office fee schedule`);
+  };
 
   // Offices of a multi-location practice. Adding the first one puts the existing chairs, visits and
   // ledger there, since until now that was the only office.
   resource(r, db, {
     path: 'locations', table: 'locations', required: ['name'], order: 'sort, id',
-    fields: ['name', 'address', 'city', 'state', 'zip', 'phone', 'npi', 'office_hours', 'active', 'sort'],
-    validate: (row) => {
+    fields: ['name', 'address', 'city', 'state', 'zip', 'phone', 'npi', 'office_hours', 'active', 'sort', 'fee_schedule_id'],
+    validate: async (row, req) => {
+      await checkOfficeSchedule(row, req);
       if (row.office_hours != null && row.office_hours !== '') row.office_hours = JSON.stringify(validateHours(typeof row.office_hours === 'string' ? JSON.parse(row.office_hours) : row.office_hours));
       else if ('office_hours' in row) row.office_hours = null;
       if (row.npi && !/^\d{10}$/.test(row.npi)) throw new HttpError(400, 'NPI must be 10 digits');
@@ -275,6 +287,9 @@ export default function settingsRoutes({ db, secret, config = {} }) {
   resource(r, db, {
     path: 'procedure-codes', table: 'procedure_codes', required: ['code', 'description', 'category'], order: 'code',
     fields: ['code', 'description', 'category', 'fee', 'requires_tooth', 'requires_surface', 'active', 'area', 'time_units'],
+    afterUpdate: async (existing, row, req) => {
+      if (row.fee != null) await recordFeeChange(db, { practiceId: req.user.practice_id, code: existing.code, oldFee: existing.fee, newFee: row.fee, userId: req.user.id });
+    },
     validate: (row) => {
       requireOneOf(row.category, CATEGORIES, 'category');
       if (row.area === '') row.area = null;

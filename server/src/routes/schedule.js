@@ -6,6 +6,7 @@ import { publish, eventStream } from '../events.js';
 import { emitAppointment } from '../webhooks.js';
 import { completeProcedure } from '../services.js';
 import { recallTypes, typesForCode } from '../recalls.js';
+import { officeFee } from '../fees.js';
 
 export const STATUSES = ['scheduled', 'confirmed', 'checked_in', 'in_chair', 'completed', 'cancelled', 'no_show'];
 export const INACTIVE = "('cancelled','no_show')";
@@ -257,7 +258,8 @@ export default function scheduleRoutes({ db }) {
       if (!pc || pc.requires_tooth) continue;
       await insert(db, 'procedures', {
         practice_id: req.user.practice_id, patient_id: row.patient_id, appointment_id: apptId, provider_id: row.provider_id,
-        code_id: pc.id, code: pc.code, description: pc.description, category: pc.category, fee: pc.fee,
+        code_id: pc.id, code: pc.code, description: pc.description, category: pc.category,
+        fee: await officeFee(db, req.user.practice_id, pc, { patientId: row.patient_id, providerId: row.provider_id, locationId: row.location_id }),
       });
     }
   };

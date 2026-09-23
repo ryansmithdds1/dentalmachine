@@ -775,6 +775,18 @@ CREATE TABLE IF NOT EXISTS campaign_recipients (
   UNIQUE (campaign_id, channel, to_address)
 );
 -- After-visit "how did we do?" answers (review routing): happy patients go on to the public review page.
+CREATE TABLE IF NOT EXISTS fee_history (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  fee_schedule_id INTEGER,
+  code TEXT NOT NULL,
+  old_fee INTEGER,
+  new_fee INTEGER,
+  changed_by INTEGER,
+  changed_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_fee_history ON fee_history(practice_id, code);
+
 -- Offices of a multi-location practice. A practice with none works as one office.
 CREATE TABLE IF NOT EXISTS locations (
   id INTEGER PRIMARY KEY,
@@ -1239,6 +1251,10 @@ const COLUMNS = [
   ['ledger_entries', 'location_id', 'INTEGER REFERENCES locations(id)'],
   ['booking_requests', 'location_id', 'INTEGER REFERENCES locations(id)'],
   ['users', 'location_ids', 'TEXT'],
+  ['fee_schedules', 'kind', "TEXT NOT NULL DEFAULT 'ppo'"],
+  ['patients', 'fee_schedule_id', 'INTEGER REFERENCES fee_schedules(id)'],
+  ['providers', 'fee_schedule_id', 'INTEGER REFERENCES fee_schedules(id)'],
+  ['locations', 'fee_schedule_id', 'INTEGER REFERENCES fee_schedules(id)'],
   ['users', 'custom_role_id', 'INTEGER REFERENCES custom_roles(id)'],
   ['users', 'permissions_add', 'TEXT'],
   ['users', 'permissions_remove', 'TEXT'],

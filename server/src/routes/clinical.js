@@ -5,6 +5,7 @@ import {
 import { completeProcedure, estimateCoverage, primaryPolicy, voidLedgerEntry } from '../services.js';
 import { signedVersion } from './casepres.js';
 import { memberSavings } from '../memberships.js';
+import { officeFee } from '../fees.js';
 
 export const CONDITIONS = [
   'caries', 'missing', 'filling', 'crown', 'root_canal', 'implant', 'bridge_pontic', 'fracture',
@@ -89,7 +90,8 @@ export default function clinicalRoutes({ db }) {
       const plan = await findOr404(db, 'treatment_plans', row.treatment_plan_id, pid, 'Treatment plan');
       if (plan.patient_id !== patientId) throw new HttpError(400, 'Treatment plan belongs to another patient');
     }
-    const fee = row.fee != null ? Math.round(Number(row.fee)) : code.fee;
+    const fee = row.fee != null ? Math.round(Number(row.fee))
+      : await officeFee(db, pid, code, { patientId, providerId: row.provider_id, locationId: req.location_id });
     if (!Number.isFinite(fee) || fee < 0) throw new HttpError(400, 'fee must be a non-negative number of cents');
     return {
       practice_id: pid, patient_id: patientId, code_id: code.id, code: code.code, description: code.description, category: code.category,

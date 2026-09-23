@@ -3,7 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { api, getToken, download } from '../api.js';
 import { useApi, useLookup, invalidateLookup } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
-import { money, fmtDateTime, fmtUtcDateTime, label, toCents, fromCents } from '../format.js';
+import { money, fmtDate, fmtDateTime, fmtUtcDateTime, label, toCents, fromCents } from '../format.js';
 import { ErrorBox, Modal, useSubmit } from '../components/ui.jsx';
 import { CustomFieldsSettings, DuplicateCharts } from '../components/Switching.jsx';
 import ImportData from '../components/ImportData.jsx';
@@ -20,12 +20,12 @@ const CATEGORIES = ['diagnostic', 'preventive', 'restorative', 'endodontics', 'p
 const RESOURCES = {
   providers: {
     title: 'Providers', singular: 'provider', path: '/providers', columns: ['name', 'type', 'npi', 'color', 'working_hours'],
-    fields: [['name', 'Name', 'text'], ['type', 'Type', 'select', ['dentist', 'hygienist', 'specialist']], ['npi', 'NPI (10 digits)', 'text'], ['license_number', 'License #', 'text'], ['dea_number', 'DEA # (controlled substances)', 'text'], ['erx_user_id', 'e-Rx user ID (DoseSpot)', 'text'], ['color', 'Schedule color', 'color'], ['daily_goal', 'Daily production goal ($, blank = none)', 'money'], ['active', 'Active', 'checkbox'], ['working_hours', 'Working hours', 'hours']],
+    fields: [['name', 'Name', 'text'], ['type', 'Type', 'select', ['dentist', 'hygienist', 'specialist']], ['npi', 'NPI (10 digits)', 'text'], ['license_number', 'License #', 'text'], ['dea_number', 'DEA # (controlled substances)', 'text'], ['erx_user_id', 'e-Rx user ID (DoseSpot)', 'text'], ['color', 'Schedule color', 'color'], ['fee_schedule_id', 'Own fees (office fee schedule)', 'feeschedule'], ['daily_goal', 'Daily production goal ($, blank = none)', 'money'], ['active', 'Active', 'checkbox'], ['working_hours', 'Working hours', 'hours']],
   },
   locations: {
     title: 'Offices', singular: 'office', path: '/locations', columns: ['name', 'city', 'phone', 'office_hours'],
     intro: 'For practices with more than one office. Each chair belongs to an office; visits, production and front-desk payments are counted at their office, and staff can switch offices in the sidebar. Adding the first office puts your existing chairs and history there.',
-    fields: [['name', 'Name', 'text'], ['phone', 'Phone', 'text'], ['address', 'Address', 'text'], ['city', 'City', 'text'], ['state', 'State', 'text'], ['zip', 'ZIP', 'text'], ['npi', 'Office NPI (if billed separately)', 'text'], ['sort', 'Display order', 'number'], ['active', 'Active', 'checkbox'],
+    fields: [['name', 'Name', 'text'], ['phone', 'Phone', 'text'], ['address', 'Address', 'text'], ['city', 'City', 'text'], ['state', 'State', 'text'], ['zip', 'ZIP', 'text'], ['npi', 'Office NPI (if billed separately)', 'text'], ['fee_schedule_id', 'Fees (office fee schedule)', 'feeschedule'], ['sort', 'Display order', 'number'], ['active', 'Active', 'checkbox'],
       ['office_hours', 'Opening hours', 'hours', { note: 'Outside these hours the office is shaded on the calendar and online booking won’t offer times there.', same: 'Same as the practice’s office hours', alt: false }]],
   },
   operatories: { title: 'Operatories', singular: 'operatory', path: '/operatories', columns: ['name', 'location_id', 'sort', 'is_hygiene'], fields: [['name', 'Name', 'text'], ['location_id', 'Office', 'location'], ['sort', 'Display order', 'number'], ['default_provider_id', 'Usually works here', 'provider'], ['is_hygiene', 'Hygiene chair', 'checkbox'], ['active', 'Active', 'checkbox']] },
@@ -55,7 +55,7 @@ export default function Settings() {
     ['You', [['account', 'My account', true]]],
     ['Practice', [['practice', 'Practice & security', admin], ['users', 'Users & roles', admin], ['locations', 'Offices', admin], ['providers', 'Providers', true], ['operatories', 'Operatories', true], ['types', 'Appointment types', true], ['import', 'Import from another system', admin]]],
     ['Clinical', [['templates', 'Note templates', can('clinical:write')], ['forms', 'Forms & consents', can('patients:read')], ['labs', 'Labs', can('clinical:read')], ['referrals', 'Referral contacts', can('patients:read')]]],
-    ['Billing', [['codes', 'Fee schedule', true], ['ppo', 'PPO fee schedules', can('billing:read')], ['carriers', 'Insurance carriers', can('billing:read')], ['memberships', 'Membership plans', can('billing:read')]]],
+    ['Billing', [['codes', 'Fee schedule', true], ['ppo', 'Fee schedules', can('billing:read')], ['carriers', 'Insurance carriers', can('billing:read')], ['memberships', 'Membership plans', can('billing:read')]]],
     ['Patients', [['messaging', 'Messages & reviews', admin], ['custom', 'Custom patient fields', admin], ['duplicates', 'Duplicate charts', admin]]],
     ['Connections', [['integrations', 'Integrations', admin], ['imaging', 'Imaging bridges', admin], ['developer', 'API & webhooks', admin]]],
     ['Compliance', [['audit', 'Audit log', admin], ['backups', 'Backups', admin]]],
@@ -659,6 +659,7 @@ function ResourceTable({ spec, canWrite }) {
 function ResourceForm({ spec, row, onDone }) {
   const providerList = useLookup('/providers?active=true');
   const locationList = useLookup(spec.fields.some((f) => f[2] === 'location') ? '/locations' : null);
+  const officeSchedules = useLookup(spec.fields.some((f) => f[2] === 'feeschedule') ? '/fee-schedules' : null).filter((f) => f.kind === 'office');
   const { data: practice } = useApi(spec.fields.some((f) => f[2] === 'hours') ? '/practice' : null);
   const practiceHours = practice?.office_hours ? JSON.parse(practice.office_hours) : DEFAULT_HOURS;
   const [form, setForm] = useState(() => Object.fromEntries(spec.fields.map(([name, , type]) => {
@@ -696,6 +697,7 @@ function ResourceForm({ spec, row, onDone }) {
               {form[name] && options?.alt !== false && <AltWeeks value={form[name]} onChange={set} />}
             </div>
           );
+          if (type === 'feeschedule') return <label key={name}>{text}<select value={form[name] || ''} onChange={(e) => set(e.target.value ? Number(e.target.value) : null)}><option value="">Standard fees</option>{officeSchedules.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}</select></label>;
           if (type === 'location') return locationList.length ? <label key={name}>{text}<select value={form[name] || ''} onChange={(e) => set(e.target.value ? Number(e.target.value) : null)}><option value="">—</option>{locationList.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</select></label> : null;
           if (type === 'provider') return <label key={name}>{text}<select value={form[name] || ''} onChange={(e) => set(e.target.value ? Number(e.target.value) : null)}><option value="">—</option>{providerList.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>;
           if (type === 'select') return <label key={name}>{text}<select value={form[name]} onChange={(e) => set(e.target.value)}><option value="">—</option>{options.map((o) => <option key={o} value={o}>{label(o)}</option>)}</select></label>;
@@ -826,7 +828,7 @@ async function exportData() {
   URL.revokeObjectURL(url);
 }
 
-// PPO fee schedules: contracted allowed fees per carrier, which drive write-offs and patient estimates.
+// Fee schedules: PPO contracted allowed fees per carrier (write-offs and estimates), and office fees (what's charged).
 function FeeSchedules({ admin }) {
   const { data: list, reload } = useApi('/fee-schedules');
   const { data: carriers } = useApi('/carriers');
@@ -838,19 +840,23 @@ function FeeSchedules({ admin }) {
     <div className="grid" style={{ gridTemplateColumns: 'minmax(200px, 260px) minmax(0, 1fr)' }}>
       <div className="card">
         <h2>Schedules</h2>
-        <p className="muted" style={{ fontSize: 13 }}>In-network (PPO) plans pay from their contracted fee, not your office fee. The difference is written off and patient estimates use the contracted fee.</p>
+        <p className="muted" style={{ fontSize: 13 }}>
+          <strong>Insurance (PPO)</strong> schedules are what in-network plans allow: the difference from your fee is written off and estimates use it.{' '}
+          <strong>Office</strong> schedules change what you charge — for a patient (cash / uninsured), a provider (an associate or specialist) or an office. The patient’s wins, then the provider’s, then the office’s, then the standard fee.
+        </p>
         {list?.map((f) => (
           <button key={f.id} className={`list-item${current?.id === f.id ? ' active' : ''}`} onClick={() => setSel(f.id)}>
-            <strong>{f.name}</strong>
-            <div className="muted" style={{ fontSize: 12 }}>{f.items.length} codes · {f.carriers.map((c) => c.name).join(', ') || 'no carriers'}</div>
+            <strong>{f.name}</strong> <span className="badge">{f.kind === 'office' ? 'Office' : 'PPO'}</span>
+            <div className="muted" style={{ fontSize: 12 }}>{f.items.length} codes{f.kind !== 'office' && ` · ${f.carriers.map((c) => c.name).join(', ') || 'no carriers'}`}</div>
           </button>
         ))}
         {list?.length === 0 && <div className="muted">None yet — all carriers are paid from office fees.</div>}
         {admin && <button className="primary" style={{ marginTop: 12 }} onClick={() => setCreating(true)}>+ New fee schedule</button>}
+        <FeeHistory />
       </div>
       {current && codes && carriers && <FeeScheduleEditor key={current.id} fs={current} codes={codes} carriers={carriers} admin={admin} onSaved={reload} />}
       {creating && (
-        <Modal title="New PPO fee schedule" onClose={() => setCreating(false)}>
+        <Modal title="New fee schedule" onClose={() => setCreating(false)}>
           <NewFeeSchedule onDone={(fs) => { setCreating(false); reload(); setSel(fs.id); }} />
         </Modal>
       )}
@@ -858,14 +864,38 @@ function FeeSchedules({ admin }) {
   );
 }
 
+// Every change to a standard or scheduled fee, newest first.
+function FeeHistory() {
+  const [code, setCode] = useState('');
+  const { data } = useApi(`/fee-history${code.length >= 5 ? `?code=${encodeURIComponent(code)}` : ''}`);
+  return (
+    <details style={{ marginTop: 16 }}>
+      <summary>Fee history</summary>
+      <input placeholder="Code, e.g. D2740" value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} style={{ margin: '6px 0' }} />
+      <table className="compact-table">
+        <tbody>
+          {data?.slice(0, 100).map((x) => (
+            <tr key={x.id}><td>{x.code}<div className="muted" style={{ fontSize: 11 }}>{x.schedule_name || 'Standard'} · {fmtDate(x.changed_at.slice(0, 10))}</div></td><td className="num">{x.old_fee == null ? '—' : money(x.old_fee)} → {x.new_fee == null ? '—' : money(x.new_fee)}</td></tr>
+          ))}
+          {data?.length === 0 && <tr><td className="muted">No changes recorded yet.</td></tr>}
+        </tbody>
+      </table>
+    </details>
+  );
+}
+
 function NewFeeSchedule({ onDone }) {
-  const [form, setForm] = useState({ name: '', percent_of_ucr: 80 });
+  const [form, setForm] = useState({ name: '', kind: 'ppo', percent_of_ucr: 80 });
   const { submit, busy, error } = useSubmit(async () => onDone(await api.post('/fee-schedules', form)));
   return (
     <form onSubmit={(e) => { e.preventDefault(); submit(); }}>
       <ErrorBox error={error} />
       <div className="form-grid">
-        <label className="full">Name<input required value={form.name} placeholder="e.g. Delta Dental PPO 2026" onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
+        <div className="full inline" style={{ gap: 16 }}>
+          <label className="checkbox"><input type="radio" checked={form.kind === 'ppo'} onChange={() => setForm({ ...form, kind: 'ppo', percent_of_ucr: 80 })} /> Insurance (PPO) allowed fees</label>
+          <label className="checkbox"><input type="radio" checked={form.kind === 'office'} onChange={() => setForm({ ...form, kind: 'office', percent_of_ucr: 100 })} /> Office fees (cash, associate, office)</label>
+        </div>
+        <label className="full">Name<input required value={form.name} placeholder={form.kind === 'ppo' ? 'e.g. Delta Dental PPO 2026' : 'e.g. Cash / uninsured'} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
         <label className="full">Start at % of office fees<input type="number" min="0" max="100" value={form.percent_of_ucr} onChange={(e) => setForm({ ...form, percent_of_ucr: Number(e.target.value) })} /><span className="muted">You can then enter each contracted fee exactly.</span></label>
       </div>
       <div className="form-actions"><button className="primary" disabled={busy}>Create</button></div>
@@ -892,7 +922,8 @@ function FeeScheduleEditor({ fs, codes, carriers, admin, onSaved }) {
         {admin && <div className="inline">{saved && <span className="badge ok">Saved</span>}<button className="primary" disabled={busy} onClick={submit}>Save</button></div>}
       </div>
       <ErrorBox error={error} />
-      <div style={{ marginBottom: 12 }}>
+      {fs.kind === 'office' && <p className="muted" style={{ fontSize: 13 }}>Choose it on a patient’s chart, a provider (Settings → Providers) or an office (Settings → Offices). Codes left blank use the standard fee.</p>}
+      <div style={{ marginBottom: 12, display: fs.kind === 'office' ? 'none' : undefined }}>
         <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>Used for these carriers</div>
         <div className="chips">
           {carriers.map((c) => (
@@ -906,7 +937,7 @@ function FeeScheduleEditor({ fs, codes, carriers, admin, onSaved }) {
       <input placeholder="Filter codes…" value={filter} onChange={(e) => setFilter(e.target.value)} style={{ marginBottom: 8, maxWidth: 280 }} />
       <div className="table-wrap" style={{ maxHeight: 460, overflow: 'auto' }}>
         <table>
-          <thead><tr><th>Code</th><th>Description</th><th className="num">Office fee</th><th className="num">Contracted</th><th className="num">Write-off</th></tr></thead>
+          <thead><tr><th>Code</th><th>Description</th><th className="num">Standard fee</th><th className="num">{fs.kind === 'office' ? 'This schedule' : 'Contracted'}</th><th className="num">{fs.kind === 'office' ? 'Difference' : 'Write-off'}</th></tr></thead>
           <tbody>
             {shown.map((c) => {
               const v = fees[c.code];
@@ -914,7 +945,7 @@ function FeeScheduleEditor({ fs, codes, carriers, admin, onSaved }) {
               return (
                 <tr key={c.code}>
                   <td>{c.code}</td><td>{c.description}</td><td className="num">{money(c.fee)}</td>
-                  <td className="num"><input className="fee-input" type="number" min="0" step="0.01" disabled={!admin} value={v ?? ''} placeholder="office fee" onChange={(e) => { setSaved(false); setFees({ ...fees, [c.code]: e.target.value }); }} /></td>
+                  <td className="num"><input className="fee-input" type="number" min="0" step="0.01" disabled={!admin} value={v ?? ''} placeholder="standard" onChange={(e) => { setSaved(false); setFees({ ...fees, [c.code]: e.target.value }); }} /></td>
                   <td className="num muted">{wo ? money(wo) : '—'}</td>
                 </tr>
               );
