@@ -7,6 +7,7 @@ import { money, fmtDateTime, fmtUtcDateTime, label, toCents, fromCents } from '.
 import { ErrorBox, Modal, useSubmit } from '../components/ui.jsx';
 import { CustomFieldsSettings, DuplicateCharts } from '../components/Switching.jsx';
 import ImportData from '../components/ImportData.jsx';
+import Backups from '../components/Backups.jsx';
 import MfaSetup from '../components/MfaSetup.jsx';
 
 const ROLES = ['admin', 'dentist', 'hygienist', 'assistant', 'front_desk', 'billing'];
@@ -48,7 +49,7 @@ export default function Settings() {
     ['Billing', [['codes', 'Fee schedule', true], ['ppo', 'PPO fee schedules', can('billing:read')], ['carriers', 'Insurance carriers', can('billing:read')]]],
     ['Patients', [['messaging', 'Messages & reviews', admin], ['custom', 'Custom patient fields', admin], ['duplicates', 'Duplicate charts', admin]]],
     ['Connections', [['integrations', 'Integrations', admin], ['imaging', 'Imaging bridges', admin]]],
-    ['Compliance', [['audit', 'Audit log', admin]]],
+    ['Compliance', [['audit', 'Audit log', admin], ['backups', 'Backups', admin]]],
   ].map(([g, items]) => [g, items.filter((t) => t[2])]).filter(([, items]) => items.length);
   const all = groups.flatMap(([, items]) => items);
   const [params, setParams] = useSearchParams();
@@ -83,6 +84,7 @@ export default function Settings() {
       {tab === 'messaging' && <Messaging />}
       {tab === 'custom' && <CustomFieldsSettings />}
       {tab === 'import' && admin && <ImportData />}
+      {tab === 'backups' && admin && <Backups />}
       {tab === 'duplicates' && <DuplicateCharts />}
       {tab === 'imaging' && <ImagingBridges />}
       {tab === 'integrations' && <Integrations />}

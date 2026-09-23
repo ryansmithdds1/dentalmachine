@@ -130,8 +130,25 @@ JWT_SECRET=... DOCUMENT_ENCRYPTION_KEY=... docker compose up --build --scale app
 | Mailed statements | `MAIL_DRIVER=lob` and `LOB_API_KEY` (`test_` keys never mail anything). `MAIL_DRIVER=log` records letters without sending them. |
 | Single sign-on | Set up per practice in **Settings → Practice**. Register `https://<your host>/api/auth/sso/callback` as the redirect URI with your identity provider. |
 | Imaging bridges | Set up per workstation in **Settings → Imaging bridges** (see below). |
+| Automatic backups | `BACKUP_DIR` (a mounted disk or synced folder) turns on nightly backups of every practice, kept `BACKUP_KEEP` days (default 14). SQLite installs also get a copy of the database file. Documents are included when they're stored on the server's disk; `BACKUP_DOCUMENTS=on` or `off` overrides that. |
 
 Without Twilio or SendGrid configured, messages are recorded in the log but not actually sent. **Settings → Integrations** shows which integrations are connected.
+
+### Switching from another system
+
+In **Settings → Import from another system**, bring in CSV exports from Open Dental, Dentrix, Eaglesoft, Curve or any spreadsheet. Import patients first (with families and, optionally, balances), then insurance, balances, appointments, recalls and treatment. Columns are matched by name and can be changed, and a dry run shows what the first rows would do before anything is saved. Each record remembers its ID in the old system, so importing a corrected file again updates what's there instead of duplicating it. An import can be undone until its records have been used. Balances come over as a single "balance forward" adjustment, and procedure history is imported without posting charges.
+
+### Backups and restore
+
+**Settings → Backups** downloads a practice backup (optionally with documents and x-rays) and runs a test restore that proves the backup comes back whole without changing anything. From the command line:
+
+```bash
+node src/backupcli.js export <practice id> backup.json.gz [--documents]
+node src/backupcli.js restore backup.json.gz          # onto a new server
+node src/backupcli.js restore backup.json.gz --copy   # beside the original, as a separate practice
+```
+
+A restore creates a new practice with every ID remapped, so the same file works for disaster recovery and moving servers. On Postgres, also turn on your provider's daily backups and point-in-time recovery (Supabase, Neon, RDS and Render all offer them).
 
 ### Imaging bridge (operatory PCs)
 

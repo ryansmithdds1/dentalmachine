@@ -280,7 +280,7 @@ const CDT_CATEGORY = [
   [/^D60[0-9]/, 'implants'], [/^D[56]/, 'prosthodontics'], [/^D7/, 'oral_surgery'], [/^D8/, 'orthodontics'], [/^D9/, 'adjunctive'],
 ];
 
-const TABLE = { patients: 'patients', insurance: 'patient_insurance', appointments: 'appointments', recalls: 'recalls', treatment: 'procedures', balances: 'ledger_entries', plans: 'treatment_plans' };
+export const TABLE = { patients: 'patients', insurance: 'patient_insurance', appointments: 'appointments', recalls: 'recalls', treatment: 'procedures', balances: 'ledger_entries', plans: 'treatment_plans' };
 
 // ---- Import engine ----
 export class Importer {

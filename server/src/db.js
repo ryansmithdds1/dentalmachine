@@ -1122,21 +1122,21 @@ export function schemaInfo() {
       const c = /^\s+(\w+)\s+(INTEGER|TEXT|REAL|BLOB)\b(.*)$/.exec(line);
       if (!c || ['UNIQUE', 'PRIMARY', 'FOREIGN', 'CHECK'].includes(c[1])) continue;
       const ref = /REFERENCES (\w+)\(id\)/.exec(c[3]);
-      cols.push({ name: c[1], ref: ref ? ref[1] : null });
+      cols.push({ name: c[1], type: c[2], ref: ref ? ref[1] : null, notnull: /^[^,]*NOT NULL/.test(c[3]) });
       // "email TEXT, phone TEXT" style lines declare several columns.
-      for (const extra of c[3].matchAll(/,\s*(\w+)\s+(?:INTEGER|TEXT|REAL)/g)) cols.push({ name: extra[1], ref: null });
+      for (const extra of c[3].matchAll(/,\s*(\w+)\s+(INTEGER|TEXT|REAL)/g)) cols.push({ name: extra[1], type: extra[2], ref: null, notnull: false });
     }
     tables.set(m[1], cols);
   }
   for (const [table, column, def] of COLUMNS) {
     const ref = /REFERENCES (\w+)\(id\)/.exec(def);
-    if (tables.has(table) && !tables.get(table).some((c) => c.name === column)) tables.get(table).push({ name: column, ref: ref ? ref[1] : null });
+    if (tables.has(table) && !tables.get(table).some((c) => c.name === column)) tables.get(table).push({ name: column, type: def.split(' ')[0], ref: ref ? ref[1] : null, notnull: /NOT NULL/.test(def) });
   }
   const aliases = { guarantor_id: 'patients', referred_by_id: 'referral_contacts', primary_provider_id: 'providers', primary_hygienist_id: 'providers', default_provider_id: 'providers', created_by: 'users', handled_by: 'users', recorded_by: 'users', reviewed_by: 'users', signed_by: 'users', voided_by: 'users', checked_out_by: 'users', assigned_to: 'users', author_id: 'users',
     addendum_of: 'clinical_notes', plan_id: 'insurance_plans', batch_id: 'edi_batches', primary_claim_id: 'claims', corrected_from_id: 'claims', reverses_id: 'ledger_entries', refund_of_id: 'ledger_entries' };
   for (const [table, cols] of tables) {
     for (const c of cols) {
-      if (c.ref || c.name === 'id') continue;
+      if (c.ref || c.name === 'id' || c.type !== 'INTEGER') continue; // text IDs belong to outside services (Twilio, Stripe)
       if (aliases[c.name]) c.ref = aliases[c.name];
       else {
         const base = c.name.replace(/_id$/, '');
@@ -1217,6 +1217,11 @@ function openSqlite(path) {
       const p = queue.then(run, run);
       queue = p.catch(() => {});
       return p;
+    },
+    // A consistent copy of the whole database file (for automatic backups).
+    async snapshot(path) {
+      await outside();
+      db.exec(`VACUUM INTO '${String(path).replace(/'/g, "''")}'`);
     },
     // Inside a transaction: undo just this part if it fails, and keep the transaction going.
     async savepoint(fn) {

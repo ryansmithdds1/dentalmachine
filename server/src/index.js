@@ -6,6 +6,7 @@ import { initCluster, runExclusive } from './cluster.js';
 import { pollClearinghouse } from './clearinghouse.js';
 import { runRecallSequences } from './recalls.js';
 import { runAutopay } from './payments.js';
+import { runAutomaticBackups } from './backup.js';
 
 let secret = process.env.JWT_SECRET;
 if (!secret) {
@@ -39,6 +40,16 @@ if (ch?.batch && process.env.CLEARINGHOUSE_POLL !== 'off') {
     .catch((err) => console.error('Clearinghouse poll failed:', err.message));
   setInterval(poll, ch.pollMinutes * 60 * 1000).unref();
   setTimeout(poll, 15_000).unref();
+}
+// Nightly backups of every practice to BACKUP_DIR (checked hourly; a day's file is only written once).
+// Documents are included when they live on this server's disk, unless BACKUP_DOCUMENTS says otherwise.
+if (config.backupDir) {
+  const storage = app.locals.storage;
+  const backup = () => runExclusive('backups', 60 * 60 * 1000, () => runAutomaticBackups(db, { dir: config.backupDir, keep: config.backupKeep, storage, documents: config.backupDocuments ?? storage.driver === 'disk' }))
+    .then((made) => made?.length && console.log(`Backups written: ${made.join(', ')}`))
+    .catch((err) => console.error('Backup failed:', err.message));
+  setInterval(backup, 60 * 60 * 1000).unref();
+  setTimeout(backup, 60_000).unref();
 }
 // Payment-plan autopay: due installments are charged once a day (checked hourly).
 if (app.locals.payments.enabled && process.env.AUTOPAY !== 'off') {

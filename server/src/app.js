@@ -29,6 +29,7 @@ import systemRoutes from './routes/system.js';
 import chartingRoutes from './routes/charting.js';
 import referralRoutes from './routes/referrals.js';
 import importRoutes from './routes/imports.js';
+import backupRoutes from './routes/backup.js';
 import { createMessenger } from './messaging.js';
 import { createStorage } from './storage.js';
 import { createClearinghouse, clearinghouseConfig } from './clearinghouse.js';
@@ -50,6 +51,10 @@ export function loadConfig(env = process.env) {
     ediMode: env.EDI_MODE || 'manual',
     ediSubmitterId: env.EDI_SUBMITTER_ID || null,
     ediReceiverId: env.EDI_RECEIVER_ID || null,
+    // Automatic nightly backups to a folder (a mounted volume or a synced bucket); off when unset.
+    backupDir: env.BACKUP_DIR || null,
+    backupKeep: Number(env.BACKUP_KEEP) || 14,
+    backupDocuments: env.BACKUP_DOCUMENTS ? env.BACKUP_DOCUMENTS === 'on' : null,
   };
 }
 
@@ -66,6 +71,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   app.locals.clearinghouse = clearinghouse;
   app.locals.payments = payments;
   app.locals.messenger = messenger;
+  app.locals.storage = storage;
   // Client IPs (rate limits, audit log) come from X-Forwarded-For only when set by a proxy we trust:
   // by default one on a private network (a load balancer in the same VPC). Set TRUST_PROXY for others.
   app.set('trust proxy', process.env.TRUST_PROXY ? (/^\d+$/.test(process.env.TRUST_PROXY) ? Number(process.env.TRUST_PROXY) : process.env.TRUST_PROXY) : 'loopback, linklocal, uniquelocal');
@@ -108,6 +114,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(chartingRoutes({ db }));
   api.use(referralRoutes({ db }));
   api.use(importRoutes({ db }));
+  api.use(backupRoutes({ db, storage, config }));
   api.use(billingRoutes({ db, payments }));
   api.use(insuranceRoutes({ db }));
   api.use(settingsRoutes({ db, secret, config }));

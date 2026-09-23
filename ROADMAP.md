@@ -107,7 +107,7 @@ The "OD / Curve" column shows which competitor has the feature: ✓ = has it, ~ 
 | 21 | **Report filters** by provider, location, payer and date on every report; **saved and scheduled reports** emailed on a schedule. | Owners want the Monday-morning email. | ✓ / ✓ | P2 | M |
 | 22 | **Custom query / report builder** (read-only SQL for admins, or a guided builder). | Open Dental's "User Query" is heavily used. | ✓ / ~ | P3 | M |
 | 23 | **Public API and outbound webhooks** (appointments, patients, payments), with API keys and scopes. | Third-party integrations: Weave, NexHealth, Dental Intelligence. | ✓ / ~ | P2 | L |
-| 24 | **Automated backups and restore**, including documents; point-in-time recovery guidance for Postgres. | HIPAA contingency plan. | ✓ / ✓ | P1 | M |
+| 24 | ✅ **Automated backups and restore**, including documents; point-in-time recovery guidance for Postgres. | HIPAA contingency plan. | ✓ / ✓ | P1 | M |
 | 25 | ✅ **Custom patient fields.** | Every office tracks something unique. | ✓ / ✓ | P2 | S |
 | 26 | ✅ **Patient merge,** plus a duplicate check on create. | Duplicates appear within weeks. | ✓ / ✓ | P2 | M |
 | 27 | **Time clock and simple payroll export.** | Open Dental has it; small offices use it. | ✓ / ✗ | P3 | M |
