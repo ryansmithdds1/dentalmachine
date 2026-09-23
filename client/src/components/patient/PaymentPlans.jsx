@@ -26,9 +26,27 @@ export function PlanSummary({ plan }) {
 export default function PaymentPlans({ patient, onChange }) {
   const { can } = useAuth();
   const { data: plans, reload } = useApi(`/patients/${patient.id}/payment-plans`);
+  const { data: cards, reload: reloadCards } = useApi(`/patients/${patient.id}/payment-methods`);
+  const { data: payCfg } = useApi('/payments/config');
   const [creating, setCreating] = useState(false);
   const [open, setOpen] = useState(null);
+  const [err, setErr] = useState(null);
+  const [msg, setMsg] = useState(null);
+  const act = async (fn, done) => {
+    setErr(null);
+    setMsg(null);
+    try {
+      const r = await fn();
+      if (done) setMsg(done(r));
+      reload();
+      reloadCards();
+      onChange?.();
+    } catch (e) {
+      setErr(e);
+    }
+  };
   if (!plans) return null;
+  const w = can('billing:write');
   return (
     <div className="card">
       <div className="page-header" style={{ marginBottom: 8 }}>
@@ -36,9 +54,27 @@ export default function PaymentPlans({ patient, onChange }) {
         {can('billing:write') && <button className="small" onClick={() => setCreating(true)}>+ New plan</button>}
       </div>
       {plans.length === 0 && <div className="muted">No payment plans.</div>}
+      <ErrorBox error={err} />
+      {msg && <div className="public-notice ok" style={{ marginBottom: 8 }}>{msg}</div>}
       {plans.map((p) => (
         <div key={p.id} style={{ marginBottom: 10 }}>
           <PlanSummary plan={p} />
+          {p.status === 'active' && payCfg?.cards_on_file && (
+            <div className="autopay-row">
+              <label className="autopay-label">
+                <span>Autopay</span>
+                <select disabled={!w} value={p.autopay_method_id || ''} onChange={(e) => act(() => api.put(`/payment-plans/${p.id}`, { autopay_method_id: e.target.value ? Number(e.target.value) : null }))} style={{ width: 'auto' }}>
+                  <option value="">Off</option>
+                  {cards?.map((c) => <option key={c.id} value={c.id}>{cardLabel(c)}</option>)}
+                </select>
+              </label>
+              {p.autopay_method_id && p.autopay_paused ? <span className="badge danger nocap">Paused after declines</span> : null}
+              {p.autopay_message && <span className="muted" style={{ fontSize: 12 }}>{p.autopay_message}</span>}
+              {w && p.autopay_method_id && p.past_due > 0 && (
+                <button className="small" onClick={() => act(() => api.post(`/payment-plans/${p.id}/charge-now`), (r) => (r.ok ? `Charged ${money(r.amount)}.` : `Declined: ${r.reason}`))}>Charge {money(p.past_due)} now</button>
+              )}
+            </div>
+          )}
           <button className="small link" onClick={() => setOpen(open === p.id ? null : p.id)}>{open === p.id ? 'Hide schedule' : 'Show schedule'}</button>
           {open === p.id && (
             <table style={{ marginTop: 6 }}>
@@ -51,6 +87,7 @@ export default function PaymentPlans({ patient, onChange }) {
           )}
         </div>
       ))}
+      {payCfg?.cards_on_file && <CardsOnFile patient={patient} cards={cards} mode={payCfg.mode} onChange={() => { reloadCards(); reload(); }} />}
       {creating && (
         <Modal title="New payment plan" onClose={() => setCreating(false)}>
           <PlanForm patient={patient} onDone={() => { setCreating(false); reload(); onChange?.(); }} />
@@ -86,5 +123,63 @@ function PlanForm({ patient, onDone }) {
       {financed > 0 && <p className="muted">{form.installments} payments of about <strong>${each.toFixed(2)}</strong>. Record the down payment as a normal payment.</p>}
       <div className="form-actions"><button className="primary" disabled={busy}>Create plan</button></div>
     </form>
+  );
+}
+
+const cardLabel = (c) => `${c.brand ? c.brand[0].toUpperCase() + c.brand.slice(1) : 'Card'} •••• ${c.last4}${c.exp_month ? ` (exp ${String(c.exp_month).padStart(2, '0')}/${String(c.exp_year).slice(-2)})` : ''}`;
+
+// Cards on file for the account. With Stripe the card is typed on Stripe's secure page (never here).
+function CardsOnFile({ patient, cards, mode, onChange }) {
+  const { can } = useAuth();
+  const [adding, setAdding] = useState(false);
+  const [number, setNumber] = useState('4242 4242 4242 4242');
+  const [note, setNote] = useState(null);
+  const add = useSubmit(async (how) => {
+    if (mode === 'sandbox') {
+      await api.post(`/patients/${patient.id}/payment-methods`, { number });
+      setAdding(false);
+      return onChange();
+    }
+    const r = await api.post(`/patients/${patient.id}/card-setup`, how === 'send' ? { send: 'auto' } : {});
+    if (how === 'send') setNote(`Secure card link sent by ${r.message?.channel === 'sms' ? 'text' : 'email'}. The card appears here once saved.`);
+    else {
+      window.open(r.url, '_blank', 'noopener');
+      setNote('The secure card page opened in a new tab. The card appears here once saved.');
+    }
+    setAdding(false);
+  });
+  return (
+    <div className="cards-on-file">
+      <div className="inline" style={{ justifyContent: 'space-between' }}>
+        <strong>Cards on file</strong>
+        {can('billing:write') && !adding && <button className="small link" onClick={() => setAdding(true)}>+ Add card</button>}
+      </div>
+      {cards?.length === 0 && !adding && <div className="muted" style={{ fontSize: 13 }}>None — add one to charge plan installments automatically.</div>}
+      {cards?.map((c) => (
+        <div key={c.id} className="card-row">
+          <span>💳 {cardLabel(c)}</span>
+          {can('billing:write') && <button className="small link" onClick={() => confirm('Remove this card? Autopay using it will stop.') && api.del(`/payment-methods/${c.id}`).then(onChange)}>Remove</button>}
+        </div>
+      ))}
+      <ErrorBox error={add.error} />
+      {note && <div className="muted" style={{ fontSize: 13 }}>{note}</div>}
+      {adding && (mode === 'sandbox' ? (
+        <div className="inline" style={{ gap: 8, flexWrap: 'wrap' }}>
+          <select value={number} onChange={(e) => setNumber(e.target.value)} style={{ width: 'auto' }}>
+            <option value="4242 4242 4242 4242">Test Visa 4242 (approves)</option>
+            <option value="5555 5555 5555 4444">Test Mastercard 4444 (approves)</option>
+            <option value="4000 0000 0000 0002">Test Visa 0002 (declines)</option>
+          </select>
+          <button className="small primary" disabled={add.busy} onClick={() => add.submit()}>Save test card</button>
+          <button className="small" onClick={() => setAdding(false)}>Cancel</button>
+        </div>
+      ) : (
+        <div className="inline" style={{ gap: 8, flexWrap: 'wrap' }}>
+          <button className="small primary" disabled={add.busy} onClick={() => add.submit('send')}>Text/email secure link</button>
+          <button className="small" disabled={add.busy} onClick={() => add.submit('open')}>Open card form here</button>
+          <button className="small" onClick={() => setAdding(false)}>Cancel</button>
+        </div>
+      ))}
+    </div>
   );
 }

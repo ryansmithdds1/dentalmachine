@@ -3,6 +3,8 @@ import { requirePermission, HttpError } from '../auth.js';
 import { insert, audit, practiceNow, toCents, utcRange } from '../util.js';
 import { sendMessage, preferredChannel } from '../messaging.js';
 import { renderTemplate, templatesFor } from '../templates.js';
+import { mailable, statementHtml } from '../mail.js';
+import { statementData } from './billing.js';
 
 const requireAdmin = (req, _res, next) => (req.user.role === 'admin' ? next() : next(new HttpError(403, 'Administrator access required')));
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -10,7 +12,7 @@ const addDays = (d, n) => new Date(Date.parse(`${d}T12:00:00Z`) + n * 86400_000)
 const pct = (a, b) => (b ? Math.round((a / b) * 1000) / 10 : null);
 
 // Practice analytics (KPIs), statement batches, bulk recall and full data export.
-export default function growthRoutes({ db, messenger, config }) {
+export default function growthRoutes({ db, messenger, config, mailer = { enabled: false } }) {
   const r = Router();
 
   r.get('/analytics', requirePermission('reports:read'), async (req, res) => {
@@ -123,29 +125,57 @@ export default function growthRoutes({ db, messenger, config }) {
     const ids = new Set((req.body?.patient_ids || []).map(Number));
     const accounts = (await statementCandidates(pid, toCents(req.body?.min_balance ?? 500), Number(req.body?.since_days ?? 25))).filter((a) => !ids.size || ids.has(a.id));
     if (!accounts.length) throw new HttpError(400, 'No accounts to statement');
-    const practice = await db.get('SELECT name, phone FROM practices WHERE id = ?', pid);
-    let emailed = 0;
-    let printed = 0;
+    const practice = await db.get('SELECT * FROM practices WHERE id = ?', pid);
+    const today = (await practiceNow(db, pid)).slice(0, 10);
+    const useMail = req.body?.mail !== false && mailer.enabled && mailable(practice);
+    const runId = await insert(db, 'statement_runs', {
+      practice_id: pid, accounts: accounts.length, total: accounts.reduce((s, a) => s + a.patient_portion, 0),
+      patient_ids: JSON.stringify(accounts.map((a) => a.id)), created_by: req.user.id,
+    });
+    const counts = { email: 0, mail: 0, print: 0 };
+    const printIds = [];
+    const portalUrl = `${config.appUrl}/portal`;
     for (const a of accounts) {
+      let method = 'print';
+      let reference = null;
+      let detail = null;
       if (req.body?.email !== false && a.email && a.email_opt_in) {
         const msg = await sendMessage(db, messenger, {
           practiceId: pid, patientId: a.id, userId: req.user.id, kind: 'statement', channel: 'email', to: a.email,
           subject: `Your statement from ${practice.name}`,
-          body: `Hi ${a.first_name}, your account balance at ${practice.name} is $${(a.patient_portion / 100).toFixed(2)}. Questions? Call ${practice.phone || 'the office'}.`,
+          body: `Hi ${a.first_name}, your account balance at ${practice.name} is $${(a.patient_portion / 100).toFixed(2)}. You can see the details and pay online at ${portalUrl}. Questions? Call ${practice.phone || 'the office'}.`,
         });
-        if (msg.status === 'sent') emailed++;
-        else printed++;
-      } else {
-        printed++;
+        if (msg.status === 'sent') {
+          method = 'email';
+          reference = String(msg.id);
+        }
       }
+      if (method === 'print' && useMail && mailable(a)) {
+        // Mailed statements show the last 90 days (or since the last statement) with the balance carried forward.
+        const since = a.statement_sent_at ? a.statement_sent_at.slice(0, 10) : addDays(today, -90);
+        const data = await statementData(db, pid, a, { family: true, since });
+        try {
+          const letter = await mailer.sendLetter({
+            description: `Statement ${today} #${a.id}`, idempotencyKey: `statement-${runId}-${a.id}`,
+            to: { name: `${a.first_name} ${a.last_name}`, address: a.address, city: a.city, state: a.state, zip: a.zip },
+            from: { name: practice.name, address: practice.address, city: practice.city, state: practice.state, zip: practice.zip },
+            html: statementHtml({ practice, account: a, entries: data.entries, previousBalance: data.previous_balance, balance: data.balance, pendingInsurance: a.pending_insurance, portalUrl, statementDate: today }),
+          });
+          method = 'mail';
+          reference = letter.reference;
+          detail = letter.expected_delivery_date ? `Expected ${letter.expected_delivery_date}` : null;
+        } catch (err) {
+          detail = `Mail service: ${err.message}`;
+        }
+      }
+      if (method === 'print') printIds.push(a.id);
+      counts[method]++;
+      await insert(db, 'statement_deliveries', { practice_id: pid, run_id: runId, patient_id: a.id, method, amount: a.patient_portion, reference, status: method === 'print' ? 'to_print' : 'sent', detail });
       await db.run("UPDATE patients SET statement_sent_at = datetime('now') WHERE id = ?", a.id);
     }
-    const id = await insert(db, 'statement_runs', {
-      practice_id: pid, accounts: accounts.length, emailed, printed, total: accounts.reduce((s, a) => s + a.patient_portion, 0),
-      patient_ids: JSON.stringify(accounts.map((a) => a.id)), created_by: req.user.id,
-    });
-    await audit(db, req, 'statements.run', 'statement_runs', id, { accounts: accounts.length });
-    res.status(201).json({ ...(await db.get('SELECT * FROM statement_runs WHERE id = ?', id)), print_ids: accounts.filter((a) => !(req.body?.email !== false && a.email && a.email_opt_in)).map((a) => a.id) });
+    await db.run('UPDATE statement_runs SET emailed = ?, mailed = ?, printed = ? WHERE id = ?', counts.email, counts.mail, counts.print, runId);
+    await audit(db, req, 'statements.run', 'statement_runs', runId, { accounts: accounts.length, ...counts });
+    res.status(201).json({ ...(await db.get('SELECT * FROM statement_runs WHERE id = ?', runId)), print_ids: printIds, mail: mailer.name });
   });
 
   r.get('/statements/runs', requirePermission('billing:read'), async (req, res) => {

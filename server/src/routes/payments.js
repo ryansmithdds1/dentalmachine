@@ -3,25 +3,78 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import { requirePermission, HttpError } from '../auth.js';
 import { findOr404, insert, audit, toCents, practiceNow } from '../util.js';
 import { patientBalance } from '../services.js';
+import { runAutopay } from '../payments.js';
 import { sendMessage, preferredChannel } from '../messaging.js';
 
-// Online card payments via Stripe Checkout. Enabled when STRIPE_SECRET_KEY is configured.
-export default function paymentRoutes({ db, config, fetchImpl, messenger }) {
+// Online card payments via Stripe Checkout, cards on file and payment-plan autopay.
+export default function paymentRoutes({ db, config, messenger, payments, mailer }) {
   const r = Router();
-  const enabled = () => !!config.stripeSecretKey;
+  const enabled = () => payments.mode === 'stripe';
+  const stripe = (path, params) => payments.stripe('POST', path, params);
 
-  async function stripe(path, params) {
-    const res = await fetchImpl(`https://api.stripe.com/v1/${path}`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${config.stripeSecretKey}`, 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams(params),
+  r.get('/payments/config', (_req, res) => res.json({ enabled: enabled(), mode: payments.mode, cards_on_file: payments.enabled, mail: { enabled: !!mailer?.enabled, name: mailer?.name } }));
+
+  // ---- Cards on file (belong to the guarantor) ----
+  const guarantorOf = async (patient) => (patient.guarantor_id ? db.get('SELECT * FROM patients WHERE id = ?', patient.guarantor_id) : patient);
+  const methodView = (m) => ({ id: m.id, brand: m.brand, last4: m.last4, exp_month: m.exp_month, exp_year: m.exp_year, provider: m.provider, created_at: m.created_at });
+
+  r.get('/patients/:id/payment-methods', requirePermission('billing:read'), async (req, res) => {
+    const g = await guarantorOf(await findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient'));
+    res.json((await db.all('SELECT * FROM payment_methods WHERE practice_id = ? AND patient_id = ? AND removed_at IS NULL ORDER BY id DESC', req.user.practice_id, g.id)).map(methodView));
+  });
+
+  // Stripe: a secure page (hosted by Stripe) where the card is entered — sent to the patient or opened at the front desk.
+  r.post('/patients/:id/card-setup', requirePermission('billing:write'), async (req, res) => {
+    if (!enabled()) throw new HttpError(409, payments.mode === 'sandbox' ? 'Sandbox: add a test card directly' : 'Card payments are not configured. Set STRIPE_SECRET_KEY on the server.');
+    const g = await guarantorOf(await findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient'));
+    const url = await payments.cardSetupUrl(db, g, { successUrl: `${config.appUrl}/pay/card-saved`, cancelUrl: `${config.appUrl}/pay/cancelled` });
+    let message = null;
+    if (req.body?.send) {
+      const target = preferredChannel(g, req.body.send === 'auto' ? undefined : req.body.send);
+      if (!target) throw new HttpError(400, 'Patient has no reachable phone or email (or has opted out)');
+      const practice = await db.get('SELECT name FROM practices WHERE id = ?', req.user.practice_id);
+      message = await sendMessage(db, messenger, {
+        practiceId: req.user.practice_id, patientId: g.id, userId: req.user.id, kind: 'payment_request', channel: target.channel, to: target.to,
+        subject: `Save a card for your payment plan — ${practice.name}`,
+        body: `Hi ${g.first_name}, ${practice.name} can charge your payment plan automatically. Add your card securely here: ${url}`,
+      });
+    }
+    await audit(db, req, 'card.setup_link', 'patients', g.id);
+    res.status(201).json({ url, message });
+  });
+
+  // Sandbox only: save one of the test cards (never a real card number).
+  r.post('/patients/:id/payment-methods', requirePermission('billing:write'), async (req, res) => {
+    if (payments.mode !== 'sandbox') throw new HttpError(409, 'Cards are saved on the secure card page');
+    const number = String(req.body?.number || '').replace(/\D/g, '');
+    if (!['4242424242424242', '4000000000000002', '5555555555554444'].includes(number)) throw new HttpError(400, 'Sandbox accepts test cards only: 4242 4242 4242 4242 (approves), 4000 0000 0000 0002 (declines), 5555 5555 5555 4444');
+    const g = await guarantorOf(await findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient'));
+    const id = await insert(db, 'payment_methods', {
+      practice_id: req.user.practice_id, patient_id: g.id, provider: 'sandbox', brand: number.startsWith('5') ? 'mastercard' : 'visa', last4: number.slice(-4),
+      exp_month: 12, exp_year: new Date().getUTCFullYear() + 3, created_by: req.user.id,
     });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new HttpError(502, `Stripe: ${data.error?.message || res.status}`);
-    return data;
-  }
+    await audit(db, req, 'card.saved', 'payment_methods', id);
+    res.status(201).json(methodView(await db.get('SELECT * FROM payment_methods WHERE id = ?', id)));
+  });
 
-  r.get('/payments/config', (_req, res) => res.json({ enabled: enabled() }));
+  r.delete('/payment-methods/:mid', requirePermission('billing:write'), async (req, res) => {
+    const m = await findOr404(db, 'payment_methods', req.params.mid, req.user.practice_id, 'Card');
+    await db.run("UPDATE payment_methods SET removed_at = datetime('now') WHERE id = ?", m.id);
+    await db.run('UPDATE payment_plans SET autopay_method_id = NULL WHERE autopay_method_id = ?', m.id);
+    if (m.payment_method_id && enabled()) await payments.stripe('POST', `payment_methods/${m.payment_method_id}/detach`, {}).catch(() => {});
+    await audit(db, req, 'card.removed', 'payment_methods', m.id);
+    res.json({ ok: true });
+  });
+
+  // Take the amount that's due now (instead of waiting for the next autopay run).
+  r.post('/payment-plans/:planId/charge-now', requirePermission('billing:write'), async (req, res) => {
+    const plan = await findOr404(db, 'payment_plans', req.params.planId, req.user.practice_id, 'Payment plan');
+    if (!plan.autopay_method_id) throw new HttpError(409, 'Choose a card on file for this plan first');
+    const [result] = await runAutopay(db, payments, messenger, { planId: plan.id, force: true });
+    if (!result) throw new HttpError(409, 'Nothing is due on this plan right now');
+    await audit(db, req, 'payment_plan.charge', 'payment_plans', plan.id, result);
+    res.json(result);
+  });
 
   r.get('/patients/:id/payment-requests', requirePermission('billing:read'), async (req, res) => {
     const patient = await findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient');
@@ -82,7 +135,7 @@ export function verifyStripeSignature(rawBody, header, secret, nowSec = Math.flo
 }
 
 // Mounted before the JSON body parser: signature verification needs the exact raw bytes.
-export function stripeWebhook({ db, config }) {
+export function stripeWebhook({ db, config, payments }) {
   const r = Router();
   r.post('/api/webhooks/stripe', express.raw({ type: () => true, limit: '1mb' }), async (req, res) => {
     if (!config.stripeWebhookSecret) return res.status(501).json({ error: 'Webhook secret not configured' });
@@ -91,7 +144,17 @@ export function stripeWebhook({ db, config }) {
       return res.status(400).json({ error: 'Invalid signature' });
     }
     const event = JSON.parse(raw);
-    if (event.type === 'checkout.session.completed' || event.type === 'checkout.session.async_payment_succeeded') {
+    if (event.type === 'checkout.session.completed' && event.data.object.mode === 'setup' && event.data.object.metadata?.purpose === 'card_on_file') {
+      const session = event.data.object;
+      const patientId = Number(session.metadata.patient_id);
+      const practiceId = Number(session.metadata.practice_id);
+      const card = await payments.cardFromSetupSession(session);
+      const exists = await db.get('SELECT id FROM payment_methods WHERE payment_method_id = ? AND removed_at IS NULL', card.payment_method_id);
+      if (!exists && (await db.get('SELECT id FROM patients WHERE id = ? AND practice_id = ?', patientId, practiceId))) {
+        const id = await insert(db, 'payment_methods', { practice_id: practiceId, patient_id: patientId, provider: 'stripe', ...card });
+        await audit(db, { ip: req.ip, user: { practice_id: practiceId, id: null } }, 'card.saved', 'payment_methods', id);
+      }
+    } else if (event.type === 'checkout.session.completed' || event.type === 'checkout.session.async_payment_succeeded') {
       const session = event.data.object;
       if (session.payment_status === 'paid') {
         await db.tx(async () => {

@@ -28,6 +28,8 @@ import { createMessenger } from './messaging.js';
 import { createStorage } from './storage.js';
 import { createClearinghouse, clearinghouseConfig } from './clearinghouse.js';
 import { createErx, erxConfig } from './erx.js';
+import { createPayments } from './payments.js';
+import { createMailer } from './mail.js';
 
 // Runtime configuration, from the environment unless overridden (tests pass their own).
 export function loadConfig(env = process.env) {
@@ -37,6 +39,7 @@ export function loadConfig(env = process.env) {
     documentKey: env.DOCUMENT_ENCRYPTION_KEY || null,
     stripeSecretKey: env.STRIPE_SECRET_KEY || null,
     stripeWebhookSecret: env.STRIPE_WEBHOOK_SECRET || null,
+    payments: env.PAYMENTS || null,
     twilioAuthToken: env.TWILIO_AUTH_TOKEN || null,
     ediMode: env.EDI_MODE || 'manual',
     ediSubmitterId: env.EDI_SUBMITTER_ID || null,
@@ -44,18 +47,22 @@ export function loadConfig(env = process.env) {
   };
 }
 
-export function createApp({ db, secret, config: overrides = {}, fetchImpl = globalThis.fetch, messenger, storage, clearinghouse, erx }) {
+export function createApp({ db, secret, config: overrides = {}, fetchImpl = globalThis.fetch, messenger, storage, clearinghouse, erx, payments, mailer }) {
   if (!secret) throw new Error('JWT secret is required');
   const config = { ...loadConfig(), ...overrides };
   messenger ??= createMessenger({ fetchImpl });
   storage ??= createStorage({ dir: config.uploadDir, key: config.documentKey });
   erx ??= createErx(overrides.erx || erxConfig());
+  payments ??= createPayments({ config, fetchImpl });
+  mailer ??= overrides.mailer || createMailer({ fetchImpl });
   clearinghouse ??= createClearinghouse({ db, fetchImpl, config: { ...clearinghouseConfig(), ...(config.ediMode === 'sandbox' && !process.env.CLEARINGHOUSE ? { mode: 'sandbox' } : {}) } });
   const app = express();
   app.locals.clearinghouse = clearinghouse;
+  app.locals.payments = payments;
+  app.locals.messenger = messenger;
   app.set('trust proxy', 1);
   app.disable('x-powered-by');
-  app.use(stripeWebhook({ db, config })); // needs the raw body, so before express.json
+  app.use(stripeWebhook({ db, config, payments })); // needs the raw body, so before express.json
   app.use(smsWebhook({ db, config }));
   app.use(express.json({ limit: '1mb' }));
   app.use((_req, res, next) => {
@@ -95,7 +102,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(reportRoutes({ db }));
   api.use(engagementRoutes({ db, messenger, config }));
   api.use(documentRoutes({ db, storage }));
-  api.use(paymentRoutes({ db, config, fetchImpl, messenger }));
+  api.use(paymentRoutes({ db, config, messenger, payments, mailer }));
   api.use(familyRoutes({ db }));
   api.use(conversationRoutes({ db }));
   api.use(ediRoutes({ db, config, clearinghouse }));
@@ -103,7 +110,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(ppoRoutes({ db, config }));
   api.use(frontDeskRoutes({ db }));
   api.use(casePresentationRoutes({ db, messenger, config, erx }));
-  api.use(growthRoutes({ db, messenger, config }));
+  api.use(growthRoutes({ db, messenger, config, mailer }));
   api.use(imagingRoutes({ db }));
   app.use('/api', api);
   app.use('/api', (_req, _res, next) => next(new HttpError(404, 'Not found')));

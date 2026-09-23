@@ -616,6 +616,35 @@ CREATE TABLE IF NOT EXISTS bridge_commands (
 );
 CREATE INDEX IF NOT EXISTS idx_bridge_commands ON bridge_commands(agent_id, status);
 
+CREATE TABLE IF NOT EXISTS payment_methods (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  provider TEXT NOT NULL,
+  customer_id TEXT,
+  payment_method_id TEXT,
+  brand TEXT,
+  last4 TEXT,
+  exp_month INTEGER,
+  exp_year INTEGER,
+  created_by INTEGER REFERENCES users(id),
+  removed_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS statement_deliveries (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  run_id INTEGER NOT NULL REFERENCES statement_runs(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  method TEXT NOT NULL,
+  amount INTEGER NOT NULL,
+  reference TEXT,
+  status TEXT NOT NULL,
+  detail TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS tasks (
   id INTEGER PRIMARY KEY,
   practice_id INTEGER NOT NULL REFERENCES practices(id),
@@ -697,6 +726,13 @@ const COLUMNS = [
   ['documents', 'source_hash', 'TEXT'],
   ['documents', 'source', 'TEXT'],
   ['documents', 'taken_at', 'TEXT'],
+  ['patients', 'stripe_customer_id', 'TEXT'],
+  ['payment_plans', 'autopay_method_id', 'INTEGER REFERENCES payment_methods(id)'],
+  ['payment_plans', 'autopay_paused', 'INTEGER NOT NULL DEFAULT 0'],
+  ['payment_plans', 'autopay_failures', 'INTEGER NOT NULL DEFAULT 0'],
+  ['payment_plans', 'autopay_last_attempt', 'TEXT'],
+  ['payment_plans', 'autopay_message', 'TEXT'],
+  ['statement_runs', 'mailed', 'INTEGER NOT NULL DEFAULT 0'],
   ['appointments', 'series_id', 'INTEGER REFERENCES appointment_series(id)'],
 ];
 

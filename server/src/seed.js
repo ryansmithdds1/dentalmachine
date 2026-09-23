@@ -88,7 +88,7 @@ await db.tx(async () => {
       practice_id: practiceId, first_name: first, last_name: last,
       dob: `${year}-${String(1 + Math.floor(rand() * 12)).padStart(2, '0')}-${String(1 + Math.floor(rand() * 28)).padStart(2, '0')}`,
       gender: rand() > 0.5 ? 'female' : 'male', phone: `(512) 555-${String(1000 + i * 37).slice(-4)}`,
-      email: `${first}.${last}${i}@example.com`.toLowerCase(), address: `${100 + i * 13} Oak Ave`, city: 'Austin', state: 'TX', zip: '78704',
+      email: i % 4 === 3 ? null : `${first}.${last}${i}@example.com`.toLowerCase(), address: `${100 + i * 13} Oak Ave`, city: 'Austin', state: 'TX', zip: '78704',
       medical_alerts: pickOne(ALERTS), allergies: pickOne(ALLERGIES), primary_provider_id: rand() > 0.5 ? drChen : drRivera,
       referral_source: pickOne(REFERRALS), office_alert: pickOne(OFFICE_ALERTS),
       preferred_pharmacy: rand() < 0.6 ? JSON.stringify(pickOne(SANDBOX_PHARMACIES.slice(0, 4))) : null,
@@ -265,10 +265,28 @@ await db.tx(async () => {
     const [head, ...members] = patients.slice(f * 3, f * 3 + 3);
     for (const m of members) await db.run('UPDATE patients SET guarantor_id = ?, last_name = (SELECT last_name FROM patients WHERE id = ?) WHERE id = ?', head, head, m);
   }
-  await insert(db, 'payment_plans', {
-    practice_id: practiceId, patient_id: patients[0], total: 240000, down_payment: 40000, installment_amount: 50000, installments: 4,
-    frequency: 'monthly', start_date: dayOffset(-45), notes: 'Crown + buildup', created_by: adminId,
-  });
+  // A crown financed on a payment plan: the work, the down payment and the first installment.
+  {
+    const pid = patients[0];
+    const planDay = dayOffset(-45);
+    let total = 0;
+    for (const [c, tooth] of [['D2740', '3'], ['D2950', '3']]) {
+      const procId = await addProc(pid, c, { tooth, provider_id: drChen });
+      const proc = await db.get('SELECT * FROM procedures WHERE id = ?', procId);
+      await completeProcedure(db, adminUser, proc);
+      await db.run('UPDATE ledger_entries SET entry_date = ? WHERE procedure_id = ?', planDay, procId);
+      await db.run('UPDATE procedures SET completed_at = ? WHERE id = ?', `${planDay} 11:00:00`, procId);
+      total += proc.fee;
+    }
+    const down = Math.round(total * 0.2 / 100) * 100;
+    const each = Math.ceil((total - down) / 4);
+    const planId = await insert(db, 'payment_plans', {
+      practice_id: practiceId, patient_id: pid, total, down_payment: down, installment_amount: each, installments: 4,
+      frequency: 'monthly', start_date: dayOffset(-40), notes: 'Crown + buildup #3', created_by: adminId,
+    });
+    await insert(db, 'ledger_entries', { practice_id: practiceId, patient_id: pid, type: 'payment', amount: -down, description: 'Down payment (credit card)', method: 'credit_card', entry_date: planDay, created_by: adminId });
+    await insert(db, 'ledger_entries', { practice_id: practiceId, patient_id: pid, type: 'payment', amount: -each, description: 'Payment plan installment 1', method: 'credit_card', payment_plan_id: planId, entry_date: dayOffset(-40), created_by: adminId });
+  }
   await insert(db, 'tasks', { practice_id: practiceId, title: 'Call Delta Dental about denied claim', priority: 'high', due_date: dayOffset(1), created_by: adminId });
   await insert(db, 'tasks', { practice_id: practiceId, patient_id: patients[4], title: 'Send pre-authorization for crown #3', due_date: dayOffset(3), created_by: adminId });
   // Online booking requests waiting for the front desk.

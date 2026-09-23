@@ -484,3 +484,7 @@ button.active, .seg button.active { background: var(--primary-soft); color: var(
 .imaging-bar .error { width: 100%; margin: 0; }
 .imaging-status { width: 100%; font-size: 13px; }
 .imaging-ws { flex-direction: row !important; align-items: center; gap: 8px; }
+.autopay-row { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; margin: 4px 0; font-size: 13px; }
+.cards-on-file { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 6px; }
+.card-row { display: flex; justify-content: space-between; align-items: center; font-size: 13px; }
+.autopay-label { flex-direction: row !important; align-items: center; gap: 6px; color: var(--text) !important; font-size: 13px !important; }

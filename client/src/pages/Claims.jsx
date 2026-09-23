@@ -218,6 +218,7 @@ function Plans() {
               <span className="muted">{p.phone}</span>
             </div>
             <PlanSummary plan={p} />
+            {p.autopay_method_id ? <div className="muted" style={{ fontSize: 12 }}>{p.autopay_paused ? '⏸ Autopay paused' : '↻ Autopay on'}{p.autopay_message ? ` · ${p.autopay_message}` : ''}</div> : null}
           </div>
         ))}
       </div>
@@ -338,6 +339,8 @@ function Statements() {
   const { data: runs, reload: reloadRuns } = useApi('/statements/runs');
   const [result, setResult] = useState(null);
   const [err, setErr] = useState(null);
+  const { data: payCfg } = useApi('/payments/config');
+  const mailOn = payCfg?.mail?.enabled;
   const run = async () => {
     setErr(null);
     try {
@@ -357,13 +360,14 @@ function Statements() {
         <label>Skip accounts statemented in the last<select value={since} onChange={(e) => setSince(Number(e.target.value))} style={{ width: 140 }}><option value={0}>— none —</option><option value={14}>14 days</option><option value={25}>25 days</option><option value={45}>45 days</option></select></label>
         <div style={{ marginLeft: 'auto', textAlign: 'right' }}>
           <div><strong>{rows?.length ?? 0}</strong> accounts · <strong>{money(total)}</strong> patient portion</div>
+          <div className="muted" style={{ fontSize: 12 }}>{mailOn ? `Accounts without email are printed and mailed by ${payCfg.mail.name}.` : 'Accounts without email are printed here.'}</div>
           {can('billing:write') && <button className="primary" style={{ marginTop: 6 }} disabled={!rows?.length} onClick={run}>Send statements</button>}
         </div>
       </div>
       <ErrorBox error={err} />
       {result && (
         <div className="public-notice ok" style={{ marginBottom: 12 }}>
-          {result.accounts} statements: {result.emailed} emailed, {result.printed} to print.{' '}
+          {result.accounts} statement{result.accounts === 1 ? '' : 's'}: {result.emailed} emailed{result.mailed ? `, ${result.mailed} mailed by ${result.mail}` : ''}, {result.printed} to print.{' '}
           {result.print_ids.length > 0 && <>Print: {result.print_ids.map((id) => <Link key={id} to={`/patients/${id}/statement?family=1`} style={{ marginRight: 8 }}>#{id}</Link>)}</>}
         </div>
       )}
@@ -375,7 +379,7 @@ function Statements() {
               {rows?.map((r) => (
                 <tr key={r.id}>
                   <td><Link to={`/patients/${r.id}`}>{r.first_name} {r.last_name}</Link><div className="muted">{[r.address, r.city, r.state].filter(Boolean).join(', ') || 'no address'}</div></td>
-                  <td>{r.email && r.email_opt_in ? 'Email' : <span className="badge warn">Print & mail</span>}</td>
+                  <td>{r.email && r.email_opt_in ? 'Email' : mailOn && r.address && r.zip ? <span className="badge info nocap">Mailed for you</span> : <span className="badge warn nocap">Print & mail</span>}</td>
                   <td>{r.statement_sent_at ? fmtDate(r.statement_sent_at) : 'Never'}</td>
                   <td className="num">{money(r.balance)}</td><td className="num">{money(r.pending_insurance)}</td><td className="num"><strong>{money(r.patient_portion)}</strong></td>
                 </tr>

@@ -4,6 +4,7 @@ import { createApp, loadConfig } from './app.js';
 import { createMessenger, runReminders } from './messaging.js';
 import { initCluster, runExclusive } from './cluster.js';
 import { pollClearinghouse } from './clearinghouse.js';
+import { runAutopay } from './payments.js';
 
 let secret = process.env.JWT_SECRET;
 if (!secret) {
@@ -37,6 +38,14 @@ if (ch?.batch && process.env.CLEARINGHOUSE_POLL !== 'off') {
     .catch((err) => console.error('Clearinghouse poll failed:', err.message));
   setInterval(poll, ch.pollMinutes * 60 * 1000).unref();
   setTimeout(poll, 15_000).unref();
+}
+// Payment-plan autopay: due installments are charged once a day (checked hourly).
+if (app.locals.payments.enabled && process.env.AUTOPAY !== 'off') {
+  const charge = () => runExclusive('autopay', 30 * 60 * 1000, () => runAutopay(db, app.locals.payments, messenger))
+    .then((r) => r?.length && console.log(`Autopay: ${r.filter((x) => x.ok).length} charged, ${r.filter((x) => !x.ok).length} declined`))
+    .catch((err) => console.error('Autopay failed:', err.message));
+  setInterval(charge, 60 * 60 * 1000).unref();
+  setTimeout(charge, 30_000).unref();
 }
 console.log(`Clearinghouse: ${ch?.name || 'manual'}${ch?.realtime ? ' + real-time eligibility/status' : ''}`);
 console.log(`Database: ${db.dialect} · cluster: ${cluster.mode}`);

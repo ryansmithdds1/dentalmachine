@@ -84,24 +84,28 @@ export default function billingRoutes({ db }) {
   // Printable statement data.
   r.get('/patients/:id/statement', requirePermission('billing:read'), async (req, res) => {
     const patient = await patientOr404(req);
-    const practice = await db.get('SELECT * FROM practices WHERE id = ?', req.user.practice_id);
-    const since = req.query.since || '0000-00-00';
-    // Family statements go to the guarantor and include every member of the household.
     const family = req.query.family === 'true' || req.query.family === '1';
-    const addressee = family && patient.guarantor_id ? await db.get('SELECT * FROM patients WHERE id = ?', patient.guarantor_id) : patient;
-    const ids = family
-      ? (await db.all('SELECT id FROM patients WHERE practice_id = ? AND (id = ? OR guarantor_id = ?)', req.user.practice_id, addressee.id, addressee.id)).map((x) => x.id)
-      : [patient.id];
-    const inList = ids.map(() => '?').join(',');
-    const prior = (await db.get(`SELECT COALESCE(SUM(amount),0) AS n FROM ledger_entries WHERE practice_id = ? AND patient_id IN (${inList}) AND entry_date < ?`, req.user.practice_id, ...ids, since)).n;
-    const entries = await db.all(
-      `SELECT l.*, p.first_name AS patient_first_name, p.last_name AS patient_last_name FROM ledger_entries l JOIN patients p ON p.id = l.patient_id
-       WHERE l.practice_id = ? AND l.patient_id IN (${inList}) AND l.entry_date >= ? ORDER BY l.entry_date, l.id`, req.user.practice_id, ...ids, since,
-    );
-    const balance = (await db.get(`SELECT COALESCE(SUM(amount),0) AS n FROM ledger_entries WHERE practice_id = ? AND patient_id IN (${inList})`, req.user.practice_id, ...ids)).n;
+    const data = await statementData(db, req.user.practice_id, patient, { family, since: req.query.since || '0000-00-00' });
     await audit(db, req, 'statement.generate', 'patients', patient.id, { family });
-    res.json({ practice, patient: addressee, family, since, previous_balance: prior, entries, balance, generated_at: new Date().toISOString() });
+    res.json(data);
   });
 
   return r;
+}
+
+// Statement contents for a patient, or (family) for the guarantor and every member of the household.
+export async function statementData(db, practiceId, patient, { family = false, since = '0000-00-00' } = {}) {
+  const practice = await db.get('SELECT * FROM practices WHERE id = ?', practiceId);
+  const addressee = family && patient.guarantor_id ? await db.get('SELECT * FROM patients WHERE id = ?', patient.guarantor_id) : patient;
+  const ids = family
+    ? (await db.all('SELECT id FROM patients WHERE practice_id = ? AND (id = ? OR guarantor_id = ?)', practiceId, addressee.id, addressee.id)).map((x) => x.id)
+    : [patient.id];
+  const inList = ids.map(() => '?').join(',');
+  const prior = (await db.get(`SELECT COALESCE(SUM(amount),0) AS n FROM ledger_entries WHERE practice_id = ? AND patient_id IN (${inList}) AND entry_date < ?`, practiceId, ...ids, since)).n;
+  const entries = await db.all(
+    `SELECT l.*, p.first_name AS patient_first_name, p.last_name AS patient_last_name FROM ledger_entries l JOIN patients p ON p.id = l.patient_id
+     WHERE l.practice_id = ? AND l.patient_id IN (${inList}) AND l.entry_date >= ? ORDER BY l.entry_date, l.id`, practiceId, ...ids, since,
+  );
+  const balance = (await db.get(`SELECT COALESCE(SUM(amount),0) AS n FROM ledger_entries WHERE practice_id = ? AND patient_id IN (${inList})`, practiceId, ...ids)).n;
+  return { practice, patient: addressee, family, since, previous_balance: prior, entries, balance, generated_at: new Date().toISOString() };
 }

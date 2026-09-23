@@ -159,8 +159,13 @@ export default function familyRoutes({ db }) {
 
   r.put('/payment-plans/:planId', requirePermission('billing:write'), async (req, res) => {
     const plan = await findOr404(db, 'payment_plans', req.params.planId, req.user.practice_id, 'Payment plan');
-    const row = pick(req.body, ['status', 'notes']);
+    const row = pick(req.body, ['status', 'notes', 'autopay_method_id']);
     requireOneOf(row.status, ['active', 'completed', 'cancelled'], 'status');
+    if (row.autopay_method_id) {
+      const m = await findOr404(db, 'payment_methods', row.autopay_method_id, req.user.practice_id, 'Card');
+      if (m.patient_id !== plan.patient_id || m.removed_at) throw new HttpError(400, "That card isn't on file for this account");
+      Object.assign(row, { autopay_paused: 0, autopay_failures: 0, autopay_last_attempt: null });
+    }
     await update(db, 'payment_plans', plan.id, req.user.practice_id, row);
     await audit(db, req, 'payment_plan.update', 'payment_plans', plan.id, row);
     res.json(await planStatus(db, await db.get('SELECT * FROM payment_plans WHERE id = ?', plan.id), (await practiceNow(db, req.user.practice_id)).slice(0, 10)));
