@@ -878,6 +878,38 @@ CREATE TABLE IF NOT EXISTS upload_links (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Card readers at the front desk (Stripe Terminal) and the in-person payments taken on them.
+CREATE TABLE IF NOT EXISTS terminal_readers (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  location_id INTEGER,
+  reader_id TEXT NOT NULL,
+  label TEXT NOT NULL,
+  device_type TEXT,
+  serial_number TEXT,
+  removed_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (practice_id, reader_id)
+);
+CREATE TABLE IF NOT EXISTS terminal_payments (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  reader_id INTEGER NOT NULL REFERENCES terminal_readers(id),
+  intent_id TEXT,
+  amount INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  error TEXT,
+  card_brand TEXT,
+  card_last4 TEXT,
+  ledger_entry_id INTEGER REFERENCES ledger_entries(id),
+  receipt TEXT,
+  presented INTEGER NOT NULL DEFAULT 0,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_terminal_payments_intent ON terminal_payments(intent_id);
+
 -- Saved custom queries from the report builder (a JSON description, never SQL).
 CREATE TABLE IF NOT EXISTS custom_queries (
   id INTEGER PRIMARY KEY,
@@ -1509,6 +1541,7 @@ const COLUMNS = [
   ['patients', 'family_relationship', 'TEXT'],
   ['practices', 'financing', 'TEXT'],
   ['practices', 'auto_receipts', 'INTEGER NOT NULL DEFAULT 1'],
+  ['practices', 'stripe_terminal_location', 'TEXT'],
   ['documents', 'tags', 'TEXT'],
   ['patients', 'second_responsible_id', 'INTEGER REFERENCES patients(id)'],
   ['appointment_types', 'pattern', 'TEXT'],

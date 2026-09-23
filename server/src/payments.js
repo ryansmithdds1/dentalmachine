@@ -57,6 +57,45 @@ export function createPayments({ config, fetchImpl = globalThis.fetch }) {
         const re = await stripe('POST', 'refunds', { payment_intent: pi, amount: String(amount) }, { idempotencyKey });
         return { reference: re.id, status: re.status };
       },
+      // Card readers (Stripe Terminal, server-driven): the reader shows the amount and the patient taps or inserts.
+      terminal: {
+        async register(db, practice, { registrationCode, label }) {
+          let location = practice.stripe_terminal_location;
+          if (!location) {
+            const loc = await stripe('POST', 'terminal/locations', {
+              display_name: practice.name.slice(0, 100), 'address[line1]': practice.address || 'Address not set', 'address[city]': practice.city || '',
+              'address[state]': practice.state || '', 'address[postal_code]': practice.zip || '', 'address[country]': 'US',
+            });
+            location = loc.id;
+            await db.run('UPDATE practices SET stripe_terminal_location = ? WHERE id = ?', location, practice.id);
+          }
+          const r = await stripe('POST', 'terminal/readers', { registration_code: registrationCode, label, location });
+          return { reader_id: r.id, label: r.label || label, device_type: r.device_type || null, serial_number: r.serial_number || null };
+        },
+        async start({ readerId, amount, description, metadata, idempotencyKey }) {
+          const pi = await stripe('POST', 'payment_intents', {
+            amount: String(amount), currency: 'usd', 'payment_method_types[]': 'card_present', capture_method: 'automatic', description,
+            ...Object.fromEntries(Object.entries(metadata).map(([k, v]) => [`metadata[${k}]`, String(v)])),
+          }, { idempotencyKey });
+          await stripe('POST', `terminal/readers/${readerId}/process_payment_intent`, { payment_intent: pi.id });
+          return { intent_id: pi.id };
+        },
+        async status(row, readerId) {
+          const pi = await stripe('GET', `payment_intents/${row.intent_id}`, { 'expand[]': 'latest_charge' });
+          const card = pi.latest_charge?.payment_method_details?.card_present;
+          if (pi.status === 'succeeded') return { status: 'succeeded', brand: card?.brand || null, last4: card?.last4 || null };
+          if (pi.status === 'canceled') return { status: 'canceled' };
+          const reader = await stripe('GET', `terminal/readers/${readerId}`);
+          if (reader.action?.status === 'failed') return { status: 'failed', reason: reader.action.failure_message || 'The reader could not take the payment' };
+          return { status: 'pending', reader: reader.status };
+        },
+        async cancel(row, readerId) {
+          await stripe('POST', `terminal/readers/${readerId}/cancel_action`, {}).catch(() => {});
+          await stripe('POST', `payment_intents/${row.intent_id}/cancel`, {}).catch(() => {});
+        },
+        // Test mode only: acts as if a card was tapped on the (simulated) reader.
+        simulate: config.stripeSecretKey.startsWith('sk_test_') ? async (row, readerId) => { await stripe('POST', `test_helpers/terminal/readers/${readerId}/present_payment_method`, {}); } : null,
+      },
       async charge({ method, amount, description, idempotencyKey, metadata = {} }) {
         try {
           const pi = await stripe('POST', 'payment_intents', {
@@ -77,8 +116,20 @@ export function createPayments({ config, fetchImpl = globalThis.fetch }) {
     };
   }
   if (config.payments === 'sandbox') {
+    const sbx = (p) => `${p}${Date.now().toString(36)}${randomBytes(4).toString('hex')}`;
     return {
       mode: 'sandbox', enabled: true,
+      // A pretend reader: the payment waits until someone "taps" (simulate); amounts ending in 02 cents decline.
+      terminal: {
+        async register(_db, _practice, { label }) { return { reader_id: sbx('sbx_tmr_'), label, device_type: 'simulated_wisepos_e', serial_number: null }; },
+        async start() { return { intent_id: sbx('sbx_pi_') }; },
+        async status(row) {
+          if (!row.presented) return { status: 'pending', reader: 'online' };
+          return row.amount % 100 === 2 ? { status: 'failed', reason: 'Card declined (generic decline)' } : { status: 'succeeded', brand: 'visa', last4: '4242' };
+        },
+        async cancel() {},
+        simulate: async () => {},
+      },
       async refund({ reference }) {
         if (!String(reference || '').startsWith('sbx_')) throw new HttpError(400, "That payment wasn't made by card — refund it by cash or check");
         return { reference: `sbx_re_${Date.now().toString(36)}${randomBytes(4).toString('hex')}`, status: 'succeeded' };

@@ -6,6 +6,7 @@ import { useAuth } from '../../auth.jsx';
 import { money, fmtDate, label, toCents } from '../../format.js';
 import { ErrorBox, Modal, useSubmit } from '../ui.jsx';
 import PaymentPlans from './PaymentPlans.jsx';
+import { ReaderPay, useReaders } from '../CardReader.jsx';
 
 const KINDS = { Charges: ['charge'], 'Patient payments': ['payment'], 'Insurance payments': ['insurance_payment'], Adjustments: ['adjustment'], Refunds: ['refund'] };
 const METHODS = ['credit_card', 'debit_card', 'cash', 'check', 'ach', 'care_credit', 'other'];
@@ -14,6 +15,7 @@ export default function LedgerTab({ patient, onChange }) {
   const { can } = useAuth();
   const { data, reload } = useApi(`/patients/${patient.id}/ledger`);
   const { data: payConfig } = useApi('/payments/config');
+  const terminal = useReaders();
   const { data: payRequests, reload: reloadRequests } = useApi(`/patients/${patient.id}/payment-requests`);
   const [modal, setModal] = useState(null);
   const [kind, setKind] = useState('');
@@ -56,6 +58,7 @@ export default function LedgerTab({ patient, onChange }) {
             {can('billing:write') && (
               <>
                 {payConfig?.enabled && <button onClick={() => setModal('paylink')}>Send card payment link</button>}
+                {terminal.readers.length > 0 && <button onClick={() => setModal('reader')}>Card reader</button>}
                 <button onClick={() => setModal('adjustment')}>Adjustment</button>
                 {data.balance < 0 && <button onClick={() => setModal('refund')}>Refund credit</button>}
                 {(patient.guarantor || patient.family_size > 1) && <button onClick={() => setModal('transfer')} title="Move a balance or credit to another family member">Transfer</button>}
@@ -131,6 +134,7 @@ export default function LedgerTab({ patient, onChange }) {
         </div>
       )}
       {modal?.receipt && <Modal title={`Receipt #${modal.receipt.id}`} onClose={() => setModal(null)}><ReceiptActions patient={patient} entry={modal.receipt} /></Modal>}
+      {modal === 'reader' && <Modal title="Card reader payment" onClose={() => { setModal(null); reload(); }}><ReaderPay patient={patient} amount={data.patient_portion} readers={terminal.readers} testMode={terminal.test_mode} onDone={(_p, close) => { reload(); if (close) setModal(null); }} /></Modal>}
       {modal === 'paylink' && <Modal title="Send card payment link" onClose={() => setModal(null)}><PayLinkForm patient={patient} balance={data.patient_portion} fullBalance={data.balance} onDone={() => { setModal(null); reloadRequests(); }} /></Modal>}
       {modal === 'adjustment' && <Modal title="Ledger adjustment" onClose={() => setModal(null)}><AdjustmentForm patient={patient} lockDate={data.lock_date} onDone={done} /></Modal>}
       {modal === 'transfer' && <Modal title="Transfer within the family" onClose={() => setModal(null)}><TransferForm patient={patient} balance={data.balance} onDone={done} /></Modal>}

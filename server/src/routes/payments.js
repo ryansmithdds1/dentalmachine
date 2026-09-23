@@ -6,6 +6,7 @@ import { findOr404, insert, audit, toCents, practiceNow } from '../util.js';
 import { patientBalance, pendingInsurance } from '../services.js';
 import { runAutopay } from '../payments.js';
 import { autoReceipt } from '../receipts.js';
+import { refreshTerminalPayment } from './terminal.js';
 import { finishBooking } from '../onlinebooking.js';
 import { sendMessage, preferredChannel, sendAppointmentReminder } from '../messaging.js';
 
@@ -206,6 +207,10 @@ export function stripeWebhook({ db, config, payments, messenger }) {
         });
         if (posted) await autoReceipt(db, messenger, posted);
       }
+    } else if (event.type === 'payment_intent.succeeded' && event.data.object.metadata?.terminal_payment_id) {
+      // A card-reader payment: post it even if nobody's screen is still checking.
+      const row = await db.get('SELECT * FROM terminal_payments WHERE id = ? AND intent_id = ?', Number(event.data.object.metadata.terminal_payment_id), event.data.object.id);
+      if (row) await refreshTerminalPayment(db, payments, messenger, row);
     } else if (event.type === 'checkout.session.expired') {
       await db.run("UPDATE payment_requests SET status = 'expired' WHERE session_id = ? AND status = 'pending'", event.data.object.id);
     }

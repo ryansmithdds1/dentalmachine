@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { CardReaderSettings } from '../components/CardReader.jsx';
 import { Link, useSearchParams } from 'react-router-dom';
 import { api, getToken, download } from '../api.js';
 import { useApi, useLookup, invalidateLookup } from '../hooks.js';
@@ -70,7 +71,7 @@ const KEYWORDS = {
   messaging: 'messages reminders recall reviews google yelp templates spanish text email review link threshold',
   custom: 'custom patient fields extra fields',
   duplicates: 'duplicate charts merge patients',
-  integrations: 'integrations stripe payments card twilio texting email smtp clearinghouse edi eligibility e-prescribing erx dosespot mail lob postgrid attachments',
+  integrations: 'integrations stripe payments card reader terminal tap chip twilio texting email smtp clearinghouse edi eligibility e-prescribing erx dosespot mail lob postgrid attachments',
   imaging: 'imaging bridges dexis sidexis sensor capture twain x-ray workstation',
   developer: 'api keys webhooks developer integrations',
   audit: 'audit log access log who viewed hipaa',
@@ -1415,7 +1416,7 @@ function Integrations() {
   const items = [
     ['💬', 'Text messages', d.sms === 'log' ? off('Logged only') : on('Twilio'), 'Reminders, two-way texting, recall and review requests.', 'TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM'],
     ['✉️', 'Email', d.email === 'log' ? off('Logged only') : on('SendGrid'), 'Reminders, statements, forms and portal sign-in codes.', 'SENDGRID_API_KEY, EMAIL_FROM'],
-    ['💳', 'Card payments & autopay', d.payments === 'stripe' ? on('Stripe') : d.payments === 'sandbox' ? sandbox('Sandbox (test cards)') : off(), 'Text-to-pay, portal payments, cards on file and payment-plan autopay.', 'STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET'],
+    ['💳', 'Card payments & autopay', d.payments === 'stripe' ? on('Stripe') : d.payments === 'sandbox' ? sandbox('Sandbox (test cards)') : off(), 'Text-to-pay, portal payments, card readers at the desk, cards on file and payment-plan autopay.', 'STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET'],
     ['🧾', 'Clearinghouse', d.clearinghouse.mode === 'sftp' ? on(d.clearinghouse.name) : d.clearinghouse.mode === 'sandbox' ? sandbox() : off('Manual upload'), `Claims sent automatically; acknowledgments, claim status and ERAs posted for you.${d.clearinghouse.realtime ? ' Real-time eligibility and claim status are on.' : ''}`, 'CLEARINGHOUSE=sftp, CH_SFTP_*, CH_REALTIME_URL'],
     ['℞', 'E-prescribing', d.erx.mode === 'dosespot' ? on('DoseSpot') : d.erx.mode === 'sandbox' ? sandbox() : off('Printed Rx only'), 'Send prescriptions to the pharmacy, including controlled substances (EPCS).', 'ERX=dosespot, ERX_DOSESPOT_CLINIC_ID, ERX_DOSESPOT_CLINIC_KEY'],
     ['📮', 'Mailed statements', d.mail.mode === 'lob' ? on('Lob') : d.mail.mode === 'log' ? sandbox('Logged only') : off('Printed at the office'), 'Statements for accounts without email are printed and mailed for you.', 'MAIL_DRIVER=lob, LOB_API_KEY'],
@@ -1436,6 +1437,7 @@ function Integrations() {
           </div>
         ))}
       </div>
+      <CardReaderSettings />
       <div className="card">
         <h2>Platform</h2>
         <dl className="kv">

@@ -6,6 +6,7 @@ import { useAuth } from '../auth.jsx';
 import { money, fmtDate, fmtTime, label, toCents, practiceToday } from '../format.js';
 import { Badge, ErrorBox, Modal, useSubmit } from '../components/ui.jsx';
 import AppointmentForm from '../components/AppointmentForm.jsx';
+import { ReaderPay, useReaders } from '../components/CardReader.jsx';
 
 const METHODS = ['credit_card', 'debit_card', 'cash', 'check', 'care_credit', 'ach', 'other'];
 
@@ -92,7 +93,7 @@ export default function Checkout() {
             <div><span>Paid today</span><strong>{money(co.paid_today)}</strong></div>
             <div><span>Suggested now</span><strong>{money(co.suggested_payment)}</strong></div>
           </div>
-          {can('billing:write') ? <CollectForm key={co.suggested_payment} patientId={a.patient_id} suggested={co.suggested_payment} onDone={(amt) => { setNote(`Payment of ${money(amt)} posted.`); reload(); }} /> : <p className="muted">Ask billing to take the payment.</p>}
+          {can('billing:write') ? <CollectForm key={co.suggested_payment} patient={patient} patientId={a.patient_id} suggested={co.suggested_payment} onDone={(amt) => { setNote(`Payment of ${money(amt)} posted.`); reload(); }} /> : <p className="muted">Ask billing to take the payment.</p>}
         </section>
 
         <section className="card">
@@ -133,20 +134,31 @@ export default function Checkout() {
   );
 }
 
-function CollectForm({ patientId, suggested, onDone }) {
+function CollectForm({ patient, patientId, suggested, onDone }) {
   const [form, setForm] = useState({ amount: suggested > 0 ? (suggested / 100).toFixed(2) : '', method: 'credit_card', reference: '' });
+  const terminal = useReaders();
+  const [onReader, setOnReader] = useState(false);
+  const { data: contact } = useApi(onReader ? `/patients/${patientId}` : null); // email and phone for the receipt
   const { submit, busy, error } = useSubmit(async () => {
     const amount = toCents(form.amount);
     await api.post(`/patients/${patientId}/payments`, { amount, method: form.method, reference: form.reference || null });
     onDone(amount);
   });
   return (
+    <>
     <form className="inline" style={{ flexWrap: 'wrap', gap: 8, alignItems: 'flex-end' }} onSubmit={(e) => { e.preventDefault(); submit(); }}>
       <ErrorBox error={error} />
       <label>Amount ($)<input type="number" step="0.01" min="0.01" required value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} style={{ width: 120 }} /></label>
       <label>Method<select value={form.method} onChange={(e) => setForm({ ...form, method: e.target.value })}>{METHODS.map((m) => <option key={m} value={m}>{label(m)}</option>)}</select></label>
       <label>Reference<input value={form.reference} onChange={(e) => setForm({ ...form, reference: e.target.value })} placeholder="last 4, check #" style={{ width: 140 }} /></label>
       <button className="primary" disabled={busy}>Post payment</button>
+      {terminal.readers.length > 0 && patient && <button type="button" onClick={() => setOnReader(true)}>Card reader…</button>}
     </form>
+    {onReader && (
+      <Modal title="Card reader payment" onClose={() => setOnReader(false)}>
+        {contact && <ReaderPay patient={contact} amount={toCents(form.amount || 0)} readers={terminal.readers} testMode={terminal.test_mode} onDone={(p) => { setOnReader(false); onDone(p.amount); }} />}
+      </Modal>
+    )}
+    </>
   );
 }

@@ -25,8 +25,18 @@ const messenger = {
   },
 };
 const stripeCalls = [];
+const terminalState = { paid: false };
 const fakeFetch = async (url, init) => {
-  stripeCalls.push({ url, body: Object.fromEntries(new URLSearchParams(init.body)) });
+  stripeCalls.push({ url, method: init.method, body: Object.fromEntries(new URLSearchParams(init.body)) });
+  const path = new URL(url).pathname.replace('/v1/', '');
+  const json = (o) => new Response(JSON.stringify(o), { status: 200 });
+  if (path === 'terminal/locations') return json({ id: 'tml_1' });
+  if (path === 'terminal/readers' && init.method === 'POST') return json({ id: 'tmr_1', label: 'Desk', device_type: 'bbpos_wisepos_e', serial_number: 'WSC-1' });
+  if (path === 'payment_intents' && init.method === 'POST') return json({ id: `pi_term_${stripeCalls.length}`, status: 'requires_payment_method' });
+  if (path.startsWith('payment_intents/pi_term_') && init.method === 'GET') {
+    return json(terminalState.paid ? { id: path.split('/')[1], status: 'succeeded', latest_charge: { payment_method_details: { card_present: { brand: 'mastercard', last4: '4444' } } } } : { id: path.split('/')[1], status: 'requires_payment_method' });
+  }
+  if (path === 'terminal/readers/tmr_1' && init.method === 'GET') return json({ id: 'tmr_1', status: 'online', action: { status: 'in_progress' } });
   return new Response(JSON.stringify({ id: `cs_test_${stripeCalls.length}`, url: `https://checkout.stripe.test/${stripeCalls.length}` }), { status: 200 });
 };
 const config = {
@@ -304,6 +314,27 @@ test('text-to-pay asks for the patient portion, not what insurance is still expe
   assert.equal(reqd.amount, ledger.patient_portion);
   // Staff can still ask for more.
   assert.equal((await api.post(`/patients/${patient.id}/payment-requests`, { amount: ledger.balance })).data.amount, ledger.balance);
+});
+
+test('card readers with Stripe Terminal: a location, the reader, a card-present PaymentIntent sent to the reader', async () => {
+  const { api, patient } = await setup();
+  const reader = (await api.post('/terminal/readers', { registration_code: 'quick-brown-fox', label: 'Desk' })).data;
+  assert.equal(reader.reader_id, 'tmr_1');
+  const reg = stripeCalls.slice(-2);
+  assert.match(reg[0].url, /terminal\/locations$/);
+  assert.deepEqual([reg[1].body.registration_code, reg[1].body.location], ['quick-brown-fox', 'tml_1']);
+  const started = (await api.post(`/patients/${patient.id}/terminal-payments`, { reader_id: reader.id, amount: 7500 })).data;
+  const [pi, processCall] = stripeCalls.slice(-2);
+  assert.deepEqual([pi.body.amount, pi.body['payment_method_types[]'], pi.body['metadata[terminal_payment_id]']], ['7500', 'card_present', String(started.id)]);
+  assert.match(processCall.url, /terminal\/readers\/tmr_1\/process_payment_intent$/);
+  assert.equal((await api.get(`/terminal-payments/${started.id}`)).data.status, 'pending');
+  terminalState.paid = true;
+  const done = (await api.get(`/terminal-payments/${started.id}`)).data;
+  assert.deepEqual([done.status, done.card_brand, done.card_last4], ['succeeded', 'mastercard', '4444']);
+  const pay = (await api.get(`/patients/${patient.id}/ledger`)).data.entries.find((e) => e.type === 'payment');
+  assert.equal(pay.amount, -7500);
+  assert.match(pay.reference, /^pi_term_/);
+  terminalState.paid = false;
 });
 
 test('two-factor authentication: enrol, required at login, replay blocked, enforceable per practice', async () => {

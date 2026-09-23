@@ -219,3 +219,49 @@ test('receipts: printed, emailed or texted for any payment; automatic for autopa
   assert.equal(h.sent.slice(m2).filter((m) => /receipt/i.test(m.subject || '')).length, 0);
   assert.ok(h.sent.length > before);
 });
+
+test('card readers: register, send an amount, tap, posted once with a receipt; declines and cancels', async () => {
+  const { api, patient } = await h.practice();
+  const other = await h.practice();
+  assert.equal((await api.post('/terminal/readers', { label: 'Front desk' })).status, 400, 'needs the registration code');
+  const reader = (await api.post('/terminal/readers', { registration_code: 'simulated-wpe', label: 'Front desk' })).data;
+  assert.match(reader.reader_id, /^sbx_tmr_/);
+  const list = (await api.get('/terminal/readers')).data;
+  assert.deepEqual([list.enabled, list.test_mode, list.readers.length], [true, true, 1]);
+  assert.equal((await other.api.post(`/patients/${other.patient.id}/terminal-payments`, { reader_id: reader.id, amount: 5000 })).status, 404, "another practice's reader");
+
+  const started = await api.post(`/patients/${patient.id}/terminal-payments`, { reader_id: reader.id, amount: 5000, receipt: 'email' });
+  assert.equal(started.status, 201);
+  assert.equal(started.data.status, 'pending');
+  assert.equal((await api.get(`/terminal-payments/${started.data.id}`)).data.status, 'pending', 'waits for the card');
+  assert.equal((await api.post(`/patients/${patient.id}/terminal-payments`, { reader_id: reader.id, amount: 100 })).status, 409, 'one at a time per reader');
+  const sentBefore = h.sent.length;
+  const tapped = (await api.post(`/terminal-payments/${started.data.id}/simulate`)).data;
+  assert.deepEqual([tapped.status, tapped.card_brand, tapped.card_last4], ['succeeded', 'visa', '4242']);
+  assert.ok(tapped.ledger_entry_id);
+  // Checking again (or the webhook) doesn't post it twice.
+  await api.get(`/terminal-payments/${started.data.id}`);
+  const payments = (await api.get(`/patients/${patient.id}/ledger`)).data.entries.filter((e) => e.type === 'payment');
+  assert.equal(payments.length, 1);
+  assert.equal(payments[0].amount, -5000);
+  assert.match(payments[0].description, /Visa •••• 4242/);
+  assert.ok(h.sent.slice(sentBefore).some((m) => /receipt/i.test(m.subject || '')), 'receipt emailed');
+  // It can be refunded to the card like any card payment.
+  const refund = await api.post(`/patients/${patient.id}/refunds`, { amount: 1000, payment_id: payments[0].id });
+  assert.equal(refund.status, 201, JSON.stringify(refund.data));
+
+  // A decline ends it without touching the ledger; a cancel frees the reader.
+  const declined = (await api.post(`/patients/${patient.id}/terminal-payments`, { reader_id: reader.id, amount: 1002 })).data;
+  const d = (await api.post(`/terminal-payments/${declined.id}/simulate`)).data;
+  assert.deepEqual([d.status, d.ledger_entry_id], ['failed', null]);
+  assert.match(d.error, /declined/);
+  const waiting = (await api.post(`/patients/${patient.id}/terminal-payments`, { reader_id: reader.id, amount: 2000 })).data;
+  assert.equal((await api.post(`/terminal-payments/${waiting.id}/cancel`)).data.status, 'canceled');
+  assert.equal((await api.post(`/terminal-payments/${waiting.id}/simulate`)).status, 409);
+  assert.equal((await api.get(`/patients/${patient.id}/ledger`)).data.entries.filter((e) => e.type === 'payment').length, 1);
+
+  // Removing a reader keeps its history.
+  assert.equal((await api.del(`/terminal/readers/${reader.id}`)).status, 200);
+  assert.equal((await api.get('/terminal/readers')).data.readers.length, 0);
+  assert.equal((await api.post(`/patients/${patient.id}/terminal-payments`, { reader_id: reader.id, amount: 5000 })).status, 400);
+});

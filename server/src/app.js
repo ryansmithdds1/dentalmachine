@@ -15,6 +15,7 @@ import engagementRoutes from './routes/engagement.js';
 import publicRoutes from './routes/public.js';
 import documentRoutes from './routes/documents.js';
 import paymentRoutes, { stripeWebhook } from './routes/payments.js';
+import terminalRoutes from './routes/terminal.js';
 import familyRoutes from './routes/family.js';
 import conversationRoutes, { smsWebhook } from './routes/sms.js';
 import ediRoutes from './routes/edi.js';
@@ -169,6 +170,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(engagementRoutes({ db, messenger, config }));
   api.use(documentRoutes({ db, storage, config }));
   api.use(paymentRoutes({ db, config, messenger, payments, mailer }));
+  api.use(terminalRoutes({ db, payments, messenger }));
   api.use(familyRoutes({ db }));
   api.use(conversationRoutes({ db, messenger }));
   api.use(ediRoutes({ db, config, clearinghouse }));
