@@ -148,7 +148,7 @@ The "OD / Curve" column shows which competitor has the feature: ✓ = has it, ~ 
 | 52 | ✅ **Auto notes / procedure notes.** Completing a procedure pre-fills a note from a template with prompts (anesthetic, shade, materials); editable template library. | Documentation speed and compliance. | ✓ / ✓ | P1 | M |
 | 53 | ✅ **Addenda on signed notes.** | Legal requirement. | ✓ / ✓ | P0 | S |
 | 54 | ✅ **Structured medical history.** _(Done: condition checklist, vitals/BP with warnings, ASA, premed alerts on chart and schedule, history review. Allergies and medications stay free text.)_ Coded allergies and medications, vitals and blood pressure, ASA class, premedication flag driving alerts, history versions with side-by-side review. | Safety. | ✓ / ✓ | P2 | M |
-| 55 | **Image viewer.** Zoom, pan, brightness and contrast, rotate, measure, annotate; FMX mount templates; side-by-side comparison; DICOM rendering (dcmjs / cornerstone). | Curve ships integrated imaging; this is a visible gap. | ✓ / ✓ | P1 | L |
+| 55 | ✅ **Image viewer.** Zoom, pan, brightness and contrast, rotate, measure, annotate; FMX mount templates; side-by-side comparison; DICOM rendering (dcmjs / cornerstone). | Curve ships integrated imaging; this is a visible gap. | ✓ / ✓ | P1 | L |
 | 56 | **Direct sensor capture** (TWAIN bridge) as well as imaging-program bridges. | Offices without DEXIS or similar software. | ✓ / ✓ | P3 | L |
 | 57 | ✅ **Procedure-specific informed consents** with signature, filed as a document. | Risk management. | ✓ / ✓ | P1 | M |
 | 58 | ✅ **Lab directory and lab slips.** _(Photo attachments go on the patient's documents.)_ Link to a procedure, printable Rx slip, photo attachments. | Lab workflow. | ✓ / ~ | P3 | S |

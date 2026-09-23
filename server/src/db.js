@@ -660,6 +660,17 @@ CREATE TABLE IF NOT EXISTS portal_codes (
 CREATE INDEX IF NOT EXISTS idx_portal_codes ON portal_codes(practice_id, contact);
 
 -- Patients without an appointment who want one (or an earlier one), and when they can come.
+-- Images arranged in a layout (FMX, bitewings): slot number → document.
+CREATE TABLE IF NOT EXISTS image_mounts (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  template TEXT NOT NULL,
+  taken_at TEXT NOT NULL,
+  slots TEXT NOT NULL DEFAULT '{}',
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 -- Marketing campaigns to a segment of patients, and who each one went to.
 CREATE TABLE IF NOT EXISTS campaigns (
   id INTEGER PRIMARY KEY,
@@ -1130,6 +1141,8 @@ const COLUMNS = [
   ['ledger_entries', 'membership_id', 'INTEGER REFERENCES memberships(id)'],
   ['practices', 'review_threshold', 'INTEGER NOT NULL DEFAULT 4'],
   ['practices', 'instant_booking', 'INTEGER NOT NULL DEFAULT 0'],
+  ['documents', 'annotations', 'TEXT'],
+  ['documents', 'mm_per_px', 'REAL'],
   ['appointment_types', 'deposit', 'INTEGER NOT NULL DEFAULT 0'],
   ['booking_requests', 'insurance_carrier', 'TEXT'],
   ['booking_requests', 'insurance_member_id', 'TEXT'],

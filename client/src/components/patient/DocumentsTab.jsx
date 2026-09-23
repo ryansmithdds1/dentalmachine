@@ -5,16 +5,19 @@ import { useAuth } from '../../auth.jsx';
 import { fmtDate, label } from '../../format.js';
 import { ErrorBox, Modal } from '../ui.jsx';
 import { useLiveEvents } from '../../live.js';
+import ImageViewer from '../ImageViewer.jsx';
 
 // Browsers can't show TIFF or DICOM; those are offered as downloads instead of a broken preview.
 const previewable = (mime) => /^image\/(png|jpeg|gif|webp|bmp)$/.test(mime);
+// What the image viewer opens (DICOM is converted on the server).
+const viewerable = (mime) => previewable(mime) || mime === 'application/dicom';
 
 const CATEGORIES = ['xray', 'photo', 'document', 'consent', 'insurance_card', 'referral', 'other'];
 const catLabel = (c) => (c === 'xray' ? 'X-ray' : label(c));
 
 // Files are behind auth, so fetch them with the bearer token and show via object URLs.
-async function fetchBlob(id) {
-  const res = await fetch(`/api/documents/${id}/file`, { headers: { Authorization: `Bearer ${getToken()}` } });
+async function fetchBlob(id, image = false) {
+  const res = await fetch(`/api/documents/${id}/${image ? 'image' : 'file'}`, { headers: { Authorization: `Bearer ${getToken()}` } });
   if (!res.ok) throw new Error('Could not load file');
   return URL.createObjectURL(await res.blob());
 }
@@ -22,16 +25,16 @@ async function fetchBlob(id) {
 function Thumb({ doc, onOpen }) {
   const [src, setSrc] = useState(null);
   useEffect(() => {
-    if (!previewable(doc.mime)) return undefined;
+    if (!viewerable(doc.mime)) return undefined;
     let url;
-    fetchBlob(doc.id).then((u) => setSrc((url = u))).catch(() => {});
+    fetchBlob(doc.id, doc.mime === 'application/dicom').then((u) => setSrc((url = u))).catch(() => {});
     return () => url && URL.revokeObjectURL(url);
   }, [doc.id, doc.mime]);
   return (
     <button className="doc-tile" onClick={onOpen}>
       <div className="doc-thumb">{src ? <img src={src} alt={doc.filename} /> : <span style={{ fontSize: 32 }}>{doc.mime === 'application/pdf' ? '📄' : '📎'}</span>}</div>
       <div className="doc-meta">
-        <strong>{doc.filename}</strong>
+        <strong>{doc.filename}{doc.annotated ? ' ✎' : ''}</strong>
         <span className="muted">{catLabel(doc.category)}{doc.tooth ? ` · #${doc.tooth}` : ''} · {fmtDate(doc.created_at)}</span>
       </div>
     </button>
@@ -49,6 +52,7 @@ export default function DocumentsTab({ patient }) {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState(null);
   const [viewing, setViewing] = useState(null);
+  const [compare, setCompare] = useState(null);
   const input = useRef(null);
 
   const upload = async (files) => {
@@ -74,6 +78,8 @@ export default function DocumentsTab({ patient }) {
   };
 
   const open = async (doc) => {
+    setCompare(null);
+    if (viewerable(doc.mime)) { setViewing({ doc, url: null, viewer: true }); return; }
     setViewing({ doc, url: null });
     try {
       setViewing({ doc, url: await fetchBlob(doc.id) });
@@ -98,6 +104,7 @@ export default function DocumentsTab({ patient }) {
   return (
     <>
       <ImagingBar patient={patient} />
+      <Mounts patient={patient} docs={(docs || []).filter((d) => viewerable(d.mime))} onOpen={open} canEdit={can('clinical:write')} />
       {can('clinical:write') && (
         <div className="card">
           <div className="inline" style={{ flexWrap: 'wrap', gap: 12 }}>
@@ -129,12 +136,29 @@ export default function DocumentsTab({ patient }) {
           <div className="muted" style={{ marginBottom: 10 }}>
             {catLabel(viewing.doc.category)}{viewing.doc.tooth ? ` · tooth #${viewing.doc.tooth}` : ''} · {viewing.doc.taken_at ? `taken ${fmtDate(viewing.doc.taken_at)} · ` : ''}added {fmtDate(viewing.doc.created_at)}{viewing.doc.uploaded_by_name ? ` by ${viewing.doc.uploaded_by_name}` : viewing.doc.notes ? ` · ${viewing.doc.notes}` : ''}
           </div>
-          {!viewing.url && <div className="empty">Loading…</div>}
+          {viewing.viewer && (
+            <>
+              <div className="inline" style={{ gap: 8, marginBottom: 8 }}>
+                <label className="inline" style={{ gap: 6 }}>Compare with
+                  <select value={compare?.id || ''} onChange={(e) => setCompare((docs || []).find((d) => d.id === Number(e.target.value)) || null)}>
+                    <option value="">—</option>
+                    {(docs || []).filter((d) => d.id !== viewing.doc.id && viewerable(d.mime)).map((d) => <option key={d.id} value={d.id}>{d.filename} · {fmtDate(d.taken_at || d.created_at)}{d.tooth ? ` · #${d.tooth}` : ''}</option>)}
+                  </select>
+                </label>
+              </div>
+              <div className={compare ? 'viewer-compare' : ''}>
+                <ImageViewer doc={viewing.doc} canEdit={can('clinical:write')} compact={!!compare} height={compare ? '60vh' : '66vh'} />
+                {compare && <ImageViewer key={compare.id} doc={compare} canEdit={can('clinical:write')} compact height="60vh" />}
+              </div>
+            </>
+          )}
+          {!viewing.viewer && !viewing.url && <div className="empty">Loading…</div>}
           {viewing.url && previewable(viewing.doc.mime) && <img src={viewing.url} alt={viewing.doc.filename} className="doc-viewer" />}
           {viewing.url && viewing.doc.mime === 'application/pdf' && <iframe src={viewing.url} title={viewing.doc.filename} className="doc-viewer" style={{ height: '70vh', width: '100%', border: 0 }} />}
-          {viewing.url && !previewable(viewing.doc.mime) && viewing.doc.mime !== 'application/pdf' && <p>Preview not available for this file type — <a href={viewing.url} download={viewing.doc.filename}>download it</a> to open in your imaging software.</p>}
+          {viewing.url && !viewerable(viewing.doc.mime) && viewing.doc.mime !== 'application/pdf' && <p>Preview not available for this file type — <a href={viewing.url} download={viewing.doc.filename}>download it</a> to open in your imaging software.</p>}
           <div className="form-actions">
             {viewing.url && <a href={viewing.url} download={viewing.doc.filename}><button>Download</button></a>}
+            {viewing.viewer && <button onClick={() => fetchBlob(viewing.doc.id).then((u) => Object.assign(document.createElement('a'), { href: u, download: viewing.doc.filename }).click())}>Download original</button>}
             {can('clinical:write') && <button className="danger" onClick={() => remove(viewing.doc)}>Remove</button>}
           </div>
         </Modal>
@@ -204,6 +228,98 @@ function ImagingBar({ patient }) {
       )}
       {status && <div className="muted imaging-status">{status}</div>}
       <ErrorBox error={error} />
+    </div>
+  );
+}
+
+// Mount layouts: rows of labelled slots (FMX, bitewings, photo series).
+const U7 = ['UR molar', 'UR premolar', 'UR canine', 'Upper incisors', 'UL canine', 'UL premolar', 'UL molar'];
+const L7 = ['LR molar', 'LR premolar', 'LR canine', 'Lower incisors', 'LL canine', 'LL premolar', 'LL molar'];
+const BW4 = ['R molar BW', 'R premolar BW', 'L premolar BW', 'L molar BW'];
+export const MOUNTS = {
+  fmx18: { label: 'FMX (18)', rows: [U7, BW4, L7] },
+  fmx20: { label: 'FMX (20)', rows: [['UR molar', ...U7.slice(0, 3), 'Upper incisors R', 'Upper incisors L', ...U7.slice(4)], BW4, ['LR molar', ...L7.slice(0, 3), 'Lower incisors R', 'Lower incisors L', ...L7.slice(4)]] },
+  bw4: { label: '4 bitewings', rows: [BW4] },
+  bw2: { label: '2 bitewings', rows: [['Right BW', 'Left BW']] },
+  pa4: { label: '4 periapicals', rows: [['PA 1', 'PA 2', 'PA 3', 'PA 4']] },
+  photos8: { label: 'Photo series (8)', rows: [['Full face', 'Smile', 'Profile', 'Retracted front'], ['Right buccal', 'Left buccal', 'Upper occlusal', 'Lower occlusal']] },
+};
+
+function MountThumb({ docId, onClick, label, onClear }) {
+  const [src, setSrc] = useState(null);
+  useEffect(() => {
+    if (!docId) { setSrc(null); return undefined; }
+    let url;
+    fetchBlob(docId, true).then((u) => setSrc((url = u))).catch(() => {});
+    return () => url && URL.revokeObjectURL(url);
+  }, [docId]);
+  return (
+    <div className={`mount-slot${docId ? ' filled' : ''}`} onClick={onClick} role="button" tabIndex={0} title={label}>
+      {src ? <img src={src} alt={label} /> : <span>{label}</span>}
+      {docId && onClear && <button type="button" className="mount-clear" aria-label="Remove from mount" onClick={(e) => { e.stopPropagation(); onClear(); }}>✕</button>}
+    </div>
+  );
+}
+
+// FMX and other mounts: images placed into a layout, opened in the viewer.
+function Mounts({ patient, docs, onOpen, canEdit }) {
+  const { data: mounts, reload } = useApi(`/patients/${patient.id}/mounts`);
+  const [open, setOpen] = useState(null);
+  const [picking, setPicking] = useState(null);
+  const [error, setError] = useState(null);
+  const current = mounts?.find((m) => m.id === open) || mounts?.[0];
+  const setSlot = async (i, docId) => {
+    try {
+      await api.put(`/mounts/${current.id}`, { slots: { ...current.slots, [i]: docId } });
+      setPicking(null);
+      reload();
+    } catch (e) { setError(e); }
+  };
+  if (!mounts || (!mounts.length && !canEdit)) return null;
+  let n = 0;
+  return (
+    <div className="card">
+      <div className="inline" style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
+        <h2 style={{ margin: 0 }}>Mounts</h2>
+        <div className="inline" style={{ gap: 6 }}>
+          {mounts.length > 0 && (
+            <select value={current?.id || ''} onChange={(e) => setOpen(Number(e.target.value))}>
+              {mounts.map((m) => <option key={m.id} value={m.id}>{MOUNTS[m.template]?.label} · {fmtDate(m.taken_at)}</option>)}
+            </select>
+          )}
+          {canEdit && (
+            <select value="" onChange={async (e) => { if (!e.target.value) return; try { const m = await api.post(`/patients/${patient.id}/mounts`, { template: e.target.value }); setOpen(m.id); reload(); } catch (err) { setError(err); } }}>
+              <option value="">+ New mount…</option>
+              {Object.entries(MOUNTS).map(([k, m]) => <option key={k} value={k}>{m.label}</option>)}
+            </select>
+          )}
+        </div>
+      </div>
+      <ErrorBox error={error} />
+      {current && (
+        <div className="mount-grid">
+          {MOUNTS[current.template].rows.map((row, r) => (
+            <div key={r} className="mount-row">
+              {row.map((label) => {
+                const i = n++;
+                const docId = current.slots[i];
+                return (
+                  <MountThumb key={i} docId={docId} label={label}
+                    onClick={() => (docId ? onOpen(docs.find((d) => d.id === docId) || { id: docId, mime: 'image/png', filename: label, category: 'xray' }) : canEdit && setPicking(i))}
+                    onClear={canEdit ? () => setSlot(i, null) : null} />
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      )}
+      {picking != null && (
+        <Modal title="Choose an image for this spot" onClose={() => setPicking(null)}>
+          {docs.length === 0 ? <div className="muted">No images yet.</div> : (
+            <div className="doc-grid">{docs.map((d) => <Thumb key={d.id} doc={d} onOpen={() => setSlot(picking, d.id)} />)}</div>
+          )}
+        </Modal>
+      )}
     </div>
   );
 }

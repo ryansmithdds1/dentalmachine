@@ -612,3 +612,18 @@ span.perio-site { border-color: transparent; }
 .stars .star:hover ~ .star { color: #cbd5e1; }
 a.button { display: inline-block; text-decoration: none; padding: 10px 18px; border-radius: 8px; }
 a.button.primary { background: var(--primary); color: #fff; }
+.image-viewer { display: flex; flex-direction: column; min-width: 0; }
+.viewer-toolbar { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin-bottom: 6px; }
+.viewer-sep { width: 1px; height: 20px; background: var(--border); margin: 0 4px; }
+.viewer-slider { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; flex-direction: row; }
+.viewer-slider input { width: 80px; }
+.viewer-canvas { background: #0b0f19; border-radius: 8px; overflow: hidden; position: relative; touch-action: none; }
+.viewer-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+@media (max-width: 900px) { .viewer-compare { grid-template-columns: 1fr; } }
+.mount-grid { background: #111827; border-radius: 8px; padding: 10px; margin-top: 10px; display: flex; flex-direction: column; gap: 8px; overflow-x: auto; }
+.mount-row { display: flex; gap: 8px; justify-content: center; }
+.mount-slot { position: relative; width: 96px; height: 72px; border: 1px dashed #4b5563; border-radius: 4px; display: grid; place-items: center; color: #9ca3af; font-size: 10px; text-align: center; cursor: pointer; overflow: hidden; flex: none; }
+.mount-slot.filled { border-style: solid; border-color: #6b7280; }
+.mount-slot img { width: 100%; height: 100%; object-fit: cover; }
+.mount-clear { position: absolute; top: 2px; right: 2px; padding: 0 5px; font-size: 10px; line-height: 16px; background: rgba(0,0,0,.6); color: #fff; border: none; border-radius: 3px; display: none; }
+.mount-slot:hover .mount-clear { display: block; }
