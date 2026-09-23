@@ -178,7 +178,7 @@ The "OD / Curve" column shows which competitor has the feature: ✓ = has it, ~ 
 | 72 | ✅ _(Done: Reports → Treatment plans.)_ **Treatment plan report:** presented vs accepted vs scheduled vs completed, by provider. | P2 | S |
 | 73 | ✅ **Write-off and adjustment report** by type. | P2 | S |
 | 74 | ✅ **Audit log search** (date range, patient, user, action) with CSV export, beyond the current 500-row cap. | P1 | S |
-| 75 | **End-of-day / month-end close** with locking (pairs with the lock date in Part 1). | P2 | S |
+| 75 | ✅ _(Done: Reports → Close: a day's or month's totals, a checklist of loose ends (open visits, unsigned notes, unbilled work, unsent claims, undeposited payments, unreconciled deposits), and closing moves the lock date; closes are kept with their totals.)_ **End-of-day / month-end close** with locking (pairs with the lock date in Part 1). | P2 | S |
 
 ---
 

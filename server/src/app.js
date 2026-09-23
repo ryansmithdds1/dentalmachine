@@ -25,6 +25,7 @@ import casePresentationRoutes, { publicCasePresentation } from './routes/casepre
 import growthRoutes from './routes/growth.js';
 import collectionRoutes from './routes/collections.js';
 import depositRoutes from './routes/deposits.js';
+import closeRoutes from './routes/close.js';
 import imagingRoutes, { bridgeAgentRoutes } from './routes/imaging.js';
 import { portalPublicRoutes, portalRoutes } from './routes/portal.js';
 import systemRoutes from './routes/system.js';
@@ -152,6 +153,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(growthRoutes({ db, messenger, config, mailer }));
   api.use(collectionRoutes({ db, messenger }));
   api.use(depositRoutes({ db }));
+  api.use(closeRoutes({ db }));
   api.use(imagingRoutes({ db }));
   api.use(systemRoutes({ db, config, messenger, storage, payments, clearinghouse, erx, mailer }));
   app.use('/api', api);

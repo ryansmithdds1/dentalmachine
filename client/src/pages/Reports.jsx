@@ -6,6 +6,7 @@ import { useAuth } from '../auth.jsx';
 import { money, label, practiceToday, shiftDate } from '../format.js';
 import { MembershipReport } from '../components/Memberships.jsx';
 import ReviewReport from '../components/ReviewReport.jsx';
+import CloseBooks from '../components/CloseBooks.jsx';
 import { downloadCsv, dollars, getLocationId } from '../api.js';
 
 export default function Reports() {
@@ -22,8 +23,9 @@ export default function Reports() {
         <button className={tab === 'reviews' ? 'active' : ''} onClick={() => setParams({ tab: 'reviews' })}>Reviews</button>
         <button className={tab === 'hygiene' ? 'active' : ''} onClick={() => setParams({ tab: 'hygiene' })}>Hygiene</button>
         <button className={tab === 'plans' ? 'active' : ''} onClick={() => setParams({ tab: 'plans' })}>Treatment plans</button>
+        <button className={tab === 'close' ? 'active' : ''} onClick={() => setParams({ tab: 'close' })}>Close</button>
       </div>
-      {tab === 'kpis' ? <Analytics /> : tab === 'hygiene' ? <HygieneReport /> : tab === 'plans' ? <PlanReport /> : tab === 'referrals' ? <ReferralReport /> : tab === 'memberships' ? <MembershipReport /> : tab === 'reviews' ? <ReviewReport /> : <Operational />}
+      {tab === 'kpis' ? <Analytics /> : tab === 'hygiene' ? <HygieneReport /> : tab === 'plans' ? <PlanReport /> : tab === 'close' ? <CloseBooks /> : tab === 'referrals' ? <ReferralReport /> : tab === 'memberships' ? <MembershipReport /> : tab === 'reviews' ? <ReviewReport /> : <Operational />}
     </>
   );
 }

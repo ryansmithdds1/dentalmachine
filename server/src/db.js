@@ -787,6 +787,18 @@ CREATE TABLE IF NOT EXISTS fee_history (
 );
 CREATE INDEX IF NOT EXISTS idx_fee_history ON fee_history(practice_id, code);
 
+-- Day and month closes: the totals when the books were closed (the lock date moves up to the period end).
+CREATE TABLE IF NOT EXISTS period_closes (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  period_type TEXT NOT NULL CHECK (period_type IN ('day','month')),
+  period_start TEXT NOT NULL,
+  period_end TEXT NOT NULL,
+  totals TEXT NOT NULL,
+  closed_by INTEGER,
+  closed_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Bank deposits: the checks and cash (or card batches) taken to the bank together, and the bank's figure for reconciling.
 CREATE TABLE IF NOT EXISTS deposits (
   id INTEGER PRIMARY KEY,
