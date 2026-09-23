@@ -59,3 +59,15 @@ export function fmtUtcDateTime(s, tz) {
   const d = new Date(`${s.slice(0, 19).replace(' ', 'T')}Z`);
   return d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', ...(tz ? { timeZone: tz } : {}) });
 }
+
+// An appointment's insurance check as a badge: verified recently, getting old, not done, or a problem.
+export function eligibilityBadge(e, now = Date.now()) {
+  if (!e) return null;
+  const days = e.checked_at ? Math.max(0, Math.floor((now - Date.parse(`${e.checked_at.replace(' ', 'T')}${/Z|[+-]\d\d:?\d\d$/.test(e.checked_at) ? '' : 'Z'}`)) / 86400_000)) : null;
+  const ago = days == null ? '' : days === 0 ? 'today' : days === 1 ? 'yesterday' : `${days} days ago`;
+  if (e.status === 'active') return days <= 30 ? { tone: 'ok', icon: '$✓', text: `Insurance verified ${ago}` } : { tone: 'warn', icon: '$?', text: `Insurance verified ${ago} — check again` };
+  if (e.status === 'inactive') return { tone: 'bad', icon: '$✗', text: `Coverage inactive (checked ${ago})` };
+  if (e.status === 'error') return { tone: 'bad', icon: '$!', text: `Eligibility check failed ${ago}` };
+  if (e.status === 'pending') return { tone: 'warn', icon: '$…', text: 'Eligibility request waiting for the payer’s answer' };
+  return { tone: 'warn', icon: '$?', text: 'Insurance not verified' };
+}

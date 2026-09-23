@@ -221,6 +221,30 @@ const datesBetween = (from, to) => {
   return out;
 };
 
+// Each appointment's insurance check: the primary policy's latest eligibility result and when it ran.
+export const withEligibility = async (db, rows) => {
+  const patients = [...new Set(rows.map((a) => a.patient_id))];
+  const primary = new Map();
+  const latest = new Map();
+  for (let i = 0; i < patients.length; i += 500) {
+    const ids = patients.slice(i, i + 500);
+    const policies = await db.all(`SELECT id, patient_id, priority FROM patient_insurance WHERE active = 1 AND patient_id IN (${ids.map(() => '?').join(',')}) ORDER BY CASE priority WHEN 'primary' THEN 0 ELSE 1 END, id`, ...ids);
+    for (const p of policies) if (!primary.has(p.patient_id)) primary.set(p.patient_id, p.id);
+  }
+  const policyIds = [...primary.values()];
+  for (let i = 0; i < policyIds.length; i += 500) {
+    const ids = policyIds.slice(i, i + 500);
+    const checks = await db.all(`SELECT e.patient_insurance_id, e.status, e.created_at FROM eligibility_checks e WHERE e.id IN (SELECT MAX(id) FROM eligibility_checks WHERE patient_insurance_id IN (${ids.map(() => '?').join(',')}) GROUP BY patient_insurance_id)`, ...ids);
+    for (const c of checks) latest.set(c.patient_insurance_id, c);
+  }
+  for (const a of rows) {
+    const policy = primary.get(a.patient_id);
+    const c = policy && latest.get(policy);
+    a.eligibility = !policy ? null : c ? { status: c.status, checked_at: c.created_at } : { status: 'unverified', checked_at: null };
+  }
+  return rows;
+};
+
 export default function scheduleRoutes({ db }) {
   const r = Router();
   const FIELDS = ['patient_id', 'provider_id', 'operatory_id', 'location_id', 'start_time', 'end_time', 'status', 'reason', 'notes', 'appointment_type_id', 'asap', 'pattern'];
@@ -245,12 +269,14 @@ export default function scheduleRoutes({ db }) {
       }
     }
     if (req.query.include_cancelled !== 'true') where.push(`a.status NOT IN ${INACTIVE}`);
-    res.json(await db.all(`${SELECT} WHERE ${where.join(' AND ')} ORDER BY a.start_time`, ...params));
+    res.json(await withEligibility(db, await db.all(`${SELECT} WHERE ${where.join(' AND ')} ORDER BY a.start_time`, ...params)));
   });
+
 
   r.get('/appointments/:id', requirePermission('schedule:read'), async (req, res) => {
     const row = await db.get(`${SELECT} WHERE a.id = ? AND a.practice_id = ?`, Number(req.params.id), req.user.practice_id);
     if (!row) throw new HttpError(404, 'Appointment not found');
+    await withEligibility(db, [row]);
     row.procedures = await db.all('SELECT * FROM procedures WHERE appointment_id = ? ORDER BY id', row.id);
     if (row.series_id) row.series = await seriesInfo(row);
     res.json(row);
@@ -546,6 +572,7 @@ export default function scheduleRoutes({ db }) {
       `${SELECT} WHERE a.practice_id = ? AND a.start_time >= ? AND a.start_time < ? ${req.query.include_cancelled === 'true' ? '' : `AND a.status NOT IN ${INACTIVE}`}${location ? ' AND a.location_id = ?' : ''} ORDER BY a.start_time`,
       pid, `${from} 00:00`, `${to} 24:00`, ...(location ? [location.id] : []),
     );
+    await withEligibility(db, appointments);
     const blockouts = await db.all(
       `SELECT * FROM blockouts WHERE practice_id = ? AND start_time < ? AND end_time > ?${location ? ' AND (operatory_id IS NULL OR operatory_id IN (SELECT id FROM operatories WHERE location_id = ?))' : ''} ORDER BY start_time`,
       pid, `${to} 24:00`, `${from} 00:00`, ...(location ? [location.id] : []),

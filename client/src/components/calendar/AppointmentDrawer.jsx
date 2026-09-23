@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../../api.js';
-import { fmtTime, fmtDateTime, fmtUtcDateTime, money } from '../../format.js';
+import { fmtTime, fmtDateTime, fmtUtcDateTime, money, eligibilityBadge } from '../../format.js';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../../auth.jsx';
 import { Badge } from '../ui.jsx';
 
@@ -93,6 +94,7 @@ export default function AppointmentDrawer({ appt: a, can, onClose, onStatus, onE
           <dt>Reason</dt><dd>{a.reason || '—'}</dd>
           {a.procedure_summary && (<><dt>Procedures</dt><dd>{a.procedure_summary}</dd></>)}
           <dt>Production</dt><dd>{money(a.production || 0)}</dd>
+          {a.eligibility && (() => { const b = eligibilityBadge(a.eligibility); return (<><dt>Insurance</dt><dd><span className={`cal-elig ${b.tone}`}>{b.icon}</span> {b.text} · <Link to={`/patients/${a.patient_id}?tab=insurance`}>{a.eligibility.status === 'active' ? 'details' : 'verify'}</Link></dd></>); })()}
           <dt>Confirmation</dt>
           <dd>
             {a.confirmed_at ? `Confirmed ${CONFIRMED_VIA[a.confirmed_via] || ''} ${fmtDateTime(a.confirmed_at.replace('T', ' '))}` : a.confirmed_via === 'left_message' ? 'Left a message' : a.reminder_sent_at ? `Reminder sent ${fmtDateTime(a.reminder_sent_at)}` : 'Not reminded yet'}

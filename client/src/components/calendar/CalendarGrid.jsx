@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { eligibilityBadge } from '../../format.js';
 
 export const toMin = (t) => Number(t.slice(-5, -3)) * 60 + Number(t.slice(-2));
 export const fmtMin = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
@@ -262,6 +263,7 @@ export default function CalendarGrid({
                           {STATUS_ICON[a.status] && <span className="cal-status" title={a.status}>{STATUS_ICON[a.status]}</span>}
                           {a.asap ? <span className="cal-asap" title="Wants an earlier time">ASAP</span> : null}
                           {a.series_id ? <span className="cal-repeat" title="Recurring visit">↻</span> : null}
+                          {(() => { const b = eligibilityBadge(a.eligibility); return b ? <span className={`cal-elig ${b.tone}`} title={b.text}>{b.icon}</span> : null; })()}
                           {col.isToday && nowMin != null && a.status === 'checked_in' && a.arrived_at && (
                             <span className={`cal-flow${nowMin - toMin(a.arrived_at.slice(11, 16)) >= 15 ? ' long' : ''}`} title="Waiting since arrival">⏱ {Math.max(0, nowMin - toMin(a.arrived_at.slice(11, 16)))}m</span>
                           )}

@@ -256,7 +256,7 @@ Works well: drag, resize and create; undo; live updates; conflict checks; open-t
 
 ### Eligibility
 1. ✅ **P2** Show 271 frequency and history, remaining benefits and out-of-network values. _(Done: each eligibility check shows the payer's frequency limits with the last date done and when the patient is next eligible, what's left of the annual max, deductible and family deductible, the ortho lifetime max and what's left, and the out-of-network max, deductible and percentages, kept apart from the in-network figures.)_
-2. **P2** An eligibility badge on appointments ("verified 2 days ago").
+2. ✅ **P2** An eligibility badge on appointments ("verified 2 days ago"). _(Done: each appointment on the schedule shows its primary insurance check — green “$✓” when verified in the last 30 days, amber when older, not verified yet or still waiting, red when coverage is inactive or the check failed — with “Insurance verified 2 days ago” on hover and in the appointment panel, linking to the patient's insurance to verify.)_
 
 ### Messaging and portal
 1. ✅ **P1** Opt-out rules everywhere (see Part 1). _(Done: one check in the send path for every text and email — the patient's preference plus a list of addresses that texted STOP or unsubscribed (even non-patients); blocked messages are logged as “blocked” with the reason; staff can't re-enable texts for a STOP'd number (the patient texts START); new patients with a STOP'd number start opted out; only requested sign-in codes are exempt.)_

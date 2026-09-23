@@ -758,3 +758,8 @@ table.ada-services td:first-child { font: 400 6.5pt Arial, sans-serif; width: 12
 
 table.elig-freq { margin-top: 4px; font-size: 13px; }
 table.elig-freq th, table.elig-freq td { padding: 3px 8px; }
+
+.cal-elig { font-size: 9px; font-weight: 700; border-radius: 4px; padding: 0 3px; white-space: nowrap; }
+.cal-elig.ok { background: #dcfce7; color: #166534; }
+.cal-elig.warn { background: #fef3c7; color: #92400e; }
+.cal-elig.bad { background: #fee2e2; color: #991b1b; }

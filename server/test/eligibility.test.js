@@ -51,3 +51,20 @@ test("batch eligibility: a day's patients, skipping recent checks; applies payer
   assert.equal(first.find((x) => x.date === DAY && x.checked === 1) != null, true);
   assert.equal((await runEligibilityBatches(h.db, elig, evening)).length, 0, 'once a night');
 });
+
+test('appointments carry the insurance check: unverified, then verified with when; none without insurance', async () => {
+  const { api, provider, patient } = await h.practice({ timezone: 'UTC' });
+  const carrier = (await api.post('/carriers', { name: 'Delta Dental', payer_id: '94276' })).data;
+  const policy = (await api.post(`/patients/${patient.id}/insurance`, { carrier_id: carrier.id, subscriber_name: 'Jane Doe', subscriber_id: 'W9', annual_max: 150000 })).data;
+  const cash = (await api.post('/patients', { first_name: 'Cash', last_name: 'Only' })).data;
+  const day = '2031-05-05';
+  const a1 = (await api.post('/appointments', { patient_id: patient.id, provider_id: provider.id, start_time: `${day} 09:00`, end_time: `${day} 09:30` })).data;
+  await api.post('/appointments', { patient_id: cash.id, provider_id: provider.id, start_time: `${day} 10:00`, end_time: `${day} 10:30` });
+  let rows = (await api.get(`/appointments?date=${day}`)).data;
+  assert.deepEqual(rows.map((a) => a.eligibility?.status ?? null), ['unverified', null]);
+  await api.post(`/insurance/${policy.id}/eligibility`);
+  rows = (await api.get(`/appointments?date=${day}`)).data;
+  assert.equal(rows[0].eligibility.status, 'active');
+  assert.ok(rows[0].eligibility.checked_at);
+  assert.equal((await api.get(`/appointments/${a1.id}`)).data.eligibility.status, 'active');
+});
