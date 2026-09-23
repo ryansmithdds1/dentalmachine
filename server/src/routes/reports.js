@@ -1,0 +1,114 @@
+import { Router } from 'express';
+import { requirePermission, HttpError } from '../auth.js';
+import { practiceNow } from '../util.js';
+
+const DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+function range(req, db) {
+  const today = practiceNow(db, req.user.practice_id).slice(0, 10);
+  const from = req.query.from || `${today.slice(0, 7)}-01`;
+  const to = req.query.to || today;
+  if (!DATE.test(from) || !DATE.test(to)) throw new HttpError(400, 'from/to must be YYYY-MM-DD');
+  return { from, to, today };
+}
+
+export default function reportRoutes({ db }) {
+  const r = Router();
+
+  // Front-desk dashboard: available to anyone who can see the schedule.
+  r.get('/dashboard', requirePermission('schedule:read'), (req, res) => {
+    const pid = req.user.practice_id;
+    const { from, to, today } = range(req, db);
+    const appts = db.all(
+      `SELECT a.status, COUNT(*) AS n FROM appointments a WHERE a.practice_id = ? AND a.start_time >= ? AND a.start_time < ? GROUP BY a.status`,
+      pid, `${today} 00:00`, `${today} 24:00`,
+    );
+    const byStatus = Object.fromEntries(appts.map((a) => [a.status, a.n]));
+    const out = {
+      today,
+      appointments_today: appts.filter((a) => !['cancelled', 'no_show'].includes(a.status)).reduce((s, a) => s + a.n, 0),
+      appointments_by_status: byStatus,
+      recalls_due: db.get(
+        `SELECT COUNT(*) AS n FROM recalls r JOIN patients p ON p.id = r.patient_id
+         WHERE r.practice_id = ? AND r.due_date <= ? AND r.status IN ('due','contacted') AND p.status = 'active'`, pid, today,
+      ).n,
+      active_patients: db.get("SELECT COUNT(*) AS n FROM patients WHERE practice_id = ? AND status = 'active'", pid).n,
+    };
+    if (req.user.role === 'admin' || ['dentist', 'billing'].includes(req.user.role)) {
+      Object.assign(out, {
+        period: { from, to },
+        production: db.get("SELECT COALESCE(SUM(amount),0) AS n FROM ledger_entries WHERE practice_id = ? AND type = 'charge' AND entry_date BETWEEN ? AND ?", pid, from, to).n,
+        collections: -db.get("SELECT COALESCE(SUM(amount),0) AS n FROM ledger_entries WHERE practice_id = ? AND type IN ('payment','insurance_payment') AND entry_date BETWEEN ? AND ?", pid, from, to).n,
+        adjustments: db.get("SELECT COALESCE(SUM(amount),0) AS n FROM ledger_entries WHERE practice_id = ? AND type = 'adjustment' AND entry_date BETWEEN ? AND ?", pid, from, to).n,
+        accounts_receivable: db.get('SELECT COALESCE(SUM(amount),0) AS n FROM ledger_entries WHERE practice_id = ?', pid).n,
+        outstanding_claims: db.get("SELECT COUNT(*) AS n, COALESCE(SUM(estimated_amount),0) AS amount FROM claims WHERE practice_id = ? AND status = 'submitted'", pid),
+        new_patients: db.get('SELECT COUNT(*) AS n FROM patients WHERE practice_id = ? AND date(created_at) BETWEEN ? AND ?', pid, from, to).n,
+        unscheduled_treatment: db.get(
+          `SELECT COUNT(*) AS n, COALESCE(SUM(pr.fee),0) AS amount FROM procedures pr JOIN treatment_plans tp ON tp.id = pr.treatment_plan_id
+           WHERE pr.practice_id = ? AND pr.status = 'planned' AND pr.appointment_id IS NULL AND tp.status IN ('proposed','accepted')`, pid,
+        ),
+      });
+    }
+    res.json(out);
+  });
+
+  r.get('/reports/production', requirePermission('reports:read'), (req, res) => {
+    const pid = req.user.practice_id;
+    const { from, to } = range(req, db);
+    res.json({
+      from, to,
+      by_provider: db.all(
+        `SELECT pv.id, pv.name, COUNT(*) AS procedures, SUM(l.amount) AS production FROM ledger_entries l
+         JOIN providers pv ON pv.id = l.provider_id WHERE l.practice_id = ? AND l.type = 'charge' AND l.entry_date BETWEEN ? AND ?
+         GROUP BY pv.id ORDER BY production DESC`, pid, from, to,
+      ),
+      by_category: db.all(
+        `SELECT pr.category, COUNT(*) AS procedures, SUM(l.amount) AS production FROM ledger_entries l
+         JOIN procedures pr ON pr.id = l.procedure_id WHERE l.practice_id = ? AND l.type = 'charge' AND l.entry_date BETWEEN ? AND ?
+         GROUP BY pr.category ORDER BY production DESC`, pid, from, to,
+      ),
+      by_day: db.all(
+        `SELECT entry_date AS day,
+           SUM(CASE WHEN type = 'charge' THEN amount ELSE 0 END) AS production,
+           -SUM(CASE WHEN type IN ('payment','insurance_payment') THEN amount ELSE 0 END) AS collections
+         FROM ledger_entries WHERE practice_id = ? AND entry_date BETWEEN ? AND ? GROUP BY entry_date ORDER BY entry_date`, pid, from, to,
+      ),
+      top_procedures: db.all(
+        `SELECT pr.code, pr.description, COUNT(*) AS count, SUM(pr.fee) AS production FROM procedures pr
+         WHERE pr.practice_id = ? AND pr.status = 'completed' AND date(pr.completed_at) BETWEEN ? AND ?
+         GROUP BY pr.code ORDER BY production DESC LIMIT 10`, pid, from, to,
+      ),
+    });
+  });
+
+  // Aging by patient: open balance is attributed to the most recent charges first (FIFO payment application).
+  r.get('/reports/aging', requirePermission('reports:read'), (req, res) => {
+    const pid = req.user.practice_id;
+    const { today } = range(req, db);
+    const patients = db.all(
+      `SELECT p.id, p.first_name, p.last_name, p.phone, SUM(l.amount) AS balance FROM ledger_entries l JOIN patients p ON p.id = l.patient_id
+       WHERE l.practice_id = ? GROUP BY p.id HAVING balance > 0 ORDER BY balance DESC`, pid,
+    );
+    const buckets = ['current', 'd31_60', 'd61_90', 'd90_plus'];
+    const totals = Object.fromEntries(buckets.map((b) => [b, 0]));
+    const todayMs = Date.parse(`${today}T00:00:00Z`);
+    const rows = patients.map((p) => {
+      const charges = db.all("SELECT amount, entry_date FROM ledger_entries WHERE patient_id = ? AND practice_id = ? AND amount > 0 ORDER BY entry_date DESC, id DESC", p.id, pid);
+      const row = { ...p, ...Object.fromEntries(buckets.map((b) => [b, 0])) };
+      let remaining = p.balance;
+      for (const c of charges) {
+        if (remaining <= 0) break;
+        const part = Math.min(c.amount, remaining);
+        remaining -= part;
+        const age = Math.floor((todayMs - Date.parse(`${c.entry_date}T00:00:00Z`)) / 86400000);
+        const bucket = age <= 30 ? 'current' : age <= 60 ? 'd31_60' : age <= 90 ? 'd61_90' : 'd90_plus';
+        row[bucket] += part;
+      }
+      buckets.forEach((b) => (totals[b] += row[b]));
+      return row;
+    });
+    res.json({ as_of: today, totals: { ...totals, total: rows.reduce((s, r) => s + r.balance, 0) }, rows });
+  });
+
+  return r;
+}
