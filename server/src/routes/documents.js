@@ -1,4 +1,5 @@
 import express, { Router } from 'express';
+import { autoAnalyze } from '../xrayai.js';
 import { requirePermission, HttpError } from '../auth.js';
 import { findOr404, insert, audit, requireOneOf, validTooth, newToken } from '../util.js';
 import { sniffMime } from './imaging.js';
@@ -117,6 +118,7 @@ export default function documentRoutes({ db, storage, config = {} }) {
         uploaded_by: req.user.id,
       });
       await audit(db, req, 'document.upload', 'documents', id, { patient_id: patient.id, category });
+      if (category === 'xray') autoAnalyze(db, id);
       res.status(201).json(await db.get('SELECT id, category, filename, mime, size, tooth, notes, created_at FROM documents WHERE id = ?', id));
     },
   );

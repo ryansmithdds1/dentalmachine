@@ -1,4 +1,5 @@
 import express, { Router } from 'express';
+import { autoAnalyze } from '../xrayai.js';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -405,6 +406,7 @@ export function bridgeAgentRoutes({ db, storage }) {
       taken_at: tags?.studyDate || (capture ? new Date().toISOString().slice(0, 10) : null), exposure: exposure ? JSON.stringify(exposure) : null,
     });
     await audit(db, { user: { practice_id: agent.practice_id, id: null }, ip: req.ip }, 'document.import', 'documents', id, { patient_id: patientId, agent: agent.name, matched_by: matchedBy });
+    if (category === 'xray') autoAnalyze(db, id);
     let placed = null;
     if (capture) {
       placed = await db.tx(async () => {

@@ -1311,3 +1311,11 @@ button.assist-fab.busy { animation: assist-busy 1.4s ease-in-out infinite; }
 @keyframes scribe-pulse { 50% { opacity: 0.45; } }
 .scribe-transcript { width: 100%; font-family: inherit; font-size: 13px; margin-top: 8px; }
 .scribe h3 { margin: 12px 0 4px; font-size: 13px; }
+
+/* AI x-ray findings under the viewer toolbar */
+.viewer-ai { background: #0b1220; color: #e2e8f0; padding: 8px 12px; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.viewer-ai .muted { color: #94a3b8; }
+.viewer-ai-head { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.viewer-ai-row { display: flex; align-items: center; gap: 8px; }
+.viewer-ai-row i { width: 10px; height: 10px; border-radius: 2px; flex: none; }
+.viewer-ai-row.rejected span:first-of-type { text-decoration: line-through; opacity: 0.6; }

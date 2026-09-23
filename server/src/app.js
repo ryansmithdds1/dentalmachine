@@ -23,6 +23,8 @@ import conversationRoutes, { smsWebhook } from './routes/sms.js';
 import { deliveryWebhooks } from './routes/delivery.js';
 import financeRoutes, { financePublicRoutes } from './routes/finance.js';
 import scribeRoutes from './routes/scribe.js';
+import xrayAiRoutes from './routes/xrayai.js';
+import { createXrayAi, registerXrayAi } from './xrayai.js';
 import { createPlaid } from './finance/plaid.js';
 import { createQuickBooks } from './finance/quickbooks.js';
 import ediRoutes from './routes/edi.js';
@@ -83,6 +85,8 @@ export function loadConfig(env = process.env) {
     sendgridWebhookKey: env.SENDGRID_WEBHOOK_KEY || null,
     // The business's bank (Plaid) and books (QuickBooks Online); PLAID=sandbox / QBO=sandbox simulate them.
     plaidClientId: env.PLAID_CLIENT_ID || null, plaidSecret: env.PLAID_SECRET || null, plaidEnv: env.PLAID_ENV || 'sandbox', plaid: env.PLAID || null,
+    // AI x-ray reading: XRAY_AI=vendor (with XRAY_AI_URL, XRAY_AI_KEY, XRAY_AI_NAME), claude or sandbox.
+    xrayAi: env.XRAY_AI || null, xrayAiUrl: env.XRAY_AI_URL || null, xrayAiKey: env.XRAY_AI_KEY || null, xrayAiName: env.XRAY_AI_NAME || null,
     qboClientId: env.QBO_CLIENT_ID || null, qboClientSecret: env.QBO_CLIENT_SECRET || null, qboEnv: env.QBO_ENV || 'sandbox', qbo: env.QBO || null,
     ediMode: env.EDI_MODE || 'manual',
     ediSubmitterId: env.EDI_SUBMITTER_ID || null,
@@ -107,7 +111,7 @@ export function loadConfig(env = process.env) {
 // Plaid Link (connecting the practice's bank) runs from Plaid's own script and frame.
 export const CSP = "default-src 'self'; script-src 'self' https://cdn.plaid.com/link/v2/stable/link-initialize.js; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://production.plaid.com https://sandbox.plaid.com; frame-src 'self' blob: https://cdn.plaid.com; media-src 'self' blob:; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'";
 
-export function createApp({ db, secret, config: overrides = {}, fetchImpl = globalThis.fetch, messenger, storage, clearinghouse, erx, payments, mailer, attachmentSender, plaid, qbo }) {
+export function createApp({ db, secret, config: overrides = {}, fetchImpl = globalThis.fetch, messenger, storage, clearinghouse, erx, payments, mailer, attachmentSender, plaid, qbo, xrayAi }) {
   if (!secret) throw new Error('JWT secret is required');
   const config = { ...loadConfig(), ...overrides };
   messenger ??= createMessenger({ fetchImpl });
@@ -116,6 +120,8 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   payments ??= createPayments({ config, fetchImpl });
   plaid ??= createPlaid({ config, fetchImpl });
   qbo ??= createQuickBooks({ config, fetchImpl });
+  xrayAi ??= createXrayAi({ config, fetchImpl });
+  registerXrayAi(db, { storage, xrayAi });
   mailer ??= overrides.mailer || createMailer({ fetchImpl });
   clearinghouse ??= createClearinghouse({ db, fetchImpl, config: { ...clearinghouseConfig(), ...(config.ediMode === 'sandbox' && !process.env.CLEARINGHOUSE ? { mode: 'sandbox' } : {}) } });
   startWebhooks(db, fetchImpl);
@@ -208,6 +214,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(assistantRoutes({ db, config, secret, app: () => app }));
   api.use(financeRoutes({ db, config, secret, plaid, qbo }));
   api.use(scribeRoutes({ db, config }));
+  api.use(xrayAiRoutes({ db, xrayAi }));
   api.use(attachmentRoutes({ db, storage, sender: attachmentSender ?? createAttachmentSender(attachmentConfig(process.env, config.ediMode), fetchImpl) }));
   api.use(billingRoutes({ db, payments, config, messenger }));
   api.use(insuranceRoutes({ db }));

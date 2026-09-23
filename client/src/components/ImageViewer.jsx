@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Hand, Ruler, Spline, DraftingCompass, MoveUpRight, Circle, Type, Eraser, Crosshair, ZoomIn, ZoomOut, RotateCw, ArrowLeftRight,
   Contrast, Search, SlidersHorizontal, Maximize, Minimize, Undo2, Save, Keyboard,
+  ScanSearch,
 } from 'lucide-react';
 import { api, getToken } from '../api.js';
 import { ErrorBox } from './ui.jsx';
@@ -26,6 +27,8 @@ const TOOLS = [
 ];
 const READ_ONLY_TOOLS = ['pan', 'measure', 'polyline', 'angle'];
 const MARK = '#facc15';
+// AI findings: a colour per kind; suggestions dashed, accepted solid, rejected hidden.
+const AI_COLOR = { caries: '#f43f5e', calculus: '#f59e0b', bone_loss: '#a855f7', periapical: '#ef4444', open_margin: '#fb923c', restoration: '#38bdf8', crown: '#38bdf8', root_canal: '#22d3ee', implant: '#94a3b8', impacted: '#eab308', other: '#e2e8f0' };
 
 async function loadImage(id) {
   const res = await fetch(`/api/documents/${id}/image`, { headers: { Authorization: `Bearer ${getToken()}` } });
@@ -69,6 +72,11 @@ export default function ImageViewer({ doc, canEdit = false, height = '70vh', com
   const [help, setHelp] = useState(false);
   const [full, setFull] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [aiStatus, setAiStatus] = useState(null);
+  const [ai, setAi] = useState(null);
+  const [showAi, setShowAi] = useState(false);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [category, setCategory] = useState(doc.category || null);
 
   useEffect(() => {
     let url;
@@ -84,6 +92,7 @@ export default function ImageViewer({ doc, canEdit = false, height = '70vh', com
       setMm(meta.mm_per_px);
       setScaleSource(meta.scale_source);
       setExposure(meta.exposure);
+      setCategory(meta.category || doc.category || null);
       setAgentId(meta.agent_id);
       // X-rays nobody has saved settings for open with this computer's choice (Clarity unless changed).
       const start = meta.adjust || (meta.category === 'xray' ? PRESETS.find((p) => p.id === openPreset())?.adjust : null) || null;
@@ -94,6 +103,24 @@ export default function ImageViewer({ doc, canEdit = false, height = '70vh', com
     }).catch(setError);
     return () => url && URL.revokeObjectURL(url);
   }, [doc.id]);
+
+  // AI findings for x-rays, when the server reads them.
+  useEffect(() => { api.get('/xray-ai').then(setAiStatus).catch(() => setAiStatus(null)); }, []);
+  useEffect(() => {
+    setAi(null);
+    if (!aiStatus?.enabled || category !== 'xray') return;
+    api.get(`/documents/${doc.id}/ai-findings`).then((f) => { setAi(f); if (f.findings.some((x) => x.status === 'suggested')) setShowAi(true); }).catch(() => {});
+  }, [doc.id, category, aiStatus?.enabled]);
+  const readAi = async () => {
+    setAiBusy(true);
+    try { setAi(await api.post(`/documents/${doc.id}/ai-read`)); setShowAi(true); } catch (e) { setError(e); } finally { setAiBusy(false); }
+  };
+  const decide = async (f, status) => {
+    try {
+      const next = await api.patch(`/ai-findings/${f.id}`, { status, chart: status === 'accepted' });
+      setAi((a) => ({ ...a, findings: a.findings.map((x) => (x.id === f.id ? next : x)) }));
+    } catch (e) { setError(e); }
+  };
 
   // Enhancement runs off the main render (a big x-ray takes a moment), newest settings winning.
   useEffect(() => {
@@ -205,6 +232,24 @@ export default function ImageViewer({ doc, canEdit = false, height = '70vh', com
         label(a.type === 'calibrate' ? 'known length' : fmtLen(dist(a.points[0], a.points[1])), (p0[0] + p1[0]) / 2 + 8 * ratio, (p0[1] + p1[1]) / 2 - 8 * ratio);
       }
     }
+    // AI findings: a box on the image for each, with what and where.
+    if (showAi && ai) {
+      for (const f of ai.findings) {
+        if (!f.box || f.status === 'rejected') continue;
+        const [bx, by, bw, bh] = f.box;
+        const corners = [[bx, by], [bx + bw, by], [bx + bw, by + bh], [bx, by + bh]].map(([u, v]) => toScreen([u * img.width, v * img.height]));
+        ctx.strokeStyle = AI_COLOR[f.kind] || '#fff';
+        ctx.lineWidth = 2 * ratio;
+        ctx.setLineDash(f.status === 'accepted' ? [] : [6 * ratio, 4 * ratio]);
+        ctx.beginPath();
+        corners.forEach((p, i) => (i ? ctx.lineTo(...p) : ctx.moveTo(...p)));
+        ctx.closePath();
+        ctx.stroke();
+        ctx.setLineDash([]);
+        const top = corners.reduce((a, p) => (p[1] < a[1] ? p : a));
+        label(`${f.label}${f.tooth ? ` #${f.tooth}` : ''}${f.surfaces ? ` ${f.surfaces}` : ''}${f.measurement_mm ? ` ${f.measurement_mm}mm` : ''} · ${Math.round(f.confidence * 100)}%`, top[0], top[1] - 6 * ratio);
+      }
+    }
     // Magnifier: the same view at 3× inside a circle that follows the pointer.
     if (magnify && loupe.current) {
       const [lx, ly] = loupe.current;
@@ -224,7 +269,7 @@ export default function ImageViewer({ doc, canEdit = false, height = '70vh', com
       ctx.arc(lx, ly, r, 0, Math.PI * 2);
       ctx.stroke();
     }
-  }, [img, processed, notes, draft, matrix, mm, magnify]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [img, processed, notes, draft, matrix, mm, magnify, showAi, ai]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { draw(); }, [draw]);
   useEffect(() => {
@@ -423,6 +468,7 @@ export default function ImageViewer({ doc, canEdit = false, height = '70vh', com
           <IconBtn on={adj.invert} title="Invert (I)" onClick={() => setA({ invert: !adj.invert })}><Contrast size={16} /></IconBtn>
           <IconBtn on={magnify} title="Magnifier (M)" onClick={() => setMagnify(!magnify)}><Search size={16} /></IconBtn>
           <IconBtn on={panel} title="Adjust image" onClick={() => setPanel(!panel)}><SlidersHorizontal size={16} /></IconBtn>
+          {aiStatus?.enabled && category === 'xray' && <IconBtn on={showAi} title={`AI findings (${aiStatus.label})`} onClick={() => setShowAi(!showAi)}><ScanSearch size={16} /></IconBtn>}
         </div>
         {!small && (
           <div className="vgroup presets" role="group" aria-label="Presets">
@@ -461,6 +507,30 @@ export default function ImageViewer({ doc, canEdit = false, height = '70vh', com
           <label className="vcheck" title="What x-rays open with on this computer when nobody has saved settings for them">Open x-rays with
             <select value={openWith} onChange={(e) => { setOpenWith(e.target.value); setOpenPreset(e.target.value); }}>{PRESETS.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}</select>
           </label>
+        </div>
+      )}
+      {showAi && aiStatus?.enabled && (
+        <div className="viewer-ai">
+          <div className="viewer-ai-head">
+            <strong>AI findings</strong>
+            <span className="muted">{aiStatus.label}{aiStatus.cleared ? '' : ' · for the dentist’s review, not a diagnosis'}</span>
+            {canEdit && <button type="button" className="small" disabled={aiBusy} onClick={readAi}>{aiBusy ? 'Reading…' : ai?.read_at || ai?.findings?.length ? 'Read again' : 'Read this x-ray'}</button>}
+          </div>
+          {ai?.quality && <div className="muted" style={{ fontSize: 12 }}>Image: {ai.quality}</div>}
+          {ai && !ai.findings.length && <div className="muted" style={{ fontSize: 12 }}>{ai.read_at ? 'Nothing found.' : 'Not read yet.'}</div>}
+          {ai?.findings.map((f) => (
+            <div key={f.id} className={`viewer-ai-row ${f.status}`}>
+              <i style={{ background: AI_COLOR[f.kind] }} />
+              <span>{f.label}{f.tooth ? ` #${f.tooth}` : ''}{f.surfaces ? ` ${f.surfaces}` : ''}{f.measurement_mm ? ` · ${f.measurement_mm} mm` : ''} · {Math.round(f.confidence * 100)}%</span>
+              {canEdit && f.status === 'suggested' && (
+                <>
+                  <button type="button" className="small" onClick={() => decide(f, 'accepted')} title={f.tooth ? 'Agree, and add it to the tooth chart' : 'Agree'}>Agree</button>
+                  <button type="button" className="small" onClick={() => decide(f, 'rejected')}>Dismiss</button>
+                </>
+              )}
+              {f.status !== 'suggested' && <span className="muted" style={{ fontSize: 11 }}>{f.status === 'accepted' ? (f.condition_id ? 'on the chart' : 'agreed') : 'dismissed'}{canEdit && <button type="button" className="link" style={{ fontSize: 11, marginLeft: 6 }} onClick={() => decide(f, 'suggested')}>undo</button>}</span>}
+            </div>
+          ))}
         </div>
       )}
       <ErrorBox error={error} />

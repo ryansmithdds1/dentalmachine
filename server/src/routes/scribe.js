@@ -3,6 +3,7 @@ import { requirePermission, HttpError } from '../auth.js';
 import { insert, findOr404, audit, practiceNow } from '../util.js';
 import { structured, aiClient } from '../ai.js';
 import { canSeePatient } from '../officeaccess.js';
+import { CONDITIONS } from './clinical.js';
 
 // The ambient scribe: the chairside conversation (transcribed in the browser) plus what the chart already
 // knows becomes a draft clinical note, with the procedures it describes as done or planned and anything a
@@ -27,7 +28,7 @@ const TOOL = {
       planned: { type: 'array', description: 'Treatment recommended for later.', items: { $ref: '#/$defs/proc' } },
       conditions: {
         type: 'array', description: 'Findings to chart on teeth.',
-        items: { type: 'object', properties: { tooth: { type: 'string' }, condition: { type: 'string', enum: ['caries', 'fracture', 'watch', 'missing', 'impacted', 'abscess', 'mobility', 'recession', 'wear', 'other'] }, surfaces: { type: 'string' }, notes: { type: 'string' } }, required: ['tooth', 'condition'] },
+        items: { type: 'object', properties: { tooth: { type: 'string' }, condition: { type: 'string', enum: CONDITIONS }, surfaces: { type: 'string' }, notes: { type: 'string' } }, required: ['tooth', 'condition'] },
       },
       missing: { type: 'array', items: { type: 'string' }, description: 'What a complete note would usually include but wasn’t said.' },
       patient_instructions: { type: 'string' },

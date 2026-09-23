@@ -742,6 +742,28 @@ CREATE TABLE IF NOT EXISTS scribe_sessions (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- What an AI read of an x-ray found, where on the image (a box, as fractions of it), and the dentist's call.
+CREATE TABLE IF NOT EXISTS xray_findings (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  document_id INTEGER NOT NULL REFERENCES documents(id),
+  engine TEXT,
+  kind TEXT NOT NULL,
+  tooth TEXT,
+  surfaces TEXT,
+  confidence REAL,
+  box TEXT,
+  measurement_mm REAL,
+  note TEXT,
+  status TEXT NOT NULL DEFAULT 'suggested',
+  reviewed_by INTEGER REFERENCES users(id),
+  reviewed_at TEXT,
+  condition_id INTEGER,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_xray_findings ON xray_findings(practice_id, patient_id, status);
+
 CREATE TABLE IF NOT EXISTS assistant_log (
   id INTEGER PRIMARY KEY,
   practice_id INTEGER NOT NULL REFERENCES practices(id),
@@ -1894,6 +1916,10 @@ const COLUMNS = [
   ['practices', 'send_until', "TEXT NOT NULL DEFAULT '20:00'"],
   ['practices', 'booking_notices', 'INTEGER NOT NULL DEFAULT 1'],
   ['practices', 'no_show_texts', 'INTEGER NOT NULL DEFAULT 1'],
+  ['documents', 'ai_read_at', 'TEXT'],
+  ['documents', 'ai_image_type', 'TEXT'],
+  ['documents', 'ai_quality', 'TEXT'],
+  ['practices', 'xray_ai_auto', 'INTEGER NOT NULL DEFAULT 1'],
 ];
 
 // CHECK constraints widened after release: [table, constraint name on Postgres, old text, new text].
