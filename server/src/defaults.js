@@ -46,6 +46,20 @@ export const DEFAULT_CODES = [
   ['D9944', 'Occlusal guard, hard appliance, full arch', 'adjunctive', 55000, 0, 0],
 ];
 
+// [name, minutes, color, procedure codes, provider type, bookable online]
+export const DEFAULT_APPOINTMENT_TYPES = [
+  ['New patient exam & cleaning', 90, '#0ea5e9', ['D0150', 'D0210', 'D1110'], 'hygienist', 1],
+  ['Recall exam & cleaning', 60, '#10b981', ['D0120', 'D1110', 'D0274'], 'hygienist', 1],
+  ['Perio maintenance', 60, '#14b8a6', ['D0120', 'D4910'], 'hygienist', 0],
+  ['Filling', 60, '#6366f1', [], 'dentist', 0],
+  ['Crown prep', 90, '#a855f7', [], 'dentist', 0],
+  ['Crown seat', 30, '#c084fc', [], 'dentist', 0],
+  ['Root canal', 90, '#f43f5e', [], 'dentist', 0],
+  ['Extraction', 60, '#f97316', [], 'dentist', 0],
+  ['Emergency / limited exam', 30, '#ef4444', ['D0140', 'D0220'], 'dentist', 1],
+  ['Consultation', 30, '#64748b', [], 'dentist', 1],
+];
+
 export function seedPracticeDefaults(db, practiceId) {
   for (const [code, description, category, fee, rt, rs] of DEFAULT_CODES) {
     insert(db, 'procedure_codes', {
@@ -55,6 +69,9 @@ export function seedPracticeDefaults(db, practiceId) {
   for (const name of ['Op 1', 'Op 2', 'Hygiene 1']) {
     insert(db, 'operatories', { practice_id: practiceId, name });
   }
+  DEFAULT_APPOINTMENT_TYPES.forEach(([name, duration, color, codes, providerType, online], sort) => insert(db, 'appointment_types', {
+    practice_id: practiceId, name, duration, color, procedure_codes: JSON.stringify(codes), provider_type: providerType, online_bookable: online, sort,
+  }));
 }
 
 // Insurance coverage tier for a procedure category.

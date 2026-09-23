@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { requirePermission, HttpError } from '../auth.js';
 import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, toCents, practiceNow } from '../util.js';
-import { estimateCoverage } from '../services.js';
+import { estimateCoverage, postClaimPayment } from '../services.js';
 
 const POLICY_FIELDS = [
   'carrier_id', 'priority', 'subscriber_name', 'subscriber_id', 'subscriber_dob', 'relationship', 'group_number',
@@ -168,28 +168,9 @@ export default function insuranceRoutes({ db }) {
     const writeOff = req.body?.write_off != null ? toCents(req.body.write_off, 'write_off') : 0;
     if (writeOff < 0) throw new HttpError(400, 'write_off cannot be negative');
     const final = req.body?.final !== false;
-    const carrier = db.get('SELECT ic.name FROM patient_insurance pi JOIN insurance_carriers ic ON ic.id = pi.carrier_id WHERE pi.id = ?', claim.patient_insurance_id);
-    const today = practiceNow(db, req.user.practice_id).slice(0, 10);
-    db.tx(() => {
-      insert(db, 'ledger_entries', {
-        practice_id: claim.practice_id, patient_id: claim.patient_id, type: 'insurance_payment', amount: -amount,
-        description: `Insurance payment - ${carrier.name} (claim #${claim.id})`, method: req.body?.method || 'check',
-        reference: req.body?.reference ?? null, claim_id: claim.id, entry_date: today, created_by: req.user.id,
-      });
-      if (writeOff > 0) {
-        insert(db, 'ledger_entries', {
-          practice_id: claim.practice_id, patient_id: claim.patient_id, type: 'adjustment', amount: -writeOff,
-          description: `Insurance write-off - ${carrier.name} (claim #${claim.id})`, claim_id: claim.id, entry_date: today, created_by: req.user.id,
-        });
-      }
-      db.run(
-        "UPDATE claims SET paid_amount = paid_amount + ?, status = ?, paid_at = datetime('now') WHERE id = ?",
-        amount, final ? 'paid' : 'partially_paid', claim.id,
-      );
-      // First payment on a claim satisfies the deductible it applied.
-      if (claim.status === 'submitted' && claim.deductible_applied > 0) {
-        db.run('UPDATE patient_insurance SET deductible_met = MIN(deductible, deductible_met + ?) WHERE id = ?', claim.deductible_applied, claim.patient_insurance_id);
-      }
+    postClaimPayment(db, claim, {
+      amount, writeOff, final, method: req.body?.method || 'check', reference: req.body?.reference ?? null,
+      userId: req.user.id, date: practiceNow(db, req.user.practice_id).slice(0, 10),
     });
     audit(db, req, 'claim.payment', 'claims', claim.id, { amount, write_off: writeOff });
     res.json(db.get(`${CLAIM_SELECT} WHERE c.id = ?`, claim.id));

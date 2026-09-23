@@ -5,7 +5,7 @@ import { patientBalance, primaryPolicy } from '../services.js';
 
 const FIELDS = [
   'first_name', 'last_name', 'preferred_name', 'dob', 'gender', 'email', 'phone', 'address', 'city', 'state', 'zip',
-  'emergency_contact', 'medical_alerts', 'allergies', 'medications', 'notes', 'primary_provider_id', 'status', 'sms_opt_in', 'email_opt_in',
+  'emergency_contact', 'medical_alerts', 'allergies', 'medications', 'notes', 'primary_provider_id', 'status', 'sms_opt_in', 'email_opt_in', 'guarantor_id',
 ];
 
 function validate(row) {
@@ -50,6 +50,7 @@ export default function patientRoutes({ db }) {
     requireFields(row, ['first_name', 'last_name']);
     validate(row);
     if (row.primary_provider_id) findOr404(db, 'providers', row.primary_provider_id, req.user.practice_id, 'Provider');
+    if (row.guarantor_id && findOr404(db, 'patients', row.guarantor_id, req.user.practice_id, 'Guarantor').guarantor_id) throw new HttpError(400, 'Choose the head of household as guarantor');
     const id = insert(db, 'patients', { ...row, practice_id: req.user.practice_id });
     audit(db, req, 'patient.create', 'patients', id);
     res.status(201).json(db.get('SELECT * FROM patients WHERE id = ?', id));
@@ -71,6 +72,9 @@ export default function patientRoutes({ db }) {
         pid, patient.id, practiceNow(db, pid).slice(0, 10),
       ),
       recalls: db.all('SELECT * FROM recalls WHERE practice_id = ? AND patient_id = ? ORDER BY due_date', pid, patient.id),
+      guarantor: patient.guarantor_id ? db.get('SELECT id, first_name, last_name FROM patients WHERE id = ?', patient.guarantor_id) : null,
+      family_size: db.get('SELECT COUNT(*) AS n FROM patients WHERE practice_id = ? AND status != \'archived\' AND (id = ? OR guarantor_id = ?)', pid, patient.guarantor_id || patient.id, patient.guarantor_id || patient.id).n,
+      open_lab_cases: db.all("SELECT id, lab_name, description, status, due_date FROM lab_cases WHERE practice_id = ? AND patient_id = ? AND status IN ('sent','returned_for_adjustment','received') ORDER BY due_date", pid, patient.id),
     });
   });
 
@@ -80,6 +84,11 @@ export default function patientRoutes({ db }) {
     validate(row);
     if (row.first_name === null || row.last_name === null) throw new HttpError(400, 'Name cannot be blank');
     if (row.primary_provider_id) findOr404(db, 'providers', row.primary_provider_id, req.user.practice_id, 'Provider');
+    if (row.guarantor_id) {
+      const g = findOr404(db, 'patients', row.guarantor_id, req.user.practice_id, 'Guarantor');
+      if (g.id === existing.id) row.guarantor_id = null;
+      else if (g.guarantor_id) throw new HttpError(400, 'Choose the head of household as guarantor');
+    }
     update(db, 'patients', existing.id, req.user.practice_id, { ...row, updated_at: new Date().toISOString() });
     audit(db, req, 'patient.update', 'patients', existing.id, { fields: Object.keys(row) });
     res.json(db.get('SELECT * FROM patients WHERE id = ?', existing.id));

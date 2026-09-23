@@ -114,3 +114,30 @@ export function completeProcedure(db, user, procedure, { providerId, appointment
     }
   });
 }
+
+// Posts an insurance payment (and optional contractual write-off) against a claim.
+export function postClaimPayment(db, claim, { amount, writeOff = 0, final = true, method = 'check', reference = null, userId = null, date, payerClaimNumber = null }) {
+  const carrier = db.get('SELECT ic.name FROM patient_insurance pi JOIN insurance_carriers ic ON ic.id = pi.carrier_id WHERE pi.id = ?', claim.patient_insurance_id);
+  db.tx(() => {
+    if (amount > 0) {
+      insert(db, 'ledger_entries', {
+        practice_id: claim.practice_id, patient_id: claim.patient_id, type: 'insurance_payment', amount: -amount,
+        description: `Insurance payment - ${carrier.name} (claim #${claim.id})`, method, reference, claim_id: claim.id, entry_date: date, created_by: userId,
+      });
+    }
+    if (writeOff > 0) {
+      insert(db, 'ledger_entries', {
+        practice_id: claim.practice_id, patient_id: claim.patient_id, type: 'adjustment', amount: -writeOff,
+        description: `Insurance write-off - ${carrier.name} (claim #${claim.id})`, claim_id: claim.id, entry_date: date, created_by: userId,
+      });
+    }
+    db.run(
+      "UPDATE claims SET paid_amount = paid_amount + ?, status = ?, paid_at = datetime('now'), payer_claim_number = COALESCE(?, payer_claim_number) WHERE id = ?",
+      amount, final ? 'paid' : 'partially_paid', payerClaimNumber, claim.id,
+    );
+    // First payment on a claim satisfies the deductible it applied.
+    if (claim.status === 'submitted' && claim.deductible_applied > 0) {
+      db.run('UPDATE patient_insurance SET deductible_met = MIN(deductible, deductible_met + ?) WHERE id = ?', claim.deductible_applied, claim.patient_insurance_id);
+    }
+  });
+}

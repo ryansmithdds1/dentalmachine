@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { HttpError, hashPassword } from '../auth.js';
 import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, toCents } from '../util.js';
 import { validatePassword } from './auth.js';
+import { validateHours } from '../hours.js';
 
 const ROLES = ['admin', 'dentist', 'hygienist', 'assistant', 'front_desk', 'billing'];
 const CATEGORIES = ['diagnostic', 'preventive', 'restorative', 'endodontics', 'periodontics', 'prosthodontics', 'oral_surgery', 'orthodontics', 'implants', 'adjunctive'];
@@ -37,7 +38,9 @@ export default function settingsRoutes({ db }) {
 
   r.get('/practice', (req, res) => res.json(db.get('SELECT * FROM practices WHERE id = ?', req.user.practice_id)));
   r.put('/practice', requireAdmin, (req, res) => {
-    const row = pick(req.body, ['name', 'address', 'city', 'state', 'zip', 'phone', 'email', 'tax_id', 'npi', 'timezone', 'slug', 'online_booking', 'reminder_hours', 'require_mfa']);
+    const row = pick(req.body, ['name', 'address', 'city', 'state', 'zip', 'phone', 'email', 'tax_id', 'npi', 'timezone', 'slug', 'online_booking', 'reminder_hours', 'require_mfa', 'office_hours', 'daily_goal', 'sms_number']);
+    if (row.office_hours != null) row.office_hours = JSON.stringify(validateHours(typeof row.office_hours === 'string' ? JSON.parse(row.office_hours) : row.office_hours));
+    if (row.daily_goal != null) row.daily_goal = toCents(row.daily_goal, 'daily_goal');
     if (row.slug != null) {
       row.slug = String(row.slug).toLowerCase();
       if (!/^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])$/.test(row.slug)) throw new HttpError(400, 'Booking URL name must be 3-40 lowercase letters, numbers or dashes');
@@ -115,6 +118,22 @@ export default function settingsRoutes({ db }) {
       requireOneOf(row.category, CATEGORIES, 'category');
       if (row.code) row.code = row.code.toUpperCase();
       if (row.fee != null) row.fee = toCents(row.fee, 'fee');
+    },
+  });
+
+  resource(r, db, {
+    path: 'appointment-types', table: 'appointment_types', required: ['name', 'duration'], order: 'sort, name',
+    fields: ['name', 'duration', 'color', 'procedure_codes', 'provider_type', 'online_bookable', 'active', 'sort'],
+    validate: (row) => {
+      if (row.duration != null) {
+        row.duration = Number(row.duration);
+        if (!Number.isInteger(row.duration) || row.duration < 5 || row.duration > 480 || row.duration % 5) throw new HttpError(400, 'Duration must be 5-480 minutes in steps of 5');
+      }
+      requireOneOf(row.provider_type, ['dentist', 'hygienist', 'specialist'], 'provider_type');
+      if (row.procedure_codes != null) {
+        const codes = Array.isArray(row.procedure_codes) ? row.procedure_codes : String(row.procedure_codes).split(/[\s,]+/).filter(Boolean);
+        row.procedure_codes = JSON.stringify(codes.map((c) => String(c).toUpperCase()));
+      }
     },
   });
 

@@ -360,6 +360,111 @@ CREATE TABLE IF NOT EXISTS payment_requests (
   paid_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS appointment_types (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  name TEXT NOT NULL,
+  duration INTEGER NOT NULL DEFAULT 60,
+  color TEXT NOT NULL DEFAULT '#0ea5e9',
+  procedure_codes TEXT,
+  provider_type TEXT,
+  online_bookable INTEGER NOT NULL DEFAULT 0,
+  active INTEGER NOT NULL DEFAULT 1,
+  sort INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS blockouts (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  provider_id INTEGER REFERENCES providers(id),
+  operatory_id INTEGER REFERENCES operatories(id),
+  start_time TEXT NOT NULL,
+  end_time TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_blockouts_time ON blockouts(practice_id, start_time);
+
+CREATE TABLE IF NOT EXISTS payment_plans (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  total INTEGER NOT NULL,
+  down_payment INTEGER NOT NULL DEFAULT 0,
+  installment_amount INTEGER NOT NULL,
+  installments INTEGER NOT NULL,
+  frequency TEXT NOT NULL DEFAULT 'monthly' CHECK (frequency IN ('weekly','biweekly','monthly')),
+  start_date TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','completed','cancelled')),
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS eligibility_checks (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  patient_insurance_id INTEGER NOT NULL REFERENCES patient_insurance(id),
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','active','inactive','error')),
+  request_x12 TEXT,
+  response_x12 TEXT,
+  summary TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS era_imports (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  filename TEXT,
+  payer_name TEXT,
+  check_number TEXT,
+  payment_date TEXT,
+  total_paid INTEGER NOT NULL DEFAULT 0,
+  claims_matched INTEGER NOT NULL DEFAULT 0,
+  claims_unmatched INTEGER NOT NULL DEFAULT 0,
+  details TEXT,
+  raw TEXT NOT NULL,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS lab_cases (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  provider_id INTEGER REFERENCES providers(id),
+  appointment_id INTEGER REFERENCES appointments(id),
+  lab_name TEXT NOT NULL,
+  description TEXT NOT NULL,
+  tooth TEXT,
+  shade TEXT,
+  status TEXT NOT NULL DEFAULT 'sent' CHECK (status IN ('sent','received','returned_for_adjustment','delivered','cancelled')),
+  sent_date TEXT,
+  due_date TEXT,
+  received_date TEXT,
+  cost INTEGER,
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS tasks (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER REFERENCES patients(id),
+  assigned_to INTEGER REFERENCES users(id),
+  title TEXT NOT NULL,
+  notes TEXT,
+  due_date TEXT,
+  priority TEXT NOT NULL DEFAULT 'normal' CHECK (priority IN ('low','normal','high')),
+  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','done')),
+  created_by INTEGER REFERENCES users(id),
+  completed_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `;
 
 // Columns added after the first release. SQLite has no ADD COLUMN IF NOT EXISTS, so check first.
@@ -376,6 +481,20 @@ const COLUMNS = [
   ['appointments', 'confirm_token_hash', 'TEXT'],
   ['appointments', 'reminder_sent_at', 'TEXT'],
   ['appointments', 'confirmed_at', 'TEXT'],
+  ['appointments', 'appointment_type_id', 'INTEGER REFERENCES appointment_types(id)'],
+  ['appointments', 'asap', 'INTEGER NOT NULL DEFAULT 0'],
+  ['practices', 'office_hours', 'TEXT'],
+  ['practices', 'daily_goal', 'INTEGER NOT NULL DEFAULT 0'],
+  ['practices', 'sms_number', 'TEXT'],
+  ['practices', 'billing_provider_taxonomy', "TEXT NOT NULL DEFAULT '1223G0001X'"],
+  ['patients', 'guarantor_id', 'INTEGER REFERENCES patients(id)'],
+  ['messages', 'direction', "TEXT NOT NULL DEFAULT 'outbound'"],
+  ['messages', 'from_address', 'TEXT'],
+  ['messages', 'read_at', 'TEXT'],
+  ['ledger_entries', 'payment_plan_id', 'INTEGER REFERENCES payment_plans(id)'],
+  ['claims', 'control_number', 'TEXT'],
+  ['claims', 'payer_claim_number', 'TEXT'],
+  ['insurance_carriers', 'electronic', 'INTEGER NOT NULL DEFAULT 1'],
 ];
 
 function migrate(db) {

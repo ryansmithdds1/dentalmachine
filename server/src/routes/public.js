@@ -3,8 +3,10 @@ import { HttpError, rateLimit } from '../auth.js';
 import { insert, update, hashToken, practiceNow, normalizeDateTime, audit } from '../util.js';
 import { MEDICAL_CONDITIONS, parseMedicalHistory, patientUpdatesFromHistory } from '../forms.js';
 import { openSlots } from './schedule.js';
+import { publish } from '../events.js';
 
-const REASONS = [
+// Used only for practices that haven't marked any appointment types as bookable online.
+const FALLBACK_REASONS = [
   { label: 'New patient exam & cleaning', duration: 60 },
   { label: 'Checkup & cleaning', duration: 60 },
   { label: 'Tooth pain / emergency', duration: 30 },
@@ -26,6 +28,10 @@ export default function publicRoutes({ db }) {
     if (!p) throw new HttpError(404, 'Online booking is not available for this practice');
     return p;
   };
+  const reasonsFor = (practiceId) => {
+    const types = db.all('SELECT id, name, duration, provider_type FROM appointment_types WHERE practice_id = ? AND active = 1 AND online_bookable = 1 ORDER BY sort, name', practiceId);
+    return types.length ? types.map((t) => ({ label: t.name, duration: t.duration, type_id: t.id, provider_type: t.provider_type })) : FALLBACK_REASONS;
+  };
   const publicProviders = (practiceId) => db.all('SELECT id, name, type FROM providers WHERE practice_id = ? AND active = 1 ORDER BY type, name', practiceId);
 
   // ---- Online booking ----
@@ -33,7 +39,7 @@ export default function publicRoutes({ db }) {
     const p = bookablePractice(req.params.slug);
     res.json({
       name: p.name, phone: p.phone, address: p.address, city: p.city, state: p.state, zip: p.zip,
-      today: practiceNow(db, p.id).slice(0, 10), providers: publicProviders(p.id), reasons: REASONS,
+      today: practiceNow(db, p.id).slice(0, 10), providers: publicProviders(p.id), reasons: reasonsFor(p.id),
     });
   });
 
@@ -41,10 +47,14 @@ export default function publicRoutes({ db }) {
     const p = bookablePractice(req.params.slug);
     const { date } = req.query;
     if (!DATE.test(date || '')) throw new HttpError(400, 'date must be YYYY-MM-DD');
-    const duration = REASONS.find((x) => x.label === req.query.reason)?.duration || 60;
+    const reasons = reasonsFor(p.id);
+    const reason = reasons.find((x) => x.label === req.query.reason) || reasons[0];
+    const duration = reason.duration;
     const now = practiceNow(db, p.id);
-    if ([0, 6].includes(new Date(`${date}T12:00:00Z`).getUTCDay())) return res.json({ date, duration, slots: [] });
-    const providers = publicProviders(p.id).filter((pv) => !req.query.provider_id || pv.id === Number(req.query.provider_id));
+    // Office hours decide which days/times are offered; a hygiene visit is only offered with hygienists, etc.
+    const providers = publicProviders(p.id)
+      .filter((pv) => !req.query.provider_id || pv.id === Number(req.query.provider_id))
+      .filter((pv) => req.query.provider_id || !reason.provider_type || pv.type === reason.provider_type || !publicProviders(p.id).some((x) => x.type === reason.provider_type));
     const slots = [];
     for (const pv of providers) {
       for (const s of openSlots(db, p.id, pv.id, date, { duration, step: 30, after: now })) slots.push({ start: s, provider_id: pv.id, provider_name: pv.name });
@@ -62,7 +72,8 @@ export default function publicRoutes({ db }) {
     if (!first || !last) throw new HttpError(400, 'First and last name are required');
     if (!b.phone && !b.email) throw new HttpError(400, 'A phone number or email is required so we can confirm');
     if (b.dob && !DATE.test(b.dob)) throw new HttpError(400, 'Date of birth must be YYYY-MM-DD');
-    const reason = REASONS.find((x) => x.label === b.reason) || REASONS[1];
+    const reasons = reasonsFor(p.id);
+    const reason = reasons.find((x) => x.label === b.reason) || reasons[0];
     const start = normalizeDateTime(b.start, 'start');
     if (start <= practiceNow(db, p.id)) throw new HttpError(400, 'Please choose a future time');
     const providerId = Number(b.provider_id);
@@ -101,6 +112,7 @@ export default function publicRoutes({ db }) {
     const a = apptForToken(req.params.token);
     const action = req.body?.action;
     if (a.start_time <= practiceNow(db, a.practice_id)) throw new HttpError(409, 'This appointment has already passed');
+    publish(a.practice_id, { type: 'schedule', dates: [a.start_time.slice(0, 10)], source: 'patient' });
     if (action === 'confirm') {
       if (!['scheduled', 'confirmed'].includes(a.status)) throw new HttpError(409, `This appointment is ${a.status.replace('_', ' ')}`);
       db.run("UPDATE appointments SET status = 'confirmed', confirmed_at = COALESCE(confirmed_at, datetime('now')) WHERE id = ?", a.id);

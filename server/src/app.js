@@ -15,6 +15,10 @@ import engagementRoutes from './routes/engagement.js';
 import publicRoutes from './routes/public.js';
 import documentRoutes from './routes/documents.js';
 import paymentRoutes, { stripeWebhook } from './routes/payments.js';
+import familyRoutes from './routes/family.js';
+import conversationRoutes, { smsWebhook } from './routes/sms.js';
+import ediRoutes from './routes/edi.js';
+import officeRoutes from './routes/office.js';
 import { createMessenger } from './messaging.js';
 import { createStorage } from './storage.js';
 
@@ -26,6 +30,10 @@ export function loadConfig(env = process.env) {
     documentKey: env.DOCUMENT_ENCRYPTION_KEY || null,
     stripeSecretKey: env.STRIPE_SECRET_KEY || null,
     stripeWebhookSecret: env.STRIPE_WEBHOOK_SECRET || null,
+    twilioAuthToken: env.TWILIO_AUTH_TOKEN || null,
+    ediMode: env.EDI_MODE || 'manual',
+    ediSubmitterId: env.EDI_SUBMITTER_ID || null,
+    ediReceiverId: env.EDI_RECEIVER_ID || null,
   };
 }
 
@@ -38,6 +46,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   app.set('trust proxy', 1);
   app.disable('x-powered-by');
   app.use(stripeWebhook({ db, config })); // needs the raw body, so before express.json
+  app.use(smsWebhook({ db, config }));
   app.use(express.json({ limit: '1mb' }));
   app.use((_req, res, next) => {
     res.set({
@@ -72,6 +81,10 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(engagementRoutes({ db, messenger, config }));
   api.use(documentRoutes({ db, storage }));
   api.use(paymentRoutes({ db, config, fetchImpl, messenger }));
+  api.use(familyRoutes({ db }));
+  api.use(conversationRoutes({ db }));
+  api.use(ediRoutes({ db, config }));
+  api.use(officeRoutes({ db }));
   app.use('/api', api);
   app.use('/api', (_req, _res, next) => next(new HttpError(404, 'Not found')));
 

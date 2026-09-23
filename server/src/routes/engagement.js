@@ -3,6 +3,7 @@ import { requirePermission, HttpError } from '../auth.js';
 import { pick, requireFields, requireOneOf, insert, findOr404, audit, newToken, friendlyDateTime } from '../util.js';
 import { sendMessage, sendAppointmentReminder, runReminders, preferredChannel } from '../messaging.js';
 import { validateAppt } from './schedule.js';
+import { publish } from '../events.js';
 
 const requireAdmin = (req, _res, next) => (req.user.role === 'admin' ? next() : next(new HttpError(403, 'Administrator access required')));
 
@@ -42,6 +43,7 @@ export default function engagementRoutes({ db, messenger, config }) {
       channel: target.channel, to: target.to, subject: row.subject || `Message from ${practiceName(req.user.practice_id)}`, body: row.body,
     });
     audit(db, req, 'message.send', 'messages', msg.id, { channel: target.channel });
+    publish(req.user.practice_id, { type: 'message', patient_id: patient.id });
     res.status(201).json(msg);
   });
 
@@ -119,6 +121,7 @@ export default function engagementRoutes({ db, messenger, config }) {
         patient_id: patientId, provider_id: providerId, operatory_id: req.body?.operatory_id ? Number(req.body.operatory_id) : null,
         start_time: start, end_time: `${start.slice(0, 10)} ${String(Math.floor(endMin / 60)).padStart(2, '0')}:${String(endMin % 60).padStart(2, '0')}`,
         status: 'scheduled', reason: b.reason, notes: b.notes,
+        appointment_type_id: db.get('SELECT id FROM appointment_types WHERE practice_id = ? AND name = ?', pid, b.reason)?.id ?? null,
       };
       validateAppt(db, pid, row);
       const id = insert(db, 'appointments', { ...row, practice_id: pid });
@@ -126,6 +129,7 @@ export default function engagementRoutes({ db, messenger, config }) {
       return id;
     });
     audit(db, req, 'booking.accept', 'booking_requests', b.id, { appointment_id: apptId });
+    publish(pid, { type: 'schedule', dates: [start.slice(0, 10)], by: req.user.id });
     const message = await sendAppointmentReminder(db, messenger, { appointmentId: apptId, appUrl: config.appUrl, userId: req.user.id, kind: 'booking_confirmation' });
     res.json({ appointment_id: apptId, message });
   });
