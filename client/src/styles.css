@@ -3,7 +3,7 @@
   --panel: #ffffff;
   --border: #e3e8f0;
   --text: #1c2433;
-  --muted: #667085;
+  --muted: #596274;
   --primary: #0f766e;
   --primary-hover: #115e59;
   --primary-soft: #e6f4f2;
@@ -632,7 +632,6 @@ a.button.primary { background: var(--primary); color: #fff; }
 .cal-col-sub.goal-met { color: #15803d; font-weight: 600; }
 .cal-col-sub.goal-short { color: #b45309; }
 .pinboard { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; padding: 8px 12px; background: #fff; border: 1px dashed var(--border); border-radius: var(--radius); font-size: 13px; }
-.pinboard.empty { opacity: 0.8; }
 .pinboard:hover { border-color: var(--primary); }
 .pin-item { display: inline-flex; align-items: center; gap: 6px; background: #f8fafc; border: 1px solid var(--border); border-left: 4px solid; border-radius: 6px; padding: 3px 8px; }
 .pin-item.active { background: #fef3c7; border-color: #f59e0b; }
@@ -653,3 +652,11 @@ a.button.primary { background: var(--primary); color: #fff; }
 .bubble.mine { align-self: flex-end; background: var(--primary-soft, #e6f4f1); }
 .bubble.theirs { align-self: flex-start; background: #f1f5f9; }
 .portal-appt { flex-wrap: wrap; }
+
+/* Accessibility: a visible keyboard focus ring everywhere, links that stand out inside text, skip link. */
+:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--primary); outline-offset: 0; }
+p a, .muted a, li a, .public-notice a { text-decoration: underline; }
+.skip-link { position: absolute; left: 8px; top: -40px; z-index: 100; background: var(--primary); color: #fff; padding: 8px 12px; border-radius: 6px; }
+.skip-link:focus { top: 8px; }
+.swatch { display: inline-block; width: 14px; height: 14px; border-radius: 4px; border: 1px solid rgba(0, 0, 0, 0.15); }

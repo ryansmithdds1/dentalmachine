@@ -28,7 +28,7 @@ export default function Patients() {
         <h1>Patients</h1>
         <div className="actions">
           <input placeholder="Search name, phone, email, DOB (YYYY-MM-DD) or ID" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 340 }} autoFocus />
-          <select value={status} onChange={(e) => { setStatus(e.target.value); setOffset(0); }} style={{ width: 130 }}>
+          <select value={status} onChange={(e) => { setStatus(e.target.value); setOffset(0); }} style={{ width: 130 }} aria-label="Status">
             <option value="active">Active</option><option value="inactive">Inactive</option><option value="archived">Archived</option><option value="all">All</option>
           </select>
           {can('patients:write') && <button className="primary" onClick={() => setAdding(true)}>+ New patient</button>}

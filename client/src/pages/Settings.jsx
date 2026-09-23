@@ -124,7 +124,7 @@ function CodeImport() {
         Area is tooth, quadrant, arch or mouth; each time unit is 10 minutes.
       </p>
       <ErrorBox error={error} />
-      <input type="file" accept=".csv,text/csv" onChange={async (e) => { const f = e.target.files?.[0]; if (f) setCsv(await f.text()); }} />
+      <input type="file" aria-label="CSV file" accept=".csv,text/csv" onChange={async (e) => { const f = e.target.files?.[0]; if (f) setCsv(await f.text()); }} />
       <textarea rows={4} value={csv} onChange={(e) => setCsv(e.target.value)} placeholder={'D2740,Crown - porcelain/ceramic,restorative,1350.00,tooth,6'} style={{ marginTop: 8 }} />
       <div className="form-actions"><button className="primary" disabled={busy || !csv.trim()} onClick={submit}>Import</button></div>
       {result && (
@@ -616,7 +616,7 @@ function ResourceTable({ spec, canWrite }) {
   };
   const cell = (row, col) => {
     if (col === 'fee') return money(row.fee);
-    if (col === 'color') return <span className="badge" style={{ background: row.color, color: '#fff' }}>{row.color}</span>;
+    if (col === 'color') return <span className="inline" style={{ gap: 6 }}><span className="swatch" style={{ background: row.color }} aria-hidden />{row.color}</span>;
     if (col === 'type' || col === 'category') return label(row[col]);
     if (col === 'duration') return `${row.duration} min`;
     if (col === 'procedure_codes') return (row.procedure_codes ? JSON.parse(row.procedure_codes) : []).join(', ') || '—';
@@ -800,9 +800,9 @@ function OfficeHours({ value, onChange, note }) {
             {ranges.length === 0 && <span className="muted">Closed</span>}
             {ranges.map(([o, c], i) => (
               <span key={i} className="inline">
-                <input type="time" value={o} step={900} onChange={(e) => setDay(d, ranges.map((r, j) => (j === i ? [e.target.value, r[1]] : r)))} />
+                <input type="time" aria-label={`${DAYS[d]} opens`} value={o} step={900} onChange={(e) => setDay(d, ranges.map((r, j) => (j === i ? [e.target.value, r[1]] : r)))} />
                 <span>–</span>
-                <input type="time" value={c} step={900} onChange={(e) => setDay(d, ranges.map((r, j) => (j === i ? [r[0], e.target.value] : r)))} />
+                <input type="time" aria-label={`${DAYS[d]} closes`} value={c} step={900} onChange={(e) => setDay(d, ranges.map((r, j) => (j === i ? [r[0], e.target.value] : r)))} />
                 <button type="button" className="small" onClick={() => setDay(d, ranges.filter((_, j) => j !== i))} aria-label="Remove">✕</button>
               </span>
             ))}
@@ -987,15 +987,15 @@ function RecallTypes() {
           {types?.map((t) => (
             <tr key={t.id}>
               <td>{t.name}</td>
-              <td><input type="number" min="1" max="120" defaultValue={t.interval_months} disabled={!admin} style={{ width: 60 }} onBlur={(e) => Number(e.target.value) !== t.interval_months && save(t, { interval_months: Number(e.target.value) })} /> mo</td>
-              <td><input defaultValue={t.codes.join(', ')} disabled={!admin} onBlur={(e) => e.target.value !== t.codes.join(', ') && save(t, { codes: e.target.value })} /></td>
+              <td><input type="number" aria-label={`${t.name} interval (months)`} min="1" max="120" defaultValue={t.interval_months} disabled={!admin} style={{ width: 60 }} onBlur={(e) => Number(e.target.value) !== t.interval_months && save(t, { interval_months: Number(e.target.value) })} /> mo</td>
+              <td><input aria-label={`${t.name} codes`} defaultValue={t.codes.join(', ')} disabled={!admin} onBlur={(e) => e.target.value !== t.codes.join(', ') && save(t, { codes: e.target.value })} /></td>
               <td>
-                <select value={t.appointment_type_id || ''} disabled={!admin} onChange={(e) => save(t, { appointment_type_id: e.target.value ? Number(e.target.value) : null })}>
+                <select aria-label={`${t.name} visit type`} value={t.appointment_type_id || ''} disabled={!admin} onChange={(e) => save(t, { appointment_type_id: e.target.value ? Number(e.target.value) : null })}>
                   <option value="">—</option>
                   {apptTypes.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
                 </select>
               </td>
-              <td><input type="checkbox" checked={!!t.active} disabled={!admin} onChange={(e) => save(t, { active: e.target.checked })} /></td>
+              <td><input type="checkbox" aria-label={`${t.name} active`} checked={!!t.active} disabled={!admin} onChange={(e) => save(t, { active: e.target.checked })} /></td>
             </tr>
           ))}
         </tbody>
@@ -1050,17 +1050,17 @@ function Messaging() {
             {cur.reminder_steps.map((s, i) => (
               <tr key={i}>
                 <td>
-                  <select value={s.hours} onChange={(e) => setStep('reminder_steps', i, { hours: e.target.value })}>
+                  <select aria-label="Before the visit" value={s.hours} onChange={(e) => setStep('reminder_steps', i, { hours: e.target.value })}>
                     {[[336, '2 weeks'], [168, '1 week'], [72, '3 days'], [48, '2 days'], [24, '1 day'], [4, '4 hours'], [2, '2 hours']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                   </select>
                 </td>
                 <td>
-                  <select value={s.channel || 'auto'} onChange={(e) => setStep('reminder_steps', i, { channel: e.target.value })}>
+                  <select aria-label="Send by" value={s.channel || 'auto'} onChange={(e) => setStep('reminder_steps', i, { channel: e.target.value })}>
                     <option value="auto">Text, or email if no mobile</option><option value="sms">Text</option><option value="email">Email</option>
                   </select>
                 </td>
-                <td><input type="checkbox" checked={!!s.confirmed} onChange={(e) => setStep('reminder_steps', i, { confirmed: e.target.checked })} /></td>
-                <td><button type="button" className="small" onClick={() => change({ reminder_steps: cur.reminder_steps.filter((_, j) => j !== i) })}>✕</button></td>
+                <td><input type="checkbox" aria-label="Also to confirmed patients" checked={!!s.confirmed} onChange={(e) => setStep('reminder_steps', i, { confirmed: e.target.checked })} /></td>
+                <td><button type="button" className="small" onClick={() => change({ reminder_steps: cur.reminder_steps.filter((_, j) => j !== i) })} aria-label="Remove reminder">✕</button></td>
               </tr>
             ))}
             {!cur.reminder_steps.length && <tr><td colSpan={4} className="muted">No automatic reminders.</td></tr>}
@@ -1080,17 +1080,17 @@ function Messaging() {
                 {cur.recall_steps.map((s, i) => (
                   <tr key={i}>
                     <td className="inline">
-                      <input type="number" value={Math.abs(s.days)} min="0" style={{ width: 70 }} onChange={(e) => setStep('recall_steps', i, { days: (Number(s.days) < 0 ? -1 : 1) * Math.abs(Number(e.target.value)) })} /> days
-                      <select value={Number(s.days) < 0 ? 'before' : 'after'} onChange={(e) => setStep('recall_steps', i, { days: (e.target.value === 'before' ? -1 : 1) * Math.abs(Number(s.days)) })}>
+                      <input type="number" aria-label="Days" value={Math.abs(s.days)} min="0" style={{ width: 70 }} onChange={(e) => setStep('recall_steps', i, { days: (Number(s.days) < 0 ? -1 : 1) * Math.abs(Number(e.target.value)) })} /> days
+                      <select aria-label="Before or after due" value={Number(s.days) < 0 ? 'before' : 'after'} onChange={(e) => setStep('recall_steps', i, { days: (e.target.value === 'before' ? -1 : 1) * Math.abs(Number(s.days)) })}>
                         <option value="before">before due</option><option value="after">after due</option>
                       </select>
                     </td>
                     <td>
-                      <select value={s.channel || 'auto'} onChange={(e) => setStep('recall_steps', i, { channel: e.target.value })}>
+                      <select aria-label="Send by" value={s.channel || 'auto'} onChange={(e) => setStep('recall_steps', i, { channel: e.target.value })}>
                         <option value="auto">Text, or email if no mobile</option><option value="sms">Text</option><option value="email">Email</option>
                       </select>
                     </td>
-                    <td><button type="button" className="small" onClick={() => change({ recall_steps: cur.recall_steps.filter((_, j) => j !== i) })}>✕</button></td>
+                    <td><button type="button" className="small" onClick={() => change({ recall_steps: cur.recall_steps.filter((_, j) => j !== i) })} aria-label="Remove step">✕</button></td>
                   </tr>
                 ))}
               </tbody>
@@ -1357,7 +1357,7 @@ function TimeOff({ canWrite }) {
     <div className="card">
       <div className="inline" style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
         <h2 style={{ margin: 0 }}>Time off & special hours</h2>
-        <select value={pid || ''} onChange={(e) => { setProviderId(e.target.value); setResult(null); }} style={{ width: 'auto' }}>
+        <select aria-label="Provider" value={pid || ''} onChange={(e) => { setProviderId(e.target.value); setResult(null); }} style={{ width: 'auto' }}>
           {providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
         </select>
       </div>
@@ -1374,7 +1374,7 @@ function TimeOff({ canWrite }) {
             </select>
           </label>
           {!form.off && (
-            <label>Hours<span className="inline"><input type="time" value={form.open} onChange={set('open')} /> – <input type="time" value={form.close} onChange={set('close')} /></span></label>
+            <label>Hours<span className="inline"><input type="time" aria-label="Opens" value={form.open} onChange={set('open')} /> – <input type="time" aria-label="Closes" value={form.close} onChange={set('close')} /></span></label>
           )}
           <label>Reason<input value={form.reason} onChange={set('reason')} placeholder="Vacation, CE course…" /></label>
           <div style={{ alignSelf: 'end' }}><button className="primary" disabled={busy}>Save</button></div>

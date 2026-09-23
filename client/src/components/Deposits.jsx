@@ -29,7 +29,7 @@ export default function Deposits() {
       <div className="card">
         <div className="inline" style={{ justifyContent: 'space-between' }}>
           <h2 style={{ margin: 0 }}>Not yet deposited</h2>
-          <select value={methods} onChange={(e) => { setMethods(e.target.value); setPicked(null); }}>
+          <select aria-label="Which payments" value={methods} onChange={(e) => { setMethods(e.target.value); setPicked(null); }}>
             <option value="cash,check">Cash and checks</option>
             <option value="check">Checks</option>
             <option value="cash">Cash</option>
@@ -55,8 +55,8 @@ export default function Deposits() {
         </table>
         {w && waiting?.length > 0 && (
           <div className="inline" style={{ marginTop: 10, gap: 8, flexWrap: 'wrap' }}>
-            <input type="date" value={form.deposit_date} onChange={(e) => setForm({ ...form, deposit_date: e.target.value })} />
-            <input placeholder="Slip or bank reference" value={form.reference} onChange={(e) => setForm({ ...form, reference: e.target.value })} style={{ width: 180 }} />
+            <input type="date" aria-label="Deposit date" value={form.deposit_date} onChange={(e) => setForm({ ...form, deposit_date: e.target.value })} />
+            <input placeholder="Slip or bank reference" aria-label="Slip or bank reference" value={form.reference} onChange={(e) => setForm({ ...form, reference: e.target.value })} style={{ width: 180 }} />
             <button className="primary" disabled={make.busy || !chosen.size} onClick={make.submit}>Make deposit of {money(total)}</button>
           </div>
         )}

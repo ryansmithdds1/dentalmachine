@@ -28,7 +28,7 @@ export default function CloseBooks() {
               <button className={type === 'day' ? 'active' : ''} onClick={() => setType('day')}>Day</button>
               <button className={type === 'month' ? 'active' : ''} onClick={() => setType('month')}>Month</button>
             </div>
-            {type === 'day' ? <input type="date" value={day} max={today} onChange={(e) => e.target.value && setDay(e.target.value)} /> : <input type="month" value={month} max={today.slice(0, 7)} onChange={(e) => e.target.value && setMonth(e.target.value)} />}
+            {type === 'day' ? <input type="date" aria-label="Day" value={day} max={today} onChange={(e) => e.target.value && setDay(e.target.value)} /> : <input type="month" aria-label="Month" value={month} max={today.slice(0, 7)} onChange={(e) => e.target.value && setMonth(e.target.value)} />}
           </div>
         </div>
         {data && (

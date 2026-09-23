@@ -106,7 +106,7 @@ function ClaimList() {
                 <tr key={c.id} className="clickable" onClick={() => nav(`/claims/${c.id}`)}>
                   <td onClick={(e) => e.stopPropagation()}>
                     {['draft', 'denied'].includes(c.status) && can('billing:write') && (
-                      <input type="checkbox" style={{ width: 'auto' }} checked={selected.includes(c.id)} onChange={(e) => setSelected(e.target.checked ? [...selected, c.id] : selected.filter((x) => x !== c.id))} />
+                      <input type="checkbox" style={{ width: 'auto' }} aria-label={`Select claim ${c.id}`} checked={selected.includes(c.id)} onChange={(e) => setSelected(e.target.checked ? [...selected, c.id] : selected.filter((x) => x !== c.id))} />
                     )}
                   </td>
                   <td>#{c.id}</td>
@@ -161,7 +161,7 @@ function EraImport() {
         <div className="card">
           <h2>Import an ERA (835)</h2>
           <p className="muted">Download electronic remittance files from your clearinghouse and drop them here. Payments, contractual write-offs and denials are posted to the matching claims automatically.</p>
-          <input type="file" accept=".835,.txt,.x12,.edi,.era" disabled={busy} onChange={(e) => e.target.files[0] && upload(e.target.files[0])} />
+          <input type="file" aria-label="835 remittance file" accept=".835,.txt,.x12,.edi,.era" disabled={busy} onChange={(e) => e.target.files[0] && upload(e.target.files[0])} />
           <ErrorBox error={err} />
         </div>
       )}
@@ -430,7 +430,7 @@ function InsurancePlans() {
   return (
     <>
       <div className="card inline" style={{ justifyContent: 'space-between', marginBottom: 12 }}>
-        <input placeholder="Search carrier, employer or group #" value={q} onChange={(e) => setQ(e.target.value)} style={{ maxWidth: 320 }} />
+        <input placeholder="Search carrier, employer or group #" aria-label="Search plans" value={q} onChange={(e) => setQ(e.target.value)} style={{ maxWidth: 320 }} />
         {can('billing:write') && <button className="primary" onClick={() => setEditing({})}>+ New plan</button>}
       </div>
       <div className="card" style={{ padding: 0 }}>
@@ -565,9 +565,9 @@ function CheckForm({ onDone }) {
                   <td>{c.first_name} {c.last_name}</td>
                   <td className="num">{money(c.total_fee)}</td>
                   <td className="num">{money(c.estimated_amount - c.paid_amount)}</td>
-                  <td><input type="number" step="0.01" style={{ width: 100 }} value={row(c.id).paid} readOnly={!!lineMode[c.id]} onChange={(e) => setRow(c.id, { paid: e.target.value })} /></td>
-                  <td><input type="number" step="0.01" style={{ width: 100 }} value={row(c.id).write_off} readOnly={!!lineMode[c.id]} onChange={(e) => setRow(c.id, { write_off: e.target.value })} /></td>
-                  <td><input type="checkbox" checked={row(c.id).final} onChange={(e) => setRow(c.id, { final: e.target.checked })} /></td>
+                  <td><input type="number" step="0.01" style={{ width: 100 }} aria-label="Paid" value={row(c.id).paid} readOnly={!!lineMode[c.id]} onChange={(e) => setRow(c.id, { paid: e.target.value })} /></td>
+                  <td><input type="number" step="0.01" style={{ width: 100 }} aria-label="Write-off" value={row(c.id).write_off} readOnly={!!lineMode[c.id]} onChange={(e) => setRow(c.id, { write_off: e.target.value })} /></td>
+                  <td><input type="checkbox" aria-label="Final payment" checked={row(c.id).final} onChange={(e) => setRow(c.id, { final: e.target.checked })} /></td>
                   <td><button type="button" className="small" onClick={() => setLineMode({ ...lineMode, [c.id]: !lineMode[c.id] })}>{lineMode[c.id] ? 'Claim total' : 'By line'}</button></td>
                 </tr>
                 {lineMode[c.id] && c.items.map((i) => (
@@ -575,8 +575,8 @@ function CheckForm({ onDone }) {
                     <td />
                     <td colSpan={2}>{i.code} {i.tooth ? `#${i.tooth}` : ''} · {money(i.fee)}</td>
                     <td className="num">{money(i.estimated_amount)}</td>
-                    <td><input type="number" step="0.01" style={{ width: 100 }} value={row(c.id).lines[i.id]?.paid || ''} onChange={(e) => setLine(c, i.id, 'paid', e.target.value)} /></td>
-                    <td><input type="number" step="0.01" style={{ width: 100 }} value={row(c.id).lines[i.id]?.write_off || ''} onChange={(e) => setLine(c, i.id, 'write_off', e.target.value)} /></td>
+                    <td><input type="number" step="0.01" style={{ width: 100 }} aria-label={`Paid for ${i.code}`} value={row(c.id).lines[i.id]?.paid || ''} onChange={(e) => setLine(c, i.id, 'paid', e.target.value)} /></td>
+                    <td><input type="number" step="0.01" style={{ width: 100 }} aria-label={`Write-off for ${i.code}`} value={row(c.id).lines[i.id]?.write_off || ''} onChange={(e) => setLine(c, i.id, 'write_off', e.target.value)} /></td>
                     <td colSpan={2} />
                   </tr>
                 ))}

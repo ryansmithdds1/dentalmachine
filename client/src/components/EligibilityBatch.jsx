@@ -33,7 +33,7 @@ export default function EligibilityBatch() {
           </div>
         </div>
         <div className="inline">
-          <input type="date" value={date} onChange={(e) => e.target.value && setDate(e.target.value)} />
+          <input type="date" aria-label="Day" value={date} onChange={(e) => e.target.value && setDate(e.target.value)} />
           {data?.automatic && can('billing:read') && (
             <button className="primary" disabled={busy || !insured.length} onClick={() => run(async () => setResult(await api.post('/eligibility/batch', { date, max_age_days: 7 })))}>
               {busy ? 'Checking…' : 'Check everyone'}

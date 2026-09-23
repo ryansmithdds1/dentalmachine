@@ -54,7 +54,7 @@ function Recall() {
   return (
     <>
       <div className="card inline" style={{ justifyContent: 'space-between', flexWrap: 'wrap', marginBottom: 12 }}>
-        <select value={win} onChange={(e) => setWin(Number(e.target.value))} style={{ width: 'auto' }}>
+        <select value={win} onChange={(e) => setWin(Number(e.target.value))} style={{ width: 'auto' }} aria-label="Due within">
           <option value={0}>Overdue only</option><option value={30}>Due within 30 days</option><option value={60}>Due within 60 days</option><option value={90}>Due within 90 days</option>
         </select>
         {can('schedule:write') && (
@@ -72,7 +72,7 @@ function Recall() {
             <tbody>
               {recalls?.map((r) => (
                 <tr key={r.id}>
-                  <td><input type="checkbox" style={{ width: 'auto' }} checked={selected.includes(r.id)} onChange={(e) => setSelected(e.target.checked ? [...selected, r.id] : selected.filter((x) => x !== r.id))} /></td>
+                  <td><input type="checkbox" style={{ width: 'auto' }} aria-label={`Select ${r.first_name} ${r.last_name}`} checked={selected.includes(r.id)} onChange={(e) => setSelected(e.target.checked ? [...selected, r.id] : selected.filter((x) => x !== r.id))} /></td>
                   <td><Link to={`/patients/${r.patient_id}`}>{r.first_name} {r.last_name}</Link></td>
                   <td>{label(r.type)}</td>
                   <td style={{ color: r.due_date < today ? 'var(--danger)' : undefined }}>{fmtDate(r.due_date)}{r.due_date < today ? ' · overdue' : ''}</td>

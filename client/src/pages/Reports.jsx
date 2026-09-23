@@ -81,9 +81,9 @@ function Operational() {
             <option value="">All providers</option>
             {providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
-          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} style={{ width: 150 }} />
+          <input type="date" aria-label="From" value={from} onChange={(e) => setFrom(e.target.value)} style={{ width: 150 }} />
           <span>to</span>
-          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} style={{ width: 150 }} />
+          <input type="date" aria-label="To" value={to} onChange={(e) => setTo(e.target.value)} style={{ width: 150 }} />
         </div>
       </div>
       <div className="grid grid-4">
@@ -179,7 +179,7 @@ function Operational() {
               <button className={agingGroup === 'patient' ? 'active' : ''} onClick={() => setAgingGroup('patient')}>By patient</button>
               <button className={agingGroup === 'family' ? 'active' : ''} onClick={() => setAgingGroup('family')}>By family</button>
             </div>
-            <input type="date" className="no-print" value={asOf} max={today} onChange={(e) => setAsOf(e.target.value)} title="As of (leave blank for today)" style={{ width: 150 }} />
+            <input type="date" className="no-print" aria-label="As of" value={asOf} max={today} onChange={(e) => setAsOf(e.target.value)} title="As of (leave blank for today)" style={{ width: 150 }} />
             <CsvButton name={`ar-aging-${aging?.as_of}`} rows={aging?.rows} columns={[['Patient #', (r) => r.id], ['First name', (r) => r.first_name], ['Last name', (r) => r.last_name], ['Phone', (r) => r.phone], ['0-30', (r) => dollars(r.current)], ['31-60', (r) => dollars(r.d31_60)], ['61-90', (r) => dollars(r.d61_90)], ['90+', (r) => dollars(r.d90_plus)], ['Total', (r) => dollars(r.balance)], ['Insurance pending', (r) => dollars(r.insurance_pending)], ['Patient owes', (r) => dollars(r.patient_portion)]]} />
             <button className="small no-print" onClick={() => window.print()}>Print / PDF</button>
           </TitleRow>
@@ -376,7 +376,7 @@ function DaySheet({ sheet, date, setDate }) {
         </div>
         <div className="actions no-print">
           <button onClick={() => setDate(shiftDate(date, -1))}>←</button>
-          <input type="date" value={date} onChange={(e) => e.target.value && setDate(e.target.value)} style={{ width: 160 }} />
+          <input type="date" aria-label="Day" value={date} onChange={(e) => e.target.value && setDate(e.target.value)} style={{ width: 160 }} />
           <button onClick={() => setDate(shiftDate(date, 1))}>→</button>
           <button onClick={() => window.print()}>Print / PDF</button>
           <CsvButton name={`day-sheet-${date}`} rows={sheet?.entries} columns={[['Date', (e) => e.entry_date], ['Type', (e) => label(e.type)], ['Patient', (e) => `${e.first_name} ${e.last_name}`], ['Description', (e) => e.description], ['Method', (e) => e.method || ''], ['Reference', (e) => e.reference || ''], ['Provider / by', (e) => e.provider_name || e.created_by_name || 'Online'], ['Amount', (e) => dollars(e.amount)]]} />

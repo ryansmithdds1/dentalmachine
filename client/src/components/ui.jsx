@@ -1,16 +1,35 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { fullName, age } from '../format.js';
 
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]):not([type=hidden]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
 export function Modal({ title, onClose, children, wide }) {
+  const box = useRef(null);
+  const close = useRef(onClose);
+  close.current = onClose;
+  // Keyboard users: focus moves into the dialog, Tab stays inside it, Escape closes, and focus goes back after.
+  const [before] = useState(() => document.activeElement);
   useEffect(() => {
-    const onKey = (e) => e.key === 'Escape' && onClose();
+    const first = box.current?.querySelector(`.modal-body ${FOCUSABLE}`) || box.current;
+    first?.focus({ preventScroll: true });
+    const onKey = (e) => {
+      if (e.key === 'Escape') close.current();
+      if (e.key !== 'Tab' || !box.current) return;
+      const items = [...box.current.querySelectorAll(FOCUSABLE)].filter((el) => el.offsetParent !== null);
+      if (!items.length) return;
+      const [a, z] = [items[0], items.at(-1)];
+      if (e.shiftKey && document.activeElement === a) { e.preventDefault(); z.focus(); } else if (!e.shiftKey && document.activeElement === z) { e.preventDefault(); a.focus(); }
+    };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      if (before && document.contains(before)) before.focus({ preventScroll: true });
+    };
+  }, [before]);
   return (
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className={`modal${wide ? ' wide' : ''}`} role="dialog" aria-label={title}>
+      <div ref={box} tabIndex={-1} className={`modal${wide ? ' wide' : ''}`} role="dialog" aria-modal="true" aria-label={title}>
         <div className="modal-header">
           <h2>{title}</h2>
           <button className="small" onClick={onClose} aria-label="Close">✕</button>

@@ -148,6 +148,7 @@ function Shell({ nav }) {
   const { user, practice, logout } = useAuth();
   return (
     <div className="app">
+      <a href="#main" className="skip-link">Skip to content</a>
       <CommandPalette />
       <IdleLogout />
       <aside className="sidebar">
@@ -176,7 +177,7 @@ function Shell({ nav }) {
           <button className="small" onClick={logout}>Sign out</button>
         </div>
       </aside>
-      <main className="main">
+      <main className="main" id="main" tabIndex={-1}>
         <Suspense fallback={<div className="empty">Loading…</div>}>
           <Routes>
             <Route path="/" element={<Dashboard />} />
