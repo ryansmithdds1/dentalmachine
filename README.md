@@ -64,7 +64,7 @@ Cloud practice management software for dental offices: scheduling, patient recor
 - **Server:** Node.js 22+ and Express 5. The database is **PostgreSQL** (recommended for production) or **SQLite** through Node's built-in `node:sqlite` (zero setup, single server). The same code runs on both, and every test runs on both.
 - **Scale-out:** several API servers behind a load balancer share live updates, rate limits and background-job locks through **Redis**. Documents can live in S3-compatible object storage (AWS S3, Cloudflare R2, Backblaze B2, MinIO), encrypted before upload.
 - **Client:** React 19, React Router and Vite, with no UI framework dependencies
-- **Tests:** `node:test` integration tests that exercise the real HTTP API. Some tests run real subprocesses: two API servers sharing one Redis, the imaging-bridge agent, and an SFTP server. Others use fake Stripe and OpenID Connect endpoints. CI runs the whole suite on SQLite and on PostgreSQL.
+- **Tests:** `node:test` integration tests that exercise the real HTTP API, plus an end-to-end browser test of the core day (Playwright, its own server on a fresh database). Some tests run real subprocesses: two API servers sharing one Redis, the imaging-bridge agent, and an SFTP server. Others use fake Stripe and OpenID Connect endpoints. CI runs the whole suite on SQLite and on PostgreSQL.
 
 ## Getting started
 
@@ -81,6 +81,7 @@ To start from scratch, open the app and click **Create an account**. This create
 ```bash
 npm test          # API integration tests (SQLite)
 TEST_DATABASE_URL=postgres://localhost/dm_test TEST_REDIS_URL=redis://localhost:6379 npm test   # also on PostgreSQL + Redis
+npm run build && npm run e2e   # end-to-end in a real browser (Playwright): new patient → insurance → book → check in → chart → check out → claim → ERA → statement
 npm run build     # production build of the web app
 ```
 

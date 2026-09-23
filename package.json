@@ -12,10 +12,14 @@
     "build": "npm run build --workspace client",
     "start": "npm start --workspace server",
     "seed": "npm run seed --workspace server",
-    "test": "npm test --workspace server"
+    "test": "npm test --workspace server",
+    "e2e": "node --test e2e/*.test.mjs"
   },
   "type": "module",
   "engines": {
     "node": ">=22.13"
+  },
+  "devDependencies": {
+    "playwright": "^1.56.1"
   }
 }

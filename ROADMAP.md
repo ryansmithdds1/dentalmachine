@@ -277,7 +277,7 @@ Works well: drag, resize and create; undo; live updates; conflict checks; open-t
 
 ### Platform quality
 1. ✅ **P1** Error monitoring (Sentry-compatible) and structured logs. _(Done: `SENTRY_DSN` reports server errors, failed background jobs and browser errors (no request bodies or patient data; rate-limited); JSON log lines with request ids, route, status and timing; 500s show a reference id; a crashed screen shows a recovery page.)_
-2. **P1** End-to-end browser tests in CI for the core flows: book → check in → chart → complete → claim → ERA → statement.
+2. ✅ **P1** End-to-end browser tests in CI for the core flows: book → check in → chart → complete → claim → ERA → statement. _(Done: `npm run e2e` drives a real browser through new patient → insurance → book → check in and seat → chart a filling → check out (complete, bill insurance) → send the claim → ERA posts the payment → statement; its own server on a fresh database; runs in CI with screenshots on failure. It found and fixed two real bugs: booking a one-off visit and adding insurance.)_
 3. **P2** Load test with a 50,000-patient database; add indexes; add pagination everywhere.
 4. **P2** Keyboard shortcuts help sheet (`?`).
 

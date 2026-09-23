@@ -117,7 +117,7 @@ export default function ClaimDetail() {
       </div>
 
       {c.remarks && <div className="card"><strong>Note to payer:</strong> {c.remarks}</div>}
-      <ClaimEdiCard key={edits} claim={c} onChange={reload} />
+      <ClaimEdiCard key={`${edits}-${c.status}-${c.ch_status}`} claim={c} onChange={reload} />
       {modal === 'edit' && <Modal title={`Edit claim #${c.id}`} wide onClose={() => setModal(null)}><EditClaim claim={c} onDone={(r) => { setModal(r?.corrected ? null : 'edited'); setEdits((n) => n + 1); if (r?.corrected) navigate(`/claims/${r.corrected}`); else reload(); }} /></Modal>}
       {modal === 'edited' && (
         <Modal title="Claim updated" onClose={() => setModal(null)}>
@@ -177,7 +177,8 @@ function DenyForm({ claim, onDone }) {
 
 function ClaimChecks({ id, status, version }) {
   const { data } = useApi(['draft', 'denied'].includes(status) ? `/claims/${id}/validate?v=${version}` : null);
-  if (!data) return null;
+  // Only for claims still to send (the last answer is kept while the claim moves on).
+  if (!data || !['draft', 'denied'].includes(status)) return null;
   const warn = data.warnings?.length ? (
     <div className="public-notice" style={{ marginBottom: 12 }}>
       <strong>Payers often deny these without attachments:</strong>
