@@ -157,7 +157,7 @@ test('refunds: only a real credit, and card payments go back to the card', async
 
 test('payment plans split evenly with no negative installment', async () => {
   const plan = { total: 10, down_payment: 0, installments: 7, installment_amount: 2, frequency: 'monthly', start_date: '2026-01-01', id: -1 };
-  const fake = { get: async () => ({ n: 0 }) };
+  const fake = { get: async () => ({ n: 0 }), all: async () => [] };
   const s = await planStatus(fake, plan, '2026-01-01');
   assert.deepEqual(s.schedule.map((x) => x.amount), [2, 2, 2, 1, 1, 1, 1]);
   const big = await planStatus(fake, { ...plan, total: 100000, installments: 3, installment_amount: 33334 }, '2026-01-01');
