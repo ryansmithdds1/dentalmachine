@@ -73,27 +73,43 @@ export default function reportRoutes({ db }) {
            -SUM(CASE WHEN type IN ('payment','insurance_payment') THEN amount ELSE 0 END) AS collections
          FROM ledger_entries WHERE practice_id = ? AND entry_date BETWEEN ? AND ? GROUP BY entry_date ORDER BY entry_date`, pid, from, to,
       ),
+      // From the same ledger charges as the rest of the report (voided work nets out).
       top_procedures: await db.all(
-        `SELECT pr.code, pr.description, COUNT(*) AS count, SUM(pr.fee) AS production FROM procedures pr
-         WHERE pr.practice_id = ? AND pr.status = 'completed' AND pr.completed_at >= ? AND pr.completed_at < ?
-         GROUP BY pr.code ORDER BY production DESC LIMIT 10`, pid, ...(await utcRange(db, pid, from, to)),
+        `SELECT pr.code, MIN(pr.description) AS description, SUM(CASE WHEN l.amount > 0 THEN 1 ELSE -1 END) AS count, SUM(l.amount) AS production
+         FROM ledger_entries l JOIN procedures pr ON pr.id = l.procedure_id
+         WHERE l.practice_id = ? AND l.type = 'charge' AND l.entry_date BETWEEN ? AND ?
+         GROUP BY pr.code HAVING SUM(l.amount) > 0 ORDER BY SUM(l.amount) DESC LIMIT 10`, pid, from, to,
       ),
     });
   });
 
-  // Aging by patient: open balance is attributed to the most recent charges first (FIFO payment application).
+  // Aging by patient: payments and credits pay off the oldest charges first, so what's still owed is the most
+  // recent debits. Voided entries and their reversals cancel out. Accounts in credit are listed separately.
   r.get('/reports/aging', requirePermission('reports:read'), async (req, res) => {
     const pid = req.user.practice_id;
     const { today } = await range(req, db);
     const patients = await db.all(
       `SELECT p.id, p.first_name, p.last_name, p.phone, SUM(l.amount) AS balance FROM ledger_entries l JOIN patients p ON p.id = l.patient_id
-       WHERE l.practice_id = ? GROUP BY p.id HAVING SUM(l.amount) > 0 ORDER BY balance DESC`, pid,
+       WHERE l.practice_id = ? GROUP BY p.id, p.first_name, p.last_name, p.phone HAVING SUM(l.amount) <> 0 ORDER BY SUM(l.amount) DESC`, pid,
     );
+    const owing = patients.filter((p) => p.balance > 0);
     const buckets = ['current', 'd31_60', 'd61_90', 'd90_plus'];
     const totals = Object.fromEntries(buckets.map((b) => [b, 0]));
     const todayMs = Date.parse(`${today}T00:00:00Z`);
-    const rows = await mapSeq(patients, async (p) => {
-      const charges = await db.all("SELECT amount, entry_date FROM ledger_entries WHERE patient_id = ? AND practice_id = ? AND amount > 0 ORDER BY entry_date DESC, id DESC", p.id, pid);
+    // Every charge-type debit for those accounts in one query. Voided entries and reversals are left out:
+    // they cancel each other in the balance, and the balance is what gets spread over the real charges.
+    const debits = owing.length ? await db.all(
+      `SELECT patient_id, amount, entry_date FROM ledger_entries WHERE practice_id = ? AND amount > 0 AND voided_at IS NULL AND reverses_id IS NULL
+       AND patient_id IN (SELECT l.patient_id FROM ledger_entries l WHERE l.practice_id = ? GROUP BY l.patient_id HAVING SUM(l.amount) > 0)
+       ORDER BY patient_id, entry_date DESC, id DESC`, pid, pid,
+    ) : [];
+    const byPatient = new Map();
+    for (const d of debits) {
+      if (!byPatient.has(d.patient_id)) byPatient.set(d.patient_id, []);
+      byPatient.get(d.patient_id).push(d);
+    }
+    const rows = owing.map((p) => {
+      const charges = byPatient.get(p.id) || [];
       const row = { ...p, ...Object.fromEntries(buckets.map((b) => [b, 0])) };
       let remaining = p.balance;
       for (const c of charges) {
@@ -104,10 +120,15 @@ export default function reportRoutes({ db }) {
         const bucket = age <= 30 ? 'current' : age <= 60 ? 'd31_60' : age <= 90 ? 'd61_90' : 'd90_plus';
         row[bucket] += part;
       }
+      // Anything not explained by a debit still on file (e.g. a voided payment) is the oldest money owed.
+      if (remaining > 0) row.d90_plus += remaining;
       buckets.forEach((b) => (totals[b] += row[b]));
       return row;
     });
-    res.json({ as_of: today, totals: { ...totals, total: rows.reduce((s, r) => s + r.balance, 0) }, rows });
+    const credits = patients.filter((p) => p.balance < 0).map((p) => ({ ...p, credit: -p.balance }));
+    res.json({
+      as_of: today, totals: { ...totals, total: rows.reduce((s, r) => s + r.balance, 0), credits: credits.reduce((s, c) => s + c.credit, 0) }, rows, credits,
+    });
   });
 
   // End-of-day "day sheet": what was produced, collected (by payment method, for the deposit) and how the schedule went.
@@ -122,7 +143,8 @@ export default function reportRoutes({ db }) {
     );
     const sum = (fn) => entries.filter(fn).reduce((s, e) => s + e.amount, 0);
     const byMethod = {};
-    for (const e of entries.filter((x) => ['payment', 'insurance_payment'].includes(x.type))) {
+    // The deposit: money in, less money paid back out (refunds, and voided payments) by the same method.
+    for (const e of entries.filter((x) => ['payment', 'insurance_payment', 'refund'].includes(x.type))) {
       const key = e.type === 'insurance_payment' ? `insurance_${e.method || 'check'}` : e.method || 'other';
       byMethod[key] = (byMethod[key] || 0) - e.amount;
     }

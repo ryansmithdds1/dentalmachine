@@ -47,8 +47,8 @@ const date = (d) => (d ? new Date(`${d.slice(0, 10)}T12:00:00Z`).toLocaleDateStr
 
 // A one-to-two page letter-size statement. The top-left of page 1 is left clear for the
 // mailing address window (the mail service prints the address there).
-export function statementHtml({ practice, account, entries, previousBalance, balance, pendingInsurance = 0, portalUrl, statementDate }) {
-  const due = Math.max(0, balance - pendingInsurance);
+export function statementHtml({ practice, account, entries, previousBalance, balance, pendingInsurance = 0, pendingWriteOff = 0, portalUrl, statementDate }) {
+  const due = Math.max(0, balance - pendingInsurance - pendingWriteOff);
   const rows = entries.map((e) => `<tr><td>${esc(date(e.entry_date))}</td><td>${esc(e.patient_first_name || '')}</td><td>${esc(e.description || e.type)}</td><td class="n">${e.amount > 0 ? money(e.amount) : ''}</td><td class="n">${e.amount < 0 ? money(-e.amount) : ''}</td></tr>`).join('');
   return `<!doctype html><html><head><meta charset="utf-8"><style>
     @page { size: 8.5in 11in; margin: 0 }
@@ -69,7 +69,7 @@ export function statementHtml({ practice, account, entries, previousBalance, bal
     <div class="top">
       <div class="practice"><h1>${esc(practice.name)}</h1>${esc(practice.address)}<br>${esc(practice.city)}, ${esc(practice.state)} ${esc(practice.zip)}<br>${esc(practice.phone || '')}</div>
       <div class="due">Statement date: ${esc(date(statementDate))}<br>Account: ${esc(account.first_name)} ${esc(account.last_name)} (#${account.id})<br>
-        <span>Amount due now</span><br><b>${money(due)}</b>${pendingInsurance > 0 ? `<br><small>${money(pendingInsurance)} is still pending with insurance</small>` : ''}</div>
+        <span>Amount due now</span><br><b>${money(due)}</b>${pendingInsurance > 0 ? `<br><small>${money(pendingInsurance)} is still pending with insurance</small>` : ''}${pendingWriteOff > 0 ? `<br><small>${money(pendingWriteOff)} in-network discount to be applied</small>` : ''}</div>
     </div>
     <table><thead><tr><th>Date</th><th>Patient</th><th>Description</th><th class="n">Charges</th><th class="n">Payments &amp; credits</th></tr></thead>
       <tbody><tr><td colspan="3">Previous balance</td><td class="n">${money(previousBalance)}</td><td></td></tr>${rows}

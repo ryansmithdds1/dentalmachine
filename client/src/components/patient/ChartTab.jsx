@@ -130,6 +130,20 @@ export default function ChartTab({ patient, onChange }) {
                     <td>{p.description}<div className="muted">{p.tooth ? `#${p.tooth} ` : ''}{p.surfaces || ''} {p.provider_name ? `· ${p.provider_name}` : ''}</div></td>
                     <td><Badge value={p.status} /></td>
                     <td className="muted">{fmtDate(p.completed_at || p.created_at)}</td>
+                    <td>
+                      {p.status === 'completed' && can('billing:write') && (
+                        <button className="small" title="Charted in error? Reverses the charge and puts it back to planned" onClick={async () => {
+                          const reason = window.prompt(`Undo completion of ${p.code} ${p.tooth ? `#${p.tooth}` : ''}? The charge is reversed on the ledger.\n\nReason:`);
+                          if (!reason?.trim()) return;
+                          try {
+                            await api.post(`/procedures/${p.id}/uncomplete`, { reason });
+                            refresh();
+                          } catch (e) {
+                            window.alert(e.message);
+                          }
+                        }}>Undo</button>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>

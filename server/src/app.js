@@ -101,7 +101,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(patientRoutes({ db }));
   api.use(scheduleRoutes({ db }));
   api.use(clinicalRoutes({ db }));
-  api.use(billingRoutes({ db }));
+  api.use(billingRoutes({ db, payments }));
   api.use(insuranceRoutes({ db }));
   api.use(settingsRoutes({ db, secret, config }));
   api.use(reportRoutes({ db }));

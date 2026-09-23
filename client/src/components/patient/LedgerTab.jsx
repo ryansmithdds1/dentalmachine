@@ -22,8 +22,13 @@ export default function LedgerTab({ patient, onChange }) {
     <>
       <div className="grid grid-4" style={{ marginBottom: 16 }}>
         <div className="card stat"><div className="label">Account balance</div><div className="value">{money(data.balance)}</div></div>
-        <div className="card stat"><div className="label">Pending insurance</div><div className="value">{money(data.pending_insurance)}</div></div>
-        <div className="card stat"><div className="label">Est. patient portion</div><div className="value" style={{ color: data.patient_portion > 0 ? 'var(--danger)' : undefined }}>{money(data.patient_portion)}</div></div>
+        <div className="card stat">
+          <div className="label">Pending insurance</div><div className="value">{money(data.pending_insurance)}</div>
+          {data.pending_write_off > 0 && <div className="muted" style={{ fontSize: 12 }}>+ {money(data.pending_write_off)} in-network write-off expected</div>}
+        </div>
+        {data.patient_portion < 0
+          ? <div className="card stat"><div className="label">Est. credit after insurance</div><div className="value" style={{ color: 'var(--ok, #15803d)' }}>{money(-data.patient_portion)}</div></div>
+          : <div className="card stat"><div className="label">Est. patient portion</div><div className="value" style={{ color: data.patient_portion > 0 ? 'var(--danger)' : undefined }}>{money(data.patient_portion)}</div></div>}
       </div>
       <div className="card" style={{ padding: 0 }}>
         <div className="page-header" style={{ padding: '14px 16px', marginBottom: 0 }}>
@@ -35,6 +40,7 @@ export default function LedgerTab({ patient, onChange }) {
               <>
                 {payConfig?.enabled && <button onClick={() => setModal('paylink')}>Send card payment link</button>}
                 <button onClick={() => setModal('adjustment')}>Adjustment</button>
+                {data.balance < 0 && <button onClick={() => setModal('refund')}>Refund credit</button>}
                 <button className="primary" onClick={() => setModal('payment')}>Take payment</button>
               </>
             )}
@@ -42,17 +48,25 @@ export default function LedgerTab({ patient, onChange }) {
         </div>
         <div className="table-wrap">
           <table>
-            <thead><tr><th>Date</th><th>Type</th><th>Description</th><th>By</th><th className="num">Charges</th><th className="num">Credits</th><th className="num">Balance</th></tr></thead>
+            <thead><tr><th>Date</th><th>Type</th><th>Description</th><th>By</th><th className="num">Charges</th><th className="num">Credits</th><th className="num">Balance</th>{can('billing:write') && <th />}</tr></thead>
             <tbody>
               {data.entries.map((e) => (
-                <tr key={e.id}>
+                <tr key={e.id} className={e.voided_at ? 'voided' : undefined}>
                   <td>{fmtDate(e.entry_date)}</td>
                   <td>{label(e.type)}</td>
-                  <td>{e.description}{e.reference ? <span className="muted"> · ref {e.reference}</span> : ''}</td>
+                  <td>
+                    {e.description}{e.reference ? <span className="muted"> · ref {e.reference}</span> : ''}
+                    {e.voided_at && <div className="muted" style={{ fontSize: 12 }}>Voided — {e.void_reason}</div>}
+                  </td>
                   <td className="muted">{e.created_by_name}</td>
                   <td className="num">{e.amount > 0 ? money(e.amount) : ''}</td>
                   <td className="num">{e.amount < 0 ? money(-e.amount) : ''}</td>
                   <td className="num">{money(e.running_balance)}</td>
+                  {can('billing:write') && (
+                    <td className="num">
+                      {!e.voided_at && !e.reverses_id && !e.claim_id && <button className="small" title={e.type === 'charge' ? 'Void this charge and put the procedure back to planned' : 'Void this entry'} onClick={() => setModal({ void: e })}>Void</button>}
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -60,7 +74,7 @@ export default function LedgerTab({ patient, onChange }) {
           {!data.entries.length && <div className="empty">No transactions.</div>}
         </div>
       </div>
-      {modal === 'payment' && <Modal title="Take payment" onClose={() => setModal(null)}><PaymentForm patient={patient} balance={data.patient_portion} onDone={done} /></Modal>}
+      {modal === 'payment' && <Modal title="Take payment" onClose={() => setModal(null)}><PaymentForm patient={patient} balance={data.patient_portion} lockDate={data.lock_date} onDone={done} /></Modal>}
       <PaymentPlans patient={patient} onChange={reload} />
       {payRequests?.length > 0 && (
         <div className="card">
@@ -80,17 +94,79 @@ export default function LedgerTab({ patient, onChange }) {
         </div>
       )}
       {modal === 'paylink' && <Modal title="Send card payment link" onClose={() => setModal(null)}><PayLinkForm patient={patient} balance={data.patient_portion} onDone={() => { setModal(null); reloadRequests(); }} /></Modal>}
-      {modal === 'adjustment' && <Modal title="Ledger adjustment" onClose={() => setModal(null)}><AdjustmentForm patient={patient} onDone={done} /></Modal>}
+      {modal === 'adjustment' && <Modal title="Ledger adjustment" onClose={() => setModal(null)}><AdjustmentForm patient={patient} lockDate={data.lock_date} onDone={done} /></Modal>}
+      {modal === 'refund' && <Modal title="Refund credit" onClose={() => setModal(null)}><RefundForm patient={patient} credit={-data.balance} entries={data.entries} onDone={done} /></Modal>}
+      {modal?.void && <Modal title={`Void ${label(modal.void.type).toLowerCase()}`} onClose={() => setModal(null)}><VoidForm entry={modal.void} onDone={done} /></Modal>}
     </>
   );
 }
 
-function PaymentForm({ patient, balance, onDone }) {
+// Voiding keeps the original on the ledger and posts an equal and opposite entry today.
+function VoidForm({ entry, onDone }) {
+  const [reason, setReason] = useState('');
+  const { submit, busy, error } = useSubmit(async () => {
+    await api.post(`/ledger/${entry.id}/void`, { reason });
+    onDone();
+  });
+  return (
+    <form onSubmit={(e) => { e.preventDefault(); submit(); }}>
+      <ErrorBox error={error} />
+      <p><strong>{entry.description}</strong> · {money(Math.abs(entry.amount))} on {fmtDate(entry.entry_date)}</p>
+      <p className="muted" style={{ fontSize: 13 }}>
+        The entry stays on the ledger marked void, and a reversing entry is posted today, so closed days don't change.
+        {entry.type === 'charge' && entry.procedure_id ? ' The procedure goes back to planned.' : ''}
+        {entry.type === 'payment' && /^(pi_|sbx_)/.test(entry.reference || '') ? " This doesn't return money to the card — use Refund credit for that." : ''}
+      </p>
+      <label>Reason<input autoFocus required value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Posted to the wrong patient" /></label>
+      <div className="form-actions"><button className="danger" disabled={busy || !reason.trim()}>Void entry</button></div>
+    </form>
+  );
+}
+
+function RefundForm({ patient, credit, entries, onDone }) {
+  const cardPayments = entries.filter((e) => e.type === 'payment' && e.amount < 0 && !e.voided_at && ['credit_card', 'debit_card'].includes(e.method) && /^(pi_|sbx_)/.test(e.reference || ''));
+  const [form, setForm] = useState({ amount: (credit / 100).toFixed(2), payment_id: cardPayments.at(-1)?.id ? String(cardPayments.at(-1).id) : '', method: 'check', reference: '' });
+  const { submit, busy, error } = useSubmit(async () => {
+    await api.post(`/patients/${patient.id}/refunds`, { amount: toCents(form.amount), ...(form.payment_id ? { payment_id: Number(form.payment_id) } : { method: form.method, reference: form.reference || null }) });
+    onDone();
+  });
+  return (
+    <form onSubmit={(e) => { e.preventDefault(); submit(); }}>
+      <ErrorBox error={error} />
+      <p className="muted">This account has a {money(credit)} credit.</p>
+      <div className="form-grid">
+        <label>Amount ($)<input type="number" step="0.01" min="0.01" max={(credit / 100).toFixed(2)} required value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} /></label>
+        <label>
+          Refund to
+          <select value={form.payment_id} onChange={(e) => setForm({ ...form, payment_id: e.target.value })}>
+            {cardPayments.map((p) => <option key={p.id} value={p.id}>Card payment {fmtDate(p.entry_date)} ({money(-p.amount)})</option>)}
+            <option value="">Cash or check from the office</option>
+          </select>
+        </label>
+        {!form.payment_id && (
+          <>
+            <label>Method<select value={form.method} onChange={(e) => setForm({ ...form, method: e.target.value })}>{['check', 'cash', 'ach', 'other'].map((m) => <option key={m} value={m}>{label(m)}</option>)}</select></label>
+            <label>Check # / reference<input value={form.reference} onChange={(e) => setForm({ ...form, reference: e.target.value })} /></label>
+          </>
+        )}
+      </div>
+      <div className="form-actions"><button className="primary" disabled={busy}>{form.payment_id ? 'Refund to card' : 'Record refund'}</button></div>
+    </form>
+  );
+}
+
+// Backdating is allowed only into the open period (after the practice's lock date), never the future.
+function DateField({ value, onChange, lockDate }) {
+  const today = new Date().toLocaleDateString('en-CA');
+  return <label>Date<input type="date" value={value} max={today} min={lockDate ? new Date(Date.parse(`${lockDate}T12:00:00Z`) + 86400_000).toISOString().slice(0, 10) : undefined} onChange={(e) => onChange(e.target.value)} placeholder="Today" /></label>;
+}
+
+function PaymentForm({ patient, balance, lockDate, onDone }) {
   const { data: plans } = useApi(`/patients/${patient.id}/payment-plans`);
   const active = (plans || []).filter((p) => p.status === 'active');
-  const [form, setForm] = useState({ amount: balance > 0 ? (balance / 100).toFixed(2) : '', method: 'credit_card', reference: '', payment_plan_id: '' });
+  const [form, setForm] = useState({ amount: balance > 0 ? (balance / 100).toFixed(2) : '', method: 'credit_card', reference: '', payment_plan_id: '', entry_date: '' });
   const { submit, busy, error } = useSubmit(async () => {
-    await api.post(`/patients/${patient.id}/payments`, { ...form, amount: toCents(form.amount), payment_plan_id: form.payment_plan_id ? Number(form.payment_plan_id) : null });
+    await api.post(`/patients/${patient.id}/payments`, { ...form, entry_date: form.entry_date || undefined, amount: toCents(form.amount), payment_plan_id: form.payment_plan_id ? Number(form.payment_plan_id) : null });
     onDone();
   });
   return (
@@ -104,7 +180,8 @@ function PaymentForm({ patient, balance, onDone }) {
             {METHODS.map((m) => <option key={m} value={m}>{label(m)}</option>)}
           </select>
         </label>
-        <label className="full">Reference (check #, last 4, auth code)<input value={form.reference} onChange={(e) => setForm({ ...form, reference: e.target.value })} /></label>
+        <label>Reference (check #, last 4, auth code)<input value={form.reference} onChange={(e) => setForm({ ...form, reference: e.target.value })} /></label>
+        <DateField value={form.entry_date} lockDate={lockDate} onChange={(v) => setForm({ ...form, entry_date: v })} />
         {active.length > 0 && (
           <label className="full">
             Apply to payment plan
@@ -159,11 +236,11 @@ function PayLinkForm({ patient, balance, onDone }) {
   );
 }
 
-function AdjustmentForm({ patient, onDone }) {
-  const [form, setForm] = useState({ amount: '', direction: 'credit', description: 'Courtesy discount' });
+function AdjustmentForm({ patient, lockDate, onDone }) {
+  const [form, setForm] = useState({ amount: '', direction: 'credit', description: 'Courtesy discount', entry_date: '' });
   const { submit, busy, error } = useSubmit(async () => {
     const cents = toCents(form.amount);
-    await api.post(`/patients/${patient.id}/adjustments`, { amount: form.direction === 'credit' ? -cents : cents, description: form.description });
+    await api.post(`/patients/${patient.id}/adjustments`, { amount: form.direction === 'credit' ? -cents : cents, description: form.description, entry_date: form.entry_date || undefined });
     onDone();
   });
   return (
@@ -178,7 +255,8 @@ function AdjustmentForm({ patient, onDone }) {
             <option value="debit">Debit (increases balance)</option>
           </select>
         </label>
-        <label className="full">Reason<input required value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></label>
+        <label>Reason<input required value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></label>
+        <DateField value={form.entry_date} lockDate={lockDate} onChange={(v) => setForm({ ...form, entry_date: v })} />
       </div>
       <div className="form-actions"><button className="primary" disabled={busy}>Post adjustment</button></div>
     </form>

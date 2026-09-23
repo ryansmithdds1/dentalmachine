@@ -1,11 +1,11 @@
 import { Router } from 'express';
 import { requirePermission, HttpError } from '../auth.js';
 import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, toCents, practiceNow, mapSeq, publicPractice } from '../util.js';
-import { estimateCoverage, postClaimPayment } from '../services.js';
+import { estimateCoverage, postClaimPayment, benefitYear, deductibleMet, reverseEntry } from '../services.js';
 
 const POLICY_FIELDS = [
   'carrier_id', 'priority', 'subscriber_name', 'subscriber_id', 'subscriber_dob', 'relationship', 'group_number',
-  'annual_max', 'deductible', 'deductible_met', 'pct_preventive', 'pct_basic', 'pct_major', 'active',
+  'annual_max', 'deductible', 'deductible_met', 'pct_preventive', 'pct_basic', 'pct_major', 'active', 'benefit_month',
 ];
 
 const CLAIM_SELECT = `SELECT c.*, p.first_name, p.last_name, ic.name AS carrier_name, ic.payer_id, pi.subscriber_id, pi.group_number
@@ -22,6 +22,17 @@ function validatePolicy(row) {
   for (const k of ['annual_max', 'deductible', 'deductible_met']) {
     if (row[k] != null) row[k] = toCents(row[k], k);
   }
+  if (row.benefit_month != null) {
+    row.benefit_month = Number(row.benefit_month);
+    if (!Number.isInteger(row.benefit_month) || row.benefit_month < 1 || row.benefit_month > 12) throw new HttpError(400, 'benefit_month must be 1-12');
+  }
+}
+
+// Staff entering "deductible met" are describing the current benefit year.
+async function stampDeductibleYear(db, row, policy) {
+  if (row.deductible_met == null) return;
+  const today = (await practiceNow(db, policy.practice_id)).slice(0, 10);
+  row.deductible_year = benefitYear({ ...policy, ...row }, today).start;
 }
 
 export default function insuranceRoutes({ db }) {
@@ -50,11 +61,13 @@ export default function insuranceRoutes({ db }) {
   // ---- Patient policies ----
   r.get('/patients/:id/insurance', requirePermission('patients:read'), async (req, res) => {
     const patient = await findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient');
-    res.json(await db.all(
+    const today = (await practiceNow(db, req.user.practice_id)).slice(0, 10);
+    // deductible_met as it stands this benefit year (last year's figure reads as zero).
+    res.json((await db.all(
       `SELECT pi.*, c.name AS carrier_name FROM patient_insurance pi JOIN insurance_carriers c ON c.id = pi.carrier_id
        WHERE pi.patient_id = ? AND pi.practice_id = ? ORDER BY pi.active DESC, pi.priority`,
       patient.id, req.user.practice_id,
-    ));
+    )).map((p) => ({ ...p, deductible_met: deductibleMet(p, today) })));
   });
 
   r.post('/patients/:id/insurance', requirePermission('patients:write'), async (req, res) => {
@@ -63,6 +76,7 @@ export default function insuranceRoutes({ db }) {
     requireFields(row, ['carrier_id', 'subscriber_name', 'subscriber_id']);
     validatePolicy(row);
     await findOr404(db, 'insurance_carriers', row.carrier_id, req.user.practice_id, 'Carrier');
+    await stampDeductibleYear(db, row, { practice_id: req.user.practice_id });
     const id = await insert(db, 'patient_insurance', { ...row, patient_id: patient.id, practice_id: req.user.practice_id });
     await audit(db, req, 'insurance.create', 'patient_insurance', id);
     res.status(201).json(await db.get('SELECT * FROM patient_insurance WHERE id = ?', id));
@@ -73,6 +87,7 @@ export default function insuranceRoutes({ db }) {
     const row = pick(req.body, POLICY_FIELDS);
     validatePolicy(row);
     if (row.carrier_id) await findOr404(db, 'insurance_carriers', row.carrier_id, req.user.practice_id, 'Carrier');
+    await stampDeductibleYear(db, row, existing);
     await update(db, 'patient_insurance', existing.id, req.user.practice_id, row);
     await audit(db, req, 'insurance.update', 'patient_insurance', existing.id);
     res.json(await db.get('SELECT * FROM patient_insurance WHERE id = ?', existing.id));
@@ -106,14 +121,16 @@ export default function insuranceRoutes({ db }) {
     res.json(claim);
   });
 
-  // Procedures that are completed but not yet on a (non-void) claim.
+  // Procedures that are completed but not yet on a (non-void) claim — for one policy when given, since
+  // the same procedure goes on the primary claim and then on the secondary.
   r.get('/patients/:id/unclaimed-procedures', requirePermission('billing:read'), async (req, res) => {
     const patient = await findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient');
+    const policyId = req.query.patient_insurance_id ? Number(req.query.patient_insurance_id) : null;
     res.json(await db.all(
       `SELECT pr.* FROM procedures pr WHERE pr.patient_id = ? AND pr.practice_id = ? AND pr.status = 'completed'
-       AND NOT EXISTS (SELECT 1 FROM claim_items ci JOIN claims c ON c.id = ci.claim_id WHERE ci.procedure_id = pr.id AND c.status != 'void')
+       AND NOT EXISTS (SELECT 1 FROM claim_items ci JOIN claims c ON c.id = ci.claim_id WHERE ci.procedure_id = pr.id AND c.status != 'void'${policyId ? ' AND c.patient_insurance_id = ?' : ''})
        ORDER BY pr.completed_at`,
-      patient.id, req.user.practice_id,
+      patient.id, req.user.practice_id, ...(policyId ? [policyId] : []),
     ));
   });
 
@@ -126,12 +143,29 @@ export default function insuranceRoutes({ db }) {
       const p = await findOr404(db, 'procedures', id, pid, 'Procedure');
       if (p.patient_id !== policy.patient_id) throw new HttpError(400, `Procedure ${p.id} belongs to another patient`);
       if (p.status !== 'completed') throw new HttpError(400, `Procedure ${p.id} is not completed`);
-      const onClaim = await db.get("SELECT c.id FROM claim_items ci JOIN claims c ON c.id = ci.claim_id WHERE ci.procedure_id = ? AND c.status != 'void'", p.id);
-      if (onClaim) throw new HttpError(409, `Procedure ${p.id} is already on claim ${onClaim.id}`);
+      const onClaim = await db.get("SELECT c.id FROM claim_items ci JOIN claims c ON c.id = ci.claim_id WHERE ci.procedure_id = ? AND c.status != 'void' AND c.patient_insurance_id = ?", p.id, policy.id);
+      if (onClaim) throw new HttpError(409, `Procedure ${p.id} is already on claim ${onClaim.id} for this insurance`);
       return p;
     });
+    // Secondary insurance: what the primary claim covers (paid, or expected) for each procedure.
+    let primary = null;
+    if (policy.priority === 'secondary') {
+      primary = new Map();
+      for (const p of procs) {
+        const line = await db.get(
+          `SELECT ci.*, c.status AS claim_status, c.paid_amount AS claim_paid, c.estimated_amount AS claim_estimated, c.total_fee AS claim_fee
+           FROM claim_items ci JOIN claims c ON c.id = ci.claim_id JOIN patient_insurance pi ON pi.id = c.patient_insurance_id
+           WHERE ci.procedure_id = ? AND c.status != 'void' AND pi.priority = 'primary' ORDER BY c.id DESC LIMIT 1`, p.id,
+        );
+        if (!line) continue;
+        // Payments are posted per claim; share them across lines by each line's estimate (or fee).
+        const paidClaim = ['paid', 'partially_paid'].includes(line.claim_status);
+        const share = line.claim_estimated > 0 ? line.estimated_amount / line.claim_estimated : line.fee / (line.claim_fee || 1);
+        primary.set(p.id, { covered: paidClaim ? Math.round(line.claim_paid * share) : line.estimated_amount, write_off: line.write_off });
+      }
+    }
     const carrier = await db.get('SELECT name FROM insurance_carriers WHERE id = ?', policy.carrier_id);
-    const est = await estimateCoverage(db, { ...policy, carrier_name: carrier.name }, procs);
+    const est = await estimateCoverage(db, { ...policy, carrier_name: carrier.name }, procs, { primary });
     const id = await db.tx(async () => {
       const claimId = await insert(db, 'claims', {
         practice_id: pid, patient_id: policy.patient_id, patient_insurance_id: policy.id,
@@ -164,15 +198,40 @@ export default function insuranceRoutes({ db }) {
     const claim = await findOr404(db, 'claims', req.params.cid, req.user.practice_id, 'Claim');
     if (!['submitted', 'partially_paid'].includes(claim.status)) throw new HttpError(409, `Cannot record payment on a ${claim.status} claim`);
     const amount = toCents(req.body?.amount);
-    if (amount <= 0) throw new HttpError(400, 'Payment amount must be positive');
+    if (amount < 0) throw new HttpError(400, 'Payment amount cannot be negative');
     const writeOff = req.body?.write_off != null ? toCents(req.body.write_off, 'write_off') : 0;
     if (writeOff < 0) throw new HttpError(400, 'write_off cannot be negative');
+    // A $0 EOB is fine (e.g. everything went to the deductible), but it has to say something.
+    if (amount === 0 && writeOff === 0 && req.body?.final === false) throw new HttpError(400, 'Enter a payment or write-off amount');
+    const posted = -(await db.get("SELECT COALESCE(SUM(amount), 0) AS n FROM ledger_entries WHERE claim_id = ? AND type = 'adjustment'", claim.id)).n;
+    if (claim.paid_amount + posted + amount + writeOff > claim.total_fee) {
+      throw new HttpError(400, `Payment plus write-off can't exceed the $${(claim.total_fee / 100).toFixed(2)} billed (already posted: $${((claim.paid_amount + posted) / 100).toFixed(2)})`);
+    }
     const final = req.body?.final !== false;
     await postClaimPayment(db, claim, {
       amount, writeOff, final, method: req.body?.method || 'check', reference: req.body?.reference ?? null,
       userId: req.user.id, date: (await practiceNow(db, req.user.practice_id)).slice(0, 10),
     });
     await audit(db, req, 'claim.payment', 'claims', claim.id, { amount, write_off: writeOff });
+    res.json(await db.get(`${CLAIM_SELECT} WHERE c.id = ?`, claim.id));
+  });
+
+  // Reopens a paid claim (payment posted to the wrong claim, or the payer took it back): its insurance
+  // payments and write-offs are reversed on the ledger and the claim goes back to waiting on the payer.
+  r.post('/claims/:cid/reopen', requirePermission('billing:write'), async (req, res) => {
+    const claim = await findOr404(db, 'claims', req.params.cid, req.user.practice_id, 'Claim');
+    if (!['paid', 'partially_paid'].includes(claim.status)) throw new HttpError(409, `Only paid claims can be reopened (this one is ${claim.status})`);
+    const reason = String(req.body?.reason || '').trim();
+    if (!reason) throw new HttpError(400, 'Give a reason for reopening');
+    const date = (await practiceNow(db, req.user.practice_id)).slice(0, 10);
+    await db.tx(async () => {
+      if (!(await db.run("UPDATE claims SET status = 'submitted', paid_amount = 0, paid_at = NULL WHERE id = ? AND status IN ('paid','partially_paid')", claim.id)).changes) {
+        throw new HttpError(409, 'The claim changed — reload and try again');
+      }
+      const posted = await db.all("SELECT * FROM ledger_entries WHERE claim_id = ? AND type IN ('insurance_payment','adjustment') AND voided_at IS NULL AND reverses_id IS NULL", claim.id);
+      for (const e of posted) await reverseEntry(db, e, { userId: req.user.id, reason: `Claim #${claim.id} reopened: ${reason}`, date });
+    });
+    await audit(db, req, 'claim.reopen', 'claims', claim.id, { reason });
     res.json(await db.get(`${CLAIM_SELECT} WHERE c.id = ?`, claim.id));
   });
 

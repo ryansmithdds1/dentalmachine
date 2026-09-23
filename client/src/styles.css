@@ -533,3 +533,4 @@ button.active, .seg button.active { background: var(--primary-soft); color: var(
   .settings-nav { display: none; }
   .settings-select { display: block; margin-bottom: 12px; }
 }
+tr.voided td { color: var(--muted); } tr.voided td:nth-child(3), tr.voided td.num:not(:last-child) { text-decoration: line-through; }

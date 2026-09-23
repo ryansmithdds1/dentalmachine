@@ -6,7 +6,7 @@ import { insert, audit, practiceNow, newToken, pick, mapSeq, publicPractice } fr
 import { sendMessage } from '../messaging.js';
 import { publish } from '../events.js';
 import { planStatus } from './family.js';
-import { estimateCoverage, primaryPolicy } from '../services.js';
+import { estimateCoverage, primaryPolicy, pendingInsurance } from '../services.js';
 
 const CODE_TTL_MINUTES = 10;
 const SESSION_HOURS = 2;
@@ -120,7 +120,7 @@ export function portalRoutes({ db, secret, config, payments }) {
     const now = await practiceNow(db, practice.id);
     const L = inList(ids);
     const balance = (await db.get(`SELECT COALESCE(SUM(amount),0) AS n FROM ledger_entries WHERE patient_id IN (${L})`, ...ids)).n;
-    const pending = (await db.get(`SELECT COALESCE(SUM(estimated_amount - paid_amount),0) AS n FROM claims WHERE patient_id IN (${L}) AND status IN ('submitted','partially_paid')`, ...ids)).n;
+    const pending = (await pendingInsurance(db, practice.id, ids)).total;
     const plans = await db.all(`SELECT tp.* FROM treatment_plans tp WHERE tp.patient_id IN (${L}) AND tp.status = 'proposed' AND tp.signed_at IS NULL
       AND EXISTS (SELECT 1 FROM procedures p WHERE p.treatment_plan_id = tp.id AND p.status = 'planned') ORDER BY tp.id DESC`, ...ids);
     const byId = Object.fromEntries(household.map((h) => [h.id, h]));

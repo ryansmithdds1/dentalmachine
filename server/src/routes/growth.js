@@ -6,6 +6,7 @@ import { renderTemplate, templatesFor } from '../templates.js';
 import { mailable, statementHtml } from '../mail.js';
 import { statementData } from './billing.js';
 import { portalKey } from './portal.js';
+import { pendingInsurance } from '../services.js';
 
 const requireAdmin = (req, _res, next) => (req.user.role === 'admin' ? next() : next(new HttpError(403, 'Administrator access required')));
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -50,9 +51,11 @@ export default function growthRoutes({ db, messenger, config, mailer = { enabled
        WHERE tp.practice_id = ? AND tp.created_at >= ? AND tp.created_at < ? AND pr.status != 'cancelled'`, pid, fromUtc, toUtc,
     );
 
-    // Hygiene reappointment: hygiene visits completed in range whose patient left with a future appointment booked.
+    // Hygiene reappointment: hygiene visits completed in range whose patient left with their next visit
+    // already booked (booked by the day of the visit — not an appointment made weeks later).
     const hyg = await db.get(
-      `SELECT COUNT(*) AS visits, SUM(CASE WHEN EXISTS (SELECT 1 FROM appointments b WHERE b.patient_id = a.patient_id AND b.start_time > a.start_time AND b.status NOT IN ('cancelled','no_show')) THEN 1 ELSE 0 END) AS reappointed
+      `SELECT COUNT(*) AS visits, SUM(CASE WHEN EXISTS (SELECT 1 FROM appointments b WHERE b.patient_id = a.patient_id AND b.start_time > a.start_time
+           AND b.status NOT IN ('cancelled','no_show') AND substr(b.created_at, 1, 10) <= substr(a.start_time, 1, 10)) THEN 1 ELSE 0 END) AS reappointed
        FROM appointments a JOIN providers pv ON pv.id = a.provider_id
        WHERE a.practice_id = ? AND pv.type = 'hygienist' AND a.status = 'completed' AND a.start_time >= ? AND a.start_time < ?`,
       pid, `${from} 00:00`, `${to} 24:00`,
@@ -105,15 +108,20 @@ export default function growthRoutes({ db, messenger, config, mailer = { enabled
   // Accounts (guarantors) with a family balance at or above the minimum, not statemented recently.
   const statementCandidates = async (pid, minBalance, sinceDays) => {
     const cutoff = addDays((await practiceNow(db, pid)).slice(0, 10), -sinceDays);
-    return (await db.all(
+    const rows = (await db.all(
       `SELECT g.id, g.first_name, g.last_name, g.email, g.email_opt_in, g.address, g.city, g.state, g.zip, g.statement_sent_at,
-         (SELECT COALESCE(SUM(l.amount),0) FROM ledger_entries l JOIN patients m ON m.id = l.patient_id WHERE m.id = g.id OR m.guarantor_id = g.id) AS balance,
-         (SELECT COALESCE(SUM(c.estimated_amount - c.paid_amount),0) FROM claims c JOIN patients m ON m.id = c.patient_id
-            WHERE (m.id = g.id OR m.guarantor_id = g.id) AND c.status IN ('submitted','partially_paid')) AS pending_insurance
+         (SELECT COALESCE(SUM(l.amount),0) FROM ledger_entries l JOIN patients m ON m.id = l.patient_id WHERE m.id = g.id OR m.guarantor_id = g.id) AS balance
        FROM patients g WHERE g.practice_id = ? AND g.guarantor_id IS NULL AND g.status != 'archived'
          AND (g.statement_sent_at IS NULL OR g.statement_sent_at < ?)`, pid, cutoff,
-    )).map((x) => ({ ...x, patient_portion: x.balance - x.pending_insurance }))
-      .filter((x) => x.patient_portion >= minBalance)
+    )).filter((x) => x.balance >= minBalance);
+    // Same patient-portion rule as the ledger and portal: minus what insurance and in-network discounts will cover.
+    const out = [];
+    for (const x of rows) {
+      const members = (await db.all('SELECT id FROM patients WHERE practice_id = ? AND (id = ? OR guarantor_id = ?)', pid, x.id, x.id)).map((m) => m.id);
+      const pending = await pendingInsurance(db, pid, members);
+      out.push({ ...x, pending_insurance: pending.insurance, pending_write_off: pending.write_off, patient_portion: x.balance - pending.total });
+    }
+    return out.filter((x) => x.patient_portion >= minBalance)
       .sort((a, b) => b.patient_portion - a.patient_portion);
   };
 
@@ -160,7 +168,7 @@ export default function growthRoutes({ db, messenger, config, mailer = { enabled
             description: `Statement ${today} #${a.id}`, idempotencyKey: `statement-${runId}-${a.id}`,
             to: { name: `${a.first_name} ${a.last_name}`, address: a.address, city: a.city, state: a.state, zip: a.zip },
             from: { name: practice.name, address: practice.address, city: practice.city, state: practice.state, zip: practice.zip },
-            html: statementHtml({ practice, account: a, entries: data.entries, previousBalance: data.previous_balance, balance: data.balance, pendingInsurance: a.pending_insurance, portalUrl, statementDate: today }),
+            html: statementHtml({ practice, account: a, entries: data.entries, previousBalance: data.previous_balance, balance: data.balance, pendingInsurance: a.pending_insurance, pendingWriteOff: a.pending_write_off, portalUrl, statementDate: today }),
           });
           method = 'mail';
           reference = letter.reference;

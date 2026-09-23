@@ -11,17 +11,20 @@ export default function InsuranceTab({ patient, onChange }) {
   const { can } = useAuth();
   const { data: policies, reload } = useApi(`/patients/${patient.id}/insurance`);
   const { data: claims, reload: reloadClaims } = useApi(can('billing:read') ? `/claims?patient_id=${patient.id}` : null);
-  const { data: unclaimed, reload: reloadUnclaimed } = useApi(can('billing:read') ? `/patients/${patient.id}/unclaimed-procedures` : null);
   const [modal, setModal] = useState(null);
   const [selected, setSelected] = useState([]);
   const [err, setErr] = useState(null);
-  const refresh = () => { reload(); reloadClaims(); reloadUnclaimed(); onChange?.(); };
   const active = policies?.filter((p) => p.active) || [];
+  // Claims go to one insurer at a time: primary first, then the same procedures to the secondary.
+  const [billTo, setBillTo] = useState(null);
+  const claimPolicy = active.find((p) => p.id === billTo) || active[0];
+  const { data: unclaimed, reload: reloadUnclaimed } = useApi(can('billing:read') && claimPolicy ? `/patients/${patient.id}/unclaimed-procedures?patient_insurance_id=${claimPolicy.id}` : null);
+  const refresh = () => { reload(); reloadClaims(); reloadUnclaimed(); onChange?.(); };
 
   const createClaim = async () => {
     setErr(null);
     try {
-      await api.post('/claims', { patient_insurance_id: active[0].id, procedure_ids: selected });
+      await api.post('/claims', { patient_insurance_id: claimPolicy.id, procedure_ids: selected });
       setSelected([]);
       refresh();
     } catch (e) {
@@ -49,7 +52,7 @@ export default function InsuranceTab({ patient, onChange }) {
                   <td>{p.subscriber_id}<div className="muted">{p.group_number}</div></td>
                   <td>{p.pct_preventive}% / {p.pct_basic}% / {p.pct_major}%</td>
                   <td className="num">{money(p.annual_max)}</td>
-                  <td className="num">{money(p.deductible_met)} of {money(p.deductible)}</td>
+                  <td className="num">{money(p.deductible_met)} of {money(p.deductible)}{p.benefit_month > 1 && <div className="muted" style={{ fontSize: 12 }}>year starts {new Date(2000, p.benefit_month - 1, 1).toLocaleString('en-US', { month: 'short' })} 1</div>}</td>
                   <td>{can('patients:write') && <button className="small" onClick={() => setModal({ policy: p })}>Edit</button>}</td>
                 </tr>
               ))}
@@ -64,9 +67,14 @@ export default function InsuranceTab({ patient, onChange }) {
         <div className="card">
           <h2>Claims</h2>
           <ErrorBox error={err} />
-          {unclaimed?.length > 0 && active.length > 0 && can('billing:write') && (
+          {active.length > 1 && can('billing:write') && (
+            <div className="seg" style={{ marginBottom: 10 }}>
+              {active.map((p) => <button key={p.id} type="button" className={claimPolicy?.id === p.id ? 'active' : ''} onClick={() => { setBillTo(p.id); setSelected([]); }}>Bill {p.priority}: {p.carrier_name}</button>)}
+            </div>
+          )}
+          {unclaimed?.length > 0 && claimPolicy && can('billing:write') && (
             <div style={{ marginBottom: 16, padding: 12, background: 'var(--warn-soft)', borderRadius: 8 }}>
-              <strong>Completed procedures not yet billed to insurance</strong>
+              <strong>Completed procedures not yet billed to {claimPolicy.carrier_name}{claimPolicy.priority === 'secondary' ? ' (secondary — estimates what the primary leaves)' : ''}</strong>
               {unclaimed.map((p) => (
                 <label key={p.id} className="checkbox" style={{ color: 'var(--text)', marginTop: 6 }}>
                   <input type="checkbox" checked={selected.includes(p.id)} onChange={(e) => setSelected(e.target.checked ? [...selected, p.id] : selected.filter((x) => x !== p.id))} />
@@ -75,7 +83,7 @@ export default function InsuranceTab({ patient, onChange }) {
               ))}
               <div className="inline" style={{ marginTop: 8 }}>
                 <button className="small" onClick={() => setSelected(unclaimed.map((p) => p.id))}>Select all</button>
-                <button className="small primary" disabled={!selected.length} onClick={createClaim}>Create claim to {active[0].carrier_name}</button>
+                <button className="small primary" disabled={!selected.length} onClick={createClaim}>Create {claimPolicy.priority} claim to {claimPolicy.carrier_name}</button>
               </div>
             </div>
           )}
@@ -126,13 +134,14 @@ function PolicyForm({ patient, policy, onDone }) {
     pct_basic: policy?.pct_basic ?? 80,
     pct_major: policy?.pct_major ?? 50,
     active: policy ? !!policy.active : true,
+    benefit_month: policy?.benefit_month ?? 1,
   }));
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value });
   const { submit, busy, error } = useSubmit(async () => {
     const body = {
       ...form, carrier_id: Number(form.carrier_id),
       annual_max: toCents(form.annual_max), deductible: toCents(form.deductible), deductible_met: toCents(form.deductible_met),
-      pct_preventive: Number(form.pct_preventive), pct_basic: Number(form.pct_basic), pct_major: Number(form.pct_major),
+      pct_preventive: Number(form.pct_preventive), pct_basic: Number(form.pct_basic), pct_major: Number(form.pct_major), benefit_month: Number(form.benefit_month),
     };
     if (policy) await api.put(`/insurance/${policy.id}`, body);
     else await api.post(`/patients/${patient.id}/insurance`, body);
@@ -163,7 +172,13 @@ function PolicyForm({ patient, policy, onDone }) {
         <label>Group #<input value={form.group_number} onChange={set('group_number')} /></label>
         <label>Annual max ($)<input type="number" step="0.01" value={form.annual_max} onChange={set('annual_max')} /></label>
         <label>Deductible ($)<input type="number" step="0.01" value={form.deductible} onChange={set('deductible')} /></label>
-        <label>Deductible met ($)<input type="number" step="0.01" value={form.deductible_met} onChange={set('deductible_met')} /></label>
+        <label>Deductible met this benefit year ($)<input type="number" step="0.01" value={form.deductible_met} onChange={set('deductible_met')} /></label>
+        <label>
+          Benefit year starts
+          <select value={form.benefit_month} onChange={set('benefit_month')}>
+            {Array.from({ length: 12 }, (_, i) => <option key={i} value={i + 1}>{new Date(2000, i, 1).toLocaleString('en-US', { month: 'long' })} 1{i === 0 ? ' (calendar year)' : ''}</option>)}
+          </select>
+        </label>
         <label>Preventive %<input type="number" min="0" max="100" value={form.pct_preventive} onChange={set('pct_preventive')} /></label>
         <label>Basic %<input type="number" min="0" max="100" value={form.pct_basic} onChange={set('pct_basic')} /></label>
         <label>Major %<input type="number" min="0" max="100" value={form.pct_major} onChange={set('pct_major')} /></label>

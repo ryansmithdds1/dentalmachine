@@ -47,6 +47,13 @@ export function createPayments({ config, fetchImpl = globalThis.fetch }) {
         const pm = si.payment_method;
         return { customer_id: session.customer, payment_method_id: pm.id, brand: pm.card?.brand, last4: pm.card?.last4, exp_month: pm.card?.exp_month, exp_year: pm.card?.exp_year };
       },
+      // Refunds part or all of an earlier card payment (by its PaymentIntent) back to the card.
+      async refund({ reference, amount, idempotencyKey }) {
+        const pi = String(reference || '');
+        if (!pi.startsWith('pi_')) throw new HttpError(400, "That payment wasn't made by card through Stripe — refund it by cash or check");
+        const re = await stripe('POST', 'refunds', { payment_intent: pi, amount: String(amount) }, { idempotencyKey });
+        return { reference: re.id, status: re.status };
+      },
       async charge({ method, amount, description, idempotencyKey, metadata = {} }) {
         try {
           const pi = await stripe('POST', 'payment_intents', {
@@ -69,6 +76,10 @@ export function createPayments({ config, fetchImpl = globalThis.fetch }) {
   if (config.payments === 'sandbox') {
     return {
       mode: 'sandbox', enabled: true,
+      async refund({ reference }) {
+        if (!String(reference || '').startsWith('sbx_')) throw new HttpError(400, "That payment wasn't made by card — refund it by cash or check");
+        return { reference: `sbx_re_${Date.now().toString(36)}`, status: 'succeeded' };
+      },
       async charge({ method, amount }) {
         if (method.last4 === '0002') return { ok: false, reason: 'Card declined (generic decline)' };
         if (amount < 50) return { ok: false, reason: 'Amount too small' };
@@ -114,7 +125,8 @@ async function autopayPlan(db, payments, messenger, plan, today) {
   const status = await planStatus(db, plan, today);
   // Never charge more than the household actually owes (e.g. after insurance paid more than expected).
   const owed = (await db.get('SELECT COALESCE(SUM(l.amount), 0) AS n FROM ledger_entries l JOIN patients p ON p.id = l.patient_id WHERE p.id = ? OR p.guarantor_id = ?', plan.patient_id, plan.patient_id)).n;
-  const amount = Math.min(status.past_due, owed);
+  // What's due on the plan, never more than is left on the plan or than the household owes.
+  const amount = Math.min(status.past_due, status.remaining, owed);
   if (amount <= 0) return null;
   const practice = await db.get('SELECT name, phone FROM practices WHERE id = ?', plan.practice_id);
   // One key per installment (what's been paid so far) and attempt: a retry after a lost answer reuses it,

@@ -244,6 +244,8 @@ function parse835Segments(segs) {
     const all = [...c.adjustments, ...c.services.flatMap((sv) => sv.adjustments)];
     c.contractual = all.filter((a) => a.group === 'CO').reduce((s, a) => s + a.amount, 0);
     c.other_adjustments = all.filter((a) => a.group === 'OA' || a.group === 'PI').reduce((s, a) => s + a.amount, 0);
+    // Patient-responsibility reason 1 is the deductible the payer applied.
+    c.deductible = all.filter((a) => a.group === 'PR' && a.reason === '1').reduce((s, a) => s + a.amount, 0);
     c.reason_codes = [...new Set(all.map((a) => `${a.group}-${a.reason}`))];
     c.status = { 1: 'processed_primary', 2: 'processed_secondary', 3: 'processed_tertiary', 4: 'denied', 22: 'reversal', 23: 'not_our_claim' }[c.status_code] || 'other';
   }

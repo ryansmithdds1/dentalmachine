@@ -42,6 +42,12 @@ export default function ClaimDetail() {
           {w && ['submitted', 'partially_paid'].includes(c.status) && <button className="primary" onClick={() => setModal('pay')}>Enter EOB payment</button>}
           {w && c.status === 'submitted' && <button className="danger" onClick={() => setModal('deny')}>Denied</button>}
           {w && ['draft', 'denied'].includes(c.status) && <button className="danger" onClick={() => confirm('Void this claim? Procedures become billable again.') && act(() => api.post(`/claims/${c.id}/void`))}>Void</button>}
+          {w && ['paid', 'partially_paid'].includes(c.status) && (
+            <button onClick={() => {
+              const reason = window.prompt('Reopen this claim? Its insurance payments and write-offs are reversed on the ledger and it goes back to waiting on the payer.\n\nReason:');
+              if (reason?.trim()) act(() => api.post(`/claims/${c.id}/reopen`, { reason }));
+            }}>Reopen claim</button>
+          )}
         </div>
       </div>
       <ErrorBox error={err} />
@@ -108,7 +114,7 @@ function PaymentForm({ claim, onDone }) {
     <form onSubmit={(e) => { e.preventDefault(); submit(); }}>
       <ErrorBox error={error} />
       <div className="form-grid">
-        <label>Insurance paid ($)<input type="number" step="0.01" min="0.01" required value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} /></label>
+        <label>Insurance paid ($)<input type="number" step="0.01" min="0" required value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} /></label>
         <label>Contractual write-off ($)<input type="number" step="0.01" min="0" value={form.write_off} onChange={(e) => setForm({ ...form, write_off: e.target.value })} /></label>
         <label className="full">Check / EFT #<input value={form.reference} onChange={(e) => setForm({ ...form, reference: e.target.value })} /></label>
         <label className="checkbox full"><input type="checkbox" checked={form.final} onChange={(e) => setForm({ ...form, final: e.target.checked })} /> Final payment for this claim</label>

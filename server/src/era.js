@@ -81,7 +81,7 @@ export async function postEra(db, practiceId, era, { userId = null, filename = n
       groups.get(claim.id).lines.push({ c, base });
     }
   }
-  await db.tx(async () => {
+  const id = await db.tx(async () => {
     for (const { claim: found, lines } of groups.values()) {
       const merged = {
         order: lines[0].base.order, control_number: found.control_number, claim_id: found.id,
@@ -118,20 +118,22 @@ export async function postEra(db, practiceId, era, { userId = null, filename = n
       }
       await postClaimPayment(db, claim, {
         amount: merged.paid, writeOff: merged.write_off, final: true, method: 'eft', reference: era.check_number, userId, date, payerClaimNumber: lines[0].c.payer_claim_number,
+        deductible: lines.reduce((s, l) => s + (l.c.deductible || 0), 0),
       });
       const splitNote = lines.length > 1 ? ` across ${lines.length} lines` : '';
       await claimEvent(db, claim, '835', 'paid', `Paid $${(merged.paid / 100).toFixed(2)}${merged.write_off ? `, $${(merged.write_off / 100).toFixed(2)} written off` : ''}${splitNote} (EFT ${era.check_number || '—'})`);
       details.push({ ...merged, result: 'posted' });
     }
-  });
-  // Report lines in file order.
-  details.sort((a, b) => a.order - b.order);
-  for (const d of details) delete d.order;
-  const matched = details.filter((d) => d.result === 'posted' || d.result === 'denied').length;
-  const id = await insert(db, 'era_imports', {
-    practice_id: practiceId, filename: filename ? String(filename).slice(0, 200) : null, payer_name: era.payer_name, check_number: era.check_number,
-    payment_date: era.payment_date, total_paid: era.total_paid, claims_matched: matched, claims_unmatched: details.length - matched,
-    details: JSON.stringify(details), raw, created_by: userId,
+    // Report lines in file order. The import record is written with the postings, so a failure can't
+    // leave payments posted without the record that stops the same ERA being posted again.
+    details.sort((a, b) => a.order - b.order);
+    for (const d of details) delete d.order;
+    const matched = details.filter((d) => d.result === 'posted' || d.result === 'denied').length;
+    return insert(db, 'era_imports', {
+      practice_id: practiceId, filename: filename ? String(filename).slice(0, 200) : null, payer_name: era.payer_name, check_number: era.check_number,
+      payment_date: era.payment_date, total_paid: era.total_paid, claims_matched: matched, claims_unmatched: details.length - matched,
+      details: JSON.stringify(details), raw, created_by: userId,
+    });
   });
   return { id, practice_id: practiceId, payer_name: era.payer_name, check_number: era.check_number, payment_date: era.payment_date, total_paid: era.total_paid, claims: details };
 }

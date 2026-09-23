@@ -9,13 +9,50 @@ export async function patientBalance(db, practiceId, patientId) {
   )).balance;
 }
 
-// Benefits used this calendar year = insurance payments received against this policy's claims.
-export async function benefitsUsed(db, policy, year = new Date().getUTCFullYear()) {
+// A plan's benefit year starts on the first of `benefit_month` (1 = calendar year).
+export function benefitYear(policy, date) {
+  const month = Math.min(12, Math.max(1, Number(policy?.benefit_month) || 1));
+  let year = Number(date.slice(0, 4));
+  if (Number(date.slice(5, 7)) < month) year -= 1;
+  const mm = String(month).padStart(2, '0');
+  return { start: `${year}-${mm}-01`, end: `${year + 1}-${mm}-01` };
+}
+
+// Deductible met in the benefit year containing `date`: it starts again at zero each new benefit year.
+export const deductibleMet = (policy, date) => {
+  const { start } = benefitYear(policy, date);
+  return !policy.deductible_year || policy.deductible_year === start ? policy.deductible_met || 0 : 0;
+};
+
+// Benefits used in the benefit year containing `date`, counted by date of service: what paid claims
+// paid, plus what open claims are expected to pay (so two claims can't both spend the same maximum).
+export async function benefitsUsed(db, policy, date) {
+  const today = date || (await practiceNow(db, policy.practice_id)).slice(0, 10);
+  const { start, end } = benefitYear(policy, today);
   return (await db.get(
-    `SELECT COALESCE(SUM(paid_amount), 0) AS used FROM claims
-     WHERE patient_insurance_id = ? AND status IN ('paid','partially_paid') AND substr(paid_at, 1, 4) = ?`,
-    policy.id, String(year),
+    `SELECT COALESCE(SUM(CASE WHEN c.status = 'paid' THEN c.paid_amount
+         WHEN c.paid_amount > c.estimated_amount THEN c.paid_amount ELSE c.estimated_amount END), 0) AS used
+     FROM claims c
+     WHERE c.patient_insurance_id = ? AND c.status IN ('draft','submitted','partially_paid','paid')
+       AND (SELECT MIN(pr.completed_at) FROM claim_items ci JOIN procedures pr ON pr.id = ci.procedure_id WHERE ci.claim_id = c.id) >= ?
+       AND (SELECT MIN(pr.completed_at) FROM claim_items ci JOIN procedures pr ON pr.id = ci.procedure_id WHERE ci.claim_id = c.id) < ?`,
+    policy.id, start, end,
   )).used;
+}
+
+// What an account still expects from insurance: the payers' remaining estimates on open claims, and the
+// in-network (PPO) write-offs that will be posted when those claims pay. Balance minus both is what the
+// patient owes; the ledger, statements and portal all use this so they agree.
+export async function pendingInsurance(db, practiceId, patientIds) {
+  const ids = [].concat(patientIds);
+  if (!ids.length) return { insurance: 0, write_off: 0, total: 0 };
+  const row = await db.get(
+    `SELECT COALESCE(SUM(CASE WHEN estimated_amount > paid_amount THEN estimated_amount - paid_amount ELSE 0 END), 0) AS insurance,
+       COALESCE(SUM(CASE WHEN status IN ('draft','submitted') THEN write_off_estimate ELSE 0 END), 0) AS write_off
+     FROM claims WHERE practice_id = ? AND patient_id IN (${ids.map(() => '?').join(',')}) AND status IN ('draft','submitted','partially_paid')`,
+    practiceId, ...ids,
+  );
+  return { insurance: row.insurance, write_off: row.write_off, total: row.insurance + row.write_off };
 }
 
 export async function primaryPolicy(db, practiceId, patientId) {
@@ -29,7 +66,9 @@ export async function primaryPolicy(db, practiceId, patientId) {
 
 // Estimates insurance vs patient portion for a list of procedures, applying the
 // remaining deductible (not to preventive) and the remaining annual maximum in order.
-export async function estimateCoverage(db, policy, procedures) {
+// For a secondary policy, pass `primary`: procedure id → { covered, write_off } from the primary claim.
+// The secondary then pays at most what's left after the primary, and nothing is written off twice.
+export async function estimateCoverage(db, policy, procedures, { primary = null } = {}) {
   if (!policy) {
     return {
       policy: null,
@@ -48,8 +87,9 @@ export async function estimateCoverage(db, policy, procedures) {
     const row = await db.get('SELECT fee FROM fee_schedule_items WHERE fee_schedule_id = ? AND code = ?', scheduleId, p.code);
     return row ? Math.min(row.fee, p.fee) : p.fee;
   };
-  let remainingMax = Math.max(0, policy.annual_max - (await benefitsUsed(db, policy)));
-  let remainingDeductible = Math.max(0, policy.deductible - policy.deductible_met);
+  const today = (await practiceNow(db, policy.practice_id)).slice(0, 10);
+  let remainingMax = Math.max(0, policy.annual_max - (await benefitsUsed(db, policy, today)));
+  let remainingDeductible = Math.max(0, policy.deductible - deductibleMet(policy, today));
   const items = await mapSeq(procedures, async (p) => {
     const tier = coverageTier(p.category);
     const pct = policy[`pct_${tier}`] ?? 0;
@@ -62,9 +102,18 @@ export async function estimateCoverage(db, policy, procedures) {
       allowed -= deductible;
     }
     let insurance = Math.round((allowed * pct) / 100);
+    let writeOff = p.fee - contracted;
+    let owed = contracted;
+    const prior = primary?.get(p.id);
+    if (prior) {
+      // Coordination of benefits: the primary's allowed amount stands and its write-off isn't repeated.
+      owed = Math.max(0, p.fee - prior.write_off - prior.covered);
+      writeOff = 0;
+      insurance = Math.min(insurance, owed);
+    }
     insurance = Math.min(insurance, remainingMax);
     remainingMax -= insurance;
-    return { procedure_id: p.id, fee: p.fee, allowed: contracted, write_off: p.fee - contracted, tier, pct, deductible, insurance, patient: contracted - insurance };
+    return { procedure_id: p.id, fee: p.fee, allowed: prior ? p.fee - prior.write_off : contracted, write_off: writeOff, tier, pct, deductible, insurance, primary_covered: prior?.covered ?? 0, patient: owed - insurance };
   });
   const sum = (k) => items.reduce((s, i) => s + i[k], 0);
   return {
@@ -129,7 +178,7 @@ export async function completeProcedure(db, user, procedure, { providerId, appoi
 export async function postClaimPayment(
   db,
   claim,
-  { amount, writeOff = 0, final = true, method = 'check', reference = null, userId = null, date, payerClaimNumber = null }
+  { amount, writeOff = 0, final = true, method = 'check', reference = null, userId = null, date, payerClaimNumber = null, deductible = null }
 ) {
   const carrier = await db.get('SELECT ic.name FROM patient_insurance pi JOIN insurance_carriers ic ON ic.id = pi.carrier_id WHERE pi.id = ?', claim.patient_insurance_id);
   await db.tx(async () => {
@@ -151,9 +200,62 @@ export async function postClaimPayment(
       amount, final ? 'paid' : 'partially_paid', payerClaimNumber, claim.id,
     );
     if (!updated.changes) throw new HttpError(409, `Claim #${claim.id} is no longer open for payment`);
-    // First payment on a claim satisfies the deductible it applied.
-    if (claim.status === 'submitted' && claim.deductible_applied > 0) {
-      await db.run('UPDATE patient_insurance SET deductible_met = CASE WHEN deductible_met + ? > deductible THEN deductible ELSE deductible_met + ? END WHERE id = ?', claim.deductible_applied, claim.deductible_applied, claim.patient_insurance_id);
+    // The first payment on a claim counts toward the deductible: what the payer says it applied (835 PR-1),
+    // or else what we estimated. It goes to the benefit year of the date of service.
+    const applied = deductible ?? (claim.status === 'submitted' ? claim.deductible_applied : 0);
+    if (claim.status === 'submitted' && applied > 0) {
+      const policy = await db.get('SELECT * FROM patient_insurance WHERE id = ?', claim.patient_insurance_id);
+      const dos = (await db.get('SELECT MIN(pr.completed_at) AS d FROM claim_items ci JOIN procedures pr ON pr.id = ci.procedure_id WHERE ci.claim_id = ?', claim.id)).d?.slice(0, 10) || date;
+      const { start } = benefitYear(policy, dos);
+      const current = benefitYear(policy, date).start;
+      // Only this benefit year's deductible is tracked; a late payment for last year's visit doesn't count.
+      if (start === current) {
+        const met = Math.min(policy.deductible, deductibleMet(policy, date) + applied);
+        await db.run('UPDATE patient_insurance SET deductible_met = ?, deductible_year = ? WHERE id = ?', met, start, policy.id);
+      }
     }
+  });
+}
+
+// Posting dates: nothing on or before the practice's lock date (closed books), nothing in the future.
+export async function checkPostingDate(db, practiceId, date) {
+  const today = (await practiceNow(db, practiceId)).slice(0, 10);
+  if (!date) return today;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date))) throw new HttpError(400, 'entry_date must be YYYY-MM-DD');
+  if (date > today) throw new HttpError(400, "Entries can't be dated in the future");
+  const lock = (await db.get('SELECT lock_date FROM practices WHERE id = ?', practiceId))?.lock_date;
+  if (lock && date <= lock) throw new HttpError(400, `The books are closed through ${lock} — date it after that, or ask an administrator to move the lock date`);
+  return date;
+}
+
+// Reverses a ledger entry. The original stays (marked void) and an equal and opposite entry of the same
+// type is posted today, so past day sheets and closed periods never change.
+export async function reverseEntry(db, entry, { userId, reason, date }) {
+  if (entry.reverses_id) throw new HttpError(409, "A reversal can't itself be voided");
+  const marked = await db.run("UPDATE ledger_entries SET voided_at = datetime('now'), voided_by = ?, void_reason = ? WHERE id = ? AND voided_at IS NULL", userId ?? null, reason, entry.id);
+  if (!marked.changes) throw new HttpError(409, 'That entry was already voided');
+  return insert(db, 'ledger_entries', {
+    practice_id: entry.practice_id, patient_id: entry.patient_id, type: entry.type, amount: -entry.amount,
+    description: `Void: ${entry.description}`.slice(0, 300), method: entry.method, reference: entry.reference,
+    procedure_id: entry.procedure_id, claim_id: entry.claim_id, provider_id: entry.provider_id, payment_plan_id: entry.payment_plan_id,
+    entry_date: date, created_by: userId ?? null, reverses_id: entry.id,
+  });
+}
+
+// Voids a patient-side ledger entry. Voiding a procedure's charge un-completes the procedure (back to
+// planned, off production); insurance entries are undone by reopening their claim instead.
+export async function voidLedgerEntry(db, entry, { userId, reason }) {
+  if (!String(reason || '').trim()) throw new HttpError(400, 'Give a reason for the void');
+  if (entry.voided_at) throw new HttpError(409, 'That entry was already voided');
+  if (entry.reverses_id) throw new HttpError(409, "A reversal can't itself be voided");
+  if (entry.claim_id) throw new HttpError(409, `This came from insurance claim #${entry.claim_id} — reopen the claim to undo it`);
+  const date = (await practiceNow(db, entry.practice_id)).slice(0, 10);
+  return db.tx(async () => {
+    if (entry.type === 'charge' && entry.procedure_id) {
+      const claim = await db.get("SELECT c.id FROM claim_items ci JOIN claims c ON c.id = ci.claim_id WHERE ci.procedure_id = ? AND c.status != 'void'", entry.procedure_id);
+      if (claim) throw new HttpError(409, `The procedure is on claim #${claim.id} — void that claim first`);
+      await db.run("UPDATE procedures SET status = 'planned', completed_at = NULL WHERE id = ? AND status = 'completed'", entry.procedure_id);
+    }
+    return reverseEntry(db, entry, { userId, reason: String(reason).trim().slice(0, 300), date });
   });
 }

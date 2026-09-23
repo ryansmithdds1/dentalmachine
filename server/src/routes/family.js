@@ -23,10 +23,10 @@ export function installmentDate(plan, i) {
 export async function planStatus(db, plan, today) {
   const financed = plan.total - plan.down_payment;
   const paid = -(await db.get('SELECT COALESCE(SUM(amount), 0) AS n FROM ledger_entries WHERE payment_plan_id = ?', plan.id)).n;
-  const schedule = Array.from({ length: plan.installments }, (_, i) => {
-    const amount = i === plan.installments - 1 ? financed - plan.installment_amount * (plan.installments - 1) : plan.installment_amount;
-    return { n: i + 1, due_date: installmentDate(plan, i), amount };
-  });
+  // Even installments; the leftover cents go on the first ones (so none is ever negative or short).
+  const base = Math.floor(financed / plan.installments);
+  const extra = financed - base * plan.installments;
+  const schedule = Array.from({ length: plan.installments }, (_, i) => ({ n: i + 1, due_date: installmentDate(plan, i), amount: base + (i < extra ? 1 : 0) }));
   let cumulative = 0;
   let dueToDate = 0;
   for (const s of schedule) {

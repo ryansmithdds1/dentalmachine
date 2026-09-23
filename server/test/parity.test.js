@@ -168,7 +168,9 @@ test('analytics KPIs, statement batch, recall campaign, review requests and temp
   const past = localNow('America/New_York', new Date(Date.now() - 3 * 86400_000)).slice(0, 10);
   const visit = (await api.post('/appointments', { patient_id: patient.id, provider_id: hygienist.id, start_time: `${past} 09:00`, end_time: `${past} 10:00` })).data;
   await api.put(`/appointments/${visit.id}`, { status: 'completed' });
-  await api.post('/appointments', { patient_id: patient.id, provider_id: hygienist.id, start_time: '2031-01-05 09:00', end_time: '2031-01-05 10:00' });
+  // The next visit was booked before the patient left (a visit booked weeks later wouldn't count).
+  const next = (await api.post('/appointments', { patient_id: patient.id, provider_id: hygienist.id, start_time: '2031-01-05 09:00', end_time: '2031-01-05 10:00' })).data;
+  await db.run('UPDATE appointments SET created_at = ? WHERE id = ?', `${past} 15:00:00`, next.id);
   await api.post(`/patients/${patient.id}/procedures`, { code: 'D1110', provider_id: hygienist.id, complete: true });
   const plan = (await api.post(`/patients/${patient.id}/treatment-plans`, { name: 'A', procedures: [{ code: 'D2740', tooth: '3', provider_id: dentist.id }] })).data;
   await api.put(`/treatment-plans/${plan.id}`, { status: 'accepted' });

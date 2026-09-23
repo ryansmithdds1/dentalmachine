@@ -225,6 +225,11 @@ function Practice() {
               {[5, 10, 15, 30, 60, 120, 240].map((m) => <option key={m} value={m}>{m < 60 ? `${m} minutes` : `${m / 60} hour${m > 60 ? 's' : ''}`}</option>)}
             </select>
           </label>
+          <label>
+            Books closed through
+            <input type="date" value={current.lock_date || ''} max={new Date(Date.now() - 86400_000).toLocaleDateString('en-CA')} onChange={(e) => change('lock_date', e.target.value || null)} />
+            <span className="muted" style={{ fontSize: 12 }}>Nothing can be posted or backdated on or before this date (month-end close). Corrections post today.</span>
+          </label>
           <div>
             <div className="muted" style={{ fontSize: 13, marginBottom: 6 }}>Your data is yours. Download everything (patients, charts, ledger, claims, schedule) as JSON.</div>
             <button type="button" onClick={exportData}>⬇ Export practice data</button>

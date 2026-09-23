@@ -41,7 +41,10 @@ export default function Statement() {
             {s.entries.map((e) => (
               <tr key={e.id}><td>{fmtDate(e.entry_date)}</td>{s.family && <td>{e.patient_first_name}</td>}<td>{e.description}</td><td>{label(e.type)}</td><td className="num">{money(e.amount)}</td></tr>
             ))}
-            <tr className="totals-row"><td colSpan={s.family ? 4 : 3}>Amount due</td><td className="num">{money(s.balance)}</td></tr>
+            <tr className="totals-row"><td colSpan={s.family ? 4 : 3}>Account balance</td><td className="num">{money(s.balance)}</td></tr>
+            {s.pending_insurance > 0 && <tr><td colSpan={s.family ? 4 : 3}>Less: expected from insurance</td><td className="num">−{money(s.pending_insurance)}</td></tr>}
+            {s.pending_write_off > 0 && <tr><td colSpan={s.family ? 4 : 3}>Less: in-network discount to be applied</td><td className="num">−{money(s.pending_write_off)}</td></tr>}
+            <tr className="totals-row"><td colSpan={s.family ? 4 : 3}>Amount due now</td><td className="num">{money(s.amount_due)}</td></tr>
           </tbody>
         </table>
         <p className="muted" style={{ marginTop: 24 }}>Questions about your bill? Call us at {pr.phone || 'the office'}. Thank you for choosing {pr.name}.</p>

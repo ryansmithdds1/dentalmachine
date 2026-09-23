@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { requirePermission, HttpError } from '../auth.js';
 import {
   pick, requireFields, requireOneOf, insert, update, findOr404, audit, validTooth, normalizeSurfaces, mapSeq } from '../util.js';
-import { completeProcedure, estimateCoverage, primaryPolicy } from '../services.js';
+import { completeProcedure, estimateCoverage, primaryPolicy, voidLedgerEntry } from '../services.js';
 
 export const CONDITIONS = [
   'caries', 'missing', 'filling', 'crown', 'root_canal', 'implant', 'bridge_pontic', 'fracture',
@@ -128,9 +128,20 @@ export default function clinicalRoutes({ db }) {
     res.json(await db.get('SELECT * FROM procedures WHERE id = ?', existing.id));
   });
 
+  // Un-completes a procedure charted in error: its charge is voided (reversed today) and it goes back to planned.
+  r.post('/procedures/:pid/uncomplete', requirePermission('billing:write'), async (req, res) => {
+    const existing = await findOr404(db, 'procedures', req.params.pid, req.user.practice_id, 'Procedure');
+    if (existing.status !== 'completed') throw new HttpError(409, 'Only completed procedures can be un-completed');
+    const charge = await db.get("SELECT * FROM ledger_entries WHERE procedure_id = ? AND type = 'charge' AND voided_at IS NULL AND reverses_id IS NULL ORDER BY id DESC LIMIT 1", existing.id);
+    if (charge) await voidLedgerEntry(db, charge, { userId: req.user.id, reason: req.body?.reason });
+    else await db.run("UPDATE procedures SET status = 'planned', completed_at = NULL WHERE id = ?", existing.id);
+    await audit(db, req, 'procedure.uncomplete', 'procedures', existing.id, { reason: req.body?.reason });
+    res.json(await db.get('SELECT * FROM procedures WHERE id = ?', existing.id));
+  });
+
   r.post('/procedures/:pid/cancel', requirePermission('clinical:write'), async (req, res) => {
     const existing = await findOr404(db, 'procedures', req.params.pid, req.user.practice_id, 'Procedure');
-    if (existing.status !== 'planned') throw new HttpError(409, 'Only planned procedures can be cancelled; reverse completed work with a ledger adjustment');
+    if (existing.status !== 'planned') throw new HttpError(409, 'Only planned procedures can be cancelled; un-complete completed work first');
     await db.run("UPDATE procedures SET status = 'cancelled' WHERE id = ?", existing.id);
     await audit(db, req, 'procedure.cancel', 'procedures', existing.id);
     res.json({ ok: true });
