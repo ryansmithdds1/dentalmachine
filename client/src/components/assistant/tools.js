@@ -53,7 +53,7 @@ async function setup() {
     const [providers, operatories, types] = await Promise.all([api.get('/providers'), api.get('/operatories'), api.get('/appointment-types')]);
     setupCache = {
       providers: providers.filter((p) => p.active !== 0).map((p) => ({ id: p.id, name: p.name, type: p.type })),
-      chairs: operatories.filter((o) => o.active !== 0).map((o) => ({ id: o.id, name: o.name, hygiene: !!o.is_hygiene })),
+      chairs: operatories.filter((o) => o.active !== 0).map((o) => ({ id: o.id, name: o.name, hygiene: !!o.is_hygiene, usual_provider_id: o.default_provider_id || null })),
       appointment_types: types.filter((t) => t.active !== 0).map((t) => ({ id: t.id, name: t.name, minutes: t.duration })),
     };
     for (const p of setupCache.providers) names.providers.set(p.id, p.name);
@@ -123,13 +123,27 @@ export const READERS = {
   },
 };
 
+// A chair for a booking when none was named: the provider's usual chair if it's free, else a free chair of
+// the right kind (hygiene chairs for hygienists), else the first free one.
+async function freeChair(i, start) {
+  const { chairs, providers } = await setup();
+  const length = i.duration_minutes || names.types.get(i.appointment_type_id)?.minutes || 60;
+  const end = addMinutes(start, length);
+  const busy = new Set((await api.get(`/appointments?from=${start.slice(0, 10)}`))
+    .filter((a) => a.operatory_id && a.start_time.slice(0, 16) < end && a.end_time.slice(0, 16) > start).map((a) => a.operatory_id));
+  const free = chairs.filter((c) => !busy.has(c.id));
+  const hygienist = providers.find((p) => p.id === i.provider_id)?.type === 'hygienist';
+  return (free.find((c) => c.usual_provider_id === i.provider_id) || free.find((c) => c.hygiene === hygienist) || free[0])?.id;
+}
+
 // ---- Tools that change the record (the user confirms first) ----
 export const WRITERS = {
   async book_appointment(i) {
     const start = normTime(i.start_time);
     await setup();
+    const operatoryId = i.operatory_id || await freeChair(i, start);
     const body = {
-      patient_id: i.patient_id, provider_id: i.provider_id, start_time: start, operatory_id: i.operatory_id, appointment_type_id: i.appointment_type_id, reason: i.reason, notes: i.notes,
+      patient_id: i.patient_id, provider_id: i.provider_id, start_time: start, operatory_id: operatoryId, appointment_type_id: i.appointment_type_id, reason: i.reason, notes: i.notes,
       ...(i.appointment_type_id && !i.duration_minutes ? {} : { end_time: addMinutes(start, i.duration_minutes || 60) }),
     };
     return apptView(await api.post('/appointments', body));

@@ -1,7 +1,9 @@
 import { Router } from 'express';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import Anthropic from '@anthropic-ai/sdk';
 import { HttpError, rateLimit } from '../auth.js';
 import { audit, practiceNow } from '../util.js';
+import { log } from '../monitoring.js';
 
 // The assistant: staff say (or type) what they want — "book Ryan Smith for a crown prep with Dr. Lee next
 // Tuesday", "take a $120 card payment", "note: patient reports sensitivity on 19" — and Claude works out
@@ -216,7 +218,7 @@ export function assistantConfig(env = process.env) {
   return {
     apiKey: env.ANTHROPIC_API_KEY || null,
     baseURL: env.ANTHROPIC_BASE_URL || undefined,
-    model: env.ASSISTANT_MODEL || 'claude-opus-5',
+    model: env.ASSISTANT_MODEL || 'claude-opus-5-5',
     effort: ['low', 'medium', 'high'].includes(env.ASSISTANT_EFFORT) ? env.ASSISTANT_EFFORT : 'medium',
     enabled: env.ASSISTANT !== 'off' && !!env.ANTHROPIC_API_KEY,
   };
@@ -225,11 +227,19 @@ export function assistantConfig(env = process.env) {
 const MAX_MESSAGES = 60;
 const MAX_CHARS = 200_000;
 
-export default function assistantRoutes({ db, config }) {
+export default function assistantRoutes({ db, config, secret }) {
   const r = Router();
   const cfg = config.assistant || assistantConfig();
   const client = cfg.enabled ? new Anthropic({ apiKey: cfg.apiKey, baseURL: cfg.baseURL, maxRetries: 2, timeout: 60_000 }) : null;
   const limiter = rateLimit({ windowMs: 60_000, max: 40, name: 'assistant' });
+  // Screen notes stay in the conversation (the history is append-only, which newer models check), so
+  // the browser keeps them — signed, so a note it sends back is one this server wrote for this user.
+  const sign = (userId, text) => createHmac('sha256', `${secret}:assistant-note`).update(`${userId}\n${text}`).digest('base64url');
+  const signedOk = (userId, text, sig) => {
+    const want = Buffer.from(sign(userId, text));
+    const got = Buffer.from(String(sig || ''));
+    return got.length === want.length && timingSafeEqual(got, want);
+  };
 
   r.get('/assistant', (req, res) => {
     res.json({ enabled: !!client, tools: TOOLS.map((t) => ({ name: t.name, kind: t.kind })) });
@@ -243,9 +253,11 @@ export default function assistantRoutes({ db, config }) {
     if (!Array.isArray(messages) || !messages.length || messages.length > MAX_MESSAGES) throw new HttpError(400, `messages must be a list of 1-${MAX_MESSAGES}`);
     if (JSON.stringify(messages).length > MAX_CHARS) throw new HttpError(413, 'This conversation is too long — start a new one');
     for (const m of messages) {
-      if (!m || !['user', 'assistant'].includes(m.role) || (typeof m.content !== 'string' && !Array.isArray(m.content))) throw new HttpError(400, 'Each message needs a role (user or assistant) and content');
+      if (!m || !['user', 'assistant', 'system'].includes(m.role) || (typeof m.content !== 'string' && !Array.isArray(m.content))) throw new HttpError(400, 'Each message needs a role (user or assistant) and content');
+      if (m.role === 'system' && (typeof m.content !== 'string' || !signedOk(req.user.id, m.content, m.sig))) throw new HttpError(400, 'That conversation was changed — start a new one');
     }
     if (messages[0].role !== 'user') throw new HttpError(400, 'The conversation must start with the user');
+    if (messages.at(-1).role !== 'user') throw new HttpError(400, 'The conversation must end with the user');
 
     // Where the person is and what day it is ride along as an operator note, after the stable (cached) prefix.
     const ctx = req.body?.context || {};
@@ -257,22 +269,26 @@ export default function assistantRoutes({ db, config }) {
       ctx.patient_id ? `On screen: the chart of patient #${Number(ctx.patient_id)}${ctx.patient_name ? ` (${String(ctx.patient_name).slice(0, 80)})` : ''}${ctx.tab ? `, ${String(ctx.tab).slice(0, 20)} tab` : ''}.` : `On screen: ${String(ctx.screen || 'the app').slice(0, 40)}.`,
     ].join(' ');
 
-    // Opus 5 / Fable take the screen note as a mid-conversation system message, so the instructions,
-    // tools and history stay a cached prefix; other models get it in the system prompt.
+    // Newer models (Opus 5 / 5.5, Fable) take the screen note as a mid-conversation system message kept in
+    // the history, so the instructions, tools and history stay one unchanging, cached prefix; other models
+    // get the latest note in the system prompt and don't see earlier ones.
     const midSystem = /^claude-(opus-5|fable-5)/.test(cfg.model);
     const note = `Practice: ${practice?.name || ''}. ${screen}`;
+    const history = messages.filter((m) => midSystem || m.role !== 'system').map((m) => (m.role === 'system' ? { role: 'system', content: m.content } : m));
     let response;
     try {
       response = await client.beta.messages.create({
         model: cfg.model,
         max_tokens: 8000,
-        ...(midSystem ? { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' } : {}),
-        thinking: { type: 'adaptive' },
+        // A declined request is retried on the model Anthropic recommends; a thinking block whose earlier
+        // conversation doesn't match is dropped rather than failing the request.
+        ...(midSystem ? { betas: ['server-side-fallback-2026-07-01', 'thinking-binding-controls-2026-08-01'], fallbacks: 'default' } : {}),
+        thinking: midSystem ? { type: 'adaptive', block_binding: { prefix_mismatch_behavior: 'drop_block' } } : { type: 'adaptive' },
         output_config: { effort: cfg.effort },
         cache_control: { type: 'ephemeral' },
         system: midSystem ? SYSTEM : [{ type: 'text', text: SYSTEM }, { type: 'text', text: note }],
         tools: API_TOOLS,
-        messages: midSystem ? [...messages, { role: 'system', content: note }] : messages,
+        messages: midSystem ? [...history, { role: 'system', content: note }] : history,
       });
     } catch (err) {
       if (err instanceof Anthropic.RateLimitError) throw new HttpError(429, 'The assistant is busy — try again in a moment');
@@ -282,7 +298,11 @@ export default function assistantRoutes({ db, config }) {
       throw err;
     }
     await audit(db, req, 'assistant.turn', null, null, { tools: response.content.filter((b) => b.type === 'tool_use').map((b) => b.name) });
+    const dropped = (response.input_transformations || []).length;
+    if (dropped) log.warn('assistant: earlier reasoning dropped (conversation changed)', { dropped });
     res.json({
+      // The browser appends the note (then Claude's turn) to its copy of the conversation.
+      ...(midSystem ? { note: { role: 'system', content: note, sig: sign(req.user.id, note) } } : {}),
       content: response.content,
       stop_reason: response.stop_reason,
       refused: response.stop_reason === 'refusal',

@@ -175,7 +175,7 @@ Changing `JWT_SECRET` signs everyone out once.
 
 Staff can say or type what they want from any screen: press **F2** (or the button in the corner) and say "book Ryan Smith for a crown prep with Dr. Lee next Tuesday afternoon", "take a $120 card payment", "note: patient reports cold sensitivity on 19", "plan an MOD composite on 30", "perio on 3: buccal 3 2 4, bleeding on the mesial", or "check in the 10 o'clock". The assistant looks things up (patients, open times, codes), then shows exactly what it will change and waits for "yes" or **Confirm**; nothing changes without it. It acts as the signed-in user through the normal API, so permissions, office restrictions, validation and the audit log apply as usual.
 
-- Turn it on with `ANTHROPIC_API_KEY` (an Anthropic API key). Optional: `ASSISTANT_MODEL` (default `claude-opus-5`), `ASSISTANT_EFFORT` (`low`, `medium` (default) or `high` — lower is faster and cheaper), `ASSISTANT=off`.
+- Turn it on with `ANTHROPIC_API_KEY` (an Anthropic API key). Optional: `ASSISTANT_MODEL` (default `claude-opus-5-5`), `ASSISTANT_EFFORT` (`low`, `medium` (default) or `high` — lower is faster and cheaper), `ASSISTANT=off`.
 - **HIPAA:** what staff say and what the assistant looks up goes to Anthropic, so sign Anthropic's BAA before using it with real patients. Voice input uses the browser's speech recognition, which in Chrome may send audio to Google unless it runs on the device; see [docs/HIPAA-vendors.md](docs/HIPAA-vendors.md).
 - Replies are read aloud after spoken requests (toggle in the panel).
 

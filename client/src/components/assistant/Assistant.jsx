@@ -65,6 +65,8 @@ export default function Assistant() {
     try {
       for (let step = 0; step < MAX_STEPS; step++) {
         const turn = await api.post('/assistant/turn', { messages: history.current, context: context() });
+        // Append-only: the screen note the server added, then Claude's turn exactly as returned.
+        if (turn.note) history.current.push(turn.note);
         history.current.push({ role: 'assistant', content: turn.content });
         const said = turn.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
         const uses = turn.content.filter((b) => b.type === 'tool_use');
@@ -107,8 +109,8 @@ export default function Assistant() {
       add({ kind: 'error', text: 'That took too many steps — try saying it a different way.' });
     } catch (err) {
       add({ kind: 'error', text: err.message });
-      // Keep the conversation usable: drop the unanswered turn.
-      while (history.current.length && history.current.at(-1).role === 'assistant') history.current.pop();
+      // Keep the conversation usable: drop the unanswered turn (and its screen note).
+      while (history.current.length && ['assistant', 'system'].includes(history.current.at(-1).role)) history.current.pop();
     } finally {
       setBusy(false);
     }
