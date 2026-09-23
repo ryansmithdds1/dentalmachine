@@ -336,4 +336,10 @@ export default {
   'Google Calendar': 'Google Calendar',
   'Directions': 'Cómo llegar',
   'Call us': 'Llámenos',
+  'Check in': 'Registrarse',
+  'You’re checked in': 'Ya está registrado',
+  'Have a seat — or wait in your car, and we’ll text you when we’re ready.': 'Tome asiento, o espere en su auto y le enviaremos un mensaje cuando estemos listos.',
+  'Mobile number': 'Número de celular',
+  'Patient’s date of birth': 'Fecha de nacimiento del paciente',
+  'Checking in a child? Use your number and their date of birth.': '¿Registra a un niño? Use su número y la fecha de nacimiento del niño.',
 };

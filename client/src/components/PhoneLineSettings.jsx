@@ -48,6 +48,29 @@ export default function PhoneLineSettings() {
       <label style={{ marginTop: 8 }}>Voicemail greeting<textarea rows={2} value={cur.voicemail_greeting} onChange={(e) => change({ voicemail_greeting: e.target.value })} placeholder={`You've reached ${practice.name}. We can't take your call right now…`} /></label>
       <p className="muted" style={{ fontSize: 12 }}>The AI receptionist can find open times and book existing patients, take new-patient requests (held for you in Online requests), move or cancel a caller’s visit, and take messages. It never gives medical advice; urgent calls become a high-priority task.</p>
       <div className="form-actions">{saved && <span className="muted">Saved</span>}<button className="primary" disabled={busy}>Save</button></div>
+      <TrackingNumbers />
     </form>
+  );
+}
+
+// Call tracking: a Twilio number per marketing source, pointed at the same webhook; calls to it are tagged
+// with the source, and the patients they become are credited to it (Calls → Sources).
+function TrackingNumbers() {
+  const { data, reload } = useApi('/tracking-numbers');
+  const [f, setF] = useState({ number: '', source: '', monthly_cost: '' });
+  const add = useSubmit(async () => { await api.post('/tracking-numbers', f); setF({ number: '', source: '', monthly_cost: '' }); reload(); });
+  return (
+    <div style={{ marginTop: 16, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+      <h3 style={{ margin: 0 }}>Call tracking numbers</h3>
+      <p className="muted" style={{ fontSize: 12 }}>Buy a Twilio number for each ad or mailer, point its “A call comes in” webhook at the same address as above, and list it here. Its calls ring your office as usual and show which source they came from.</p>
+      <ErrorBox error={add.error} />
+      {(data || []).map((t) => <div key={t.id} className="inline" style={{ gap: 8, fontSize: 13 }}><strong>{t.source}</strong> {t.number} {t.monthly_cost ? <span className="muted">${(t.monthly_cost / 100).toFixed(0)}/month</span> : null}{!t.active && <span className="muted">(off)</span>}</div>)}
+      <div className="inline" style={{ gap: 6, marginTop: 6 }}>
+        <input placeholder="+1 512 555 0199" value={f.number} onChange={(e) => setF({ ...f, number: e.target.value })} style={{ width: 150 }} />
+        <input placeholder="Source (e.g. Google Ads)" value={f.source} onChange={(e) => setF({ ...f, source: e.target.value })} />
+        <input type="number" placeholder="$ / month" value={f.monthly_cost} onChange={(e) => setF({ ...f, monthly_cost: e.target.value })} style={{ width: 100 }} />
+        <button type="button" className="small" disabled={add.busy || !f.number || !f.source} onClick={add.submit}>Add</button>
+      </div>
+    </div>
   );
 }

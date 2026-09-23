@@ -21,7 +21,7 @@ export default function Calls() {
   const { can } = useAuth();
   const [filter, setFilter] = useState('');
   const [days, setDays] = useState(30);
-  const { data, reload, error } = useApi(`/calls?days=${days}${filter ? `&filter=${filter}` : ''}`);
+  const { data, reload, error } = useApi(filter === 'sources' ? null : `/calls?days=${days}${filter ? `&filter=${filter}` : ''}`);
   const [open, setOpen] = useState(null);
   useLiveEvents((e) => e.type === 'call' && reload());
   const s = data?.stats;
@@ -45,11 +45,12 @@ export default function Calls() {
       )}
       <div className="inline" style={{ margin: '12px 0', gap: 8 }}>
         <div className="tabs" style={{ margin: 0 }}>
-          {[['', 'All'], ['missed', 'Missed'], ['follow_up', 'Needs follow-up']].map(([k, l]) => <button key={k} className={filter === k ? 'active' : ''} onClick={() => setFilter(k)}>{l}</button>)}
+          {[['', 'All'], ['missed', 'Missed'], ['follow_up', 'Needs follow-up'], ['sources', 'Sources']].map(([k, l]) => <button key={k} className={filter === k ? 'active' : ''} onClick={() => setFilter(k)}>{l}</button>)}
         </div>
         <select value={days} onChange={(e) => setDays(Number(e.target.value))} aria-label="Period"><option value={7}>7 days</option><option value={30}>30 days</option><option value={90}>90 days</option></select>
       </div>
-      <div className="card" style={{ padding: 0 }}>
+      {filter === 'sources' && <Sources days={days} />}
+      {filter !== 'sources' && <div className="card" style={{ padding: 0 }}>
         <div className="table-wrap">
           <table>
             <thead><tr><th>When</th><th /><th>Who</th><th>What happened</th><th>Summary</th><th className="num">Length</th><th /></tr></thead>
@@ -72,7 +73,7 @@ export default function Calls() {
           </table>
           {data?.calls.length === 0 && <div className="empty">No calls in this period. Connect the office line in Settings → Phone line.</div>}
         </div>
-      </div>
+      </div>}
       {open && <CallDetail id={open} canWrite={can('patients:write')} onClose={() => { setOpen(null); reload(); }} />}
     </>
   );
@@ -106,5 +107,30 @@ function CallDetail({ id, canWrite, onClose }) {
         <div style={{ marginTop: 10, maxHeight: 360, overflow: 'auto', fontSize: 13, whiteSpace: 'pre-wrap', background: 'var(--surface-2, transparent)', padding: 10, borderRadius: 6 }}>{c.transcript}</div>
       )}
     </Modal>
+  );
+}
+
+// Call tracking: calls, new callers and the patients they became, by marketing source.
+function Sources({ days }) {
+  const { data } = useApi(`/calls/sources?days=${days}`);
+  if (!data) return <div className="empty">Loading…</div>;
+  const m = (c) => (c == null ? '—' : `$${Math.round(c / 100).toLocaleString()}`);
+  return (
+    <div className="card" style={{ padding: 0 }}>
+      <div className="table-wrap">
+        <table>
+          <thead><tr><th>Source</th><th className="num">Calls</th><th className="num">Missed</th><th className="num">New callers</th><th className="num">New patients</th><th className="num">Their production</th><th className="num">Spend</th><th className="num">Per new patient</th><th className="num">Return</th></tr></thead>
+          <tbody>
+            {data.sources.map((s) => (
+              <tr key={s.source}>
+                <td><strong>{s.source}</strong></td><td className="num">{s.calls}</td><td className="num">{s.missed}</td><td className="num">{s.new_callers}</td><td className="num">{s.new_patients}</td>
+                <td className="num">{m(s.production)}</td><td className="num">{s.spend ? m(s.spend) : '—'}</td><td className="num">{m(s.cost_per_new_patient)}</td><td className="num">{s.return_on_spend != null ? `${s.return_on_spend}×` : '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {data.sources.length === 0 && <div className="empty">No calls yet. Add tracking numbers in Settings → Phone line.</div>}
+      </div>
+    </div>
   );
 }

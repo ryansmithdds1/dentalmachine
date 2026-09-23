@@ -1,4 +1,5 @@
 import express, { Router } from 'express';
+import { HERE, checkInToday } from '../checkin.js';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { requirePermission, HttpError } from '../auth.js';
 import { sendMessage, recordOptOut, clearOptOut, isOptedOutAddress, visitsText, markBad } from '../messaging.js';
@@ -117,6 +118,13 @@ export function smsWebhook({ db, config }) {
       // The number itself is recorded too, so nothing reaches it even if it isn't (yet) on a patient's chart.
       await recordOptOut(db, practice.id, 'sms', from, 'stop');
       // Twilio sends the carrier-required opt-out confirmation itself.
+    } else if (HERE.includes(keyword) && candidates.length) {
+      // Arrived: check in today's visits for everyone at this number.
+      const done = await checkInToday(db, practice.id, household.map((p) => p.id), { via: 'text' });
+      const names = [...new Set(done.map((v) => v.first_name))].join(lang === 'es' ? ' y ' : ' and ');
+      reply = done.length
+        ? (lang === 'es' ? `¡Gracias! ${names} ya está registrado(a). Le avisaremos por mensaje cuando estemos listos.` : `Thanks! ${names} ${done.length > 1 ? 'are' : 'is'} checked in. We'll text you when we're ready for you.`)
+        : (lang === 'es' ? `No encontramos una cita para hoy. Por favor pase a la recepción o llame al ${phone}.` : `We couldn't find a visit for today. Please come to the front desk or call ${phone}.`);
     } else if (START.includes(keyword)) {
       for (const p of candidates) await db.run('UPDATE patients SET sms_opt_in = 1 WHERE id = ?', p.id);
       await clearOptOut(db, practice.id, 'sms', from);

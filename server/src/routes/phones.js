@@ -38,7 +38,9 @@ export function phoneWebhooks({ db, config, messenger, storage, transcriber, fet
     if (!practice) return send(res, say('Sorry, this number is not in service.') + '<Hangup/>');
     const from = String(req.body.From || '');
     const patient = await patientForNumber(db, practice.id, from);
+    const tracked = (await db.all('SELECT number, source FROM tracking_numbers WHERE practice_id = ? AND active = 1', practice.id)).find((t) => t.number.replace(/\D/g, '').slice(-10) === String(req.body.To || '').replace(/\D/g, '').slice(-10));
     const id = await insert(db, 'calls', {
+      source: tracked?.source ?? null, new_caller: patient ? 0 : 1,
       practice_id: practice.id, patient_id: patient?.id ?? null, direction: 'inbound', purpose: 'inbound', from_number: from, to_number: String(req.body.To || ''),
       provider_id: String(req.body.CallSid || '') || null, status: 'ringing', caller_name: req.body.CallerName || null,
     });
@@ -139,6 +141,8 @@ export function phoneWebhooks({ db, config, messenger, storage, transcriber, fet
   return r;
 }
 
+const requireAdmin = (req, _res, next) => (req.user.role === 'admin' ? next() : next(new HttpError(403, 'Only administrators can do this')));
+
 // Staff: the call log, playing a recording, and the caller card for the screen pop.
 export default function phoneRoutes({ db, storage }) {
   const r = Router();
@@ -167,6 +171,57 @@ export default function phoneRoutes({ db, storage }) {
     );
     res.json({ calls: rows, stats });
   });
+  // ---- Call tracking ----
+  r.get('/tracking-numbers', requirePermission('reports:read'), async (req, res) => res.json(await db.all('SELECT * FROM tracking_numbers WHERE practice_id = ? ORDER BY source', req.user.practice_id)));
+  r.post('/tracking-numbers', requireAdmin, async (req, res) => {
+    const number = String(req.body?.number || '').trim();
+    const source = String(req.body?.source || '').trim().slice(0, 80);
+    if (number.replace(/\D/g, '').length < 10 || !source) throw new HttpError(400, 'A phone number and the source it’s used for are required');
+    const id = await insert(db, 'tracking_numbers', { practice_id: req.user.practice_id, number, source, monthly_cost: Math.max(0, Math.round(Number(req.body.monthly_cost || 0) * 100)) });
+    res.status(201).json(await db.get('SELECT * FROM tracking_numbers WHERE id = ?', id));
+  });
+  r.put('/tracking-numbers/:tid', requireAdmin, async (req, res) => {
+    const t = await findOr404(db, 'tracking_numbers', req.params.tid, req.user.practice_id, 'Tracking number');
+    await db.run('UPDATE tracking_numbers SET source = COALESCE(?, source), monthly_cost = COALESCE(?, monthly_cost), active = COALESCE(?, active) WHERE id = ?',
+      req.body.source ? String(req.body.source).slice(0, 80) : null, req.body.monthly_cost != null ? Math.max(0, Math.round(Number(req.body.monthly_cost) * 100)) : null, req.body.active != null ? (req.body.active ? 1 : 0) : null, t.id);
+    res.json(await db.get('SELECT * FROM tracking_numbers WHERE id = ?', t.id));
+  });
+  // Which sources bring calls, new patients and production — and what each costs per new patient.
+  r.get('/calls/sources', requirePermission('reports:read'), async (req, res) => {
+    const pid = req.user.practice_id;
+    const days = Math.min(730, Math.max(7, Number(req.query.days) || 90));
+    const since = new Date(Date.now() - days * 86400_000).toISOString().slice(0, 19).replace('T', ' ');
+    const calls = await db.all("SELECT id, from_number, source, outcome, new_caller, created_at FROM calls WHERE practice_id = ? AND direction = 'inbound' AND created_at >= ? ORDER BY id", pid, since);
+    const patients = await db.all("SELECT id, phone, created_at FROM patients WHERE practice_id = ? AND created_at >= ? AND phone IS NOT NULL", pid, since);
+    const tail = (s) => String(s || '').replace(/\D/g, '').slice(-10);
+    const firstCall = new Map();
+    for (const c of calls) if (c.new_caller && !firstCall.has(tail(c.from_number))) firstCall.set(tail(c.from_number), c);
+    const rows = new Map();
+    const row = (source) => {
+      if (!rows.has(source)) rows.set(source, { source, calls: 0, missed: 0, new_callers: new Set(), new_patients: [], production: 0 });
+      return rows.get(source);
+    };
+    for (const c of calls) {
+      const r0 = row(c.source || 'Main number');
+      r0.calls++;
+      if (['missed', 'voicemail', 'after_hours', 'hung_up'].includes(c.outcome)) r0.missed++;
+      if (c.new_caller) r0.new_callers.add(tail(c.from_number));
+    }
+    // A new patient is credited to the source of their first call, when they became a patient after it.
+    for (const p of patients) {
+      const c = firstCall.get(tail(p.phone));
+      if (c && p.created_at >= c.created_at) row(c.source || 'Main number').new_patients.push(p.id);
+    }
+    const costs = new Map((await db.all('SELECT source, SUM(monthly_cost) AS cost FROM tracking_numbers WHERE practice_id = ? GROUP BY source', pid)).map((t) => [t.source, Number(t.cost) || 0]));
+    const out = [];
+    for (const r0 of rows.values()) {
+      const production = r0.new_patients.length ? Number((await db.get(`SELECT SUM(amount) AS n FROM ledger_entries WHERE type = 'charge' AND patient_id IN (${r0.new_patients.map(() => '?').join(',')})`, ...r0.new_patients))?.n) || 0 : 0;
+      const spend = Math.round(((costs.get(r0.source) || 0) * days) / 30);
+      out.push({ source: r0.source, calls: r0.calls, missed: r0.missed, new_callers: r0.new_callers.size, new_patients: r0.new_patients.length, production, spend, cost_per_new_patient: spend && r0.new_patients.length ? Math.round(spend / r0.new_patients.length) : null, return_on_spend: spend ? Math.round((production / spend) * 10) / 10 : null });
+    }
+    res.json({ days, sources: out.sort((a, b) => b.new_patients - a.new_patients || b.calls - a.calls) });
+  });
+
   r.get('/calls/:cid', requirePermission('patients:read'), async (req, res) => {
     const c = await findOr404(db, 'calls', req.params.cid, req.user.practice_id, 'Call');
     await audit(db, req, 'call.view', 'calls', c.id);

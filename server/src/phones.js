@@ -15,6 +15,9 @@ export async function practiceForNumber(db, to) {
   const all = await db.all('SELECT * FROM practices WHERE voice_number IS NOT NULL OR sms_number IS NOT NULL');
   const hit = all.find((p) => digits(p.voice_number) === digits(to)) || all.find((p) => digits(p.sms_number) === digits(to));
   if (hit) return hit;
+  // A call-tracking number rings the practice it belongs to.
+  const tracked = (await db.all('SELECT practice_id, number FROM tracking_numbers WHERE active = 1')).find((t) => digits(t.number) === digits(to));
+  if (tracked) return db.get('SELECT * FROM practices WHERE id = ?', tracked.practice_id);
   return (await db.get('SELECT COUNT(*) AS n FROM practices')).n === 1 ? db.get('SELECT * FROM practices LIMIT 1') : null;
 }
 

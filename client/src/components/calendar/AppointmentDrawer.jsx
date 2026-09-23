@@ -66,6 +66,7 @@ export default function AppointmentDrawer({ appt: a, can, onClose, onStatus, onE
           </div>
         )}
         {w && active && (
+          <>
           <div className="drawer-actions">
             {(FLOW[a.status] || []).map(([s, l]) => {
               // Completing the visit completes its planned procedures too (charges post), for clinical staff.
@@ -80,7 +81,10 @@ export default function AppointmentDrawer({ appt: a, can, onClose, onStatus, onE
               return <button key={s} className="primary" onClick={() => onStatus(s)}>{l}</button>;
             })}
             {['checked_in', 'in_chair'].includes(a.status) && onCheckout && <button onClick={onCheckout}>Check out…</button>}
+            {a.status === 'checked_in' && <ReadyText appt={a} />}
           </div>
+          {a.status === 'checked_in' && a.checked_in_via && <div className="muted" style={{ fontSize: 12, marginTop: -4 }}>Checked in {a.checked_in_via === 'qr' ? 'with the QR code' : 'by text'}{a.arrived_at ? ` at ${a.arrived_at.slice(11, 16)}` : ''}</div>}
+          </>
         )}
         {a.status === 'completed' && onCheckout && w && (
           <div className="drawer-actions">
@@ -176,5 +180,19 @@ function ApptHistory({ id }) {
         </ul>
       )}
     </div>
+  );
+}
+
+// For patients waiting in the car: one tap texts them to come in.
+function ReadyText({ appt }) {
+  const [state, setState] = useState(appt.ready_texted_at ? 'Texted' : null);
+  return (
+    <button disabled={!!state && state !== 'Try again'} onClick={async () => {
+      setState('Sending…');
+      try {
+        const r = await api.post(`/appointments/${appt.id}/ready-text`, {});
+        setState(r.status === 'sent' ? 'Texted' : 'Try again');
+      } catch { setState('Try again'); }
+    }}>{state === 'Texted' ? '✓ Texted “we’re ready”' : state || 'Text “we’re ready”'}</button>
   );
 }

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import PhoneLineSettings from '../components/PhoneLineSettings.jsx';
 import EducationSettings from '../components/EducationSettings.jsx';
+import CheckinSettings from '../components/CheckinSettings.jsx';
 import { CardReaderSettings } from '../components/CardReader.jsx';
 import { Link, useSearchParams } from 'react-router-dom';
 import { api, getToken, download } from '../api.js';
@@ -89,7 +90,7 @@ export default function Settings() {
     ['Practice', [['practice', 'Practice & security', admin], ['users', 'Users & roles', admin], ['locations', 'Offices', admin], ['providers', 'Providers', true], ['operatories', 'Operatories', true], ['types', 'Appointment types', true], ['import', 'Import from another system', admin]]],
     ['Clinical', [['templates', 'Note templates', can('clinical:write')], ['forms', 'Forms & consents', can('patients:read')], ['labs', 'Labs', can('clinical:read')], ['education', 'Patient education', can('patients:read')], ['referrals', 'Referral contacts', can('patients:read')]]],
     ['Billing', [['codes', 'Fee schedule', true], ['ppo', 'Fee schedules', can('billing:read')], ['carriers', 'Insurance carriers', can('billing:read')], ['memberships', 'Membership plans', can('billing:read')]]],
-    ['Patients', [['messaging', 'Messages & reviews', admin], ['phone', 'Phone line', admin], ['custom', 'Custom patient fields', admin], ['duplicates', 'Duplicate charts', admin]]],
+    ['Patients', [['messaging', 'Messages & reviews', admin], ['phone', 'Phone line', admin], ['checkin', 'Mobile check-in', admin], ['custom', 'Custom patient fields', admin], ['duplicates', 'Duplicate charts', admin]]],
     ['Connections', [['integrations', 'Integrations', admin], ['imaging', 'Imaging bridges', admin], ['assistant', 'Assistant', admin], ['developer', 'API & webhooks', admin]]],
     ['Compliance', [['audit', 'Audit log', admin], ['backups', 'Backups', admin]]],
   ].map(([g, items]) => [g, items.filter((t) => t[2])]).filter(([, items]) => items.length);
@@ -148,6 +149,7 @@ export default function Settings() {
       {tab === 'messaging' && <Messaging />}
       {tab === 'phone' && <PhoneLineSettings />}
       {tab === 'education' && <EducationSettings />}
+      {tab === 'checkin' && <CheckinSettings />}
       {tab === 'custom' && <CustomFieldsSettings />}
       {tab === 'import' && admin && <ImportData />}
       {tab === 'backups' && admin && <Backups />}

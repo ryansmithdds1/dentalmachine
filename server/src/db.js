@@ -1725,6 +1725,16 @@ CREATE TABLE IF NOT EXISTS education_articles (
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE (practice_id, slug)
 );
+-- Call tracking: a number per marketing source (Google Ads, a mailer, the website) that rings the office line.
+CREATE TABLE IF NOT EXISTS tracking_numbers (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  number TEXT NOT NULL,
+  source TEXT NOT NULL,
+  monthly_cost INTEGER NOT NULL DEFAULT 0,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 CREATE TABLE IF NOT EXISTS organizations (
   id INTEGER PRIMARY KEY,
   name TEXT NOT NULL,
@@ -2032,6 +2042,8 @@ const COLUMNS = [
   ['practices', 'voicemail_greeting', 'TEXT'],
   ['insurance_carriers', 'timely_filing_days', 'INTEGER'],
   // Digital lab Rx: the prescription, its files from the chart, and the lab's private link and updates.
+  ['appointments', 'checked_in_via', 'TEXT'],
+  ['appointments', 'ready_texted_at', 'TEXT'],
   ['lab_cases', 'rx', 'TEXT'],
   ['lab_cases', 'document_ids', 'TEXT'],
   ['lab_cases', 'lab_token_hash', 'TEXT'],
@@ -2043,6 +2055,8 @@ const COLUMNS = [
   ['lab_cases', 'lab_updated_at', 'TEXT'],
   ['lab_cases', 'tracking_number', 'TEXT'],
   ['calls', 'caller_name', 'TEXT'],
+  ['calls', 'source', 'TEXT'],
+  ['calls', 'new_caller', 'INTEGER NOT NULL DEFAULT 0'],
   ['calls', 'ai_turns', 'TEXT'],
   ['calls', 'recording_key', 'TEXT'],
   ['calls', 'recording_encrypted', 'INTEGER NOT NULL DEFAULT 0'],
