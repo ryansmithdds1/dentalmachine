@@ -6,6 +6,7 @@ import { useAuth } from '../../auth.jsx';
 import { money, fmtDate, label, toCents } from '../../format.js';
 import { ErrorBox, Modal, useSubmit } from '../ui.jsx';
 import PaymentPlans from './PaymentPlans.jsx';
+import Financing from './Financing.jsx';
 import { ReaderPay, useReaders } from '../CardReader.jsx';
 
 const KINDS = { Charges: ['charge'], 'Patient payments': ['payment'], 'Insurance payments': ['insurance_payment'], Adjustments: ['adjustment'], Refunds: ['refund'] };
@@ -116,6 +117,7 @@ export default function LedgerTab({ patient, onChange }) {
       </div>
       {modal === 'payment' && <Modal title="Take payment" onClose={() => setModal(null)}><PaymentForm patient={patient} balance={data.patient_portion} lockDate={data.lock_date} onDone={done} /></Modal>}
       <PaymentPlans patient={patient} onChange={reload} />
+      <Financing patient={patient} canWrite={can('billing:write')} onChange={reload} />
       {payRequests?.length > 0 && (
         <div className="card">
           <h3>Online payment requests</h3>

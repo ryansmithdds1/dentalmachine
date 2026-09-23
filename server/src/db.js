@@ -1735,6 +1735,25 @@ CREATE TABLE IF NOT EXISTS tracking_numbers (
   active INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS financing_applications (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  lender TEXT NOT NULL,
+  amount INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'sent',
+  link TEXT,
+  external_id TEXT,
+  approved_amount INTEGER,
+  plan TEXT,
+  funded_amount INTEGER,
+  funded_at TEXT,
+  ledger_entry_id INTEGER REFERENCES ledger_entries(id),
+  treatment_plan_id INTEGER,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT
+);
 CREATE TABLE IF NOT EXISTS organizations (
   id INTEGER PRIMARY KEY,
   name TEXT NOT NULL,

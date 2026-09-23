@@ -8,7 +8,7 @@ import { accountAging } from '../aging.js';
 import { portalKey } from './portal.js';
 import { receiptData, receiptPdf, sendReceipt } from '../receipts.js';
 
-export const PAYMENT_METHODS = ['cash', 'check', 'credit_card', 'debit_card', 'ach', 'care_credit', 'other'];
+export const PAYMENT_METHODS = ['cash', 'check', 'credit_card', 'debit_card', 'ach', 'care_credit', 'financing', 'other'];
 
 export default function billingRoutes({ db, payments = { enabled: false }, config = {}, messenger = null }) {
   const r = Router();

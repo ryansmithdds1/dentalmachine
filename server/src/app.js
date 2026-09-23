@@ -34,6 +34,7 @@ import claimAiRoutes from './routes/claimai.js';
 import labRxRoutes, { labPublicRoutes } from './routes/labrx.js';
 import patientCareRoutes, { learnPublicRoutes } from './routes/patientcare.js';
 import checkinRoutes, { checkinPublicRoutes } from './routes/checkin.js';
+import lenderRoutes, { lenderWebhooks } from './routes/lenders.js';
 import { createXrayAi, registerXrayAi } from './xrayai.js';
 import { registerFill } from './fill.js';
 import { createPlaid } from './finance/plaid.js';
@@ -161,6 +162,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   app.use(deliveryWebhooks({ db, config }));
   app.use(voiceWebhooks({ db, config }));
   app.use(phoneWebhooks({ db, config, messenger, storage, transcriber, fetchImpl }));
+  app.use(lenderWebhooks({ db }));
   app.use(financePublicRoutes({ db, config, secret, plaid, qbo }));
   // Signed forms can carry photos (insurance cards, ID), and documents sent to be read (benefit summaries, EOBs), so those routes take larger bodies.
   const jsonBody = express.json({ limit: '1mb' });
@@ -241,6 +243,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(labRxRoutes({ db, messenger, config }));
   api.use(patientCareRoutes({ db, messenger, config }));
   api.use(checkinRoutes({ db, messenger }));
+  api.use(lenderRoutes({ db, messenger }));
   api.use(attachmentRoutes({ db, storage, sender: attachmentSender ?? createAttachmentSender(attachmentConfig(process.env, config.ediMode), fetchImpl) }));
   api.use(billingRoutes({ db, payments, config, messenger }));
   api.use(insuranceRoutes({ db }));

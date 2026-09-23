@@ -69,10 +69,10 @@ export async function expectedDeposits(db, pid, from, to) {
     items.push({ key: `era:${e.id}`, kind: 'era', date: e.payment_date, amount: e.total_paid, trace: e.check_number, label: `${e.payer_name || 'Insurance'} payment${e.check_number ? ` · ${e.check_number}` : ''}` });
   }
   const byDay = await db.all(
-    `SELECT entry_date AS date, CASE WHEN method = 'care_credit' THEN 'financing' WHEN method = 'ach' THEN 'ach' ELSE 'card' END AS kind, -SUM(amount) AS amount, COUNT(*) AS n
-     FROM ledger_entries WHERE practice_id = ? AND type IN ('payment','insurance_payment','refund') AND method IN ('credit_card','debit_card','care_credit','ach')
+    `SELECT entry_date AS date, CASE WHEN method IN ('care_credit','financing') THEN 'financing' WHEN method = 'ach' THEN 'ach' ELSE 'card' END AS kind, -SUM(amount) AS amount, COUNT(*) AS n
+     FROM ledger_entries WHERE practice_id = ? AND type IN ('payment','insurance_payment','refund') AND method IN ('credit_card','debit_card','care_credit','financing','ach')
        AND voided_at IS NULL AND reverses_id IS NULL AND entry_date BETWEEN ? AND ?
-     GROUP BY entry_date, CASE WHEN method = 'care_credit' THEN 'financing' WHEN method = 'ach' THEN 'ach' ELSE 'card' END`, pid, from, to,
+     GROUP BY entry_date, CASE WHEN method IN ('care_credit','financing') THEN 'financing' WHEN method = 'ach' THEN 'ach' ELSE 'card' END`, pid, from, to,
   );
   const NAMES = { card: 'Card payments', financing: 'CareCredit payments', ach: 'Bank (ACH) payments' };
   for (const c of byDay) if (Number(c.amount) > 0) items.push({ key: `${c.kind}:${c.date}`, kind: c.kind, date: c.date, amount: Number(c.amount), label: `${NAMES[c.kind]} ${c.date} (${c.n})` });
