@@ -449,3 +449,21 @@ button.active, .seg button.active { background: var(--primary-soft); color: var(
 .confirm-box { margin-top: 12px; padding: 12px; border: 1px solid #fed7aa; background: var(--danger-soft); border-radius: 10px; }
 .confirm-box .drawer-actions { margin-bottom: 0; }
 .series-chip { font-size: 12px; font-weight: 600; color: var(--info); background: var(--info-soft); border-radius: 99px; padding: 2px 9px; }
+
+/* Clearinghouse */
+.ch-panel { padding: 12px 16px; margin-bottom: 12px; }
+.ch-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ch-head .live-dot { margin-right: 2px; }
+.ch-attention { margin-top: 10px; padding: 10px 12px; border-radius: 8px; background: var(--danger-soft); color: var(--danger); display: flex; flex-direction: column; gap: 3px; font-size: 13px; }
+.ch-attention a { color: inherit; text-decoration: underline; }
+.ch-row { display: flex; justify-content: space-between; gap: 10px; padding: 6px 0; border-top: 1px solid var(--border); font-size: 13px; }
+.ch-panel h3 { margin: 0 0 6px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+.small-upload { position: relative; overflow: hidden; display: inline-flex; align-items: center; padding: 4px 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 13px; color: var(--text); background: #fff; cursor: pointer; }
+.small-upload input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.timeline { list-style: none; margin: 12px 0 0; padding: 0 0 0 16px; border-left: 2px solid var(--border); display: flex; flex-direction: column; gap: 12px; }
+.timeline li { position: relative; font-size: 13px; }
+.timeline li::before { content: ''; position: absolute; left: -22px; top: 4px; width: 10px; height: 10px; border-radius: 50%; background: var(--info); box-shadow: 0 0 0 3px #fff; }
+.timeline li.tl-ok::before { background: var(--ok); }
+.timeline li.tl-danger::before { background: var(--danger); }
+.timeline li.tl-warn::before { background: var(--warn); }
+.badge.nocap { text-transform: none; }

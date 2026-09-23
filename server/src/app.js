@@ -25,6 +25,7 @@ import casePresentationRoutes, { publicCasePresentation } from './routes/casepre
 import growthRoutes from './routes/growth.js';
 import { createMessenger } from './messaging.js';
 import { createStorage } from './storage.js';
+import { createClearinghouse, clearinghouseConfig } from './clearinghouse.js';
 
 // Runtime configuration, from the environment unless overridden (tests pass their own).
 export function loadConfig(env = process.env) {
@@ -41,12 +42,14 @@ export function loadConfig(env = process.env) {
   };
 }
 
-export function createApp({ db, secret, config: overrides = {}, fetchImpl = globalThis.fetch, messenger, storage }) {
+export function createApp({ db, secret, config: overrides = {}, fetchImpl = globalThis.fetch, messenger, storage, clearinghouse }) {
   if (!secret) throw new Error('JWT secret is required');
   const config = { ...loadConfig(), ...overrides };
   messenger ??= createMessenger({ fetchImpl });
   storage ??= createStorage({ dir: config.uploadDir, key: config.documentKey });
+  clearinghouse ??= createClearinghouse({ db, fetchImpl, config: { ...clearinghouseConfig(), ...(config.ediMode === 'sandbox' && !process.env.CLEARINGHOUSE ? { mode: 'sandbox' } : {}) } });
   const app = express();
+  app.locals.clearinghouse = clearinghouse;
   app.set('trust proxy', 1);
   app.disable('x-powered-by');
   app.use(stripeWebhook({ db, config })); // needs the raw body, so before express.json
@@ -87,7 +90,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(paymentRoutes({ db, config, fetchImpl, messenger }));
   api.use(familyRoutes({ db }));
   api.use(conversationRoutes({ db }));
-  api.use(ediRoutes({ db, config }));
+  api.use(ediRoutes({ db, config, clearinghouse }));
   api.use(officeRoutes({ db }));
   api.use(ppoRoutes({ db, config }));
   api.use(frontDeskRoutes({ db }));

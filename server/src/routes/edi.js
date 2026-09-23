@@ -1,13 +1,17 @@
 import express, { Router } from 'express';
 import { requirePermission, HttpError } from '../auth.js';
 import { findOr404, audit, insert, update, practiceNow, mapSeq } from '../util.js';
-import { build837D, build270, parse271, parse835, CARC } from '../x12.js';
-import { postClaimPayment, benefitsUsed } from '../services.js';
+import { build837D, build270, build276, parse271, parse277, sandbox277 } from '../x12.js';
+import { pollClearinghouse, processInbound } from '../clearinghouse.js';
+import { claimEvent } from '../era.js';
+import { runExclusive } from '../cluster.js';
+import { benefitsUsed } from '../services.js';
+import { postEra } from '../era.js';
 
 // Electronic claims (837D), eligibility (270/271) and remittance (835) through a clearinghouse.
 // EDI_MODE=manual (default): files are generated for upload to the clearinghouse portal and responses are imported.
 // EDI_MODE=sandbox: eligibility returns a simulated 271 built from the policy on file, for demos and training.
-export default function ediRoutes({ db, config }) {
+export default function ediRoutes({ db, config, clearinghouse: ch }) {
   const r = Router();
   const ids = (practice) => ({
     senderId: config.ediSubmitterId || String(practice.tax_id || '').replace(/\D/g, '') || `DM${practice.id}`,
@@ -51,19 +55,114 @@ export default function ediRoutes({ db, config }) {
     res.json({ problems: claimProblems(await claimBundle(req.params.cid, req.user.practice_id), practice) });
   });
 
-  // One or more claims as a single 837D batch file. mark_submitted moves drafts to submitted.
-  r.post('/claims/837', requirePermission('billing:write'), async (req, res) => {
+  // Builds a validated 837D batch for the given claims.
+  async function batchFile(req) {
     const pid = req.user.practice_id;
     const practice = await db.get('SELECT * FROM practices WHERE id = ?', pid);
     const claimIds = (req.body?.claim_ids || []).map(Number);
     if (!claimIds.length) throw new HttpError(400, 'claim_ids is required');
-    const bundles = await mapSeq(claimIds, async id => await claimBundle(id, pid));
+    const bundles = await mapSeq(claimIds, (id) => claimBundle(id, pid));
     for (const b of bundles) {
       if (['void', 'paid'].includes(b.claim.status)) throw new HttpError(409, `Claim #${b.claim.id} is ${b.claim.status}`);
       const problems = claimProblems(b, practice);
       if (problems.length && !req.body?.force) throw new HttpError(422, `Claim #${b.claim.id}: ${problems.join('; ')}`, { claim_id: b.claim.id, problems });
     }
-    const file = build837D({ practice, claims: bundles, ...ids(practice), control: nextControl(), taxonomy: practice.billing_provider_taxonomy });
+    const control = nextControl();
+    return { practice, bundles, claimIds, control, file: build837D({ practice, claims: bundles, ...ids(practice), control, taxonomy: practice.billing_provider_taxonomy }) };
+  }
+
+  // Send claims straight to the clearinghouse (SFTP or sandbox). Responses arrive by polling.
+  r.post('/claims/submit', requirePermission('billing:write'), async (req, res) => {
+    if (!ch?.batch) throw new HttpError(409, 'No clearinghouse connection is set up — download the 837 file instead', { mode: ch?.mode || 'manual' });
+    const { bundles, claimIds, control, file } = await batchFile(req);
+    const filename = `DM${req.user.practice_id}_${control}.837`;
+    try {
+      await ch.batch.submit({ filename, content: file }); // network I/O stays outside transactions
+    } catch (err) {
+      throw new HttpError(502, `Couldn't reach the clearinghouse: ${err.message}. Nothing was sent; try again.`);
+    }
+    const batchId = await insert(db, 'edi_batches', {
+      practice_id: req.user.practice_id, control: String(control), filename, claim_ids: JSON.stringify(claimIds), status: 'sent', transport: ch.batch.transport, x12: file, created_by: req.user.id,
+    });
+    for (const b of bundles) {
+      await db.run("UPDATE claims SET status = CASE WHEN status IN ('draft','denied') THEN 'submitted' ELSE status END, submitted_at = COALESCE(submitted_at, datetime('now')), denial_reason = NULL, batch_id = ? WHERE id = ?", batchId, b.claim.id);
+      await claimEvent(db, { ...b.claim }, 'submit', 'sent', `Sent to ${ch.name} in batch ${control}`);
+    }
+    await audit(db, req, 'claims.submit', 'edi_batches', batchId, { claim_ids: claimIds, transport: ch.batch.transport });
+    // The sandbox answers at once, so pick its acknowledgments up straight away.
+    const responses = ch.batch.transport === 'sandbox' ? await runExclusive('clearinghouse-poll', 60_000, () => pollClearinghouse(db, ch)) : null;
+    res.status(201).json({ batch_id: batchId, control: String(control), claims: claimIds.length, filename, transport: ch.batch.transport, responses });
+  });
+
+  // Connection overview for the billing screen.
+  r.get('/clearinghouse', requirePermission('billing:read'), async (req, res) => {
+    const pid = req.user.practice_id;
+    res.json({
+      mode: ch?.mode || 'manual', name: ch?.name, batch: !!ch?.batch, realtime: !!ch?.realtime || ch?.mode === 'sandbox', poll_minutes: ch?.pollMinutes,
+      batches: await db.all(`SELECT b.id, b.control, b.filename, b.claim_ids, b.status, b.message, b.transport, b.acknowledged_at, b.created_at, u.name AS created_by_name
+        FROM edi_batches b LEFT JOIN users u ON u.id = b.created_by WHERE b.practice_id = ? ORDER BY b.id DESC LIMIT 20`, pid),
+      inbox: await db.all('SELECT id, name, type, result, error, created_at FROM edi_inbox WHERE practice_id = ? ORDER BY id DESC LIMIT 30', pid),
+      needs_attention: await db.all(`SELECT c.id, c.ch_status, c.ch_message, c.ch_updated_at, p.first_name, p.last_name FROM claims c JOIN patients p ON p.id = c.patient_id
+        WHERE c.practice_id = ? AND c.ch_status = 'rejected' AND c.status = 'draft' ORDER BY c.ch_updated_at DESC`, pid),
+    });
+  });
+
+  // Check the clearinghouse mailbox now (it is also checked automatically every few minutes).
+  r.post('/clearinghouse/poll', requirePermission('billing:write'), async (req, res) => {
+    if (!ch?.batch) throw new HttpError(409, 'No clearinghouse connection is set up');
+    let results;
+    try {
+      results = await runExclusive('clearinghouse-poll', 5 * 60_000, () => pollClearinghouse(db, ch));
+    } catch (err) {
+      throw new HttpError(502, `Couldn't reach the clearinghouse: ${err.message}`);
+    }
+    const mine = (results || []).filter((r2) => r2.practice_id === req.user.practice_id);
+    await audit(db, req, 'clearinghouse.poll', null, null, { files: mine.length });
+    res.json({ files: mine.map(({ name, type, result, error }) => ({ name, type, result, error })), busy: results === null });
+  });
+
+  // Upload a response file by hand (999, 277CA, 277 or 835) — for practices on manual mode.
+  r.post('/clearinghouse/responses', requirePermission('billing:write'), express.text({ type: () => true, limit: '10mb' }), async (req, res) => {
+    const out = await processInbound(db, { name: String(req.query.filename || 'upload').slice(0, 200), content: req.body });
+    if (out.practice_id && out.practice_id !== req.user.practice_id) throw new HttpError(403, 'That file belongs to another practice');
+    await audit(db, req, 'clearinghouse.upload', null, null, { type: out.type });
+    res.status(201).json(out);
+  });
+
+  // Where a claim is in the payer's system: 276 → 277 in real time (or sandbox, or a 276 file to upload).
+  r.post('/claims/:cid/status-check', requirePermission('billing:read'), async (req, res) => {
+    const pid = req.user.practice_id;
+    const bundle = await claimBundle(req.params.cid, pid);
+    if (!['submitted', 'partially_paid', 'paid', 'denied'].includes(bundle.claim.status)) throw new HttpError(409, 'Send the claim before checking its status');
+    const practice = await db.get('SELECT * FROM practices WHERE id = ?', pid);
+    const request = build276({ practice, bundle, ...ids(practice), control: nextControl(), trace: `CS${bundle.claim.id}T${Date.now()}` });
+    let response;
+    if (ch?.realtime) response = await ch.realtime.claimStatus(request);
+    else if (ch?.mode === 'sandbox') {
+      const c = bundle.claim;
+      const [category, code] = c.status === 'paid' || c.status === 'partially_paid' ? ['F1', '65'] : c.status === 'denied' ? ['F2', '88'] : ['P1', '20'];
+      response = sandbox277({ ca: false, claims: [{ control_number: c.control_number, last_name: bundle.patient.last_name, first_name: bundle.patient.first_name, category, code, billed: c.total_fee, paid: c.paid_amount, payer_claim_number: c.payer_claim_number || `SBX${String(c.id).padStart(8, '0')}` }] });
+    } else {
+      res.set({ 'Content-Type': 'text/plain; charset=utf-8', 'Content-Disposition': `attachment; filename="claim-status-${bundle.claim.id}.276"` });
+      return res.send(request);
+    }
+    const parsed = parse277(response).claims.find((x) => x.control_number === bundle.claim.control_number) || parse277(response).claims[0];
+    if (!parsed) throw new HttpError(502, 'The payer returned no status for this claim');
+    if (parsed.payer_claim_number) await db.run('UPDATE claims SET payer_claim_number = ? WHERE id = ?', parsed.payer_claim_number, bundle.claim.id);
+    await claimEvent(db, bundle.claim, '277', parsed.group, `${parsed.text}${parsed.category ? ` (${parsed.category})` : ''}`);
+    await audit(db, req, 'claim.status_check', 'claims', bundle.claim.id, { category: parsed.category });
+    res.json({ status: parsed.group, category: parsed.category, text: parsed.text, paid: parsed.paid, payer_claim_number: parsed.payer_claim_number, sandbox: !ch?.realtime });
+  });
+
+  r.get('/claims/:cid/events', requirePermission('billing:read'), async (req, res) => {
+    const claim = await findOr404(db, 'claims', req.params.cid, req.user.practice_id, 'Claim');
+    res.json(await db.all('SELECT id, source, status, message, created_at FROM claim_events WHERE claim_id = ? ORDER BY id', claim.id));
+  });
+
+  // One or more claims as a single 837D batch file. mark_submitted moves drafts to submitted.
+  r.post('/claims/837', requirePermission('billing:write'), async (req, res) => {
+    const pid = req.user.practice_id;
+    const { bundles, claimIds, file } = await batchFile(req);
     if (req.body?.mark_submitted !== false) {
       for (const b of bundles) {
         if (['draft', 'denied'].includes(b.claim.status)) await db.run("UPDATE claims SET status = 'submitted', submitted_at = datetime('now'), denial_reason = NULL WHERE id = ?", b.claim.id);
@@ -117,14 +216,16 @@ export default function ediRoutes({ db, config }) {
     const trace = `EL${Date.now()}`;
     const request = build270({ practice, patient, policy, carrier, ...ids(practice), control: nextControl(), trace });
     let row = { practice_id: pid, patient_id: patient.id, patient_insurance_id: policy.id, request_x12: request, created_by: req.user.id, status: 'pending' };
-    if (config.ediMode === 'sandbox') {
-      const response = await sandbox271(policy, patient, trace);
+    if (ch?.realtime || config.ediMode === 'sandbox' || ch?.mode === 'sandbox') {
+      const live = !!ch?.realtime;
+      const response = live ? await ch.realtime.eligibility(request) : await sandbox271(policy, patient, trace);
       const summary = parse271(response);
-      row = { ...row, response_x12: response, summary: JSON.stringify({ ...summary, sandbox: true }), status: summary.active ? 'active' : 'inactive' };
+      row = { ...row, response_x12: response, summary: JSON.stringify({ ...summary, ...(live ? {} : { sandbox: true }) }), status: summary.errors.length ? 'error' : summary.active ? 'active' : 'inactive' };
     }
     const id = await insert(db, 'eligibility_checks', row);
-    await audit(db, req, 'eligibility.check', 'eligibility_checks', id, { mode: config.ediMode });
-    res.status(201).json({ ...eligView(await db.get('SELECT id, patient_insurance_id, status, summary, created_at FROM eligibility_checks WHERE id = ?', id)), mode: config.ediMode });
+    const mode = ch?.realtime ? 'realtime' : row.response_x12 ? 'sandbox' : 'manual';
+    await audit(db, req, 'eligibility.check', 'eligibility_checks', id, { mode });
+    res.status(201).json({ ...eligView(await db.get('SELECT id, patient_insurance_id, status, summary, created_at FROM eligibility_checks WHERE id = ?', id)), mode });
   });
 
   r.get('/eligibility/:eid/270', requirePermission('billing:read'), async (req, res) => {
@@ -172,42 +273,9 @@ export default function ediRoutes({ db, config }) {
   });
 
   r.post('/era/import', requirePermission('billing:write'), express.text({ type: () => true, limit: '10mb' }), async (req, res) => {
-    const pid = req.user.practice_id;
-    let era;
-    try {
-      era = parse835(req.body);
-    } catch (err) {
-      throw new HttpError(400, err.message);
-    }
-    if (era.check_number && (await db.get('SELECT id FROM era_imports WHERE practice_id = ? AND check_number = ? AND total_paid = ?', pid, era.check_number, era.total_paid))) {
-      throw new HttpError(409, `ERA for check/EFT ${era.check_number} was already imported`);
-    }
-    const date = era.payment_date || (await practiceNow(db, pid)).slice(0, 10);
-    const details = await db.tx(async () => await mapSeq(era.claims, async c => {
-      const idMatch = /^DM(\d+)$/i.exec(c.control_number || '');
-      const claim = await db.get('SELECT * FROM claims WHERE practice_id = ? AND (control_number = ? OR id = ?)', pid, c.control_number, idMatch ? Number(idMatch[1]) : -1);
-      const base = { control_number: c.control_number, billed: c.billed, paid: c.paid, patient_responsibility: c.patient_responsibility, write_off: c.contractual, reasons: c.reason_codes.map((code) => ({ code, text: CARC[code.split('-')[1]] || null })) };
-      if (!claim) return { ...base, result: 'unmatched' };
-      if (c.status === 'reversal' || c.status === 'not_our_claim') return { ...base, claim_id: claim.id, result: 'needs_review' };
-      if (!['submitted', 'partially_paid'].includes(claim.status)) return { ...base, claim_id: claim.id, result: `skipped (claim is ${claim.status})` };
-      if (c.status === 'denied' || (c.paid === 0 && c.status_code === '4')) {
-        const reason = base.reasons.map((x) => `${x.code}${x.text ? ` ${x.text}` : ''}`).join(', ') || 'Denied by payer';
-        await db.run("UPDATE claims SET status = 'denied', denial_reason = ?, payer_claim_number = COALESCE(?, payer_claim_number) WHERE id = ?", reason, c.payer_claim_number, claim.id);
-        return { ...base, claim_id: claim.id, result: 'denied' };
-      }
-      await postClaimPayment(db, claim, {
-        amount: c.paid, writeOff: c.contractual, final: true, method: 'eft', reference: era.check_number, userId: req.user.id, date, payerClaimNumber: c.payer_claim_number,
-      });
-      return { ...base, claim_id: claim.id, result: 'posted' };
-    }));
-    const matched = details.filter((d) => d.result === 'posted' || d.result === 'denied').length;
-    const id = await insert(db, 'era_imports', {
-      practice_id: pid, filename: req.query.filename ? String(req.query.filename).slice(0, 200) : null, payer_name: era.payer_name, check_number: era.check_number,
-      payment_date: era.payment_date, total_paid: era.total_paid, claims_matched: matched, claims_unmatched: details.length - matched,
-      details: JSON.stringify(details), raw: req.body, created_by: req.user.id,
-    });
-    await audit(db, req, 'era.import', 'era_imports', id, { matched, total: details.length });
-    res.status(201).json({ id, payer_name: era.payer_name, check_number: era.check_number, payment_date: era.payment_date, total_paid: era.total_paid, claims: details });
+    const result = await postEra(db, req.user.practice_id, req.body, { userId: req.user.id, filename: req.query.filename });
+    await audit(db, req, 'era.import', 'era_imports', result.id, { matched: result.claims.filter((c) => ['posted', 'denied'].includes(c.result)).length, total: result.claims.length });
+    res.status(201).json(result);
   });
 
   return r;

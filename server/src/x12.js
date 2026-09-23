@@ -233,3 +233,145 @@ export const CARC = {
   27: 'Coverage terminated', 29: 'Filing limit expired', 45: 'Charge exceeds fee schedule/maximum allowable', 96: 'Non-covered charge',
   97: 'Included in another service', 119: 'Benefit maximum reached', 187: 'Consumer spending account payment', 204: 'Not covered under current benefit plan',
 };
+
+// ---- 276 claim status request (005010X212) ----
+// bundle: { claim, patient, policy, carrier, items } as for the 837D.
+export function build276({ practice, bundle, senderId, receiverId, control = 1, now = new Date(), trace }) {
+  const { claim, patient, policy, carrier, items } = bundle;
+  const isSelf = policy.relationship === 'self';
+  const sub = splitName(policy.subscriber_name);
+  const dates = items.map((i) => d8(i.completed_at)).filter(Boolean).sort();
+  const segs = [
+    `BHT*0010*13*${clean(trace, 50)}*${d8(now.toISOString())}*${now.toISOString().slice(11, 16).replace(':', '')}`,
+    'HL*1**20*1', `NM1*PR*2*${clean(carrier.name)}*****PI*${clean(carrier.payer_id || 'UNKNOWN', 80)}`,
+    'HL*2*1*21*1', `NM1*41*2*${clean(practice.name)}*****46*${clean(senderId, 80)}`,
+    'HL*3*2*19*1', `NM1*1P*2*${clean(practice.name)}*****XX*${digitsOnly(practice.npi)}`,
+    `HL*4*3*22*${isSelf ? 0 : 1}`,
+  ];
+  if (isSelf && patient.dob) segs.push(`DMG*D8*${d8(patient.dob)}*${GENDER(patient.gender)}`);
+  segs.push(`NM1*IL*1*${sub.last}*${sub.first}****MI*${clean(policy.subscriber_id, 80)}`);
+  const claimSegs = [
+    `TRN*1*${clean(claim.control_number, 50)}`,
+    ...(claim.payer_claim_number ? [`REF*1K*${clean(claim.payer_claim_number, 50)}`] : []),
+    `AMT*T3*${money(claim.total_fee)}`,
+    ...(dates.length ? [`DTP*472*RD8*${dates[0]}-${dates.at(-1)}`] : []),
+  ];
+  if (isSelf) segs.push(...claimSegs);
+  else {
+    segs.push('HL*5*4*23', `DMG*D8*${d8(patient.dob)}*${GENDER(patient.gender)}`, `NM1*QC*1*${clean(patient.last_name)}*${clean(patient.first_name)}`, ...claimSegs);
+  }
+  return envelope({ functionalId: 'HR', version: '005010X212', senderId, receiverId, control, now, body: transaction('276', '005010X212', segs) });
+}
+
+// ---- 999 implementation acknowledgment ----
+export function parse999(text) {
+  const segs = parseX12(text);
+  if (!segs.some((s) => s.id === 'ST' && s.e[1] === '999')) throw new Error('Not a 999 acknowledgment');
+  const out = { group_control: null, functional_id: null, transactions: [], status: null, errors: [] };
+  for (const s of segs) {
+    if (s.id === 'AK1') {
+      out.functional_id = s.e[1];
+      out.group_control = s.e[2];
+    }
+    if (s.id === 'AK2') out.transactions.push({ control: s.e[2], status: null });
+    if (s.id === 'IK3') out.errors.push(`Segment ${s.e[1]} at position ${s.e[2]}: ${IK3[s.e[4]] || `error ${s.e[4]}`}`);
+    if (s.id === 'IK4') out.errors.push(`Element ${s.c(1)[0]}: ${IK4[s.e[3]] || `error ${s.e[3]}`}${s.e[4] ? ` ("${s.e[4]}")` : ''}`);
+    if (s.id === 'IK5' && out.transactions.length) out.transactions.at(-1).status = s.e[1];
+    if (s.id === 'AK9') out.status = { A: 'accepted', E: 'accepted_with_errors', P: 'partially_accepted', R: 'rejected', M: 'rejected', W: 'rejected', X: 'rejected' }[s.e[1]] || 'unknown';
+  }
+  return out;
+}
+const IK3 = { 1: 'unrecognized segment', 2: 'unexpected segment', 3: 'required segment missing', 5: 'segment exceeds maximum use', 8: 'segment has data element errors' };
+const IK4 = { 1: 'required element missing', 2: 'conditional element missing', 3: 'too many elements', 4: 'value too short', 5: 'value too long', 6: 'invalid character', 7: 'invalid code value', 8: 'invalid date', 9: 'invalid time' };
+
+// ---- 277 / 277CA claim status (005010X212 / 005010X214) ----
+// Claim status category codes (STC01-1), in plain language.
+export const CLAIM_STATUS_CATEGORY = {
+  A0: ['accepted', 'Forwarded to the payer'], A1: ['accepted', 'Received by the clearinghouse'], A2: ['accepted', 'Accepted into the payer\'s system'],
+  A3: ['rejected', 'Returned as unprocessable — fix and resend'], A4: ['rejected', 'Not found by the payer'], A5: ['accepted', 'Split by the payer'],
+  A6: ['rejected', 'Rejected for missing information'], A7: ['rejected', 'Rejected for invalid information'], A8: ['rejected', 'Rejected for relational field errors'],
+  P0: ['pending', 'Pending: adjudication not finished'], P1: ['pending', 'In process'], P2: ['pending', 'Pending: payer review'], P3: ['pending', 'Pending: waiting on information requested from the provider'],
+  P4: ['pending', 'Pending: waiting on the patient'], P5: ['pending', 'Pending: payer administrative hold'],
+  F0: ['finalized', 'Finalized'], F1: ['finalized', 'Finalized — paid'], F2: ['finalized', 'Finalized — denied'], F3: ['finalized', 'Finalized — revised'],
+  F3F: ['finalized', 'Finalized — forwarded'], F3N: ['finalized', 'Finalized — not forwarded'], F4: ['finalized', 'Finalized — adjudication complete, no payment forthcoming'],
+  R0: ['request', 'More information requested'], R1: ['request', 'Requests for more information'], R3: ['request', 'Claim/line: requested information not received'], R4: ['request', 'Documentation requested'],
+  E0: ['error', 'Response not possible — error on the request'], E1: ['error', 'Response not possible — system status'], E2: ['error', 'Information holder not responding'], E3: ['error', 'Correction required'], E4: ['error', 'Trading partner agreement missing'],
+  D0: ['error', 'Data search unsuccessful'],
+};
+export function parse277(text) {
+  const segs = parseX12(text);
+  const st = segs.find((s) => s.id === 'ST' && s.e[1] === '277');
+  if (!st) throw new Error('Not a 277 claim status file');
+  const kind = /X214/.test(st.e[3] || '') ? '277CA' : '277';
+  const claims = [];
+  let current = null;
+  for (const s of segs) {
+    if (s.id === 'TRN' && s.e[1] === '2') {
+      current = { control_number: s.e[2], statuses: [], payer_claim_number: null };
+      claims.push(current);
+    }
+    if (!current) continue;
+    if (s.id === 'REF' && s.e[1] === '1K') current.payer_claim_number = s.e[2];
+    if (s.id === 'STC') {
+      const [category, code, entity] = s.c(1);
+      const [group, text] = CLAIM_STATUS_CATEGORY[category] || ['other', `Status ${category}`];
+      current.statuses.push({
+        category, code, entity, group, text, date: s.e[2] ? `${s.e[2].slice(0, 4)}-${s.e[2].slice(4, 6)}-${s.e[2].slice(6, 8)}` : null,
+        billed: s.e[4] ? cents(s.e[4]) : null, paid: s.e[5] ? cents(s.e[5]) : null, check_number: s.e[9] || null,
+      });
+    }
+  }
+  for (const c of claims) {
+    const top = c.statuses[0] || null;
+    Object.assign(c, { group: top?.group || 'other', category: top?.category || null, text: top?.text || 'No status', paid: top?.paid ?? null });
+  }
+  return { kind, claims };
+}
+
+// Which X12 transaction a file carries (for routing downloads from the clearinghouse).
+export function x12Type(text) {
+  try {
+    const st = parseX12(text).find((s) => s.id === 'ST');
+    if (!st) return null;
+    if (st.e[1] === '277' && /X214/.test(st.e[3] || '')) return '277CA';
+    return st.e[1];
+  } catch {
+    return null;
+  }
+}
+
+// ---- Sandbox payer responses (demo/training only; never sent to a real payer) ----
+const sandboxEnvelope = (functionalId, version, type, segs, control, now = new Date()) =>
+  envelope({ functionalId, version, senderId: 'SANDBOXCH', receiverId: 'DENTALMACHINE', control, now, body: transaction(type, version, segs) });
+
+export function sandbox999({ groupControl, functionalId = 'HC', accepted = true, control = 1 }) {
+  return sandboxEnvelope('FA', '005010X231A1', '999', [
+    `AK1*${functionalId}*${groupControl}*005010X224A2`, 'AK2*837*0001*005010X224A2', `IK5*${accepted ? 'A' : 'R'}`, `AK9*${accepted ? 'A' : 'R'}*1*1*${accepted ? 1 : 0}`,
+  ], control);
+}
+export function sandbox277({ claims, ca = true, control = 1, now = new Date() }) {
+  const segs = ['BHT*0085*08*SANDBOX*' + d8(now.toISOString()) + '*' + now.toISOString().slice(11, 16).replace(':', '') + '*TH', 'HL*1**20*1', 'NM1*PR*2*SANDBOX PAYER*****PI*00000'];
+  let hl = 1;
+  for (const c of claims) {
+    segs.push(`HL*${++hl}*1*PT`, `NM1*QC*1*${clean(c.last_name)}*${clean(c.first_name)}`, `TRN*2*${clean(c.control_number, 50)}`,
+      `STC*${c.category}:${c.code || '20'}:PR*${d8(now.toISOString())}**${money(c.billed || 0)}*${money(c.paid || 0)}`,
+      `REF*1K*${clean(c.payer_claim_number, 50)}`);
+  }
+  return sandboxEnvelope(ca ? 'HN' : 'HN', ca ? '005010X214' : '005010X212', '277', segs, control, now);
+}
+export function sandbox835({ payee, claims, eft, date, control = 1 }) {
+  const total = claims.reduce((s, c) => s + c.paid, 0);
+  const segs = [
+    `BPR*I*${money(total)}*C*ACH*CCP*01*999999999*DA*123456*1512345678**01*999999999*DA*654321*${d8(date)}`,
+    `TRN*1*${eft}*1512345678`, `DTM*405*${d8(date)}`,
+    'N1*PR*SANDBOX DENTAL PAYER', 'N3*1 PAYER WAY', 'N4*CHICAGO*IL*60601',
+    `N1*PE*${clean(payee.name)}*XX*${digitsOnly(payee.npi)}`,
+  ];
+  for (const c of claims) {
+    segs.push(`CLP*${clean(c.control_number, 38)}*${c.paid ? 1 : 4}*${money(c.billed)}*${money(c.paid)}*${money(c.patient)}*12*${clean(c.payer_claim_number, 50)}`);
+    if (c.write_off) segs.push(`CAS*CO*45*${money(c.write_off)}`);
+    if (!c.paid) segs.push(`CAS*CO*${c.denial_code || 204}*${money(c.billed - c.write_off)}`);
+    else if (c.patient) segs.push(`CAS*PR*2*${money(c.patient)}`);
+  }
+  return sandboxEnvelope('HP', '005010X221A1', '835', segs, control);
+}

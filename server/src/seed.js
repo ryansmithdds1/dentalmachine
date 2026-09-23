@@ -53,7 +53,7 @@ await db.tx(async () => {
     practice_id: practiceId, name: 'Dr. Priya Rivera, DMD', type: 'dentist', npi: '1234567901', color: '#7c3aed',
     working_hours: JSON.stringify({ 0: [], 1: [['08:00', '17:00']], 2: [['08:00', '17:00']], 3: [['08:00', '17:00']], 4: [['08:00', '17:00']], 5: [], 6: [] }), // Mon–Thu
   });
-  const hyg = await insert(db, 'providers', { practice_id: practiceId, user_id: hygUser, name: 'Sam Okafor, RDH', type: 'hygienist', color: '#059669' });
+  const hyg = await insert(db, 'providers', { practice_id: practiceId, user_id: hygUser, name: 'Sam Okafor, RDH', type: 'hygienist', npi: '1234567919', color: '#059669' });
   const ops = (await db.all('SELECT id FROM operatories WHERE practice_id = ? ORDER BY id', practiceId)).map((o) => o.id);
 
   const carriers = await mapSeq([
@@ -146,10 +146,11 @@ await db.tx(async () => {
     const done = await db.all("SELECT * FROM procedures WHERE patient_id = ? AND status = 'completed'", id);
     if (policy) {
       const est = await estimateCoverage(db, policy, done);
-      const paid = rand() < 0.7;
+      const draft = pastOffset > -14; // recent visits: claims waiting to be sent
+      const paid = !draft && rand() < 0.7;
       const claimId = await insert(db, 'claims', {
-        practice_id: practiceId, patient_id: id, patient_insurance_id: policy.id, status: paid ? 'paid' : 'submitted',
-        total_fee: est.total_fee, estimated_amount: est.total_insurance, submitted_at: `${pastDay} 17:00:00`,
+        practice_id: practiceId, patient_id: id, patient_insurance_id: policy.id, status: draft ? 'draft' : paid ? 'paid' : 'submitted',
+        total_fee: est.total_fee, estimated_amount: est.total_insurance, write_off_estimate: est.total_write_off || 0, submitted_at: draft ? null : `${pastDay} 17:00:00`,
         paid_amount: paid ? est.total_insurance : 0, paid_at: paid ? `${eobDay} 12:00:00` : null,
       });
       await mapSeq(

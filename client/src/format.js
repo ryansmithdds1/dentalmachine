@@ -54,3 +54,8 @@ export function fmtUtcDate(s, tz) {
   const d = new Date(`${s.slice(0, 19).replace(' ', 'T')}Z`);
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', ...(tz ? { timeZone: tz } : {}) });
 }
+export function fmtUtcDateTime(s, tz) {
+  if (!s) return '';
+  const d = new Date(`${s.slice(0, 19).replace(' ', 'T')}Z`);
+  return d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', ...(tz ? { timeZone: tz } : {}) });
+}

@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { api, getToken } from '../api.js';
+import { api } from '../api.js';
 import { useApi } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
 import { money, fmtDate, toCents, fromCents } from '../format.js';
+import { ChStatus, ClaimEdiCard, sendClaims } from '../components/ClaimEdi.jsx';
 import { Badge, ErrorBox, Modal, useSubmit } from '../components/ui.jsx';
 
 export default function ClaimDetail() {
@@ -12,6 +13,7 @@ export default function ClaimDetail() {
   const { data: c, reload, error: loadErr } = useApi(`/claims/${id}`);
   const [modal, setModal] = useState(null);
   const [err, setErr] = useState(null);
+  const { data: ch } = useApi('/clearinghouse');
   const act = async (fn) => {
     setErr(null);
     try {
@@ -24,24 +26,18 @@ export default function ClaimDetail() {
   if (loadErr) return <div className="error">{loadErr.message}</div>;
   if (!c) return <div className="empty">Loading…</div>;
   const w = can('billing:write');
-  const sendElectronic = async () => {
-    setErr(null);
-    const res = await fetch('/api/claims/837', { method: 'POST', headers: { Authorization: `Bearer ${getToken()}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ claim_ids: [c.id] }) });
-    if (!res.ok) return setErr(new Error((await res.json()).error));
-    Object.assign(document.createElement('a'), { href: URL.createObjectURL(await res.blob()), download: `claim-${c.id}.837` }).click();
-    reload();
-  };
+  const sendElectronic = () => act(() => sendClaims([c.id], ch));
 
   return (
     <>
       <div className="page-header">
         <div>
-          <h1>Claim #{c.id} <Badge value={c.status} /></h1>
+          <h1>Claim #{c.id} <Badge value={c.status} /> <ChStatus claim={c} /></h1>
           <div className="muted"><Link to={`/patients/${c.patient_id}`}>{c.first_name} {c.last_name}</Link> · {c.carrier_name}</div>
         </div>
         <div className="actions no-print">
           <button onClick={() => window.print()}>Print</button>
-          {w && ['draft', 'denied'].includes(c.status) && <button className="primary" onClick={sendElectronic}>Send electronically (837)</button>}
+          {w && ['draft', 'denied'].includes(c.status) && <button className="primary" onClick={sendElectronic}>{ch?.batch ? 'Send to clearinghouse' : 'Download 837'}</button>}
           {w && ['draft', 'denied'].includes(c.status) && <button onClick={() => act(() => api.post(`/claims/${c.id}/submit`))}>{c.status === 'denied' ? 'Resubmitted on paper' : 'Mark sent on paper'}</button>}
           {w && ['submitted', 'partially_paid'].includes(c.status) && <button className="primary" onClick={() => setModal('pay')}>Enter EOB payment</button>}
           {w && c.status === 'submitted' && <button className="danger" onClick={() => setModal('deny')}>Denied</button>}
@@ -51,6 +47,7 @@ export default function ClaimDetail() {
       <ErrorBox error={err} />
       {c.denial_reason && <div className="error">Denial reason: {c.denial_reason}</div>}
       {c.payer_claim_number && <div className="muted" style={{ marginBottom: 8 }}>Payer claim # {c.payer_claim_number}</div>}
+      {c.ch_status === 'rejected' && c.status === 'draft' && <div className="error">Rejected electronically: {c.ch_message}</div>}
       <ClaimChecks id={c.id} status={c.status} />
 
       <div className="grid grid-2">
@@ -93,6 +90,7 @@ export default function ClaimDetail() {
         </div>
       </div>
 
+      <ClaimEdiCard claim={c} onChange={reload} />
       {modal === 'pay' && <Modal title="Enter insurance payment (EOB)" onClose={() => setModal(null)}><PaymentForm claim={c} onDone={() => { setModal(null); reload(); }} /></Modal>}
       {modal === 'deny' && <Modal title="Record denial" onClose={() => setModal(null)}><DenyForm claim={c} onDone={() => { setModal(null); reload(); }} /></Modal>}
     </>

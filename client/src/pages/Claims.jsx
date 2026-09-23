@@ -6,6 +6,7 @@ import { useAuth } from '../auth.jsx';
 import { money, fmtDate, fmtDateTime, toCents } from '../format.js';
 import { Badge, ErrorBox, Modal } from '../components/ui.jsx';
 import { PlanSummary } from '../components/patient/PaymentPlans.jsx';
+import { ChStatus, ClearinghousePanel, sendClaims, describeResponses } from '../components/ClaimEdi.jsx';
 
 const FILTERS = [['draft', 'Ready to send'], ['submitted', 'Submitted'], ['partially_paid', 'Partially paid'], ['denied', 'Denied'], ['paid', 'Paid'], ['void', 'Void'], ['', 'All']];
 
@@ -48,14 +49,20 @@ function ClaimList() {
   const { data: claims, reload } = useApi(`/claims${status ? `?status=${status}` : ''}`);
   const [selected, setSelected] = useState([]);
   const [err, setErr] = useState(null);
+  const [notice, setNotice] = useState(null);
+  const [sent, setSent] = useState(0);
+  const { data: ch } = useApi('/clearinghouse');
   const totals = (claims || []).reduce((t, c) => ({ billed: t.billed + c.total_fee, est: t.est + c.estimated_amount, paid: t.paid + c.paid_amount }), { billed: 0, est: 0, paid: 0 });
   const sendable = (claims || []).filter((c) => ['draft', 'denied'].includes(c.status));
 
   const batch = async (ids) => {
     setErr(null);
+    setNotice(null);
     try {
-      await download('/claims/837', { claim_ids: ids }, `claims-${new Date().toISOString().slice(0, 10)}.837`);
+      const r = await sendClaims(ids, ch);
+      setNotice(r ? `Sent ${r.claims} claim${r.claims === 1 ? '' : 's'} to ${ch.name}.${describeResponses(r)}` : `Downloaded an 837 file with ${ids.length} claim${ids.length === 1 ? '' : 's'} — upload it in your clearinghouse portal.`);
       setSelected([]);
+      setSent((n) => n + 1);
       reload();
     } catch (e) {
       setErr(e);
@@ -67,20 +74,22 @@ function ClaimList() {
       <div className="tabs" style={{ borderBottom: 'none', marginBottom: 8 }}>
         {FILTERS.map(([v, text]) => <button key={v} className={status === v ? 'active' : ''} onClick={() => { setStatus(v); setSelected([]); }}>{text}</button>)}
       </div>
+      <ClearinghousePanel onChange={reload} version={sent} />
       <ErrorBox error={err} />
+      {notice && <div className="public-notice ok" style={{ marginBottom: 12 }}>{notice}</div>}
       {can('billing:write') && sendable.length > 0 && (
         <div className="card inline" style={{ justifyContent: 'space-between', flexWrap: 'wrap', marginBottom: 12 }}>
-          <span>{selected.length ? `${selected.length} selected` : `${sendable.length} claims ready`} · Creates an ANSI 837D batch for your clearinghouse and marks the claims submitted.</span>
+          <span>{selected.length ? `${selected.length} selected` : `${sendable.length} claim${sendable.length === 1 ? '' : 's'} ready`} · {ch?.batch ? `Sends an 837D batch straight to ${ch.name}.` : 'Creates an 837D file to upload in your clearinghouse portal.'}</span>
           <span className="inline">
             <button onClick={() => setSelected(selected.length === sendable.length ? [] : sendable.map((c) => c.id))}>{selected.length === sendable.length ? 'Clear' : 'Select all'}</button>
-            <button className="primary" disabled={!selected.length} onClick={() => batch(selected)}>Send {selected.length || ''} electronically (837)</button>
+            <button className="primary" disabled={!selected.length} onClick={() => batch(selected)}>{ch?.batch ? `Send ${selected.length || ''} to clearinghouse` : `Download ${selected.length || ''} as 837`}</button>
           </span>
         </div>
       )}
       <div className="card" style={{ padding: 0 }}>
         <div className="table-wrap">
           <table>
-            <thead><tr><th /><th>Claim</th><th>Patient</th><th>Carrier</th><th>Created</th><th>Submitted</th><th>Status</th><th className="num">Billed</th><th className="num">Estimated</th><th className="num">Paid</th></tr></thead>
+            <thead><tr><th /><th>Claim</th><th>Patient</th><th>Carrier</th><th>Created</th><th>Submitted</th><th>Status</th><th>Electronic</th><th className="num">Billed</th><th className="num">Estimated</th><th className="num">Paid</th></tr></thead>
             <tbody>
               {claims?.map((c) => (
                 <tr key={c.id} className="clickable" onClick={() => nav(`/claims/${c.id}`)}>
@@ -95,13 +104,14 @@ function ClaimList() {
                   <td>{fmtDate(c.created_at)}</td>
                   <td>{fmtDate(c.submitted_at)}</td>
                   <td><Badge value={c.status} /></td>
+                  <td><ChStatus claim={c} /></td>
                   <td className="num">{money(c.total_fee)}</td>
                   <td className="num">{money(c.estimated_amount)}</td>
                   <td className="num">{money(c.paid_amount)}</td>
                 </tr>
               ))}
               {claims?.length > 0 && (
-                <tr className="totals-row"><td colSpan={7}>{claims.length} claims</td><td className="num">{money(totals.billed)}</td><td className="num">{money(totals.est)}</td><td className="num">{money(totals.paid)}</td></tr>
+                <tr className="totals-row"><td colSpan={8}>{claims.length} claim{claims.length === 1 ? '' : 's'}</td><td className="num">{money(totals.billed)}</td><td className="num">{money(totals.est)}</td><td className="num">{money(totals.paid)}</td></tr>
               )}
             </tbody>
           </table>

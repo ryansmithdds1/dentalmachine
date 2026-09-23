@@ -3,6 +3,7 @@ import { openDb } from './db.js';
 import { createApp, loadConfig } from './app.js';
 import { createMessenger, runReminders } from './messaging.js';
 import { initCluster, runExclusive } from './cluster.js';
+import { pollClearinghouse } from './clearinghouse.js';
 
 let secret = process.env.JWT_SECRET;
 if (!secret) {
@@ -28,6 +29,16 @@ if (process.env.REMINDERS !== 'off') {
   setInterval(tick, 10 * 60 * 1000).unref();
   setTimeout(tick, 5000).unref();
 }
+// Clearinghouse mailbox: acknowledgments, claim status and ERAs are picked up and posted automatically.
+const ch = app.locals.clearinghouse;
+if (ch?.batch && process.env.CLEARINGHOUSE_POLL !== 'off') {
+  const poll = () => runExclusive('clearinghouse-poll', 10 * 60 * 1000, () => pollClearinghouse(db, ch))
+    .then((files) => files?.length && console.log(`Clearinghouse: processed ${files.length} file(s)`))
+    .catch((err) => console.error('Clearinghouse poll failed:', err.message));
+  setInterval(poll, ch.pollMinutes * 60 * 1000).unref();
+  setTimeout(poll, 15_000).unref();
+}
+console.log(`Clearinghouse: ${ch?.name || 'manual'}${ch?.realtime ? ' + real-time eligibility/status' : ''}`);
 console.log(`Database: ${db.dialect} · cluster: ${cluster.mode}`);
 console.log(`Messaging drivers: sms=${messenger.status.sms} email=${messenger.status.email}`);
 const port = Number(process.env.PORT) || 4000;

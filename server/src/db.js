@@ -537,6 +537,55 @@ CREATE TABLE IF NOT EXISTS appointment_series (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS edi_batches (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  kind TEXT NOT NULL DEFAULT '837D',
+  control TEXT NOT NULL,
+  filename TEXT,
+  claim_ids TEXT NOT NULL DEFAULT '[]',
+  status TEXT NOT NULL DEFAULT 'sent',
+  transport TEXT,
+  message TEXT,
+  x12 TEXT,
+  created_by INTEGER REFERENCES users(id),
+  acknowledged_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_edi_batch_control ON edi_batches(control);
+
+CREATE TABLE IF NOT EXISTS edi_inbox (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER REFERENCES practices(id),
+  name TEXT NOT NULL,
+  hash TEXT NOT NULL UNIQUE,
+  type TEXT,
+  content TEXT NOT NULL,
+  result TEXT,
+  error TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS claim_events (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  claim_id INTEGER NOT NULL REFERENCES claims(id),
+  source TEXT NOT NULL,
+  status TEXT NOT NULL,
+  message TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_claim_events ON claim_events(claim_id);
+
+CREATE TABLE IF NOT EXISTS edi_sandbox_mailbox (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  content TEXT NOT NULL,
+  available_at TEXT NOT NULL,
+  picked_up_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS tasks (
   id INTEGER PRIMARY KEY,
   practice_id INTEGER NOT NULL REFERENCES practices(id),
@@ -601,6 +650,10 @@ const COLUMNS = [
   ['claim_items', 'write_off', 'INTEGER NOT NULL DEFAULT 0'],
   ['claims', 'write_off_estimate', 'INTEGER NOT NULL DEFAULT 0'],
   ['providers', 'working_hours', 'TEXT'],
+  ['claims', 'ch_status', 'TEXT'],
+  ['claims', 'ch_message', 'TEXT'],
+  ['claims', 'ch_updated_at', 'TEXT'],
+  ['claims', 'batch_id', 'INTEGER'],
   ['appointments', 'series_id', 'INTEGER REFERENCES appointment_series(id)'],
 ];
 
