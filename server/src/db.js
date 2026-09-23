@@ -658,6 +658,19 @@ CREATE TABLE IF NOT EXISTS portal_codes (
 );
 CREATE INDEX IF NOT EXISTS idx_portal_codes ON portal_codes(practice_id, contact);
 
+-- One-off changes to a provider schedule: a day off, vacation, or different hours on a date.
+CREATE TABLE IF NOT EXISTS provider_exceptions (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  provider_id INTEGER NOT NULL REFERENCES providers(id),
+  date TEXT NOT NULL,
+  hours TEXT NOT NULL,
+  reason TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (provider_id, date)
+);
+
 CREATE TABLE IF NOT EXISTS password_resets (
   id INTEGER PRIMARY KEY,
   user_id INTEGER NOT NULL REFERENCES users(id),
@@ -907,8 +920,19 @@ export function toPostgres(sql) {
   // Walk the SQL so '?' inside string literals is left alone.
   for (let k = 0; k < sql.length; k++) {
     const ch = sql[k];
-    if (ch === "'") {
+    if (ch === '-' && sql[k + 1] === '-') {
+      // Line comments are copied as they are (an apostrophe in one isn't a string).
+      const eol = sql.indexOf('\n', k);
+      out += eol === -1 ? sql.slice(k) : sql.slice(k, eol);
+      if (eol === -1) break;
+      k = eol - 1;
+    } else if (ch === "'") {
       const end = sql.indexOf("'", k + 1);
+      // An unterminated string runs to the end instead of looping forever.
+      if (end === -1) {
+        out += sql.slice(k);
+        break;
+      }
       out += sql.slice(k, end + 1);
       k = end;
     } else if (ch === '?') out += `$${++i}`;

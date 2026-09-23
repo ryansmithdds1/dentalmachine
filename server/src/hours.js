@@ -44,3 +44,10 @@ export function validateHours(hours) {
   }
   return out;
 }
+
+// The provider's hours on a date, with one-off exceptions (time off, a different day) taking precedence.
+export async function providerHoursOn(db, practice, provider, date) {
+  const ex = provider?.id ? await db.get('SELECT hours, reason FROM provider_exceptions WHERE provider_id = ? AND date = ?', provider.id, date) : null;
+  if (ex) return Object.assign(JSON.parse(ex.hours), { exception: ex.reason || (JSON.parse(ex.hours).length ? 'Special hours' : 'Off') });
+  return providerHoursFor(practice, provider, date);
+}

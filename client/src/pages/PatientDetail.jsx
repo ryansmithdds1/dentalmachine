@@ -21,7 +21,7 @@ import { api } from '../api.js';
 
 export default function PatientDetail() {
   const { id } = useParams();
-  const { can, practice } = useAuth();
+  const { can, practice, user } = useAuth();
   const { data: p, error, reload } = useApi(`/patients/${id}`);
   const [tab, setTab] = useState('overview');
   const [modal, setModal] = useState(null);
@@ -84,6 +84,7 @@ export default function PatientDetail() {
             </div>
             {can('schedule:write') && <button className="primary" onClick={() => setModal('appt')}>Book appointment</button>}
             {can('patients:write') && <button onClick={() => setModal('edit')}>Edit</button>}
+            {user?.role === 'admin' && <Link to={`/settings?tab=audit&patient_id=${p.id}`}><button title="Who viewed or changed this patient's record">Access log</button></Link>}
           </div>
         </div>
       </div>
@@ -188,6 +189,7 @@ function Overview({ p, reload }) {
             </table>
           )}
         </div>
+        <VisitHistory visits={p.past_appointments || []} />
         <div className="card">
           <h2>Recall</h2>
           {p.recalls.length === 0 ? <div className="muted">No recall set. Completing a prophy creates one automatically.</div> : p.recalls.map((r) => (
@@ -284,5 +286,36 @@ function HistoryReview({ patient, onDone }) {
         </form>
       )}
     </Modal>
+  );
+}
+
+// Past visits with missed and cancelled ones counted, so the front desk knows how reliable a booking is.
+function VisitHistory({ visits }) {
+  const [all, setAll] = useState(false);
+  if (!visits.length) return null;
+  const missed = visits.filter((v) => v.status === 'no_show').length;
+  const cancelled = visits.filter((v) => v.status === 'cancelled').length;
+  const shown = all ? visits : visits.slice(0, 5);
+  return (
+    <div className="card">
+      <div className="inline" style={{ justifyContent: 'space-between' }}>
+        <h2 style={{ margin: 0 }}>Visit history</h2>
+        <span className="muted" style={{ fontSize: 12 }}>
+          {missed ? <span className="badge danger">{missed} no-show{missed === 1 ? '' : 's'}</span> : null} {cancelled ? <span className="badge warn">{cancelled} cancelled</span> : null}
+        </span>
+      </div>
+      <table style={{ marginTop: 8 }}>
+        <tbody>
+          {shown.map((a) => (
+            <tr key={a.id} style={{ opacity: ['cancelled', 'no_show'].includes(a.status) ? 0.75 : 1 }}>
+              <td>{fmtDateTime(a.start_time)}</td>
+              <td>{a.reason || '—'}<div className="muted">{a.provider_name}</div></td>
+              <td><Badge value={a.status} /></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {visits.length > 5 && <button className="link" onClick={() => setAll(!all)}>{all ? 'Show fewer' : `Show all ${visits.length}`}</button>}
+    </div>
   );
 }

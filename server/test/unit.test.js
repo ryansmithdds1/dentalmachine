@@ -82,3 +82,9 @@ test('medical history merges keep what staff recorded', async () => {
   assert.equal(mergeList(null, 'NKDA'), 'None');
   assert.equal(mergeList(null, null), null);
 });
+
+test('Postgres translation survives an unmatched quote', () => {
+  assert.equal(toPostgres("-- the provider's hours\nSELECT ? AS x"), "-- the provider's hours\nSELECT $1 AS x");
+  assert.equal(toPostgres("SELECT 'it"), "SELECT 'it", 'an unterminated string ends the scan');
+  assert.equal(toPostgres("SELECT ? WHERE a = 'it''s'"), "SELECT $1 WHERE a = 'it''s'");
+});

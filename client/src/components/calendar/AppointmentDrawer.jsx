@@ -48,7 +48,18 @@ export default function AppointmentDrawer({ appt: a, can, onClose, onStatus, onE
         </div>
         {w && active && (
           <div className="drawer-actions">
-            {(FLOW[a.status] || []).map(([s, l]) => <button key={s} className="primary" onClick={() => onStatus(s)}>{l}</button>)}
+            {(FLOW[a.status] || []).map(([s, l]) => {
+              // Completing the visit completes its planned procedures too (charges post), for clinical staff.
+              if (s === 'completed' && a.procedure_summary && can('clinical:write')) {
+                return (
+                  <span key={s} className="inline">
+                    <button className="primary" title={`Completes ${a.procedure_summary} and posts ${money(a.production || 0)}`} onClick={() => onStatus('completed', null, { complete_procedures: true })}>Complete visit & procedures</button>
+                    <button onClick={() => onStatus('completed')} title="Mark the visit done without completing its procedures">Visit only</button>
+                  </span>
+                );
+              }
+              return <button key={s} className="primary" onClick={() => onStatus(s)}>{l}</button>;
+            })}
           </div>
         )}
         <dl className="kv" style={{ gridTemplateColumns: '110px 1fr' }}>

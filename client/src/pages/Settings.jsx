@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { api, getToken } from '../api.js';
-import { useApi, invalidateLookup } from '../hooks.js';
+import { api, getToken, download } from '../api.js';
+import { useApi, useLookup, invalidateLookup } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
 import { money, fmtDateTime, fmtUtcDateTime, label, toCents, fromCents } from '../format.js';
 import { ErrorBox, Modal, useSubmit } from '../components/ui.jsx';
@@ -68,6 +68,7 @@ export default function Settings() {
       {tab === 'practice' && <Practice />}
       {tab === 'users' && <Users />}
       {RESOURCES[tab] && <ResourceTable key={tab} spec={RESOURCES[tab]} canWrite={RESOURCES[tab].writePerm ? can(RESOURCES[tab].writePerm) : admin} />}
+      {tab === 'providers' && <TimeOff canWrite={can('schedule:write')} />}
       {tab === 'ppo' && <FeeSchedules admin={admin} />}
       {tab === 'messaging' && <Messaging />}
       {tab === 'imaging' && <ImagingBridges />}
@@ -412,12 +413,30 @@ function ResourceForm({ spec, row, onDone }) {
 }
 
 function AuditLog() {
-  const { data: rows } = useApi('/audit-log?limit=300');
+  const [params] = useSearchParams();
+  const users = useLookup('/users');
+  const [filters, setFilters] = useState({ from: '', to: '', user_id: '', action: '', patient_id: params.get('patient_id') || '' });
+  const [applied, setApplied] = useState(filters);
+  const [pages, setPages] = useState(1);
+  const qs = (extra = {}) => new URLSearchParams(Object.fromEntries(Object.entries({ ...applied, ...extra }).filter(([, v]) => v !== '' && v != null))).toString();
+  const { data: rows } = useApi(`/audit-log?${qs({ limit: 200 * pages })}`);
+  const [err, setErr] = useState(null);
+  const set = (k) => (e) => setFilters({ ...filters, [k]: e.target.value });
   return (
     <div className="card" style={{ padding: 0 }}>
       <div style={{ padding: '14px 16px' }}>
         <h2 style={{ margin: 0 }}>Audit log</h2>
-        <div className="muted">Every access to and change of patient information is recorded here (HIPAA §164.312(b)).</div>
+        <div className="muted">Every access to and change of patient information is recorded here (HIPAA §164.312(b)). Search it for access reviews; export for your compliance file.</div>
+        <form className="inline" style={{ flexWrap: 'wrap', marginTop: 10, alignItems: 'flex-end' }} onSubmit={(e) => { e.preventDefault(); setPages(1); setApplied(filters); }}>
+          <label>From<input type="date" value={filters.from} onChange={set('from')} /></label>
+          <label>To<input type="date" value={filters.to} onChange={set('to')} /></label>
+          <label>User<select value={filters.user_id} onChange={set('user_id')}><option value="">Anyone</option>{users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select></label>
+          <label>Action starts with<input value={filters.action} onChange={set('action')} placeholder="e.g. patient.view, ledger." /></label>
+          <label>Patient #<input value={filters.patient_id} onChange={set('patient_id')} inputMode="numeric" style={{ width: 90 }} /></label>
+          <button className="primary">Search</button>
+          <button type="button" onClick={() => download(`/audit-log?${qs({ format: 'csv' })}`, 'audit-log.csv').catch(setErr)}>⬇ Export CSV</button>
+        </form>
+        <ErrorBox error={err} />
       </div>
       <div className="table-wrap">
         <table>
@@ -435,6 +454,8 @@ function AuditLog() {
             ))}
           </tbody>
         </table>
+        {rows?.length === 0 && <div className="empty">Nothing matches.</div>}
+        {rows?.length === 200 * pages && <div style={{ padding: 12 }}><button onClick={() => setPages(pages + 1)}>Show more</button></div>}
       </div>
     </div>
   );
@@ -830,5 +851,76 @@ function Integrations() {
         </dl>
       </div>
     </>
+  );
+}
+
+// Vacations, days off and one-off hours: the schedule shades them and booking warns.
+function TimeOff({ canWrite }) {
+  const providers = useLookup('/providers?active=true');
+  const [providerId, setProviderId] = useState('');
+  const pid = providerId || providers[0]?.id;
+  const { data: list, reload } = useApi(pid ? `/providers/${pid}/exceptions` : null);
+  const today = new Date().toLocaleDateString('en-CA');
+  const [form, setForm] = useState({ from: today, to: today, off: true, open: '08:00', close: '12:00', reason: '' });
+  const [result, setResult] = useState(null);
+  const { submit, busy, error } = useSubmit(async () => {
+    setResult(await api.post(`/providers/${pid}/exceptions`, { from: form.from, to: form.to || form.from, off: form.off, hours: form.off ? [] : [[form.open, form.close]], reason: form.reason || null }));
+    reload();
+  });
+  const remove = async (id) => { await api.del(`/provider-exceptions/${id}`); reload(); };
+  const set = (k) => (e) => setForm({ ...form, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value });
+  if (!providers.length) return null;
+  return (
+    <div className="card">
+      <div className="inline" style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
+        <h2 style={{ margin: 0 }}>Time off & special hours</h2>
+        <select value={pid || ''} onChange={(e) => { setProviderId(e.target.value); setResult(null); }} style={{ width: 'auto' }}>
+          {providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+      </div>
+      <p className="muted" style={{ fontSize: 13 }}>Vacations, CE days and one-off schedule changes. The calendar shades them and booking into them needs a deliberate override.</p>
+      {canWrite && (
+        <form className="form-grid" onSubmit={(e) => { e.preventDefault(); submit(); }}>
+          <label>From<input type="date" required value={form.from} onChange={(e) => setForm({ ...form, from: e.target.value, to: form.to < e.target.value ? e.target.value : form.to })} /></label>
+          <label>To<input type="date" value={form.to} min={form.from} onChange={set('to')} /></label>
+          <label>
+            That day
+            <select value={form.off ? 'off' : 'hours'} onChange={(e) => setForm({ ...form, off: e.target.value === 'off' })}>
+              <option value="off">Off all day</option>
+              <option value="hours">Working different hours</option>
+            </select>
+          </label>
+          {!form.off && (
+            <label>Hours<span className="inline"><input type="time" value={form.open} onChange={set('open')} /> – <input type="time" value={form.close} onChange={set('close')} /></span></label>
+          )}
+          <label>Reason<input value={form.reason} onChange={set('reason')} placeholder="Vacation, CE course…" /></label>
+          <div style={{ alignSelf: 'end' }}><button className="primary" disabled={busy}>Save</button></div>
+        </form>
+      )}
+      <ErrorBox error={error} />
+      {result?.conflicts?.length > 0 && (
+        <div className="error" style={{ marginTop: 10 }}>
+          {result.conflicts.length} booked visit{result.conflicts.length === 1 ? ' falls' : 's fall'} in that time and need{result.conflicts.length === 1 ? 's' : ''} moving:
+          {result.conflicts.map((a) => <div key={a.id}>{fmtDateTime(a.start_time)} — {a.first_name} {a.last_name}</div>)}
+        </div>
+      )}
+      {list?.length ? (
+        <table style={{ marginTop: 12 }}>
+          <tbody>
+            {list.map((x) => {
+              const hours = JSON.parse(x.hours);
+              return (
+                <tr key={x.id}>
+                  <td>{new Date(`${x.date}T12:00:00Z`).toLocaleDateString('en-US', { timeZone: 'UTC', weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}</td>
+                  <td>{hours.length ? hours.map(([o, c]) => `${o}–${c}`).join(', ') : <span className="badge warn">Off</span>}</td>
+                  <td className="muted">{x.reason}</td>
+                  <td>{canWrite && <button className="small" onClick={() => remove(x.id)}>Remove</button>}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      ) : <div className="muted" style={{ marginTop: 10 }}>Nothing coming up.</div>}
+    </div>
   );
 }

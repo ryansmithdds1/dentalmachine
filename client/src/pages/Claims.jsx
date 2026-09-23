@@ -7,6 +7,7 @@ import { money, fmtDate, fmtDateTime, toCents } from '../format.js';
 import { Badge, ErrorBox, Modal } from '../components/ui.jsx';
 import { PlanSummary } from '../components/patient/PaymentPlans.jsx';
 import { ChStatus, ClearinghousePanel, sendClaims, describeResponses } from '../components/ClaimEdi.jsx';
+import { downloadCsv, dollars } from '../api.js';
 
 const FILTERS = [['draft', 'Ready to send'], ['submitted', 'Submitted'], ['partially_paid', 'Partially paid'], ['denied', 'Denied'], ['paid', 'Paid'], ['void', 'Void'], ['', 'All']];
 
@@ -236,6 +237,10 @@ function InsuranceFollowup() {
         {B.map(([k, l]) => <div key={k} className={`card stat${k === 'd90_plus' && data.totals[k] ? ' stat-danger' : k === 'd61_90' && data.totals[k] ? ' stat-warn' : ''}`}><div className="label">{l}</div><div className="value">{money(data.totals[k])}</div><div className="sub">expected from insurance</div></div>)}
       </div>
       <div className="card" style={{ padding: 0 }}>
+        <div className="inline no-print" style={{ justifyContent: 'flex-end', padding: '10px 16px 0' }}>
+          <button className="small" disabled={!data.rows.length} onClick={() => downloadCsv('outstanding-claims', data.rows, [['Claim #', (c) => c.id], ['Patient', (c) => `${c.first_name} ${c.last_name}`], ['Carrier', (c) => c.carrier_name], ['Carrier phone', (c) => c.carrier_phone || ''], ['Submitted', (c) => c.submitted_at || ''], ['Days out', (c) => c.days_out], ['Expected', (c) => dollars(c.estimated_amount - c.paid_amount)], ['Status', (c) => c.status]])}>⬇ CSV</button>
+          <button className="small" onClick={() => window.print()}>Print / PDF</button>
+        </div>
         <div className="table-wrap">
           <table>
             <thead><tr><th>Claim</th><th>Patient</th><th>Carrier</th><th>Submitted</th><th className="num">Days out</th><th className="num">Expected</th><th>Status</th></tr></thead>

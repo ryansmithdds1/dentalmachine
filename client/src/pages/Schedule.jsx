@@ -200,11 +200,13 @@ export default function Schedule() {
     saveMove(appt, { start_time: `${col.date} ${start}`, end_time: `${col.date} ${hhmm(toMin(start) + dur)}`, ...col.assign });
   }, [placing, saveMove]);
 
-  const setStatus = async (a, status, scope) => {
+  const setStatus = async (a, status, scope, extra = {}) => {
     replaceAppt({ ...a, status, _pending: true });
     try {
-      replaceAppt(await api.patch(`/appointments/${a.id}/status`, { status, ...(scope ? { scope } : {}) }));
+      const updated = await api.patch(`/appointments/${a.id}/status`, { status, ...(scope ? { scope } : {}), ...extra });
+      replaceAppt(updated);
       cache.current.clear();
+      if (updated.completed_procedures) toast(`Visit complete · ${updated.completed_procedures} procedure${updated.completed_procedures === 1 ? '' : 's'} completed and charged`);
       if (scope === 'following') toast('Cancelled this and the following visits in the series');
       if (['cancelled', 'no_show'].includes(status)) {
         setSelectedId(null);
@@ -401,7 +403,7 @@ export default function Schedule() {
       {selected && (
         <AppointmentDrawer
           appt={selected} can={can} onClose={() => setSelectedId(null)}
-          onStatus={(s, scope) => setStatus(selected, s, scope)}
+          onStatus={(s, scope, extra) => setStatus(selected, s, scope, extra)}
           onEdit={() => setModal({ type: 'edit', appt: selected })}
           onChart={() => nav(`/patients/${selected.patient_id}`)}
           onMove={() => {

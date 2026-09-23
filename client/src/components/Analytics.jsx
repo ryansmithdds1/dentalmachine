@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useApi } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
 import { money, shiftDate, practiceToday, label } from '../format.js';
+import { downloadCsv, dollars } from '../api.js';
 
 const RANGES = [[29, '30 days'], [89, '90 days'], [364, '12 months']];
 // Industry rules of thumb, shown as context next to each KPI.
@@ -49,7 +50,10 @@ export default function Analytics() {
 
       <div className="grid grid-2" style={{ marginTop: 16 }}>
         <div className="card">
-          <h2>Production & collections by month</h2>
+          <div className="inline" style={{ justifyContent: 'space-between' }}>
+            <h2 style={{ margin: 0 }}>Production & collections by month</h2>
+            <button className="small no-print" onClick={() => downloadCsv('kpis-by-month', k.monthly, [['Month', (m) => m.month], ['Production', (m) => dollars(m.production)], ['Collections', (m) => dollars(m.collections)]])}>⬇ CSV</button>
+          </div>
           <div className="bars">
             {k.monthly.map((m) => (
               <div key={m.month} className="bar-col" title={`${m.month}\nProduction ${short(m.production)}\nCollections ${short(m.collections)}`}>
@@ -64,7 +68,10 @@ export default function Analytics() {
           <div className="legend" style={{ justifyContent: 'flex-start' }}><span><i style={{ background: 'var(--primary)' }} />Production</span><span><i style={{ background: '#94a3b8' }} />Collections</span></div>
         </div>
         <div className="card">
-          <h2>Production by provider</h2>
+          <div className="inline" style={{ justifyContent: 'space-between' }}>
+            <h2 style={{ margin: 0 }}>Production by provider</h2>
+            <button className="small no-print" onClick={() => downloadCsv('production-by-provider', k.by_provider, [['Provider', (p) => p.name], ['Type', (p) => label(p.type)], ['Production', (p) => dollars(p.production)]])}>⬇ CSV</button>
+          </div>
           {k.by_provider.map((p) => (
             <div key={p.id} className="hbar">
               <div className="inline" style={{ justifyContent: 'space-between' }}><span>{p.name} <span className="muted">· {label(p.type)}</span></span><strong>{short(p.production)}</strong></div>
@@ -73,7 +80,10 @@ export default function Analytics() {
           ))}
         </div>
         <div className="card">
-          <h2>New patients by referral source</h2>
+          <div className="inline" style={{ justifyContent: 'space-between' }}>
+            <h2 style={{ margin: 0 }}>New patients by referral source</h2>
+            <button className="small no-print" disabled={!k.new_patients.by_source.length} onClick={() => downloadCsv('new-patients-by-source', k.new_patients.by_source, [['Source', (s) => s.source], ['New patients', (s) => s.n]])}>⬇ CSV</button>
+          </div>
           {k.new_patients.by_source.length === 0 && <div className="muted">No new patients in this period.</div>}
           {k.new_patients.by_source.map((s) => (
             <div key={s.source} className="hbar">

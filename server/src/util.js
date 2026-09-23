@@ -158,3 +158,13 @@ export const staffPractice = (p, user) => {
   for (const k of Object.keys(out)) if (k.startsWith('sso_') || k === 'message_templates') delete out[k];
   return out;
 };
+
+// CSV text for spreadsheet exports (formula-looking cells are neutralised).
+export function toCsv(rows, columns) {
+  const cell = (v) => {
+    const s = v == null ? '' : String(v);
+    const safe = /^[=+\-@\t\r]/.test(s) && !/^-?\d+(\.\d+)?$/.test(s) ? `'${s}` : s;
+    return /[",\n\r]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
+  };
+  return `﻿${[columns.map(([h]) => cell(h)).join(','), ...rows.map((r) => columns.map(([, f]) => cell(f(r))).join(','))].join('\r\n')}\r\n`;
+}

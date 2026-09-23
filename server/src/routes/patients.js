@@ -74,6 +74,13 @@ export default function patientRoutes({ db }) {
          ORDER BY a.start_time LIMIT 10`,
         pid, patient.id, (await practiceNow(db, pid)).slice(0, 10),
       ),
+      // Past visits, newest first, including missed and cancelled ones (reliability matters when booking).
+      past_appointments: await db.all(
+        `SELECT a.id, a.start_time, a.end_time, a.status, a.reason, pr.name AS provider_name FROM appointments a
+         JOIN providers pr ON pr.id = a.provider_id WHERE a.practice_id = ? AND a.patient_id = ? AND a.start_time < ?
+         ORDER BY a.start_time DESC LIMIT 25`,
+        pid, patient.id, (await practiceNow(db, pid)).slice(0, 10),
+      ),
       recalls: await db.all('SELECT * FROM recalls WHERE practice_id = ? AND patient_id = ? ORDER BY due_date', pid, patient.id),
       history_review_pending: (await db.get("SELECT COUNT(*) AS n FROM patient_forms WHERE patient_id = ? AND kind = 'medical_history' AND review_status = 'pending'", patient.id)).n > 0,
       guarantor: patient.guarantor_id ? await db.get('SELECT id, first_name, last_name FROM patients WHERE id = ?', patient.guarantor_id) : null,

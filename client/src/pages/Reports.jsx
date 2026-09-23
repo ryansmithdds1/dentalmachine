@@ -4,6 +4,7 @@ import Analytics from '../components/Analytics.jsx';
 import { useApi } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
 import { money, label, practiceToday, shiftDate } from '../format.js';
+import { downloadCsv, dollars } from '../api.js';
 
 export default function Reports() {
   const [params, setParams] = useSearchParams();
@@ -42,6 +43,7 @@ function Operational() {
           <button onClick={() => { setFrom(`${today.slice(0, 7)}-01`); setTo(today); }}>MTD</button>
           <button onClick={() => { setFrom(shiftDate(today, -29)); setTo(today); }}>Last 30 days</button>
           <button onClick={() => { setFrom(`${today.slice(0, 4)}-01-01`); setTo(today); }}>YTD</button>
+          <button className="no-print" onClick={() => window.print()} title="Print, or choose “Save as PDF” in the print dialog">Print / PDF</button>
           <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} style={{ width: 150 }} />
           <span>to</span>
           <input type="date" value={to} onChange={(e) => setTo(e.target.value)} style={{ width: 150 }} />
@@ -57,7 +59,9 @@ function Operational() {
       </div>
 
       <div className="card" style={{ marginTop: 16 }}>
-        <h2>Daily production vs. collections</h2>
+        <TitleRow title="Daily production vs. collections">
+          <CsvButton name={`production-by-day-${from}-to-${to}`} rows={prod?.by_day} columns={[['Date', (d) => d.day], ['Production', (d) => dollars(d.production)], ['Collections', (d) => dollars(d.collections)]]} />
+        </TitleRow>
         {!prod?.by_day.length ? <div className="muted">No activity in this range.</div> : (
           <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: 180, overflowX: 'auto', paddingBottom: 4 }}>
             {prod.by_day.map((d) => (
@@ -79,21 +83,21 @@ function Operational() {
 
       <div className="grid grid-2" style={{ marginTop: 16 }}>
         <div className="card">
-          <h2>Production by provider</h2>
+          <TitleRow title="Production by provider"><CsvButton name={`production-by-provider-${from}-to-${to}`} rows={prod?.by_provider} columns={[['Provider', (p) => p.name], ['Procedures', (p) => p.procedures], ['Production', (p) => dollars(p.production)]]} /></TitleRow>
           <table>
             <thead><tr><th>Provider</th><th className="num">Procedures</th><th className="num">Production</th></tr></thead>
             <tbody>{prod?.by_provider.map((p) => <tr key={p.id}><td>{p.name}</td><td className="num">{p.procedures}</td><td className="num">{money(p.production)}</td></tr>)}</tbody>
           </table>
         </div>
         <div className="card">
-          <h2>Production by category</h2>
+          <TitleRow title="Production by category"><CsvButton name={`production-by-category-${from}-to-${to}`} rows={prod?.by_category} columns={[['Category', (c) => label(c.category)], ['Procedures', (c) => c.procedures], ['Production', (c) => dollars(c.production)]]} /></TitleRow>
           <table>
             <thead><tr><th>Category</th><th className="num">Procedures</th><th className="num">Production</th></tr></thead>
             <tbody>{prod?.by_category.map((c) => <tr key={c.category}><td>{label(c.category)}</td><td className="num">{c.procedures}</td><td className="num">{money(c.production)}</td></tr>)}</tbody>
           </table>
         </div>
         <div className="card">
-          <h2>Top procedures</h2>
+          <TitleRow title="Top procedures"><CsvButton name={`top-procedures-${from}-to-${to}`} rows={prod?.top_procedures} columns={[['Code', (p) => p.code], ['Description', (p) => p.description], ['Count', (p) => p.count], ['Production', (p) => dollars(p.production)]]} /></TitleRow>
           <table>
             <thead><tr><th>Code</th><th>Description</th><th className="num">Count</th><th className="num">Production</th></tr></thead>
             <tbody>{prod?.top_procedures.map((p) => <tr key={p.code}><td>{p.code}</td><td>{p.description}</td><td className="num">{p.count}</td><td className="num">{money(p.production)}</td></tr>)}</tbody>
@@ -103,8 +107,11 @@ function Operational() {
 
       <div className="card" style={{ marginTop: 16, padding: 0 }}>
         <div style={{ padding: '14px 16px' }}>
-          <h2 style={{ margin: 0 }}>Accounts receivable aging</h2>
-          <div className="muted">As of {aging?.as_of}. Credits are applied to the oldest charges first.</div>
+          <TitleRow title="Accounts receivable aging">
+            <CsvButton name={`ar-aging-${aging?.as_of}`} rows={aging?.rows} columns={[['Patient #', (r) => r.id], ['First name', (r) => r.first_name], ['Last name', (r) => r.last_name], ['Phone', (r) => r.phone], ['0-30', (r) => dollars(r.current)], ['31-60', (r) => dollars(r.d31_60)], ['61-90', (r) => dollars(r.d61_90)], ['90+', (r) => dollars(r.d90_plus)], ['Total', (r) => dollars(r.balance)]]} />
+            <button className="small no-print" onClick={() => window.print()}>Print / PDF</button>
+          </TitleRow>
+          <div className="muted">As of {aging?.as_of}. Payments and credits are applied to the oldest charges first.</div>
         </div>
         <div className="table-wrap">
           <table>
@@ -128,6 +135,14 @@ function Operational() {
             </tbody>
           </table>
         </div>
+        {aging?.credits?.length > 0 && (
+          <details style={{ padding: '0 16px 14px' }}>
+            <summary>{aging.credits.length} account{aging.credits.length === 1 ? '' : 's'} in credit ({money(aging.totals.credits)}) — refund or apply</summary>
+            <table style={{ marginTop: 8 }}>
+              <tbody>{aging.credits.map((c) => <tr key={c.id}><td><Link to={`/patients/${c.id}`}>{c.first_name} {c.last_name}</Link></td><td>{c.phone}</td><td className="num">{money(c.credit)}</td></tr>)}</tbody>
+            </table>
+          </details>
+        )}
       </div>
     </>
   );
@@ -148,7 +163,8 @@ function DaySheet({ sheet, date, setDate }) {
           <button onClick={() => setDate(shiftDate(date, -1))}>←</button>
           <input type="date" value={date} onChange={(e) => e.target.value && setDate(e.target.value)} style={{ width: 160 }} />
           <button onClick={() => setDate(shiftDate(date, 1))}>→</button>
-          <button onClick={() => window.print()}>Print</button>
+          <button onClick={() => window.print()}>Print / PDF</button>
+          <CsvButton name={`day-sheet-${date}`} rows={sheet?.entries} columns={[['Date', (e) => e.entry_date], ['Type', (e) => label(e.type)], ['Patient', (e) => `${e.first_name} ${e.last_name}`], ['Description', (e) => e.description], ['Method', (e) => e.method || ''], ['Reference', (e) => e.reference || ''], ['Provider / by', (e) => e.provider_name || e.created_by_name || 'Online'], ['Amount', (e) => dollars(e.amount)]]} />
         </div>
       </div>
       {t && (
@@ -201,3 +217,11 @@ function DaySheet({ sheet, date, setDate }) {
     </div>
   );
 }
+
+// Spreadsheet export for a report table; money columns are in dollars.
+function CsvButton({ name, rows, columns }) {
+  return <button className="small no-print" disabled={!rows?.length} onClick={() => downloadCsv(name, rows, columns)} title="Download as a spreadsheet (CSV)">⬇ CSV</button>;
+}
+const TitleRow = ({ title, children }) => (
+  <div className="inline" style={{ justifyContent: 'space-between' }}><h2 style={{ margin: 0 }}>{title}</h2><span className="inline">{children}</span></div>
+);

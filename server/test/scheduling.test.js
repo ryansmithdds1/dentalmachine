@@ -123,3 +123,44 @@ test('a completed extraction charts the tooth missing; undoing it takes that bac
   chart = (await api.get(`/patients/${patient.id}/chart`)).data;
   assert.ok(!chart.conditions.some((c) => c.tooth === '19' && c.condition === 'missing'));
 });
+
+test('completing a visit completes its procedures; time off blocks booking; visit history', async () => {
+  const { api, provider, patient } = await h.practice();
+  const crown = (await api.post(`/patients/${patient.id}/procedures`, { code: 'D2740', tooth: '3', provider_id: provider.id })).data;
+  const visit = (await api.post('/appointments', { patient_id: patient.id, provider_id: provider.id, start_time: `${MON} 09:00`, end_time: `${MON} 10:00`, procedure_ids: [crown.id] })).data;
+  const done = await api.patch(`/appointments/${visit.id}/status`, { status: 'completed', complete_procedures: true });
+  assert.equal(done.status, 200);
+  assert.equal(done.data.completed_procedures, 1);
+  assert.equal((await h.db.get('SELECT status FROM procedures WHERE id = ?', crown.id)).status, 'completed');
+  assert.equal((await api.get(`/patients/${patient.id}/ledger`)).data.balance, 135000);
+
+  // Vacation: booking warns (with override), open times disappear, the calendar knows.
+  const TUE = '2031-01-07';
+  const off = await api.post(`/providers/${provider.id}/exceptions`, { from: TUE, to: '2031-01-08', off: true, reason: 'Vacation' });
+  assert.equal(off.status, 201);
+  assert.equal(off.data.days, 2);
+  const booked = await api.post('/appointments', { patient_id: patient.id, provider_id: provider.id, start_time: `${TUE} 09:00`, end_time: `${TUE} 10:00` });
+  assert.equal(booked.status, 409);
+  assert.match(booked.data.error, /is off that day \(Vacation\)/);
+  assert.deepEqual((await api.get(`/availability?date=${TUE}&provider_id=${provider.id}`)).data.slots ?? (await api.get(`/availability?date=${TUE}&provider_id=${provider.id}`)).data, []);
+  const sched = (await api.get(`/schedule?from=${TUE}&to=${TUE}`)).data;
+  assert.deepEqual(sched.provider_hours[provider.id][TUE], []);
+  assert.equal(sched.provider_exceptions[0].reason, 'Vacation');
+  // Special hours on a day: only those hours count.
+  const THU = '2031-01-09';
+  await api.post(`/providers/${provider.id}/exceptions`, { from: THU, off: false, hours: [['13:00', '17:00']], reason: 'Morning meeting' });
+  assert.equal((await api.post('/appointments', { patient_id: patient.id, provider_id: provider.id, start_time: `${THU} 09:00`, end_time: `${THU} 10:00` })).status, 409);
+  assert.equal((await api.post('/appointments', { patient_id: patient.id, provider_id: provider.id, start_time: `${THU} 14:00`, end_time: `${THU} 15:00` })).status, 201);
+  const list = (await api.get(`/providers/${provider.id}/exceptions?from=2031-01-01`)).data;
+  assert.equal(list.length, 3);
+  await api.del(`/provider-exceptions/${list[0].id}`);
+  assert.equal((await api.post('/appointments', { patient_id: patient.id, provider_id: provider.id, start_time: `${TUE} 09:00`, end_time: `${TUE} 10:00` })).status, 201);
+
+  // Audit log search: by patient and action, and as CSV.
+  const log = (await api.get(`/audit-log?patient_id=${patient.id}&action=appointment.`)).data;
+  assert.ok(log.length >= 2 && log.every((e) => e.action.startsWith('appointment.')));
+  const csv = await fetch(`${h.origin}/api/audit-log?format=csv&action=provider.`, { headers: { Authorization: `Bearer ${(await api.post('/auth/logout-all')).data.token}` } });
+  assert.equal(csv.status, 200);
+  assert.match(csv.headers.get('content-type'), /text\/csv/);
+  assert.match(await csv.text(), /provider\.exception/);
+});

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { HttpError, hashPassword } from '../auth.js';
-import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, toCents, practiceNow, staffPractice } from '../util.js';
+import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, toCents, practiceNow, staffPractice, toCsv } from '../util.js';
 import { validatePassword } from './auth.js';
 import { validateHours } from '../hours.js';
 import { PROVIDERS, sealSecret } from '../sso.js';
@@ -190,8 +190,12 @@ export default function settingsRoutes({ db, secret, config = {} }) {
     },
   });
 
+  // Searchable audit trail (HIPAA access reviews): by date range, patient, user and action; paged,
+  // or the whole match as CSV for a compliance file.
   r.get('/audit-log', requireAdmin, async (req, res) => {
-    const limit = Math.min(Number(req.query.limit) || 100, 500);
+    const csv = req.query.format === 'csv';
+    const limit = csv ? 100_000 : Math.min(Number(req.query.limit) || 100, 2000);
+    const offset = Math.max(Number(req.query.offset) || 0, 0);
     const where = ['a.practice_id = ?'];
     const params = [req.user.practice_id];
     if (req.query.entity) {
@@ -206,10 +210,32 @@ export default function settingsRoutes({ db, secret, config = {} }) {
       where.push('a.user_id = ?');
       params.push(Number(req.query.user_id));
     }
-    res.json(await db.all(
+    if (req.query.action) {
+      where.push('a.action LIKE ?');
+      params.push(`${String(req.query.action).replace(/[%_]/g, '')}%`);
+    }
+    for (const [k, op, suffix] of [['from', '>=', ' 00:00:00'], ['to', '<=', ' 23:59:59']]) {
+      if (!req.query[k]) continue;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(req.query[k])) throw new HttpError(400, `${k} must be YYYY-MM-DD`);
+      where.push(`a.created_at ${op} ?`);
+      params.push(`${req.query[k]}${suffix}`);
+    }
+    if (req.query.patient_id) {
+      // Anything about the patient: their record, or entries whose details name them.
+      const id = Number(req.query.patient_id);
+      // Their record, their appointments/charts/bills (by the record's patient), or details that name them.
+      const owned = ['appointments', 'procedures', 'ledger_entries', 'claims', 'clinical_notes', 'documents', 'treatment_plans', 'prescriptions', 'perio_exams', 'patient_insurance'];
+      where.push(`((a.entity = 'patients' AND a.entity_id = ?) OR ${owned.map((t) => `(a.entity = '${t}' AND a.entity_id IN (SELECT id FROM ${t} WHERE patient_id = ?))`).join(' OR ')} OR a.details LIKE ? OR a.details LIKE ?)`);
+      params.push(id, ...owned.map(() => id), `%"patient_id":${id},%`, `%"patient_id":${id}}%`);
+    }
+    const rows = await db.all(
       `SELECT a.*, u.name AS user_name FROM audit_log a LEFT JOIN users u ON u.id = a.user_id
-       WHERE ${where.join(' AND ')} ORDER BY a.id DESC LIMIT ?`, ...params, limit,
-    ));
+       WHERE ${where.join(' AND ')} ORDER BY a.id DESC LIMIT ? OFFSET ?`, ...params, limit, offset,
+    );
+    if (!csv) return res.json(rows);
+    await audit(db, req, 'audit_log.export', null, null, { filters: pick(req.query, ['from', 'to', 'user_id', 'patient_id', 'action', 'entity']), rows: rows.length });
+    res.set({ 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="audit-log-${new Date().toISOString().slice(0, 10)}.csv"` });
+    res.send(toCsv(rows, [['When (UTC)', (r) => r.created_at], ['User', (r) => r.user_name || ''], ['Action', (r) => r.action], ['Record', (r) => r.entity || ''], ['Record ID', (r) => r.entity_id ?? ''], ['IP', (r) => r.ip || ''], ['Details', (r) => r.details || '']]));
   });
 
   return r;

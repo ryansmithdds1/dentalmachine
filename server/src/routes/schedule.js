@@ -1,8 +1,9 @@
 import { Router } from 'express';
-import { requirePermission, HttpError } from '../auth.js';
+import { requirePermission, HttpError, can } from '../auth.js';
 import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, normalizeDateTime, practiceNow, mapSeq } from '../util.js';
-import { hoursFor, providerHours, providerHoursFor } from '../hours.js';
+import { hoursFor, providerHours, providerHoursFor, providerHoursOn, validateHours } from '../hours.js';
 import { publish, eventStream } from '../events.js';
+import { completeProcedure } from '../services.js';
 
 export const STATUSES = ['scheduled', 'confirmed', 'checked_in', 'in_chair', 'completed', 'cancelled', 'no_show'];
 export const INACTIVE = "('cancelled','no_show')";
@@ -63,11 +64,13 @@ export async function validateAppt(db, practiceId, row, { overrideBlockout = fal
     // Nobody is booked outside their hours — the provider's own (part-time hygienists, visiting
     // specialists) or else the office's — without a deliberate override.
     const date = row.start_time.slice(0, 10);
-    const practice = providerHours(provider) ? null : await db.get('SELECT office_hours FROM practices WHERE id = ?', practiceId);
-    const ranges = providerHoursFor(practice, provider, date);
+    const practice = await db.get('SELECT office_hours FROM practices WHERE id = ?', practiceId);
+    const ranges = await providerHoursOn(db, practice, provider, date);
     const inside = ranges.some(([o, c]) => row.start_time.slice(11) >= o && row.end_time.slice(11) <= c);
     if (!inside) {
-      throw new HttpError(409, providerHours(provider) ? `${provider.name} isn't scheduled to work then` : 'That time is outside office hours', { outside_hours: ranges, can_override: true });
+      const why = ranges.exception ? `${provider.name} ${ranges.length ? 'has different hours' : 'is off'} that day (${ranges.exception})`
+        : providerHours(provider) ? `${provider.name} isn't scheduled to work then` : 'That time is outside office hours';
+      throw new HttpError(409, why, { outside_hours: [...ranges], can_override: true });
     }
   }
 }
@@ -103,8 +106,8 @@ export const addMinutes = (dateTime, minutes) => `${dateTime.slice(0, 10)} ${fro
 // Free start times for a provider on a day, on a grid (minutes) within office hours, avoiding appointments and blockouts.
 export async function openSlots(db, practiceId, providerId, date, { duration = 60, step = 10, after = null, open = null, close = null } = {}) {
   const practice = await db.get('SELECT office_hours FROM practices WHERE id = ?', practiceId);
-  const provider = await db.get('SELECT working_hours FROM providers WHERE id = ?', providerId);
-  const ranges = open && close ? [[open, close]] : providerHoursFor(practice, provider, date);
+  const provider = await db.get('SELECT id, working_hours FROM providers WHERE id = ?', providerId);
+  const ranges = open && close ? [[open, close]] : await providerHoursOn(db, practice, provider, date);
   const busy = [
     ...(await db.all(
       `SELECT start_time, end_time FROM appointments WHERE practice_id = ? AND provider_id = ? AND status NOT IN ${INACTIVE}
@@ -311,6 +314,16 @@ export default function scheduleRoutes({ db }) {
       status, status, existing.id,
     );
     if (status === 'cancelled' || status === 'no_show') await releaseAppointment(db, existing.id);
+    // Finishing the visit also completes the work planned for it (posting the charges), when the
+    // person has clinical rights and asked for it.
+    let completedProcedures = 0;
+    if (status === 'completed' && req.body.complete_procedures && can(req.user, 'clinical:write')) {
+      const planned = await db.all("SELECT * FROM procedures WHERE appointment_id = ? AND status = 'planned' ORDER BY id", existing.id);
+      for (const p of planned) {
+        await completeProcedure(db, req.user, p, { providerId: p.provider_id || existing.provider_id, appointmentId: existing.id });
+        completedProcedures++;
+      }
+    }
     if (status === 'cancelled' && req.body.scope === 'following' && existing.series_id) {
       const later = await db.all("SELECT id, start_time FROM appointments WHERE series_id = ? AND practice_id = ? AND start_time > ? AND status IN ('scheduled','confirmed')", existing.series_id, req.user.practice_id, existing.start_time);
       for (const occ of later) {
@@ -321,9 +334,53 @@ export default function scheduleRoutes({ db }) {
       }
       changed(req, ...later.map((o) => o.start_time));
     }
-    await audit(db, req, 'appointment.status', 'appointments', existing.id, { from: existing.status, to: status });
+    await audit(db, req, 'appointment.status', 'appointments', existing.id, { from: existing.status, to: status, ...(completedProcedures ? { completed_procedures: completedProcedures } : {}) });
     changed(req, existing.start_time);
-    res.json(await db.get(`${SELECT} WHERE a.id = ?`, existing.id));
+    res.json({ ...(await db.get(`${SELECT} WHERE a.id = ?`, existing.id)), completed_procedures: completedProcedures });
+  });
+
+  // ---- Provider time off and one-off hours ----
+  r.get('/providers/:pid/exceptions', requirePermission('schedule:read'), async (req, res) => {
+    const provider = await findOr404(db, 'providers', req.params.pid, req.user.practice_id, 'Provider');
+    const from = req.query.from || (await practiceNow(db, req.user.practice_id)).slice(0, 10);
+    res.json(await db.all('SELECT * FROM provider_exceptions WHERE provider_id = ? AND date >= ? ORDER BY date', provider.id, from));
+  });
+
+  // A day or a range (vacation): off entirely, or working different hours.
+  r.post('/providers/:pid/exceptions', requirePermission('schedule:write'), async (req, res) => {
+    const provider = await findOr404(db, 'providers', req.params.pid, req.user.practice_id, 'Provider');
+    const { from, to = from, off = true, hours = [], reason = null } = req.body || {};
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(from || '') || !/^\d{4}-\d{2}-\d{2}$/.test(to || '') || to < from) throw new HttpError(400, 'from/to must be YYYY-MM-DD');
+    const days = datesBetween(from, to);
+    if (days.length > 366) throw new HttpError(400, 'Choose a range of a year or less');
+    const ranges = off ? [] : validateHours({ 0: hours })[0];
+    if (!off && !ranges.length) throw new HttpError(400, 'Give the hours they will work, or mark them off');
+    await db.tx(async () => {
+      for (const d of days) {
+        await db.run(
+          'INSERT INTO provider_exceptions (practice_id, provider_id, date, hours, reason, created_by) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (provider_id, date) DO UPDATE SET hours = excluded.hours, reason = excluded.reason',
+          req.user.practice_id, provider.id, d, JSON.stringify(ranges), reason ? String(reason).slice(0, 120) : null, req.user.id,
+        );
+      }
+    });
+    // Tell the front desk about visits already booked in that time.
+    const affected = await db.all(
+      `SELECT a.id, a.start_time, a.end_time, p.first_name, p.last_name FROM appointments a JOIN patients p ON p.id = a.patient_id
+       WHERE a.provider_id = ? AND a.start_time >= ? AND a.start_time < ? AND a.status NOT IN ${INACTIVE} ORDER BY a.start_time`,
+      provider.id, `${from} 00:00`, `${to} 24:00`,
+    );
+    const conflicts = affected.filter((a) => !ranges.some(([o, c]) => a.start_time.slice(11) >= o && a.end_time.slice(11) <= c));
+    await audit(db, req, 'provider.exception', 'providers', provider.id, { from, to, off, reason });
+    changed(req, ...days);
+    res.status(201).json({ days: days.length, conflicts });
+  });
+
+  r.delete('/provider-exceptions/:eid', requirePermission('schedule:write'), async (req, res) => {
+    const ex = await findOr404(db, 'provider_exceptions', req.params.eid, req.user.practice_id, 'Exception');
+    await db.run('DELETE FROM provider_exceptions WHERE id = ?', ex.id);
+    await audit(db, req, 'provider.exception_removed', 'providers', ex.provider_id, { date: ex.date });
+    changed(req, ex.date);
+    res.json({ ok: true });
   });
 
   // Free slots for a provider on a day, on a 10-minute grid within opening hours.
@@ -350,12 +407,20 @@ export default function scheduleRoutes({ db }) {
       pid, `${from} 00:00`, `${to} 24:00`,
     );
     const production = Object.fromEntries(dates.map((d) => [d, 0]));
-    const custom = (await db.all('SELECT id, working_hours FROM providers WHERE practice_id = ? AND active = 1 AND working_hours IS NOT NULL', pid));
+    // Providers whose day differs from the office's: their own weekly hours, or a one-off exception.
+    const exceptions = await db.all('SELECT provider_id, date, hours, reason FROM provider_exceptions WHERE practice_id = ? AND date BETWEEN ? AND ?', pid, from, to);
+    const custom = (await db.all('SELECT id, working_hours FROM providers WHERE practice_id = ? AND active = 1', pid))
+      .filter((pv) => pv.working_hours || exceptions.some((e) => e.provider_id === pv.id));
+    const exceptionFor = (pv, d) => exceptions.find((e) => e.provider_id === pv.id && e.date === d);
     for (const a of appointments) if (!['cancelled', 'no_show'].includes(a.status)) production[a.start_time.slice(0, 10)] += a.production;
     res.json({
       from, to, daily_goal: practice.daily_goal,
       hours: Object.fromEntries(dates.map((d) => [d, hoursFor(practice, d)])),
-      provider_hours: Object.fromEntries(custom.map((pv) => [pv.id, Object.fromEntries(dates.map((d) => [d, providerHoursFor(practice, pv, d)]))])),
+      provider_hours: Object.fromEntries(custom.map((pv) => [pv.id, Object.fromEntries(dates.map((d) => {
+        const ex = exceptionFor(pv, d);
+        return [d, ex ? JSON.parse(ex.hours) : providerHoursFor(practice, pv, d)];
+      }))])),
+      provider_exceptions: exceptions.map((e) => ({ provider_id: e.provider_id, date: e.date, off: JSON.parse(e.hours).length === 0, reason: e.reason })),
       appointments,
       blockouts: await db.all('SELECT * FROM blockouts WHERE practice_id = ? AND start_time < ? AND end_time > ? ORDER BY start_time', pid, `${to} 24:00`, `${from} 00:00`),
       production,
