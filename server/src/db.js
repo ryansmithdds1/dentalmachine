@@ -787,6 +787,44 @@ CREATE TABLE IF NOT EXISTS fee_history (
 );
 CREATE INDEX IF NOT EXISTS idx_fee_history ON fee_history(practice_id, code);
 
+-- Supplies: what's on the shelf, every change to it, and what each procedure uses up.
+CREATE TABLE IF NOT EXISTS inventory_items (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  location_id INTEGER,
+  name TEXT NOT NULL,
+  sku TEXT,
+  category TEXT,
+  unit TEXT NOT NULL DEFAULT 'each',
+  on_hand INTEGER NOT NULL DEFAULT 0,
+  reorder_at INTEGER NOT NULL DEFAULT 0,
+  reorder_qty INTEGER NOT NULL DEFAULT 0,
+  supplier TEXT,
+  cost INTEGER,
+  active INTEGER NOT NULL DEFAULT 1,
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS inventory_moves (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  item_id INTEGER NOT NULL REFERENCES inventory_items(id),
+  change INTEGER NOT NULL,
+  reason TEXT NOT NULL,
+  note TEXT,
+  procedure_id INTEGER,
+  created_by INTEGER,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_inventory_moves ON inventory_moves(item_id, id);
+CREATE TABLE IF NOT EXISTS inventory_usage (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  code TEXT NOT NULL,
+  item_id INTEGER NOT NULL REFERENCES inventory_items(id),
+  qty INTEGER NOT NULL DEFAULT 1
+);
+
 -- Time clock: staff punch in and out; managers fix punches and export hours for payroll.
 CREATE TABLE IF NOT EXISTS time_punches (
   id INTEGER PRIMARY KEY,

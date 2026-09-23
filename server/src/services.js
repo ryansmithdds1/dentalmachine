@@ -3,6 +3,7 @@ import { insert, practiceNow } from './util.js';
 import { benefitYear, deductibleMet, estimateCoverage } from './benefits.js';
 import { resetRecalls } from './recalls.js';
 import { applyMemberBenefit } from './memberships.js';
+import { useSupplies } from './inventory.js';
 
 export { benefitYear, deductibleMet, benefitsUsed, estimateCoverage, withPlan, planFor } from './benefits.js';
 
@@ -68,6 +69,8 @@ export async function completeProcedure(db, user, procedure, { providerId, appoi
       entry_date: today,
       created_by: user.id,
     });
+
+    await useSupplies(db, procedure, { userId: user.id, today });
 
     if (isExtraction(procedure.code) && procedure.tooth) {
       await insert(db, 'tooth_conditions', {

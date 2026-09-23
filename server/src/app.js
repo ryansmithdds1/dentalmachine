@@ -28,6 +28,7 @@ import depositRoutes from './routes/deposits.js';
 import closeRoutes from './routes/close.js';
 import savedReportRoutes from './routes/savedreports.js';
 import timeclockRoutes from './routes/timeclock.js';
+import inventoryRoutes from './routes/inventory.js';
 import imagingRoutes, { bridgeAgentRoutes } from './routes/imaging.js';
 import { portalPublicRoutes, portalRoutes } from './routes/portal.js';
 import systemRoutes from './routes/system.js';
@@ -160,6 +161,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(savedReportRoutes({ db, messenger }));
   api.use(surveyRoutes({ db, messenger, config }));
   api.use(timeclockRoutes({ db }));
+  api.use(inventoryRoutes({ db }));
   api.use(imagingRoutes({ db }));
   api.use(systemRoutes({ db, config, messenger, storage, payments, clearinghouse, erx, mailer }));
   app.use('/api', api);
