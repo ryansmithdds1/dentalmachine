@@ -787,6 +787,48 @@ CREATE TABLE IF NOT EXISTS fee_history (
 );
 CREATE INDEX IF NOT EXISTS idx_fee_history ON fee_history(practice_id, code);
 
+-- Orthodontics: the treatment contract (billed monthly, optionally by card) and the adjustment log.
+CREATE TABLE IF NOT EXISTS ortho_cases (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  provider_id INTEGER REFERENCES providers(id),
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','retention','completed','cancelled')),
+  appliance TEXT NOT NULL DEFAULT 'brackets',
+  start_date TEXT NOT NULL,
+  est_months INTEGER,
+  total_fee INTEGER NOT NULL,
+  insurance_estimate INTEGER NOT NULL DEFAULT 0,
+  down_payment INTEGER NOT NULL DEFAULT 0,
+  months INTEGER NOT NULL,
+  monthly_amount INTEGER NOT NULL,
+  next_bill_date TEXT,
+  billed_months INTEGER NOT NULL DEFAULT 0,
+  payment_method_id INTEGER,
+  autopay INTEGER NOT NULL DEFAULT 0,
+  billing_failures INTEGER NOT NULL DEFAULT 0,
+  billing_message TEXT,
+  billing_lock TEXT,
+  debond_date TEXT,
+  notes TEXT,
+  created_by INTEGER,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS ortho_visits (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  case_id INTEGER NOT NULL REFERENCES ortho_cases(id),
+  visit_date TEXT NOT NULL,
+  upper_wire TEXT,
+  lower_wire TEXT,
+  elastics TEXT,
+  aligner TEXT,
+  notes TEXT,
+  next_weeks INTEGER,
+  created_by INTEGER,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Saved custom queries from the report builder (a JSON description, never SQL).
 CREATE TABLE IF NOT EXISTS custom_queries (
   id INTEGER PRIMARY KEY,
@@ -1411,6 +1453,7 @@ const COLUMNS = [
   ['practices', 'eligibility_batch_date', 'TEXT'],
   ['ledger_entries', 'deposit_id', 'INTEGER REFERENCES deposits(id)'],
   ['appointments', 'video_url', 'TEXT'],
+  ['ledger_entries', 'ortho_case_id', 'INTEGER REFERENCES ortho_cases(id)'],
   ['appointment_types', 'is_video', 'INTEGER NOT NULL DEFAULT 0'],
   ['providers', 'video_room_url', 'TEXT'],
   ['users', 'custom_role_id', 'INTEGER REFERENCES custom_roles(id)'],

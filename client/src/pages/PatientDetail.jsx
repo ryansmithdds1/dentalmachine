@@ -16,6 +16,7 @@ import DocumentsTab from '../components/patient/DocumentsTab.jsx';
 import CommsTab from '../components/patient/CommsTab.jsx';
 import FamilyTab from '../components/patient/FamilyTab.jsx';
 import RxTab from '../components/patient/RxTab.jsx';
+import OrthoTab from '../components/patient/OrthoTab.jsx';
 import { LabCaseForm, TaskForm, WaitlistForm, LAB_STATUSES } from '../components/OfficeForms.jsx';
 import { api } from '../api.js';
 import { CustomFieldValues, MergeDialog } from '../components/Switching.jsx';
@@ -58,6 +59,7 @@ export default function PatientDetail() {
     ['perio', 'Perio', can('clinical:read')],
     ['notes', 'Clinical notes', can('clinical:read')],
     ['rx', 'Rx', can('clinical:read')],
+    ['ortho', 'Ortho', can('clinical:read')],
     ['documents', 'Documents & x-rays', can('clinical:read')],
     ['ledger', 'Ledger', can('billing:read')],
     ['insurance', 'Insurance', true],
@@ -112,6 +114,7 @@ export default function PatientDetail() {
       {tab === 'perio' && <PerioTab patient={p} />}
       {tab === 'notes' && <NotesTab patient={p} />}
       {tab === 'rx' && <RxTab patient={p} onChange={reload} />}
+      {tab === 'ortho' && <OrthoTab patient={p} onChange={reload} />}
       {tab === 'ledger' && <LedgerTab patient={p} onChange={reload} />}
       {tab === 'insurance' && <InsuranceTab patient={p} onChange={reload} />}
       {tab === 'documents' && <DocumentsTab patient={p} />}

@@ -14,6 +14,7 @@ import { deliverWebhooks, scanPayments } from './webhooks.js';
 import { createEligibility, runEligibilityBatches } from './eligibility.js';
 import { runScheduledReports } from './savedreports.js';
 import { runSurveys } from './surveys.js';
+import { runOrthoBilling } from './ortho.js';
 
 let secret = process.env.JWT_SECRET;
 if (!secret) {
@@ -90,6 +91,14 @@ if (app.locals.payments.enabled && process.env.AUTOPAY !== 'off') {
     setInterval(run, 60 * 60 * 1000).unref();
     setTimeout(run, 90_000).unref();
   }
+}
+// Ortho contracts: each month's charge (and card payment, with autopay) once a day.
+if (process.env.ORTHO_BILLING !== 'off') {
+  const run = () => runExclusive('ortho-billing', 30 * 60 * 1000, () => runOrthoBilling(db, app.locals.payments))
+    .then((r) => r?.length && console.log(`Ortho billing: ${r.length} months billed`))
+    .catch((err) => console.error('Ortho billing failed:', err.message));
+  setInterval(run, 60 * 60 * 1000).unref();
+  setTimeout(run, 50_000).unref();
 }
 // After-visit patient surveys (the day after, from 10am practice time).
 {
