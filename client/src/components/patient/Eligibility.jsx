@@ -2,8 +2,17 @@ import { useState } from 'react';
 import { api, getToken } from '../../api.js';
 import { useApi } from '../../hooks.js';
 import { useAuth } from '../../auth.jsx';
-import { money, fmtDateTime } from '../../format.js';
+import { money, fmtDate, fmtDateTime } from '../../format.js';
 import { ErrorBox, Modal } from '../ui.jsx';
+
+const hasOon = (s) => !!s.out_of_network && (s.out_of_network.annual_max != null || s.out_of_network.deductible != null || Object.keys(s.out_of_network.coinsurance || {}).length > 0);
+const lastDone = (history = [], codes) => history.filter((h) => h.codes.some((c) => codes.includes(c))).map((h) => h.date).sort().at(-1) || null;
+const addMonths = (date, n) => {
+  const d = new Date(`${date}T12:00:00Z`);
+  d.setUTCMonth(d.getUTCMonth() + n);
+  return d.toISOString().slice(0, 10);
+};
+const today = new Date().toISOString().slice(0, 10);
 
 // Real-time (sandbox) or clearinghouse-file (manual) insurance eligibility checks.
 export default function Eligibility({ patient, policies, onApplied }) {
@@ -82,6 +91,38 @@ export default function Eligibility({ patient, policies, onApplied }) {
                 {s.annual_max != null && <div><span className="muted">Annual max</span>{money(s.annual_max)}{s.max_remaining != null ? ` · ${money(s.max_remaining)} left` : ''}</div>}
                 {s.deductible != null && <div><span className="muted">Deductible</span>{money(s.deductible)}{s.deductible_remaining != null ? ` · ${money(s.deductible_remaining)} left` : ''}</div>}
                 {Object.keys(s.coinsurance || {}).length > 0 && <div><span className="muted">Coverage</span>{Object.entries(s.coinsurance).map(([k, v]) => `${k} ${v}%`).join(' · ')}</div>}
+                {s.family_deductible != null && <div><span className="muted">Family deductible</span>{money(s.family_deductible)}{s.family_deductible_remaining != null ? ` · ${money(s.family_deductible_remaining)} left` : ''}</div>}
+                {s.ortho_max != null && <div><span className="muted">Ortho lifetime max</span>{money(s.ortho_max)}{s.ortho_remaining != null ? ` · ${money(s.ortho_remaining)} left` : ''}</div>}
+                {hasOon(s) && (
+                  <div style={{ gridColumn: '1 / -1' }}>
+                    <span className="muted">Out of network</span>
+                    {[s.out_of_network.annual_max != null && `max ${money(s.out_of_network.annual_max)}${s.out_of_network.max_remaining != null ? ` (${money(s.out_of_network.max_remaining)} left)` : ''}`,
+                      s.out_of_network.deductible != null && `deductible ${money(s.out_of_network.deductible)}${s.out_of_network.deductible_remaining != null ? ` (${money(s.out_of_network.deductible_remaining)} left)` : ''}`,
+                      ...Object.entries(s.out_of_network.coinsurance || {}).map(([k, v]) => `${k} ${v}%`)].filter(Boolean).join(' · ')}
+                  </div>
+                )}
+                {s.frequencies?.length > 0 && (
+                  <div style={{ gridColumn: '1 / -1' }}>
+                    <span className="muted">Frequency limits and history (from the payer)</span>
+                    <table className="elig-freq">
+                      <thead><tr><th>Codes</th><th>Limit</th><th>Last done</th><th>Next eligible</th></tr></thead>
+                      <tbody>
+                        {s.frequencies.map((f, i) => {
+                          const last = lastDone(s.history, f.codes);
+                          const next = f.months && last ? addMonths(last, f.months) : null;
+                          return (
+                            <tr key={i}>
+                              <td>{f.codes.join(', ')}</td>
+                              <td>{f.months ? `${f.count} per ${f.months % 12 === 0 ? `${f.months / 12 === 1 ? '' : `${f.months / 12} `}year${f.months / 12 === 1 ? '' : 's'}` : `${f.months} months`}` : `${f.count} per benefit year`}</td>
+                              <td>{last ? fmtDate(last) : <span className="muted">—</span>}</td>
+                              <td>{next ? <span className={next > today ? 'text-danger' : ''}>{next > today ? fmtDate(next) : 'Now'}</span> : f.months ? 'Now' : <span className="muted">{last ? 'Check the count this year' : 'Now'}</span>}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
                 {s.messages?.length > 0 && <div style={{ gridColumn: '1 / -1' }}><span className="muted">Payer notes</span>{s.messages.join(' ')}</div>}
                 {s.errors?.length > 0 && <div style={{ gridColumn: '1 / -1', color: 'var(--danger)' }}>Payer rejected the request (AAA {s.errors.map((e) => e.code).join(', ')})</div>}
               </div>

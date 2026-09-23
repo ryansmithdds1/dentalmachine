@@ -234,7 +234,7 @@ button.big { width: 100%; justify-content: center; padding: 13px 18px; font-size
 .plan-bar i { display: block; height: 100%; background: var(--ok); }
 .elig { border-top: 1px solid var(--border); padding: 10px 0; }
 .elig-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px 16px; margin-top: 8px; font-size: 13px; }
-.elig-grid span.muted { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
+.elig-grid > div > span.muted { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
 
 @media (max-width: 800px) {
   .inbox { grid-template-columns: 1fr; height: auto; }
@@ -755,3 +755,6 @@ table.ada-services td:first-child { font: 400 6.5pt Arial, sans-serif; width: 12
   .ada-page { width: auto; min-height: 0; margin: 0; padding: 0; page-break-after: always; }
   .ada-page:last-child { page-break-after: auto; }
 }
+
+table.elig-freq { margin-top: 4px; font-size: 13px; }
+table.elig-freq th, table.elig-freq td { padding: 3px 8px; }

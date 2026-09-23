@@ -255,7 +255,7 @@ Works well: drag, resize and create; undo; live updates; conflict checks; open-t
 4. ✅ **P2** Print an ADA 2024 claim form (paper fallback). _(Done: “ADA claim form” on the claim prints the ADA Dental Claim Form layout on plain letter paper — all 58 numbered boxes filled from the claim: payer, other coverage, subscriber and patient, up to 10 services a page (more spill onto another sheet with the total on the last), missing teeth marked from the chart, remarks, billing and treating dentist with NPI, license and taxonomy.)_
 
 ### Eligibility
-1. **P2** Show 271 frequency and history, remaining benefits and out-of-network values.
+1. ✅ **P2** Show 271 frequency and history, remaining benefits and out-of-network values. _(Done: each eligibility check shows the payer's frequency limits with the last date done and when the patient is next eligible, what's left of the annual max, deductible and family deductible, the ortho lifetime max and what's left, and the out-of-network max, deductible and percentages, kept apart from the in-network figures.)_
 2. **P2** An eligibility badge on appointments ("verified 2 days ago").
 
 ### Messaging and portal

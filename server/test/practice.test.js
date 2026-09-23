@@ -265,6 +265,11 @@ test('EDI: 837D export, sandbox eligibility with 271 apply, and 835 ERA auto-pos
   const s = parse271(r271);
   assert.deepEqual([s.active, s.plan_name, s.deductible, s.deductible_remaining, s.annual_max, s.max_remaining], [true, 'PPO PLUS', 5000, 0, 200000, 125050]);
   assert.deepEqual(s.coinsurance, { basic: 80, major: 50 });
+  // Out-of-network values kept apart; family deductible; ortho lifetime maximum and what's left.
+  const more = parse271(r271.replace('SE*9*0001', 'EB*C*IND*35***23*100*****N~EB*F*IND*35***23*1000*****N~EB*A*IND*25*****0.4****N~EB*C*FAM*35***23*150~EB*C*FAM*35***29*75~EB*F*IND*38***32*1500~EB*F*IND*38***33*900~SE*16*0001'));
+  assert.deepEqual([more.deductible, more.annual_max, more.coinsurance.basic], [5000, 200000, 80], 'in-network figures unchanged');
+  assert.deepEqual(more.out_of_network, { deductible: 10000, deductible_remaining: null, annual_max: 100000, max_remaining: null, coinsurance: { basic: 60 } });
+  assert.deepEqual([more.family_deductible, more.family_deductible_remaining, more.ortho_max, more.ortho_remaining], [15000, 7500, 150000, 90000]);
 
   // ERA: paid $150 with $50 contractual write-off.
   const era = `ISA*00*          *00*          *ZZ*DELTA          *ZZ*PRACTICE       *240101*1200*^*00501*000000002*0*P*:~GS*HP*D*P*20240101*1200*2*X*005010X221A1~ST*835*0001~BPR*I*150*C*ACH************20240115~TRN*1*EFT998877*1~N1*PR*DELTA DENTAL~N1*PE*PRACTICE*XX*1234567893~CLP*DM${claim.id}*1*235*150*35**ABC123~CAS*CO*45*50~SVC*AD:D2392*235*150~CAS*PR*2*35~CLP*DM99999*4*100*0*100~CAS*CO*29*100~SE*12*0001~GE*1*2~IEA*1*000000002~`;

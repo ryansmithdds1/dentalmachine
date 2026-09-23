@@ -177,7 +177,13 @@ const cents = (v) => Math.round(Number(v || 0) * 100);
 export function parse271(text) {
   const segs = parseX12(text);
   if (!segs.some((s) => s.id === 'ST' && s.e[1] === '271')) throw new Error('Not a 271 eligibility response');
-  const out = { active: null, plan_name: null, plan_begin: null, deductible: null, deductible_remaining: null, annual_max: null, max_remaining: null, coinsurance: {}, frequencies: [], history: [], messages: [], errors: [], };
+  const out = {
+    active: null, plan_name: null, plan_begin: null, deductible: null, deductible_remaining: null, annual_max: null, max_remaining: null, coinsurance: {},
+    family_deductible: null, family_deductible_remaining: null, ortho_max: null, ortho_remaining: null,
+    // Out-of-network figures (EB12 = N), for patients who see the practice as out of network.
+    out_of_network: { deductible: null, deductible_remaining: null, annual_max: null, max_remaining: null, coinsurance: {} },
+    frequencies: [], history: [], messages: [], errors: [],
+  };
   // Frequency limits and service history belong to the EB they follow: its procedure codes (EB13, "AD:D1110")
   // and HSD ("2 per service year", "1 per 36 months") or DTP*304 (last done).
   let procs = [];
@@ -196,7 +202,32 @@ export function parse271(text) {
     procs = String(s.e[13] || '').split(/[:^>]/).filter((c) => /^D\d{4}$/.test(c));
     const [info, level, services, , planName, period, amount, percent] = s.e.slice(1); // EB01..EB08
     const inNetwork = s.e[12];
-    if (inNetwork === 'N') continue; // prefer in-network figures
+    const serviceList = String(services || '').split(/[\^:]/);
+    if (inNetwork === 'N') {
+      // Kept separately; the main figures are in-network.
+      const oon = out.out_of_network;
+      if (info === 'C' && amount && (!level || level === 'IND')) oon[period === '29' ? 'deductible_remaining' : 'deductible'] ??= cents(amount);
+      if (info === 'F' && amount && (!level || level === 'IND') && !serviceList.includes('38')) {
+        if (period === '29') oon.max_remaining ??= cents(amount);
+        else if (!period || period === '23' || period === '25') oon.annual_max ??= cents(amount);
+      }
+      if (info === 'A' && percent !== undefined && percent !== '') {
+        const share = Number(percent);
+        for (const code of serviceList) { const tier = SERVICE_TIER[code]; if (tier && oon.coinsurance[tier] === undefined) oon.coinsurance[tier] = Math.round((1 - (share > 1 ? share / 100 : share)) * 100); }
+      }
+      continue;
+    }
+    // Orthodontics: a lifetime maximum (period 32) and what's left of it (33).
+    if (info === 'F' && amount && serviceList.includes('38')) {
+      if (period === '33' || period === '29') out.ortho_remaining ??= cents(amount);
+      else out.ortho_max ??= cents(amount);
+      continue;
+    }
+    if (info === 'C' && amount && level === 'FAM') {
+      if (period === '29') out.family_deductible_remaining ??= cents(amount);
+      else out.family_deductible ??= cents(amount);
+      continue;
+    }
     if (info === '1') {
       out.active = true;
       if (planName) out.plan_name = planName;
