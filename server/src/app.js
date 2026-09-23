@@ -142,7 +142,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(campaignRoutes({ db, messenger, config }));
   api.use(developerRoutes({ db, fetchImpl }));
   api.use(attachmentRoutes({ db, storage, sender: attachmentSender ?? createAttachmentSender(attachmentConfig(process.env, config.ediMode), fetchImpl) }));
-  api.use(billingRoutes({ db, payments }));
+  api.use(billingRoutes({ db, payments, config }));
   api.use(insuranceRoutes({ db }));
   api.use(settingsRoutes({ db, secret, config }));
   api.use(reportRoutes({ db }));

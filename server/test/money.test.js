@@ -88,6 +88,11 @@ test('PPO patient portion: the expected write-off is not billed to the patient a
   assert.deepEqual([l.balance, l.pending_insurance, l.pending_write_off, l.patient_portion], [23500, 15040, 4700, 3760]);
   const st = (await ctx.api.get(`/patients/${ctx.patient.id}/statement`)).data;
   assert.equal(st.amount_due, 3760);
+  assert.deepEqual(st.aging, { current: 23500, d31_60: 0, d61_90: 0, d90_plus: 0 }, 'today\'s charge is current');
+  // The ledger lines carry the procedure and its claim.
+  const charge = l.entries.find((e) => e.type === 'charge');
+  assert.equal(charge.proc_code, 'D2392');
+  assert.equal(charge.claim_link, claim.id);
   const cands = (await ctx.api.get('/statements/candidates?min_balance=100')).data;
   assert.equal(cands.find((c) => c.id === ctx.patient.id).patient_portion, 3760);
 });

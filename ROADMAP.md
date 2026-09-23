@@ -241,8 +241,8 @@ Works well: drag, resize and create; undo; live updates; conflict checks; open-t
 4. **P2** Document search; tags; scan-to-chart from a phone (QR upload link).
 
 ### Ledger and payments
-1. **P1** Ledger UI: filter by type or provider; show the procedure, tooth and claim link on each line; see Part 1 for void.
-2. **P1** Statement layout: pending insurance, estimated patient portion, aging, a payment plan line, a remittance stub, and a QR code to pay online.
+1. ✅ **P1** Ledger UI: filter by type or provider; show the procedure, tooth and claim link on each line; see Part 1 for void. _(Done: type/provider filters, hide voided, filtered totals; code, tooth, provider and claim link on each line.)_
+2. ✅ **P1** Statement layout: pending insurance, estimated patient portion, aging, a payment plan line, a remittance stub, and a QR code to pay online. _(Done on printed statements; mailed statements get the same aging, plan line and stub, with the pay-online address.)_
 3. **P2** Pay-link amount defaults to the patient's portion, not the full balance.
 4. **P2** Receipts (print or email) for every payment.
 5. **P2** Card-present payments (Stripe Terminal) at the front desk.

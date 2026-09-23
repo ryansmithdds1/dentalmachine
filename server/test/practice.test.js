@@ -171,6 +171,12 @@ test('family accounts, family statements and payment plans', async () => {
   let plans = (await api.get('/payment-plans?overdue=true')).data;
   assert.equal(plans[0].past_due, 60000);
   assert.equal(plans[0].next_due_date, '2020-02-29');
+  // The family statement shows the plan line, the balance's age, and where to pay online.
+  const st2 = (await api.get(`/patients/${kid.id}/statement?family=1`)).data;
+  assert.equal(st2.plans.length, 1);
+  assert.deepEqual([st2.plans[0].past_due, st2.plans[0].next_due_date, st2.plans[0].remaining], [60000, '2020-02-29', 60000]);
+  assert.equal(st2.aging.current + st2.aging.d31_60 + st2.aging.d61_90 + st2.aging.d90_plus, Math.max(0, st2.balance));
+  assert.match(st2.pay_url, /^https:\/\/app\.example\.com\/portal\//);
   await api.post(`/patients/${dad.id}/payments`, { amount: 60000, method: 'check', payment_plan_id: plan.id });
   plans = (await api.get('/payment-plans?status=all')).data;
   assert.equal(plans[0].status, 'completed');

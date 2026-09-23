@@ -679,3 +679,14 @@ p a, .muted a, li a, .public-notice a { text-decoration: underline; }
 .builder-cols { border: none; padding: 0; margin: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 2px 8px; }
 .builder-cols legend { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
 .builder-filter { display: grid; grid-template-columns: 1fr 0.8fr 1fr auto; gap: 4px; margin-bottom: 6px; }
+
+/* Patient statement */
+.statement-due { border: 2px solid var(--primary); border-radius: 8px; padding: 10px 14px; text-align: right; min-width: 220px; }
+.statement-due-amount { font-size: 26px; font-weight: 700; color: var(--primary); }
+.statement-aging th, .statement-aging td { border: 1px solid var(--border); }
+.statement-note { margin-top: 12px; padding: 8px 12px; background: var(--bg); border-radius: 6px; }
+.statement-pay { display: flex; gap: 16px; align-items: center; margin-top: 18px; padding: 12px; background: var(--bg); border-radius: 6px; }
+.statement-stub { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-top: 28px; padding-top: 14px; border-top: 2px dashed var(--muted); font-size: 13px; }
+.stub-box { border: 1px solid var(--muted); padding: 6px 10px; margin-top: 6px; min-width: 240px; }
+@media print { .statement-stub { break-inside: avoid; } }
+.mono { font-family: ui-monospace, Menlo, monospace; word-break: break-all; }

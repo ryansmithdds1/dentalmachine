@@ -4,17 +4,21 @@ import { pick, requireFields, requireOneOf, insert, findOr404, audit, toCents, p
 import { patientBalance, pendingInsurance, checkPostingDate, voidLedgerEntry } from '../services.js';
 import { planStatus } from './family.js';
 import { allocate } from '../allocation.js';
+import { accountAging } from '../aging.js';
+import { portalKey } from './portal.js';
 
 export const PAYMENT_METHODS = ['cash', 'check', 'credit_card', 'debit_card', 'ach', 'care_credit', 'other'];
 
-export default function billingRoutes({ db, payments = { enabled: false } }) {
+export default function billingRoutes({ db, payments = { enabled: false }, config = {} }) {
   const r = Router();
   const patientOr404 = async (req) => await findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient');
 
   r.get('/patients/:id/ledger', requirePermission('billing:read'), async (req, res) => {
     const patient = await patientOr404(req);
     const entries = await db.all(
-      `SELECT l.*, u.name AS created_by_name FROM ledger_entries l LEFT JOIN users u ON u.id = l.created_by
+      `SELECT l.*, u.name AS created_by_name, pv.name AS provider_name, pr.code AS proc_code, pr.tooth AS proc_tooth, pr.surfaces AS proc_surfaces,
+         COALESCE(l.claim_id, (SELECT MAX(ci.claim_id) FROM claim_items ci WHERE ci.procedure_id = l.procedure_id)) AS claim_link
+       FROM ledger_entries l LEFT JOIN users u ON u.id = l.created_by LEFT JOIN providers pv ON pv.id = l.provider_id LEFT JOIN procedures pr ON pr.id = l.procedure_id
        WHERE l.patient_id = ? AND l.practice_id = ? ORDER BY l.entry_date, l.id`,
       patient.id, req.user.practice_id,
     );
@@ -166,7 +170,7 @@ export default function billingRoutes({ db, payments = { enabled: false } }) {
   r.get('/patients/:id/statement', requirePermission('billing:read'), async (req, res) => {
     const patient = await patientOr404(req);
     const family = req.query.family === 'true' || req.query.family === '1';
-    const data = await statementData(db, req.user.practice_id, patient, { family, since: req.query.since || '0000-00-00' });
+    const data = await statementData(db, req.user.practice_id, patient, { family, since: req.query.since || '0000-00-00', appUrl: config.appUrl });
     await audit(db, req, 'statement.generate', 'patients', patient.id, { family });
     res.json(data);
   });
@@ -175,8 +179,9 @@ export default function billingRoutes({ db, payments = { enabled: false } }) {
 }
 
 // Statement contents for a patient, or (family) for the guarantor and every member of the household.
-export async function statementData(db, practiceId, patient, { family = false, since = '0000-00-00' } = {}) {
-  const practice = publicPractice(await db.get('SELECT * FROM practices WHERE id = ?', practiceId));
+export async function statementData(db, practiceId, patient, { family = false, since = '0000-00-00', appUrl = null } = {}) {
+  const practiceRow = await db.get('SELECT * FROM practices WHERE id = ?', practiceId);
+  const practice = publicPractice(practiceRow);
   const addressee = family && patient.guarantor_id ? await db.get('SELECT * FROM patients WHERE id = ?', patient.guarantor_id) : patient;
   const ids = family
     ? (await db.all('SELECT id FROM patients WHERE practice_id = ? AND (id = ? OR guarantor_id = ?)', practiceId, addressee.id, addressee.id)).map((x) => x.id)
@@ -189,8 +194,16 @@ export async function statementData(db, practiceId, patient, { family = false, s
   );
   const balance = (await db.get(`SELECT COALESCE(SUM(amount),0) AS n FROM ledger_entries WHERE practice_id = ? AND patient_id IN (${inList})`, practiceId, ...ids)).n;
   const pending = await pendingInsurance(db, practiceId, ids);
+  const today = (await practiceNow(db, practiceId)).slice(0, 10);
+  const plans = [];
+  for (const p of await db.all(`SELECT * FROM payment_plans WHERE practice_id = ? AND patient_id IN (${inList}) AND status = 'active' ORDER BY id`, practiceId, ...ids)) {
+    const s = await planStatus(db, p, today);
+    plans.push({ id: s.id, total: s.total, remaining: s.remaining, installment_amount: s.installment_amount, frequency: s.frequency, next_due_date: s.next_due_date, next_due_amount: s.next_due_amount, past_due: s.past_due });
+  }
   return {
     practice, patient: addressee, family, since, previous_balance: prior, entries, balance,
     pending_insurance: pending.insurance, pending_write_off: pending.write_off, amount_due: Math.max(0, balance - pending.total), generated_at: new Date().toISOString(),
+    aging: await accountAging(db, practiceId, ids, today), plans,
+    pay_url: appUrl ? `${appUrl}/portal/${portalKey(practiceRow)}` : null,
   };
 }

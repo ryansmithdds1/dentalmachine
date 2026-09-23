@@ -168,7 +168,7 @@ export default function growthRoutes({ db, messenger, config, mailer = { enabled
             description: `Statement ${today} #${a.id}`, idempotencyKey: `statement-${runId}-${a.id}`,
             to: { name: `${a.first_name} ${a.last_name}`, address: a.address, city: a.city, state: a.state, zip: a.zip },
             from: { name: practice.name, address: practice.address, city: practice.city, state: practice.state, zip: practice.zip },
-            html: statementHtml({ practice, account: a, entries: data.entries, previousBalance: data.previous_balance, balance: data.balance, pendingInsurance: a.pending_insurance, pendingWriteOff: a.pending_write_off, portalUrl, statementDate: today }),
+            html: statementHtml({ practice, account: a, entries: data.entries, previousBalance: data.previous_balance, balance: data.balance, pendingInsurance: a.pending_insurance, pendingWriteOff: a.pending_write_off, portalUrl, statementDate: today, aging: data.aging, plans: data.plans }),
           });
           method = 'mail';
           reference = letter.reference;

@@ -7,6 +7,7 @@ import { money, fmtDate, label, toCents } from '../../format.js';
 import { ErrorBox, Modal, useSubmit } from '../ui.jsx';
 import PaymentPlans from './PaymentPlans.jsx';
 
+const KINDS = { Charges: ['charge'], 'Patient payments': ['payment'], 'Insurance payments': ['insurance_payment'], Adjustments: ['adjustment'], Refunds: ['refund'] };
 const METHODS = ['credit_card', 'debit_card', 'cash', 'check', 'ach', 'care_credit', 'other'];
 
 export default function LedgerTab({ patient, onChange }) {
@@ -15,6 +16,9 @@ export default function LedgerTab({ patient, onChange }) {
   const { data: payConfig } = useApi('/payments/config');
   const { data: payRequests, reload: reloadRequests } = useApi(`/patients/${patient.id}/payment-requests`);
   const [modal, setModal] = useState(null);
+  const [kind, setKind] = useState('');
+  const [prov, setProv] = useState('');
+  const [hideVoided, setHideVoided] = useState(false);
   // ?pay=1 (from quick search "Take payment…") opens the payment form.
   const [params, setParams] = useSearchParams();
   useEffect(() => {
@@ -26,6 +30,9 @@ export default function LedgerTab({ patient, onChange }) {
   }, [params, setParams]);
   const done = () => { setModal(null); reload(); onChange?.(); };
   if (!data) return <div className="empty">Loading…</div>;
+  const providers = [...new Map(data.entries.filter((e) => e.provider_id).map((e) => [e.provider_id, e.provider_name])).entries()];
+  const shown = data.entries.filter((e) => (!kind || KINDS[kind].includes(e.type)) && (!prov || String(e.provider_id) === prov) && !(hideVoided && (e.voided_at || e.reverses_id)));
+  const filtered = shown.length !== data.entries.length;
 
   return (
     <>
@@ -57,16 +64,33 @@ export default function LedgerTab({ patient, onChange }) {
             )}
           </div>
         </div>
+        <div className="inline ledger-filters" style={{ gap: 8, padding: '0 16px 10px', flexWrap: 'wrap' }}>
+          <select aria-label="Show entries" value={kind} onChange={(e) => setKind(e.target.value)} style={{ width: 'auto' }}>
+            <option value="">All entries</option>
+            {Object.keys(KINDS).map((k) => <option key={k} value={k}>{k}</option>)}
+          </select>
+          {providers.length > 0 && (
+            <select aria-label="Provider" value={prov} onChange={(e) => setProv(e.target.value)} style={{ width: 'auto' }}>
+              <option value="">All providers</option>
+              {providers.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+            </select>
+          )}
+          <label className="inline" style={{ gap: 4, flexDirection: "row", alignItems: "center", margin: 0 }}><input type="checkbox" style={{ width: "auto" }} checked={hideVoided} onChange={(e) => setHideVoided(e.target.checked)} /> Hide voided</label>
+          {filtered && <span className="muted">{shown.length} of {data.entries.length} entries · charges {money(shown.filter((e) => e.amount > 0).reduce((s, e) => s + e.amount, 0))} · credits {money(-shown.filter((e) => e.amount < 0).reduce((s, e) => s + e.amount, 0))}</span>}
+        </div>
         <div className="table-wrap">
           <table>
             <thead><tr><th>Date</th><th>Type</th><th>Description</th><th>By</th><th className="num">Charges</th><th className="num">Credits</th><th className="num">Balance</th>{can('billing:write') && <th />}</tr></thead>
             <tbody>
-              {data.entries.map((e) => (
+              {shown.map((e) => (
                 <tr key={e.id} className={e.voided_at ? 'voided' : undefined}>
                   <td>{fmtDate(e.entry_date)}</td>
                   <td>{label(e.type)}</td>
                   <td>
+                    {e.proc_code && <span className="badge" style={{ marginRight: 6 }}>{e.proc_code}{e.proc_tooth ? ` #${e.proc_tooth}` : ''}{e.proc_surfaces ? ` ${e.proc_surfaces}` : ''}</span>}
                     {e.description}{e.reference ? <span className="muted"> · ref {e.reference}</span> : ''}
+                    {e.claim_link && <> · <Link to={`/claims/${e.claim_link}`}>claim #{e.claim_link}</Link></>}
+                    {e.provider_name && <span className="muted"> · {e.provider_name}</span>}
                     {e.voided_at && <div className="muted" style={{ fontSize: 12 }}>Voided — {e.void_reason}</div>}
                   </td>
                   <td className="muted">{e.created_by_name}</td>
@@ -83,6 +107,7 @@ export default function LedgerTab({ patient, onChange }) {
             </tbody>
           </table>
           {!data.entries.length && <div className="empty">No transactions.</div>}
+          {data.entries.length > 0 && !shown.length && <div className="empty">No entries match.</div>}
         </div>
       </div>
       {modal === 'payment' && <Modal title="Take payment" onClose={() => setModal(null)}><PaymentForm patient={patient} balance={data.patient_portion} lockDate={data.lock_date} onDone={done} /></Modal>}
