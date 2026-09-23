@@ -15,11 +15,11 @@ export const RX_FAVORITES = [
   { drug: 'Sodium fluoride 1.1% (PreviDent 5000)', strength: '1.1% paste', sig: 'Brush with a thin ribbon once daily at bedtime; spit, do not rinse', quantity: '1 tube' },
 ];
 
-const planView = (db, plan) => {
-  const procedures = db.all("SELECT * FROM procedures WHERE treatment_plan_id = ? AND status != 'cancelled' ORDER BY priority, id", plan.id);
+const planView = async (db, plan) => {
+  const procedures = await db.all("SELECT * FROM procedures WHERE treatment_plan_id = ? AND status != 'cancelled' ORDER BY priority, id", plan.id);
   return {
     ...plan, sign_token_hash: undefined, procedures,
-    estimate: estimateCoverage(db, primaryPolicy(db, plan.practice_id, plan.patient_id), procedures.filter((p) => p.status === 'planned')),
+    estimate: await estimateCoverage(db, await primaryPolicy(db, plan.practice_id, plan.patient_id), procedures.filter((p) => p.status === 'planned')),
   };
 };
 
@@ -28,52 +28,52 @@ export default function casePresentationRoutes({ db, messenger, config }) {
 
   // Staff: send the plan to the patient to review and sign remotely, or get a link for a chairside tablet.
   r.post('/treatment-plans/:tid/present', requirePermission('clinical:write'), async (req, res) => {
-    const plan = findOr404(db, 'treatment_plans', req.params.tid, req.user.practice_id, 'Treatment plan');
+    const plan = await findOr404(db, 'treatment_plans', req.params.tid, req.user.practice_id, 'Treatment plan');
     if (plan.signed_at) throw new HttpError(409, 'This plan is already signed');
     const { token, hash } = newToken();
-    db.run("UPDATE treatment_plans SET sign_token_hash = ?, presented_at = datetime('now') WHERE id = ?", hash, plan.id);
+    await db.run("UPDATE treatment_plans SET sign_token_hash = ?, presented_at = datetime('now') WHERE id = ?", hash, plan.id);
     const url = `${config.appUrl}/tp/${token}`;
     let message = null;
     if (req.body?.send) {
-      const patient = db.get('SELECT * FROM patients WHERE id = ?', plan.patient_id);
+      const patient = await db.get('SELECT * FROM patients WHERE id = ?', plan.patient_id);
       const target = preferredChannel(patient, req.body.send === 'auto' ? undefined : req.body.send);
       if (!target) throw new HttpError(400, 'Patient has no reachable phone or email (or has opted out)');
-      const practice = db.get('SELECT name FROM practices WHERE id = ?', req.user.practice_id);
+      const practice = await db.get('SELECT name FROM practices WHERE id = ?', req.user.practice_id);
       message = await sendMessage(db, messenger, {
         practiceId: req.user.practice_id, patientId: patient.id, userId: req.user.id, kind: 'treatment_plan', channel: target.channel, to: target.to,
         subject: `Your treatment plan from ${practice.name}`,
         body: `Hi ${patient.first_name}, here is the treatment plan we discussed at ${practice.name}, with your estimated costs. Review and sign here: ${url}`,
       });
     }
-    audit(db, req, 'treatment_plan.present', 'treatment_plans', plan.id);
+    await audit(db, req, 'treatment_plan.present', 'treatment_plans', plan.id);
     res.json({ url, message });
   });
 
-  r.get('/treatment-plans/:tid', requirePermission('clinical:read'), (req, res) => {
-    const plan = findOr404(db, 'treatment_plans', req.params.tid, req.user.practice_id, 'Treatment plan');
+  r.get('/treatment-plans/:tid', requirePermission('clinical:read'), async (req, res) => {
+    const plan = await findOr404(db, 'treatment_plans', req.params.tid, req.user.practice_id, 'Treatment plan');
     res.json({
-      ...planView(db, plan),
-      patient: db.get('SELECT id, first_name, last_name, dob, address, city, state, zip, phone FROM patients WHERE id = ?', plan.patient_id),
-      practice: db.get('SELECT name, address, city, state, zip, phone FROM practices WHERE id = ?', req.user.practice_id),
+      ...(await planView(db, plan)),
+      patient: await db.get('SELECT id, first_name, last_name, dob, address, city, state, zip, phone FROM patients WHERE id = ?', plan.patient_id),
+      practice: await db.get('SELECT name, address, city, state, zip, phone FROM practices WHERE id = ?', req.user.practice_id),
     });
   });
 
   // ---- Prescriptions ----
   r.get('/rx/favorites', (_req, res) => res.json(RX_FAVORITES));
 
-  r.get('/patients/:id/prescriptions', requirePermission('clinical:read'), (req, res) => {
-    const patient = findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient');
-    res.json(db.all(
+  r.get('/patients/:id/prescriptions', requirePermission('clinical:read'), async (req, res) => {
+    const patient = await findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient');
+    res.json(await db.all(
       `SELECT rx.*, pv.name AS provider_name FROM prescriptions rx JOIN providers pv ON pv.id = rx.provider_id
        WHERE rx.practice_id = ? AND rx.patient_id = ? ORDER BY rx.id DESC`, req.user.practice_id, patient.id,
     ));
   });
 
-  r.post('/patients/:id/prescriptions', requirePermission('clinical:sign'), (req, res) => {
-    const patient = findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient');
+  r.post('/patients/:id/prescriptions', requirePermission('clinical:sign'), async (req, res) => {
+    const patient = await findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient');
     const row = pick(req.body, ['provider_id', 'drug', 'strength', 'sig', 'quantity', 'refills', 'dispense_as_written', 'notes']);
     requireFields(row, ['provider_id', 'drug', 'sig', 'quantity']);
-    const provider = findOr404(db, 'providers', row.provider_id, req.user.practice_id, 'Provider');
+    const provider = await findOr404(db, 'providers', row.provider_id, req.user.practice_id, 'Provider');
     if (provider.type === 'hygienist') throw new HttpError(400, 'Prescriptions must be written by a dentist or specialist');
     row.refills = Math.max(0, Math.min(11, Number(row.refills) || 0));
     // Surface allergies at the moment of prescribing.
@@ -82,18 +82,18 @@ export default function casePresentationRoutes({ db, messenger, config }) {
     if (/amoxicillin|penicillin|ampicillin/i.test(row.drug) && /penicillin|amoxicillin/i.test(patient.allergies || '') && !req.body.override_allergy) {
       throw new HttpError(409, 'Allergy warning: patient has a penicillin allergy', { allergy_warning: true });
     }
-    const id = insert(db, 'prescriptions', { ...row, practice_id: req.user.practice_id, patient_id: patient.id, created_by: req.user.id });
-    audit(db, req, 'prescription.create', 'prescriptions', id, { drug: row.drug });
-    res.status(201).json(db.get('SELECT rx.*, pv.name AS provider_name, pv.npi AS provider_npi, pv.license_number, pv.dea_number FROM prescriptions rx JOIN providers pv ON pv.id = rx.provider_id WHERE rx.id = ?', id));
+    const id = await insert(db, 'prescriptions', { ...row, practice_id: req.user.practice_id, patient_id: patient.id, created_by: req.user.id });
+    await audit(db, req, 'prescription.create', 'prescriptions', id, { drug: row.drug });
+    res.status(201).json(await db.get('SELECT rx.*, pv.name AS provider_name, pv.npi AS provider_npi, pv.license_number, pv.dea_number FROM prescriptions rx JOIN providers pv ON pv.id = rx.provider_id WHERE rx.id = ?', id));
   });
 
-  r.get('/prescriptions/:rid', requirePermission('clinical:read'), (req, res) => {
-    const rx = findOr404(db, 'prescriptions', req.params.rid, req.user.practice_id, 'Prescription');
-    audit(db, req, 'prescription.print', 'prescriptions', rx.id);
+  r.get('/prescriptions/:rid', requirePermission('clinical:read'), async (req, res) => {
+    const rx = await findOr404(db, 'prescriptions', req.params.rid, req.user.practice_id, 'Prescription');
+    await audit(db, req, 'prescription.print', 'prescriptions', rx.id);
     res.json({
-      ...db.get('SELECT rx.*, pv.name AS provider_name, pv.npi AS provider_npi, pv.license_number, pv.dea_number FROM prescriptions rx JOIN providers pv ON pv.id = rx.provider_id WHERE rx.id = ?', rx.id),
-      patient: db.get('SELECT first_name, last_name, dob, address, city, state, zip, allergies FROM patients WHERE id = ?', rx.patient_id),
-      practice: db.get('SELECT name, address, city, state, zip, phone FROM practices WHERE id = ?', req.user.practice_id),
+      ...(await db.get('SELECT rx.*, pv.name AS provider_name, pv.npi AS provider_npi, pv.license_number, pv.dea_number FROM prescriptions rx JOIN providers pv ON pv.id = rx.provider_id WHERE rx.id = ?', rx.id)),
+      patient: await db.get('SELECT first_name, last_name, dob, address, city, state, zip, allergies FROM patients WHERE id = ?', rx.patient_id),
+      practice: await db.get('SELECT name, address, city, state, zip, phone FROM practices WHERE id = ?', req.user.practice_id),
     });
   });
 
@@ -104,15 +104,15 @@ export default function casePresentationRoutes({ db, messenger, config }) {
 export function publicCasePresentation({ db }) {
   const r = Router();
   const limiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 30 });
-  const byToken = (token) => {
-    const plan = db.get('SELECT * FROM treatment_plans WHERE sign_token_hash = ?', hashToken(token));
+  const byToken = async token => {
+    const plan = await db.get('SELECT * FROM treatment_plans WHERE sign_token_hash = ?', hashToken(token));
     if (!plan) throw new HttpError(404, 'This link is no longer valid');
     return plan;
   };
-  const publicView = (plan) => {
-    const v = planView(db, plan);
-    const patient = db.get('SELECT first_name FROM patients WHERE id = ?', plan.patient_id);
-    const practice = db.get('SELECT name, phone, address, city, state, zip FROM practices WHERE id = ?', plan.practice_id);
+  const publicView = async plan => {
+    const v = await planView(db, plan);
+    const patient = await db.get('SELECT first_name FROM patients WHERE id = ?', plan.patient_id);
+    const practice = await db.get('SELECT name, phone, address, city, state, zip FROM practices WHERE id = ?', plan.practice_id);
     return {
       name: v.name, status: v.status, notes: v.notes, signed_at: v.signed_at, signature_name: v.signature_name, first_name: patient.first_name, practice,
       procedures: v.procedures.map((p) => ({ code: p.code, description: p.description, tooth: p.tooth, surfaces: p.surfaces, fee: p.fee, status: p.status })),
@@ -120,22 +120,22 @@ export function publicCasePresentation({ db }) {
     };
   };
 
-  r.get('/tp/:token', (req, res) => res.json(publicView(byToken(req.params.token))));
+  r.get('/tp/:token', async (req, res) => res.json(await publicView(await byToken(req.params.token))));
 
-  r.post('/tp/:token', limiter, (req, res) => {
-    const plan = byToken(req.params.token);
+  r.post('/tp/:token', limiter, async (req, res) => {
+    const plan = await byToken(req.params.token);
     if (plan.signed_at) throw new HttpError(409, 'This plan has already been signed');
     const name = String(req.body?.signature_name || '').trim();
     if (name.length < 2) throw new HttpError(400, 'Type your full name to sign');
     const image = req.body?.signature_image;
     if (image != null && (typeof image !== 'string' || !image.startsWith('data:image/png;base64,') || image.length > 300_000)) throw new HttpError(400, 'Invalid signature image');
     if (!req.body?.consent) throw new HttpError(400, 'Please confirm you have read and understand the plan');
-    db.run(
+    await db.run(
       "UPDATE treatment_plans SET status = 'accepted', accepted_at = COALESCE(accepted_at, datetime('now')), signed_at = datetime('now'), signature_name = ?, signature_image = ? WHERE id = ?",
       name, image || null, plan.id,
     );
-    audit(db, { ip: req.ip, user: { practice_id: plan.practice_id, id: null } }, 'treatment_plan.patient_signed', 'treatment_plans', plan.id);
-    res.json(publicView(db.get('SELECT * FROM treatment_plans WHERE id = ?', plan.id)));
+    await audit(db, { ip: req.ip, user: { practice_id: plan.practice_id, id: null } }, 'treatment_plan.patient_signed', 'treatment_plans', plan.id);
+    res.json(await publicView(await db.get('SELECT * FROM treatment_plans WHERE id = ?', plan.id)));
   });
   return r;
 }

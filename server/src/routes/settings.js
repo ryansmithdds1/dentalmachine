@@ -12,34 +12,34 @@ const requireAdmin = (req, _res, next) => (req.user.role === 'admin' ? next() : 
 
 // Simple practice-scoped resources share one CRUD shape.
 function resource(r, db, { path, table, fields, required, validate = () => {}, order = 'name' }) {
-  r.get(`/${path}`, (req, res) => {
+  r.get(`/${path}`, async (req, res) => {
     const activeOnly = req.query.active === 'true' ? ' AND active = 1' : '';
-    res.json(db.all(`SELECT * FROM ${table} WHERE practice_id = ?${activeOnly} ORDER BY ${order}`, req.user.practice_id));
+    res.json(await db.all(`SELECT * FROM ${table} WHERE practice_id = ?${activeOnly} ORDER BY ${order}`, req.user.practice_id));
   });
-  r.post(`/${path}`, requireAdmin, (req, res) => {
+  r.post(`/${path}`, requireAdmin, async (req, res) => {
     const row = pick(req.body, fields);
     requireFields(row, required);
     validate(row, req);
-    const id = insert(db, table, { ...row, practice_id: req.user.practice_id });
-    audit(db, req, `${table}.create`, table, id);
-    res.status(201).json(db.get(`SELECT * FROM ${table} WHERE id = ?`, id));
+    const id = await insert(db, table, { ...row, practice_id: req.user.practice_id });
+    await audit(db, req, `${table}.create`, table, id);
+    res.status(201).json(await db.get(`SELECT * FROM ${table} WHERE id = ?`, id));
   });
-  r.put(`/${path}/:rid`, requireAdmin, (req, res) => {
-    const existing = findOr404(db, table, req.params.rid, req.user.practice_id);
+  r.put(`/${path}/:rid`, requireAdmin, async (req, res) => {
+    const existing = await findOr404(db, table, req.params.rid, req.user.practice_id);
     const row = pick(req.body, fields);
     validate(row, req);
-    update(db, table, existing.id, req.user.practice_id, row);
-    audit(db, req, `${table}.update`, table, existing.id);
-    res.json(db.get(`SELECT * FROM ${table} WHERE id = ?`, existing.id));
+    await update(db, table, existing.id, req.user.practice_id, row);
+    await audit(db, req, `${table}.update`, table, existing.id);
+    res.json(await db.get(`SELECT * FROM ${table} WHERE id = ?`, existing.id));
   });
 }
 
 export default function settingsRoutes({ db }) {
   const r = Router();
 
-  r.get('/practice', (req, res) => res.json(db.get('SELECT * FROM practices WHERE id = ?', req.user.practice_id)));
+  r.get('/practice', async (req, res) => res.json(await db.get('SELECT * FROM practices WHERE id = ?', req.user.practice_id)));
   r.get('/message-templates/defaults', (_req, res) => res.json(DEFAULT_TEMPLATES));
-  r.put('/practice', requireAdmin, (req, res) => {
+  r.put('/practice', requireAdmin, async (req, res) => {
     const row = pick(req.body, ['name', 'address', 'city', 'state', 'zip', 'phone', 'email', 'tax_id', 'npi', 'timezone', 'slug', 'online_booking', 'reminder_hours', 'require_mfa', 'office_hours', 'daily_goal', 'sms_number', 'review_url', 'review_requests', 'idle_timeout_minutes', 'message_templates', 'hygiene_goal']);
     if (row.message_templates != null) row.message_templates = validateTemplates(row.message_templates);
     if (row.review_url && !/^https:\/\/\S+$/.test(row.review_url)) throw new HttpError(400, 'Review link must start with https://');
@@ -53,9 +53,9 @@ export default function settingsRoutes({ db }) {
     if (row.slug != null) {
       row.slug = String(row.slug).toLowerCase();
       if (!/^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])$/.test(row.slug)) throw new HttpError(400, 'Booking URL name must be 3-40 lowercase letters, numbers or dashes');
-      if (db.get('SELECT id FROM practices WHERE slug = ? AND id != ?', row.slug, req.user.practice_id)) throw new HttpError(409, 'That booking URL name is taken');
+      if (await db.get('SELECT id FROM practices WHERE slug = ? AND id != ?', row.slug, req.user.practice_id)) throw new HttpError(409, 'That booking URL name is taken');
     }
-    if (row.online_booking && !(row.slug ?? db.get('SELECT slug FROM practices WHERE id = ?', req.user.practice_id).slug)) {
+    if (row.online_booking && !(row.slug ?? (await db.get('SELECT slug FROM practices WHERE id = ?', req.user.practice_id)).slug)) {
       throw new HttpError(400, 'Choose a booking URL name before enabling online booking');
     }
     if (row.reminder_hours != null) {
@@ -70,28 +70,28 @@ export default function settingsRoutes({ db }) {
       }
     }
     const keys = Object.keys(row);
-    if (keys.length) db.run(`UPDATE practices SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, ...keys.map((k) => row[k]), req.user.practice_id);
-    audit(db, req, 'practice.update', 'practices', req.user.practice_id);
-    res.json(db.get('SELECT * FROM practices WHERE id = ?', req.user.practice_id));
+    if (keys.length) await db.run(`UPDATE practices SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, ...keys.map((k) => row[k]), req.user.practice_id);
+    await audit(db, req, 'practice.update', 'practices', req.user.practice_id);
+    res.json(await db.get('SELECT * FROM practices WHERE id = ?', req.user.practice_id));
   });
 
   // ---- Users ----
   const USER_COLS = 'id, practice_id, email, name, role, active, mfa_enabled, last_login_at, created_at';
-  r.get('/users', (req, res) => res.json(db.all(`SELECT ${USER_COLS} FROM users WHERE practice_id = ? ORDER BY name`, req.user.practice_id)));
+  r.get('/users', async (req, res) => res.json(await db.all(`SELECT ${USER_COLS} FROM users WHERE practice_id = ? ORDER BY name`, req.user.practice_id)));
 
-  r.post('/users', requireAdmin, (req, res) => {
+  r.post('/users', requireAdmin, async (req, res) => {
     const row = pick(req.body, ['email', 'name', 'role']);
     requireFields(row, ['email', 'name', 'role']);
     requireOneOf(row.role, ROLES, 'role');
     validatePassword(req.body.password);
-    if (db.get('SELECT id FROM users WHERE email = ?', row.email)) throw new HttpError(409, 'Email already in use');
-    const id = insert(db, 'users', { ...row, practice_id: req.user.practice_id, password_hash: hashPassword(req.body.password) });
-    audit(db, req, 'user.create', 'users', id, { role: row.role });
-    res.status(201).json(db.get(`SELECT ${USER_COLS} FROM users WHERE id = ?`, id));
+    if (await db.get('SELECT id FROM users WHERE lower(email) = lower(?)', row.email)) throw new HttpError(409, 'Email already in use');
+    const id = await insert(db, 'users', { ...row, practice_id: req.user.practice_id, password_hash: hashPassword(req.body.password) });
+    await audit(db, req, 'user.create', 'users', id, { role: row.role });
+    res.status(201).json(await db.get(`SELECT ${USER_COLS} FROM users WHERE id = ?`, id));
   });
 
-  r.put('/users/:uid', requireAdmin, (req, res) => {
-    const existing = findOr404(db, 'users', req.params.uid, req.user.practice_id, 'User');
+  r.put('/users/:uid', requireAdmin, async (req, res) => {
+    const existing = await findOr404(db, 'users', req.params.uid, req.user.practice_id, 'User');
     const row = pick(req.body, ['name', 'role', 'active']);
     requireOneOf(row.role, ROLES, 'role');
     if (existing.id === req.user.id && (row.active === 0 || (row.role && row.role !== 'admin'))) {
@@ -103,18 +103,18 @@ export default function settingsRoutes({ db }) {
     }
     // Lost phone: an admin can clear a colleague's 2FA so they can enrol again.
     if (req.body.reset_mfa) Object.assign(row, { mfa_enabled: 0, mfa_secret: null, mfa_last_step: null });
-    update(db, 'users', existing.id, req.user.practice_id, row);
-    audit(db, req, 'user.update', 'users', existing.id, { fields: Object.keys(row).filter((k) => k !== 'password_hash') });
-    res.json(db.get(`SELECT ${USER_COLS} FROM users WHERE id = ?`, existing.id));
+    await update(db, 'users', existing.id, req.user.practice_id, row);
+    await audit(db, req, 'user.update', 'users', existing.id, { fields: Object.keys(row).filter((k) => k !== 'password_hash') });
+    res.json(await db.get(`SELECT ${USER_COLS} FROM users WHERE id = ?`, existing.id));
   });
 
   resource(r, db, {
     path: 'providers', table: 'providers', required: ['name'],
     fields: ['name', 'type', 'npi', 'license_number', 'dea_number', 'color', 'active', 'user_id'],
-    validate: (row, req) => {
+    validate: async (row, req) => {
       requireOneOf(row.type, ['dentist', 'hygienist', 'specialist'], 'type');
       if (row.npi && !/^\d{10}$/.test(row.npi)) throw new HttpError(400, 'NPI must be 10 digits');
-      if (row.user_id) findOr404(db, 'users', row.user_id, req.user.practice_id, 'User');
+      if (row.user_id) await findOr404(db, 'users', row.user_id, req.user.practice_id, 'User');
     },
   });
 
@@ -146,7 +146,7 @@ export default function settingsRoutes({ db }) {
     },
   });
 
-  r.get('/audit-log', requireAdmin, (req, res) => {
+  r.get('/audit-log', requireAdmin, async (req, res) => {
     const limit = Math.min(Number(req.query.limit) || 100, 500);
     const where = ['a.practice_id = ?'];
     const params = [req.user.practice_id];
@@ -162,7 +162,7 @@ export default function settingsRoutes({ db }) {
       where.push('a.user_id = ?');
       params.push(Number(req.query.user_id));
     }
-    res.json(db.all(
+    res.json(await db.all(
       `SELECT a.*, u.name AS user_name FROM audit_log a LEFT JOIN users u ON u.id = a.user_id
        WHERE ${where.join(' AND ')} ORDER BY a.id DESC LIMIT ?`, ...params, limit,
     ));

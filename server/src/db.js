@@ -1,6 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { AsyncLocalStorage } from 'node:async_hooks';
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS practices (
@@ -590,58 +591,191 @@ const COLUMNS = [
   ['claims', 'write_off_estimate', 'INTEGER NOT NULL DEFAULT 0'],
 ];
 
-function migrate(db) {
-  for (const [table, column, def] of COLUMNS) {
-    const exists = db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === column);
-    if (!exists) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${def}`);
-  }
-  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_practice_slug ON practices(slug)');
-  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_appt_token ON appointments(confirm_token_hash)');
+const INDEXES = `
+CREATE UNIQUE INDEX IF NOT EXISTS idx_practice_slug ON practices(slug);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_appt_token ON appointments(confirm_token_hash);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_email_ci ON users(lower(email));
+`;
+
+// ---------------------------------------------------------------------------
+// Drivers. Route code uses one small async API on either database:
+//   await db.get(sql, ...params)  -> first row or undefined
+//   await db.all(sql, ...params)  -> rows
+//   await db.run(sql, ...params)  -> { changes, id }
+//   await db.tx(async () => ...)  -> runs the callback in a transaction
+// SQL is written for SQLite; the Postgres driver translates the few differences.
+
+// Tables whose primary key is an integer "id" (INSERTs return it).
+const ID_TABLES = new Set([...SCHEMA.matchAll(/CREATE TABLE IF NOT EXISTS (\w+) \(\s*id INTEGER PRIMARY KEY/g)].map((m) => m[1]));
+
+export async function openDb(target = process.env.DATABASE_URL || process.env.DATABASE_PATH || './data/dentalmachine.db') {
+  if (target === ':memory:' && process.env.TEST_DATABASE_URL) return openPostgres(process.env.TEST_DATABASE_URL, { freshSchema: true });
+  if (/^postgres(ql)?:\/\//.test(target)) return openPostgres(target);
+  return openSqlite(target);
 }
 
-export function openDb(path = process.env.DATABASE_PATH || './data/dentalmachine.db') {
+// ---- SQLite (node:sqlite) ----
+function openSqlite(path) {
   if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
   const db = new DatabaseSync(path);
   db.exec('PRAGMA foreign_keys = ON;');
   if (path !== ':memory:') db.exec('PRAGMA journal_mode = WAL;');
   db.exec(SCHEMA);
-  migrate(db);
-  return wrap(db);
-}
+  for (const [table, column, def] of COLUMNS) {
+    const exists = db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === column);
+    if (!exists) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${def}`);
+  }
+  db.exec(INDEXES);
 
-// Thin helpers over node:sqlite so route code stays terse.
-function wrap(db) {
   const cache = new Map();
   const stmt = (sql) => {
     let s = cache.get(sql);
     if (!s) cache.set(sql, (s = db.prepare(sql)));
     return s;
   };
+  const args = (params) => params.map((v) => (typeof v === 'boolean' ? Number(v) : v));
   const clean = (row) => (row ? { ...row } : row);
-  let depth = 0;
+  const inTx = new AsyncLocalStorage();
+  let queue = Promise.resolve();
   return {
-    raw: db,
-    all: (sql, ...params) => stmt(sql).all(...params).map(clean),
-    get: (sql, ...params) => clean(stmt(sql).get(...params)),
-    run: (sql, ...params) => {
-      const r = stmt(sql).run(...params);
+    dialect: 'sqlite',
+    async all(sql, ...params) {
+      return stmt(sql).all(...args(params)).map(clean);
+    },
+    async get(sql, ...params) {
+      return clean(stmt(sql).get(...args(params)));
+    },
+    async run(sql, ...params) {
+      const r = stmt(sql).run(...args(params));
       return { changes: Number(r.changes), id: Number(r.lastInsertRowid) };
     },
+    // One connection, so transactions are queued. Keep network calls out of transactions.
     tx(fn) {
-      if (depth > 0) return fn();
-      depth++;
-      db.exec('BEGIN');
+      if (inTx.getStore()) return fn();
+      const run = async () => {
+        db.exec('BEGIN');
+        try {
+          const out = await inTx.run(true, fn);
+          db.exec('COMMIT');
+          return out;
+        } catch (err) {
+          db.exec('ROLLBACK');
+          throw err;
+        }
+      };
+      const p = queue.then(run, run);
+      queue = p.catch(() => {});
+      return p;
+    },
+    async close() {
+      db.close();
+    },
+  };
+}
+
+// ---- PostgreSQL ----
+// Columns stay TEXT/INTEGER like SQLite so date strings compare the same way.
+const PG_NOW = "to_char(timezone('UTC', now()), 'YYYY-MM-DD HH24:MI:SS')";
+const PG_TODAY = "to_char(timezone('UTC', now()), 'YYYY-MM-DD')";
+
+export function toPostgres(sql) {
+  let i = 0;
+  let out = '';
+  // Walk the SQL so '?' inside string literals is left alone.
+  for (let k = 0; k < sql.length; k++) {
+    const ch = sql[k];
+    if (ch === "'") {
+      const end = sql.indexOf("'", k + 1);
+      out += sql.slice(k, end + 1);
+      k = end;
+    } else if (ch === '?') out += `$${++i}`;
+    else out += ch;
+  }
+  return out
+    .replace(/datetime\('now'\)/g, PG_NOW)
+    .replace(/date\('now'\)/g, PG_TODAY)
+    .replace(/GROUP_CONCAT\(/gi, 'string_agg(')
+    .replace(/ LIKE /g, ' ILIKE ');
+}
+
+function pgSchema(sql) {
+  return toPostgres(sql)
+    .replace(/id INTEGER PRIMARY KEY/g, 'id SERIAL PRIMARY KEY')
+    .replace(/ COLLATE NOCASE/g, '');
+}
+
+async function openPostgres(url, { freshSchema = false } = {}) {
+  const { default: pg } = await import('pg');
+  pg.types.setTypeParser(20, (v) => Number(v)); // int8 (COUNT, SUM) -> number
+  pg.types.setTypeParser(1700, (v) => Number(v)); // numeric -> number
+  pg.types.setTypeParser(16, (v) => (v === 't' ? 1 : 0)); // boolean -> 1/0 like SQLite
+  let schema = null;
+  if (freshSchema) {
+    schema = `t_${process.pid}_${Math.random().toString(36).slice(2, 8)}`;
+    const admin = new pg.Client({ connectionString: url });
+    await admin.connect();
+    await admin.query(`CREATE SCHEMA ${schema}`);
+    await admin.end();
+  }
+  const pool = new pg.Pool({
+    connectionString: url,
+    max: Number(process.env.PG_POOL_SIZE) || 10,
+    ...(schema ? { options: `-c search_path=${schema}` } : {}),
+  });
+  const setup = await pool.connect();
+  try {
+    await setup.query('SELECT pg_advisory_lock(424242)'); // one server migrates at a time
+    await setup.query(pgSchema(SCHEMA));
+    for (const [table, column, def] of COLUMNS) await setup.query(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${column} ${pgSchema(def)}`);
+    await setup.query(pgSchema(INDEXES));
+  } finally {
+    await setup.query('SELECT pg_advisory_unlock(424242)');
+    setup.release();
+  }
+
+  const inTx = new AsyncLocalStorage();
+  const translated = new Map();
+  const query = (sql, params) => {
+    let text = translated.get(sql);
+    if (!text) translated.set(sql, (text = toPostgres(sql)));
+    const client = inTx.getStore() || pool;
+    return client.query(text, params.map((v) => (typeof v === 'boolean' ? Number(v) : v === undefined ? null : v)));
+  };
+  return {
+    dialect: 'postgres',
+    async all(sql, ...params) {
+      return (await query(sql, params)).rows;
+    },
+    async get(sql, ...params) {
+      return (await query(sql, params)).rows[0];
+    },
+    async run(sql, ...params) {
+      const m = /^\s*INSERT INTO (\w+)/i.exec(sql);
+      if (m && ID_TABLES.has(m[1]) && !/RETURNING/i.test(sql)) {
+        const r = await query(`${sql} RETURNING id`, params);
+        return { changes: r.rowCount, id: r.rows[0]?.id };
+      }
+      const r = await query(sql, params);
+      return { changes: r.rowCount, id: undefined };
+    },
+    async tx(fn) {
+      if (inTx.getStore()) return fn();
+      const client = await pool.connect();
       try {
-        const out = fn();
-        db.exec('COMMIT');
+        await client.query('BEGIN');
+        const out = await inTx.run(client, fn);
+        await client.query('COMMIT');
         return out;
       } catch (err) {
-        db.exec('ROLLBACK');
+        await client.query('ROLLBACK');
         throw err;
       } finally {
-        depth--;
+        client.release();
       }
     },
-    close: () => db.close(),
+    async close() {
+      if (schema) await pool.query(`DROP SCHEMA ${schema} CASCADE`);
+      await pool.end();
+    },
   };
 }

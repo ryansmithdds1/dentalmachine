@@ -9,7 +9,8 @@ import { parseX12 } from '../src/x12.js';
 import { runReviewRequests } from '../src/messaging.js';
 import { localNow } from '../src/util.js';
 
-const db = openDb(':memory:');
+const db = await openDb(':memory:');
+after(() => db.close());
 const uploadDir = mkdtempSync(join(tmpdir(), 'dm-parity-'));
 const sent = [];
 const messenger = { status: { sms: 'test', email: 'test' }, send: async (m) => { sent.push(m); return { provider_id: 'test' }; } };
@@ -70,7 +71,7 @@ test('PPO fee schedules drive allowed amounts, write-offs and claim estimates', 
   await api.post(`/procedures/${plan.procedures[0].id}/complete`);
   const claim = (await api.post('/claims', { patient_insurance_id: policy.id, procedure_ids: [plan.procedures[0].id] })).data;
   assert.equal(claim.estimated_amount, 12000);
-  assert.equal(db.get('SELECT write_off_estimate FROM claims WHERE id = ?', claim.id).write_off_estimate, 8500);
+  assert.equal((await db.get('SELECT write_off_estimate FROM claims WHERE id = ?', claim.id)).write_off_estimate, 8500);
 });
 
 test('pre-authorizations: create from a plan, export as 837 predetermination, record approval', async () => {

@@ -1,12 +1,8 @@
-import { EventEmitter } from 'node:events';
+import { broadcast, listen, unlisten } from './cluster.js';
 
-// In-process pub/sub so every open schedule updates live. For multiple server
-// instances, swap this for Redis pub/sub or Postgres LISTEN/NOTIFY.
-const bus = new EventEmitter();
-bus.setMaxListeners(0);
-
+// Pub/sub so every open schedule updates live — across all servers when Redis is configured.
 export function publish(practiceId, event) {
-  bus.emit(`practice:${practiceId}`, { ...event, at: Date.now() });
+  broadcast(`practice:${practiceId}`, { ...event, at: Date.now() });
 }
 
 // Server-Sent Events stream of practice events for the signed-in user.
@@ -17,9 +13,9 @@ export function eventStream(req, res) {
   const channel = `practice:${req.user.practice_id}`;
   const send = (event) => res.write(`data: ${JSON.stringify(event)}\n\n`);
   const heartbeat = setInterval(() => res.write(': ping\n\n'), 25_000);
-  bus.on(channel, send);
+  listen(channel, send);
   req.on('close', () => {
     clearInterval(heartbeat);
-    bus.off(channel, send);
+    unlisten(channel, send);
   });
 }

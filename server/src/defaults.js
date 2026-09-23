@@ -1,4 +1,4 @@
-import { insert } from './util.js';
+import { insert, mapSeq } from './util.js';
 
 // Starter fee schedule. Practices should review codes/fees against their current CDT licence and local UCR.
 // [code, description, category, fee (cents), requires_tooth, requires_surface]
@@ -60,18 +60,21 @@ export const DEFAULT_APPOINTMENT_TYPES = [
   ['Consultation', 30, '#64748b', [], 'dentist', 1],
 ];
 
-export function seedPracticeDefaults(db, practiceId) {
+export async function seedPracticeDefaults(db, practiceId) {
   for (const [code, description, category, fee, rt, rs] of DEFAULT_CODES) {
-    insert(db, 'procedure_codes', {
+    await insert(db, 'procedure_codes', {
       practice_id: practiceId, code, description, category, fee, requires_tooth: rt, requires_surface: rs,
     });
   }
   for (const name of ['Op 1', 'Op 2', 'Hygiene 1']) {
-    insert(db, 'operatories', { practice_id: practiceId, name });
+    await insert(db, 'operatories', { practice_id: practiceId, name });
   }
-  DEFAULT_APPOINTMENT_TYPES.forEach(([name, duration, color, codes, providerType, online], sort) => insert(db, 'appointment_types', {
-    practice_id: practiceId, name, duration, color, procedure_codes: JSON.stringify(codes), provider_type: providerType, online_bookable: online, sort,
-  }));
+  await mapSeq(
+    DEFAULT_APPOINTMENT_TYPES,
+    async ([name, duration, color, codes, providerType, online], sort) => await insert(db, 'appointment_types', {
+      practice_id: practiceId, name, duration, color, procedure_codes: JSON.stringify(codes), provider_type: providerType, online_bookable: online, sort,
+    })
+  );
 }
 
 // Insurance coverage tier for a procedure category.

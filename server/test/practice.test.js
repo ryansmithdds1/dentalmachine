@@ -9,7 +9,8 @@ import { twilioSignature } from '../src/routes/sms.js';
 import { parseX12, parse271, parse835 } from '../src/x12.js';
 import { installmentDate } from '../src/routes/family.js';
 
-const db = openDb(':memory:');
+const db = await openDb(':memory:');
+after(() => db.close());
 const uploadDir = mkdtempSync(join(tmpdir(), 'dm-practice-'));
 const config = { appUrl: 'https://app.example.com', uploadDir, twilioAuthToken: 'twilio-secret', ediMode: 'sandbox' };
 const messenger = { status: { sms: 'test', email: 'test' }, send: async () => ({ provider_id: 'test' }) };

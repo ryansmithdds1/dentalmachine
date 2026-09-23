@@ -10,7 +10,8 @@ import { runReminders } from '../src/messaging.js';
 import { totp, timeStep } from '../src/totp.js';
 import { localNow } from '../src/util.js';
 
-const db = openDb(':memory:');
+const db = await openDb(':memory:');
+after(() => db.close());
 const uploadDir = mkdtempSync(join(tmpdir(), 'dm-uploads-'));
 const sent = [];
 const messenger = {

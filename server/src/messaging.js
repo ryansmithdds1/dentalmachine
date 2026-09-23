@@ -65,22 +65,22 @@ export function preferredChannel(patient, requested) {
 
 // Records a message, attempts delivery, and stores the outcome. Never throws for delivery errors.
 export async function sendMessage(db, messenger, { practiceId, patientId, appointmentId, channel, to, subject, body, kind = 'custom', userId }) {
-  const id = insert(db, 'messages', {
+  const id = await insert(db, 'messages', {
     practice_id: practiceId, patient_id: patientId ?? null, appointment_id: appointmentId ?? null,
     channel, to_address: to, subject: subject ?? null, body, kind, created_by: userId ?? null,
   });
   try {
     const { provider_id } = await messenger.send({ channel, to, subject, body });
-    db.run("UPDATE messages SET status = 'sent', provider_id = ?, sent_at = datetime('now') WHERE id = ?", provider_id, id);
+    await db.run("UPDATE messages SET status = 'sent', provider_id = ?, sent_at = datetime('now') WHERE id = ?", provider_id, id);
   } catch (err) {
-    db.run("UPDATE messages SET status = 'failed', error = ? WHERE id = ?", String(err.message).slice(0, 500), id);
+    await db.run("UPDATE messages SET status = 'failed', error = ? WHERE id = ?", String(err.message).slice(0, 500), id);
   }
-  return db.get('SELECT * FROM messages WHERE id = ?', id);
+  return await db.get('SELECT * FROM messages WHERE id = ?', id);
 }
 
 // Sends a reminder with a one-tap confirmation link, rotating the appointment's confirm token.
 export async function sendAppointmentReminder(db, messenger, { appointmentId, appUrl, userId, channel: requested, kind = 'reminder' }) {
-  const a = db.get(
+  const a = await db.get(
     `SELECT a.*, p.first_name, p.phone, p.email, p.sms_opt_in, p.email_opt_in, pr.name AS practice_name, pr.phone AS practice_phone, pr.message_templates, pv.name AS provider_name
      FROM appointments a JOIN patients p ON p.id = a.patient_id JOIN practices pr ON pr.id = a.practice_id JOIN providers pv ON pv.id = a.provider_id
      WHERE a.id = ?`, appointmentId,
@@ -88,7 +88,7 @@ export async function sendAppointmentReminder(db, messenger, { appointmentId, ap
   const target = preferredChannel(a, requested);
   if (!target) return null;
   const { token, hash } = newToken();
-  db.run('UPDATE appointments SET confirm_token_hash = ? WHERE id = ?', hash, a.id);
+  await db.run('UPDATE appointments SET confirm_token_hash = ? WHERE id = ?', hash, a.id);
   const link = `${appUrl}/c/${token}`;
   const when = friendlyDateTime(a.start_time);
   const templates = templatesFor({ message_templates: a.message_templates });
@@ -100,17 +100,17 @@ export async function sendAppointmentReminder(db, messenger, { appointmentId, ap
     practiceId: a.practice_id, patientId: a.patient_id, appointmentId: a.id, userId, kind,
     channel: target.channel, to: target.to, subject: `Your appointment at ${a.practice_name}`, body,
   });
-  if (msg.status === 'sent' && kind === 'reminder') db.run("UPDATE appointments SET reminder_sent_at = datetime('now') WHERE id = ?", a.id);
+  if (msg.status === 'sent' && kind === 'reminder') await db.run("UPDATE appointments SET reminder_sent_at = datetime('now') WHERE id = ?", a.id);
   return msg;
 }
 
 // Finds unconfirmed appointments inside each practice's reminder window and reminds them once.
 export async function runReminders(db, messenger, { appUrl, now = new Date() } = {}) {
   let sent = 0;
-  for (const practice of db.all('SELECT id, timezone, reminder_hours FROM practices WHERE reminder_hours > 0')) {
+  for (const practice of await db.all('SELECT id, timezone, reminder_hours FROM practices WHERE reminder_hours > 0')) {
     const from = localNow(practice.timezone, now);
     const to = localNow(practice.timezone, new Date(now.getTime() + practice.reminder_hours * 3600_000));
-    const due = db.all(
+    const due = await db.all(
       `SELECT id FROM appointments WHERE practice_id = ? AND status = 'scheduled' AND reminder_sent_at IS NULL
        AND start_time > ? AND start_time <= ? ORDER BY start_time`, practice.id, from, to,
     );
@@ -118,7 +118,7 @@ export async function runReminders(db, messenger, { appUrl, now = new Date() } =
       const msg = await sendAppointmentReminder(db, messenger, { appointmentId: id, appUrl });
       if (msg?.status === 'sent') sent++;
       // Mark attempted even without a reachable channel so we don't retry every cycle.
-      if (!msg) db.run("UPDATE appointments SET reminder_sent_at = datetime('now') WHERE id = ?", id);
+      if (!msg) await db.run("UPDATE appointments SET reminder_sent_at = datetime('now') WHERE id = ?", id);
     }
   }
   return sent + (await runReviewRequests(db, messenger, { now }));
@@ -127,18 +127,18 @@ export async function runReminders(db, messenger, { appUrl, now = new Date() } =
 // After a completed visit, ask happy patients for an online review (at most once every 6 months).
 export async function runReviewRequests(db, messenger, { now = new Date() } = {}) {
   let sent = 0;
-  for (const practice of db.all("SELECT * FROM practices WHERE review_requests = 1 AND review_url IS NOT NULL AND review_url != ''")) {
+  for (const practice of await db.all("SELECT * FROM practices WHERE review_requests = 1 AND review_url IS NOT NULL AND review_url != ''")) {
     const local = localNow(practice.timezone, now);
-    const due = db.all(
+    const due = await db.all(
       `SELECT a.id, a.patient_id FROM appointments a WHERE a.practice_id = ? AND a.status = 'completed' AND a.review_sent_at IS NULL
        AND a.start_time >= ? AND a.end_time <= ?`,
       practice.id, `${local.slice(0, 10)} 00:00`, local,
     );
     const templates = templatesFor(practice);
     for (const { id, patient_id: patientId } of due) {
-      db.run("UPDATE appointments SET review_sent_at = datetime('now') WHERE id = ?", id);
-      const recent = db.get("SELECT 1 FROM messages WHERE patient_id = ? AND kind = 'review' AND created_at > datetime('now', '-180 days')", patientId);
-      const patient = db.get('SELECT * FROM patients WHERE id = ?', patientId);
+      await db.run("UPDATE appointments SET review_sent_at = datetime('now') WHERE id = ?", id);
+      const recent = await db.get("SELECT 1 FROM messages WHERE patient_id = ? AND kind = 'review' AND created_at > ?", patientId, new Date(Date.now() - 180 * 86400_000).toISOString().slice(0, 19).replace('T', ' '));
+      const patient = await db.get('SELECT * FROM patients WHERE id = ?', patientId);
       const target = preferredChannel(patient);
       if (recent || !target) continue;
       const msg = await sendMessage(db, messenger, {

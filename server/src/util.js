@@ -33,28 +33,28 @@ export function toCents(value, name = 'amount') {
   return Math.round(n);
 }
 
-export function insert(db, table, row) {
+export async function insert(db, table, row) {
   const keys = Object.keys(row);
   const sql = `INSERT INTO ${table} (${keys.join(', ')}) VALUES (${keys.map(() => '?').join(', ')})`;
-  return db.run(sql, ...keys.map((k) => row[k])).id;
+  return (await db.run(sql, ...keys.map((k) => row[k]))).id;
 }
 
-export function update(db, table, id, practiceId, row) {
+export async function update(db, table, id, practiceId, row) {
   const keys = Object.keys(row);
   if (!keys.length) return 0;
   const sql = `UPDATE ${table} SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ? AND practice_id = ?`;
-  return db.run(sql, ...keys.map((k) => row[k]), id, practiceId).changes;
+  return (await db.run(sql, ...keys.map((k) => row[k]), id, practiceId)).changes;
 }
 
 // Fetches a row scoped to the caller's practice or 404s. Tenant isolation hinges on this.
-export function findOr404(db, table, id, practiceId, label = table) {
-  const row = db.get(`SELECT * FROM ${table} WHERE id = ? AND practice_id = ?`, Number(id), practiceId);
+export async function findOr404(db, table, id, practiceId, label = table) {
+  const row = await db.get(`SELECT * FROM ${table} WHERE id = ? AND practice_id = ?`, Number(id), practiceId);
   if (!row) throw new HttpError(404, `${label} not found`);
   return row;
 }
 
-export function audit(db, req, action, entity, entityId, details) {
-  db.run(
+export async function audit(db, req, action, entity, entityId, details) {
+  await db.run(
     'INSERT INTO audit_log (practice_id, user_id, action, entity, entity_id, details, ip) VALUES (?, ?, ?, ?, ?, ?, ?)',
     req.user?.practice_id ?? null,
     req.user?.id ?? null,
@@ -100,8 +100,8 @@ export function localNow(timeZone = 'America/New_York', date = new Date()) {
   return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}`;
 }
 
-export function practiceNow(db, practiceId) {
-  const tz = db.get('SELECT timezone FROM practices WHERE id = ?', practiceId)?.timezone;
+export async function practiceNow(db, practiceId) {
+  const tz = (await db.get('SELECT timezone FROM practices WHERE id = ?', practiceId))?.timezone;
   return localNow(tz || 'America/New_York');
 }
 
@@ -136,8 +136,15 @@ export function zonedToUtc(timeZone, date, time = '00:00') {
 }
 
 // [startUtc, endUtcExclusive] covering practice-local dates from..to inclusive.
-export function utcRange(db, practiceId, from, to) {
-  const tz = db.get('SELECT timezone FROM practices WHERE id = ?', practiceId)?.timezone || 'America/New_York';
+export async function utcRange(db, practiceId, from, to) {
+  const tz = (await db.get('SELECT timezone FROM practices WHERE id = ?', practiceId))?.timezone || 'America/New_York';
   const next = new Date(Date.parse(`${to}T12:00:00Z`) + 86400_000).toISOString().slice(0, 10);
   return [zonedToUtc(tz, from), zonedToUtc(tz, next)];
+}
+
+// Sequential async map (keeps queries ordered, which matters inside transactions).
+export async function mapSeq(items, fn) {
+  const out = [];
+  for (let i = 0; i < items.length; i++) out.push(await fn(items[i], i));
+  return out;
 }

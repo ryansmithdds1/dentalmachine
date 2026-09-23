@@ -1,15 +1,15 @@
 // Loads a demo practice with realistic sample data. Usage: npm run seed
 import { openDb } from './db.js';
 import { hashPassword } from './auth.js';
-import { insert, localNow, addMonths } from './util.js';
+import { insert, localNow, addMonths, mapSeq } from './util.js';
 import { seedPracticeDefaults } from './defaults.js';
 import { completeProcedure, estimateCoverage } from './services.js';
 
 const DEMO_EMAIL = 'admin@demo.dentalmachine.app';
 const DEMO_PASSWORD = 'demo-password-123';
 
-const db = openDb();
-if (db.get('SELECT id FROM users WHERE email = ?', DEMO_EMAIL)) {
+const db = await openDb();
+if (await db.get('SELECT id FROM users WHERE lower(email) = lower(?)', DEMO_EMAIL)) {
   console.log(`Demo practice already exists. Log in as ${DEMO_EMAIL} / ${DEMO_PASSWORD}`);
   process.exit(0);
 }
@@ -33,43 +33,43 @@ const dayOffset = (n) => {
   return d.toISOString().slice(0, 10);
 };
 
-db.tx(() => {
-  const practiceId = insert(db, 'practices', {
+await db.tx(async () => {
+  const practiceId = await insert(db, 'practices', {
     name: 'Bright Smiles Family Dentistry', address: '1200 Main Street, Suite 200', city: 'Austin', state: 'TX', zip: '78701',
     phone: '(512) 555-0142', email: 'office@brightsmiles.example', npi: '1987654321', tax_id: '74-1234567', timezone: 'America/Chicago',
     slug: 'bright-smiles', online_booking: 1, reminder_hours: 48,
   });
-  seedPracticeDefaults(db, practiceId);
+  await seedPracticeDefaults(db, practiceId);
 
-  const user = (email, name, role) => insert(db, 'users', { practice_id: practiceId, email, name, role, password_hash: hashPassword(DEMO_PASSWORD) });
-  const adminId = user(DEMO_EMAIL, 'Morgan Reyes', 'admin');
-  const drUser = user('dr.chen@demo.dentalmachine.app', 'Dr. Alex Chen', 'dentist');
-  const hygUser = user('sam@demo.dentalmachine.app', 'Sam Okafor, RDH', 'hygienist');
-  user('frontdesk@demo.dentalmachine.app', 'Jordan Lee', 'front_desk');
-  user('billing@demo.dentalmachine.app', 'Casey Park', 'billing');
+  const user = async (email, name, role) => await insert(db, 'users', { practice_id: practiceId, email, name, role, password_hash: hashPassword(DEMO_PASSWORD) });
+  const adminId = await user(DEMO_EMAIL, 'Morgan Reyes', 'admin');
+  const drUser = await user('dr.chen@demo.dentalmachine.app', 'Dr. Alex Chen', 'dentist');
+  const hygUser = await user('sam@demo.dentalmachine.app', 'Sam Okafor, RDH', 'hygienist');
+  await user('frontdesk@demo.dentalmachine.app', 'Jordan Lee', 'front_desk');
+  await user('billing@demo.dentalmachine.app', 'Casey Park', 'billing');
 
-  const drChen = insert(db, 'providers', { practice_id: practiceId, user_id: drUser, name: 'Dr. Alex Chen, DDS', type: 'dentist', npi: '1234567893', license_number: 'TX-28841', dea_number: 'BC1234563', color: '#2563eb' });
-  const drRivera = insert(db, 'providers', { practice_id: practiceId, name: 'Dr. Priya Rivera, DMD', type: 'dentist', npi: '1234567901', color: '#7c3aed' });
-  const hyg = insert(db, 'providers', { practice_id: practiceId, user_id: hygUser, name: 'Sam Okafor, RDH', type: 'hygienist', color: '#059669' });
-  const ops = db.all('SELECT id FROM operatories WHERE practice_id = ? ORDER BY id', practiceId).map((o) => o.id);
+  const drChen = await insert(db, 'providers', { practice_id: practiceId, user_id: drUser, name: 'Dr. Alex Chen, DDS', type: 'dentist', npi: '1234567893', license_number: 'TX-28841', dea_number: 'BC1234563', color: '#2563eb' });
+  const drRivera = await insert(db, 'providers', { practice_id: practiceId, name: 'Dr. Priya Rivera, DMD', type: 'dentist', npi: '1234567901', color: '#7c3aed' });
+  const hyg = await insert(db, 'providers', { practice_id: practiceId, user_id: hygUser, name: 'Sam Okafor, RDH', type: 'hygienist', color: '#059669' });
+  const ops = (await db.all('SELECT id FROM operatories WHERE practice_id = ? ORDER BY id', practiceId)).map((o) => o.id);
 
-  const carriers = [
+  const carriers = await mapSeq([
     ['Delta Dental', '94276'], ['MetLife Dental', '65978'], ['Cigna Dental', '62308'], ['Aetna Dental', '60054'], ['Guardian', '64246'],
-  ].map(([name, payer_id]) => insert(db, 'insurance_carriers', { practice_id: practiceId, name, payer_id, phone: '(800) 555-0100' }));
+  ], async ([name, payer_id]) => await insert(db, 'insurance_carriers', { practice_id: practiceId, name, payer_id, phone: '(800) 555-0100' }));
 
   // In-network PPO fee schedules: Delta and Cigna pay contracted fees (office fee minus a write-off).
   for (const [name, pct, carrierIdx] of [['Delta Dental PPO', 82, [0]], ['Cigna DPPO', 76, [2]]]) {
-    const fsId = insert(db, 'fee_schedules', { practice_id: practiceId, name });
-    for (const c of db.all('SELECT code, fee FROM procedure_codes WHERE practice_id = ? AND active = 1', practiceId)) {
-      db.run('INSERT INTO fee_schedule_items (fee_schedule_id, code, fee) VALUES (?, ?, ?)', fsId, c.code, Math.round((c.fee * pct) / 100 / 100) * 100);
+    const fsId = await insert(db, 'fee_schedules', { practice_id: practiceId, name });
+    for (const c of await db.all('SELECT code, fee FROM procedure_codes WHERE practice_id = ? AND active = 1', practiceId)) {
+      await db.run('INSERT INTO fee_schedule_items (fee_schedule_id, code, fee) VALUES (?, ?, ?)', fsId, c.code, Math.round((c.fee * pct) / 100 / 100) * 100);
     }
-    for (const i of carrierIdx) db.run('UPDATE insurance_carriers SET fee_schedule_id = ? WHERE id = ?', fsId, carriers[i]);
+    for (const i of carrierIdx) await db.run('UPDATE insurance_carriers SET fee_schedule_id = ? WHERE id = ?', fsId, carriers[i]);
   }
 
-  const code = (c) => db.get('SELECT * FROM procedure_codes WHERE practice_id = ? AND code = ?', practiceId, c);
-  const addProc = (patientId, c, extra = {}) => {
-    const pc = code(c);
-    return insert(db, 'procedures', {
+  const code = async c => await db.get('SELECT * FROM procedure_codes WHERE practice_id = ? AND code = ?', practiceId, c);
+  const addProc = async (patientId, c, extra = {}) => {
+    const pc = await code(c);
+    return await insert(db, 'procedures', {
       practice_id: practiceId, patient_id: patientId, code_id: pc.id, code: pc.code, description: pc.description, category: pc.category, fee: pc.fee, ...extra,
     });
   };
@@ -80,7 +80,7 @@ db.tx(() => {
     const first = FIRST[i % FIRST.length];
     const last = LAST[(i * 7) % LAST.length];
     const year = 1950 + Math.floor(rand() * 60);
-    const id = insert(db, 'patients', {
+    const id = await insert(db, 'patients', {
       practice_id: practiceId, first_name: first, last_name: last,
       dob: `${year}-${String(1 + Math.floor(rand() * 12)).padStart(2, '0')}-${String(1 + Math.floor(rand() * 28)).padStart(2, '0')}`,
       gender: rand() > 0.5 ? 'female' : 'male', phone: `(512) 555-${String(1000 + i * 37).slice(-4)}`,
@@ -93,7 +93,7 @@ db.tx(() => {
     patients.push(id);
 
     if (rand() < 0.75) {
-      insert(db, 'patient_insurance', {
+      await insert(db, 'patient_insurance', {
         practice_id: practiceId, patient_id: id, carrier_id: pickOne(carriers), subscriber_name: `${first} ${last}`,
         subscriber_id: `W${String(100000000 + i * 7919).slice(0, 9)}`, group_number: `G${1000 + (i % 9)}`,
         annual_max: pickOne([100000, 150000, 200000]), deductible: 5000, pct_preventive: 100, pct_basic: 80, pct_major: 50,
@@ -104,68 +104,71 @@ db.tx(() => {
     const pastOffset = -Math.floor(3 + rand() * 75);
     const pastDay = dayOffset(pastOffset);
     const eobDay = dayOffset(Math.min(0, pastOffset + 10 + Math.floor(rand() * 10)));
-    const pastAppt = insert(db, 'appointments', {
+    const pastAppt = await insert(db, 'appointments', {
       practice_id: practiceId, patient_id: id, provider_id: hyg, operatory_id: ops[2],
       start_time: `${pastDay} 09:00`, end_time: `${pastDay} 10:00`, status: 'completed', reason: 'Recall exam & cleaning',
     });
     for (const c of ['D0120', 'D1110', 'D0274']) {
-      const pid = addProc(id, c, { provider_id: c === 'D0120' ? drChen : hyg, appointment_id: pastAppt });
-      completeProcedure(db, adminUser, db.get('SELECT * FROM procedures WHERE id = ?', pid));
+      const pid = await addProc(id, c, { provider_id: c === 'D0120' ? drChen : hyg, appointment_id: pastAppt });
+      await completeProcedure(db, adminUser, await db.get('SELECT * FROM procedures WHERE id = ?', pid));
     }
-    db.run('UPDATE ledger_entries SET entry_date = ? WHERE patient_id = ? AND entry_date = ?', pastDay, id, today);
-    db.run('UPDATE procedures SET completed_at = ? WHERE appointment_id = ?', `${pastDay} 10:00:00`, pastAppt);
-    db.run('UPDATE recalls SET due_date = ? WHERE patient_id = ?', addMonths(pastDay, 6), id);
+    await db.run('UPDATE ledger_entries SET entry_date = ? WHERE patient_id = ? AND entry_date = ?', pastDay, id, today);
+    await db.run('UPDATE procedures SET completed_at = ? WHERE appointment_id = ?', `${pastDay} 10:00:00`, pastAppt);
+    await db.run('UPDATE recalls SET due_date = ? WHERE patient_id = ?', addMonths(pastDay, 6), id);
 
     // Charting findings and a treatment plan for some patients.
     if (rand() < 0.5) {
       const tooth = String(pickOne([3, 14, 19, 30, 2, 15, 18, 31]));
-      insert(db, 'tooth_conditions', { practice_id: practiceId, patient_id: id, tooth, surfaces: 'MO', condition: 'caries', recorded_by: drUser });
+      await insert(db, 'tooth_conditions', { practice_id: practiceId, patient_id: id, tooth, surfaces: 'MO', condition: 'caries', recorded_by: drUser });
       const accepted = rand() > 0.4;
       const planDay = dayOffset(-Math.floor(rand() * 150));
-      const planId = insert(db, 'treatment_plans', {
+      const planId = await insert(db, 'treatment_plans', {
         practice_id: practiceId, patient_id: id, name: 'Restorative', status: accepted ? 'accepted' : 'proposed', accepted_at: accepted ? `${planDay} 15:20:00` : null, created_at: `${planDay} 15:00:00`,
         ...(accepted && rand() > 0.4 ? { signature_name: `${first} ${last}`, signed_at: `${planDay} 15:20:00`, presented_at: `${planDay} 15:05:00` } : {}),
       });
-      addProc(id, 'D2392', { tooth, surfaces: 'MO', provider_id: drChen, treatment_plan_id: planId, priority: 1 });
-      if (rand() < 0.4) addProc(id, 'D2740', { tooth: String(pickOne([3, 14, 19, 30])), provider_id: drChen, treatment_plan_id: planId, priority: 2 });
+      await addProc(id, 'D2392', { tooth, surfaces: 'MO', provider_id: drChen, treatment_plan_id: planId, priority: 1 });
+      if (rand() < 0.4) await addProc(id, 'D2740', { tooth: String(pickOne([3, 14, 19, 30])), provider_id: drChen, treatment_plan_id: planId, priority: 2 });
     }
-    if (rand() < 0.2) insert(db, 'tooth_conditions', { practice_id: practiceId, patient_id: id, tooth: pickOne(['1', '16', '17', '32']), condition: 'missing', recorded_by: drUser });
-    if (rand() < 0.3) insert(db, 'tooth_conditions', { practice_id: practiceId, patient_id: id, tooth: pickOne(['3', '14', '19', '30']), condition: 'crown', recorded_by: drUser });
+    if (rand() < 0.2) await insert(db, 'tooth_conditions', { practice_id: practiceId, patient_id: id, tooth: pickOne(['1', '16', '17', '32']), condition: 'missing', recorded_by: drUser });
+    if (rand() < 0.3) await insert(db, 'tooth_conditions', { practice_id: practiceId, patient_id: id, tooth: pickOne(['3', '14', '19', '30']), condition: 'crown', recorded_by: drUser });
 
-    insert(db, 'clinical_notes', {
+    await insert(db, 'clinical_notes', {
       practice_id: practiceId, patient_id: id, appointment_id: pastAppt, provider_id: hyg, author_id: hygUser,
       body: 'Periodic exam, adult prophy and 4BWX. Light calculus lower anteriors. OHI reviewed. No complaints.',
       signed: 1, signed_at: `${pastDay} 10:05:00`, created_at: `${pastDay} 10:00:00`,
     });
 
     // Insurance claim + payments on the historical visit.
-    const policy = db.get('SELECT pi.*, c.name AS carrier_name FROM patient_insurance pi JOIN insurance_carriers c ON c.id = pi.carrier_id WHERE pi.patient_id = ?', id);
-    const done = db.all("SELECT * FROM procedures WHERE patient_id = ? AND status = 'completed'", id);
+    const policy = await db.get('SELECT pi.*, c.name AS carrier_name FROM patient_insurance pi JOIN insurance_carriers c ON c.id = pi.carrier_id WHERE pi.patient_id = ?', id);
+    const done = await db.all("SELECT * FROM procedures WHERE patient_id = ? AND status = 'completed'", id);
     if (policy) {
-      const est = estimateCoverage(db, policy, done);
+      const est = await estimateCoverage(db, policy, done);
       const paid = rand() < 0.7;
-      const claimId = insert(db, 'claims', {
+      const claimId = await insert(db, 'claims', {
         practice_id: practiceId, patient_id: id, patient_insurance_id: policy.id, status: paid ? 'paid' : 'submitted',
         total_fee: est.total_fee, estimated_amount: est.total_insurance, submitted_at: `${pastDay} 17:00:00`,
         paid_amount: paid ? est.total_insurance : 0, paid_at: paid ? `${eobDay} 12:00:00` : null,
       });
-      est.items.forEach((it) => insert(db, 'claim_items', { claim_id: claimId, procedure_id: it.procedure_id, fee: it.fee, estimated_amount: it.insurance }));
+      await mapSeq(
+        est.items,
+        async it => await insert(db, 'claim_items', { claim_id: claimId, procedure_id: it.procedure_id, fee: it.fee, estimated_amount: it.insurance })
+      );
       if (paid) {
-        insert(db, 'ledger_entries', {
+        await insert(db, 'ledger_entries', {
           practice_id: practiceId, patient_id: id, type: 'insurance_payment', amount: -est.total_insurance,
           description: `Insurance payment - ${policy.carrier_name} (claim #${claimId})`, method: 'check', claim_id: claimId,
           entry_date: eobDay, created_by: adminId,
         });
       }
       if (est.total_patient > 0 && rand() < 0.6) {
-        insert(db, 'ledger_entries', {
+        await insert(db, 'ledger_entries', {
           practice_id: practiceId, patient_id: id, type: 'payment', amount: -est.total_patient,
           description: 'Patient payment (credit card)', method: 'credit_card', entry_date: pastDay, created_by: adminId,
         });
       }
     } else if (rand() < 0.5) {
       const total = done.reduce((s, p) => s + p.fee, 0);
-      insert(db, 'ledger_entries', {
+      await insert(db, 'ledger_entries', {
         practice_id: practiceId, patient_id: id, type: 'payment', amount: -total,
         description: 'Patient payment (cash)', method: 'cash', entry_date: pastDay, created_by: adminId,
       });
@@ -173,8 +176,8 @@ db.tx(() => {
   }
 
   // Upcoming schedule: today and the next several weekdays, built from appointment types.
-  db.run('UPDATE practices SET daily_goal = ?, hygiene_goal = ?, review_url = ?, review_requests = 1 WHERE id = ?', 600000, 180000, 'https://g.page/r/bright-smiles-austin/review', practiceId);
-  const typeId = (name) => db.get('SELECT * FROM appointment_types WHERE practice_id = ? AND name = ?', practiceId, name);
+  await db.run('UPDATE practices SET daily_goal = ?, hygiene_goal = ?, review_url = ?, review_requests = 1 WHERE id = ?', 600000, 180000, 'https://g.page/r/bright-smiles-austin/review', practiceId);
+  const typeId = async name => await db.get('SELECT * FROM appointment_types WHERE practice_id = ? AND name = ?', practiceId, name);
   const hhmm = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
   const plan = [
     ['Recall exam & cleaning', hyg, 2, []], ['Filling', drChen, 0, [['D2392', '19', 'MO'], ['D2391', '30', 'O']]], ['Crown prep', drRivera, 1, [['D2740', '3'], ['D2950', '3']]],
@@ -186,25 +189,25 @@ db.tx(() => {
     const day = dayOffset(d);
     const dow = new Date(`${day}T12:00:00Z`).getUTCDay();
     if (dow === 0 || dow === 6) continue;
-    insert(db, 'blockouts', { practice_id: practiceId, start_time: `${day} 12:00`, end_time: `${day} 13:00`, reason: 'Lunch', created_by: adminId });
+    await insert(db, 'blockouts', { practice_id: practiceId, start_time: `${day} 12:00`, end_time: `${day} 13:00`, reason: 'Lunch', created_by: adminId });
     const cursor = { [drChen]: 8 * 60, [drRivera]: 8 * 60, [hyg]: 8 * 60 };
     for (let k = 0; k < 14; k++) {
       const [name, prov, opIdx, procs] = plan[(k + d) % plan.length];
-      const type = typeId(name);
+      const type = await typeId(name);
       let start = cursor[prov];
       if (start < 13 * 60 && start + type.duration > 12 * 60) start = 13 * 60; // skip lunch
       if (start + type.duration > 17 * 60) continue;
       cursor[prov] = start + type.duration + (rand() < 0.25 ? 30 : 0);
       const patientId = patients[pi++ % 30]; // the last 10 patients stay off the schedule (follow-up lists)
-      const apptId = insert(db, 'appointments', {
+      const apptId = await insert(db, 'appointments', {
         practice_id: practiceId, patient_id: patientId, provider_id: prov, operatory_id: ops[opIdx], appointment_type_id: type.id, reason: type.name,
         start_time: `${day} ${hhmm(start)}`, end_time: `${day} ${hhmm(start + type.duration)}`, asap: d > 3 && rand() < 0.08 ? 1 : 0,
         status: d === 0 ? pickOne(['confirmed', 'checked_in', 'scheduled', 'confirmed']) : pickOne(['scheduled', 'confirmed']),
       });
       const codes = [...JSON.parse(type.procedure_codes || '[]').map((c) => [c]), ...procs];
-      for (const [c, tooth, surfaces] of codes) addProc(patientId, c, { appointment_id: apptId, provider_id: prov, tooth: tooth ?? null, surfaces: surfaces ?? null });
+      for (const [c, tooth, surfaces] of codes) await addProc(patientId, c, { appointment_id: apptId, provider_id: prov, tooth: tooth ?? null, surfaces: surfaces ?? null });
       if (name === 'Crown prep') {
-        insert(db, 'lab_cases', {
+        await insert(db, 'lab_cases', {
           practice_id: practiceId, patient_id: patientId, provider_id: prov, lab_name: pickOne(['Glidewell', 'Burbank Dental Lab', 'Dental Arts Lab']),
           description: 'Zirconia crown #3', tooth: '3', shade: 'A2', status: 'sent', sent_date: day, due_date: dayOffset(d + 10), cost: 12900,
         });
@@ -215,34 +218,34 @@ db.tx(() => {
   // Patients who fell off the schedule: overdue recall, broken appointments, diagnosed-but-unscheduled treatment.
   for (let j = 30; j < 40; j++) {
     const pid = patients[j];
-    db.run("UPDATE recalls SET due_date = ?, status = 'due' WHERE patient_id = ?", dayOffset(j % 3 === 0 ? 12 : -(j - 25) * 9), pid);
+    await db.run("UPDATE recalls SET due_date = ?, status = 'due' WHERE patient_id = ?", dayOffset(j % 3 === 0 ? 12 : -(j - 25) * 9), pid);
     if (j % 2 === 0) {
       const when = dayOffset(-(j - 28) * 3);
-      insert(db, 'appointments', {
+      await insert(db, 'appointments', {
         practice_id: practiceId, patient_id: pid, provider_id: j % 4 === 0 ? drChen : hyg, operatory_id: ops[j % 4 === 0 ? 0 : 2],
         start_time: `${when} 14:00`, end_time: `${when} 15:00`, status: j % 4 === 0 ? 'no_show' : 'cancelled', reason: j % 4 === 0 ? 'Crown prep' : 'Recall exam & cleaning',
       });
     }
-    if (!db.get("SELECT 1 FROM procedures WHERE patient_id = ? AND status = 'planned'", pid)) {
+    if (!(await db.get("SELECT 1 FROM procedures WHERE patient_id = ? AND status = 'planned'", pid))) {
       const planDay = dayOffset(-(j - 20) * 4);
-      const tp = insert(db, 'treatment_plans', { practice_id: practiceId, patient_id: pid, name: 'Restorative', status: j % 3 ? 'accepted' : 'proposed', accepted_at: j % 3 ? `${planDay} 15:00:00` : null, created_at: `${planDay} 14:00:00` });
-      addProc(pid, pickOne(['D2740', 'D2392', 'D3330']), { tooth: pickOne(['3', '14', '19', '30']), provider_id: drChen, treatment_plan_id: tp, priority: 1 });
+      const tp = await insert(db, 'treatment_plans', { practice_id: practiceId, patient_id: pid, name: 'Restorative', status: j % 3 ? 'accepted' : 'proposed', accepted_at: j % 3 ? `${planDay} 15:00:00` : null, created_at: `${planDay} 14:00:00` });
+      await addProc(pid, pickOne(['D2740', 'D2392', 'D3330']), { tooth: pickOne(['3', '14', '19', '30']), provider_id: drChen, treatment_plan_id: tp, priority: 1 });
     }
   }
-  insert(db, 'followups', { practice_id: practiceId, patient_id: patients[31], kind: 'recall', outcome: 'left_voicemail', note: 'Left VM on cell', created_by: adminId, created_at: `${dayOffset(-2)} 16:00:00` });
-  insert(db, 'followups', { practice_id: practiceId, patient_id: patients[34], kind: 'unscheduled', outcome: 'spoke_will_call', note: 'Checking work schedule, will call back', created_by: adminId, created_at: `${dayOffset(-1)} 11:00:00` });
+  await insert(db, 'followups', { practice_id: practiceId, patient_id: patients[31], kind: 'recall', outcome: 'left_voicemail', note: 'Left VM on cell', created_by: adminId, created_at: `${dayOffset(-2)} 16:00:00` });
+  await insert(db, 'followups', { practice_id: practiceId, patient_id: patients[34], kind: 'unscheduled', outcome: 'spoke_will_call', note: 'Checking work schedule, will call back', created_by: adminId, created_at: `${dayOffset(-1)} 11:00:00` });
 
   // A few households share a guarantor.
   for (let f = 0; f < 5; f++) {
     const [head, ...members] = patients.slice(f * 3, f * 3 + 3);
-    for (const m of members) db.run('UPDATE patients SET guarantor_id = ?, last_name = (SELECT last_name FROM patients WHERE id = ?) WHERE id = ?', head, head, m);
+    for (const m of members) await db.run('UPDATE patients SET guarantor_id = ?, last_name = (SELECT last_name FROM patients WHERE id = ?) WHERE id = ?', head, head, m);
   }
-  insert(db, 'payment_plans', {
+  await insert(db, 'payment_plans', {
     practice_id: practiceId, patient_id: patients[0], total: 240000, down_payment: 40000, installment_amount: 50000, installments: 4,
     frequency: 'monthly', start_date: dayOffset(-45), notes: 'Crown + buildup', created_by: adminId,
   });
-  insert(db, 'tasks', { practice_id: practiceId, title: 'Call Delta Dental about denied claim', priority: 'high', due_date: dayOffset(1), created_by: adminId });
-  insert(db, 'tasks', { practice_id: practiceId, patient_id: patients[4], title: 'Send pre-authorization for crown #3', due_date: dayOffset(3), created_by: adminId });
+  await insert(db, 'tasks', { practice_id: practiceId, title: 'Call Delta Dental about denied claim', priority: 'high', due_date: dayOffset(1), created_by: adminId });
+  await insert(db, 'tasks', { practice_id: practiceId, patient_id: patients[4], title: 'Send pre-authorization for crown #3', due_date: dayOffset(3), created_by: adminId });
   // Online booking requests waiting for the front desk.
   const requests = [
     ['Harper', 'Quinn', '1994-06-12', '(512) 555-0188', 'harper.q@example.com', 'New patient exam & cleaning', 60, 2, '15:00', 'Moving from Dallas, last cleaning ~1 year ago.'],
@@ -251,7 +254,7 @@ db.tx(() => {
   for (const [first_name, last_name, dob, phone, email, reason, duration, offset, time, notes] of requests) {
     let day = dayOffset(offset);
     while ([0, 6].includes(new Date(`${day}T12:00:00Z`).getUTCDay())) day = dayOffset(++offset);
-    insert(db, 'booking_requests', {
+    await insert(db, 'booking_requests', {
       practice_id: practiceId, first_name, last_name, dob, phone, email, reason, duration, provider_id: drRivera,
       requested_start: `${day} ${time}`, notes, ip: '203.0.113.7',
     });
@@ -259,8 +262,8 @@ db.tx(() => {
 
   // Message history so the communication log isn't empty.
   for (const pid of patients.slice(0, 6)) {
-    const p = db.get('SELECT * FROM patients WHERE id = ?', pid);
-    insert(db, 'messages', {
+    const p = await db.get('SELECT * FROM patients WHERE id = ?', pid);
+    await insert(db, 'messages', {
       practice_id: practiceId, patient_id: pid, channel: 'sms', kind: 'reminder', to_address: p.phone, status: 'sent', provider_id: 'log',
       body: `Hi ${p.first_name}, this is Bright Smiles Family Dentistry reminding you of your appointment. Please confirm: (demo link)`,
       sent_at: `${dayOffset(-2)} 09:00:00`, created_at: `${dayOffset(-2)} 09:00:00`,
@@ -268,8 +271,8 @@ db.tx(() => {
   }
   // Two-way text threads.
   for (const [idx, body] of [[1, 'Can I come in 15 minutes later tomorrow?'], [2, 'C'], [7, 'Do you take Aetna?']]) {
-    const p = db.get('SELECT * FROM patients WHERE id = ?', patients[idx]);
-    insert(db, 'messages', {
+    const p = await db.get('SELECT * FROM patients WHERE id = ?', patients[idx]);
+    await insert(db, 'messages', {
       practice_id: practiceId, patient_id: p.id, channel: 'sms', kind: 'reply', direction: 'inbound', to_address: '+15125550142', from_address: p.phone,
       body, status: 'sent', sent_at: `${dayOffset(0)} 08:1${idx}:00`, created_at: `${dayOffset(0)} 08:1${idx}:00`,
     });
@@ -277,3 +280,4 @@ db.tx(() => {
 });
 
 console.log(`Demo practice created. Log in as ${DEMO_EMAIL} / ${DEMO_PASSWORD}`);
+await db.close();

@@ -1,4 +1,5 @@
 import { scryptSync, randomBytes, timingSafeEqual, createHmac } from 'node:crypto';
+import { hit } from './cluster.js';
 
 export class HttpError extends Error {
   constructor(status, message, details) {
@@ -64,16 +65,16 @@ export function can(user, permission) {
 }
 
 export function authenticate(db, secret, { allowMfaSetup = false } = {}) {
-  return (req, _res, next) => {
+  return async (req, _res, next) => {
     const header = req.headers.authorization || '';
     const token = header.startsWith('Bearer ') ? header.slice(7) : null;
     const payload = token && verifyToken(token, secret);
     if (!payload) return next(new HttpError(401, 'Authentication required'));
-    const user = db.get('SELECT id, practice_id, email, name, role, active FROM users WHERE id = ?', payload.sub);
+    const user = await db.get('SELECT id, practice_id, email, name, role, active FROM users WHERE id = ?', payload.sub);
     if (!user || !user.active) return next(new HttpError(401, 'Account disabled or not found'));
     // Practices can require 2FA; until it's set up, only the account/MFA endpoints are reachable.
     if (!allowMfaSetup) {
-      const gate = db.get('SELECT p.require_mfa, u.mfa_enabled FROM users u JOIN practices p ON p.id = u.practice_id WHERE u.id = ?', user.id);
+      const gate = await db.get('SELECT p.require_mfa, u.mfa_enabled FROM users u JOIN practices p ON p.id = u.practice_id WHERE u.id = ?', user.id);
       if (gate.require_mfa && !gate.mfa_enabled) return next(new HttpError(403, 'Two-factor authentication setup required', { mfa_setup_required: true }));
     }
     req.user = user;
@@ -84,18 +85,12 @@ export function authenticate(db, secret, { allowMfaSetup = false } = {}) {
 export const requirePermission = (permission) => (req, _res, next) =>
   can(req.user, permission) ? next() : next(new HttpError(403, `Missing permission: ${permission}`));
 
-// Naive fixed-window limiter; good enough to blunt credential stuffing on a single node.
-export function rateLimit({ windowMs, max }) {
-  const hits = new Map();
-  return (req, _res, next) => {
-    const key = req.ip;
-    const now = Date.now();
-    const entry = hits.get(key);
-    if (!entry || now - entry.start > windowMs) {
-      hits.set(key, { start: now, count: 1 });
-      return next();
-    }
-    if (++entry.count > max) return next(new HttpError(429, 'Too many attempts, try again later'));
+// Fixed-window limiter per client IP; shared across servers when Redis is configured.
+let limiterSeq = 0;
+export function rateLimit({ windowMs, max, name = `l${++limiterSeq}` }) {
+  return async (req, _res, next) => {
+    const n = await hit(`${name}:${req.ip}`, windowMs);
+    if (n > max) return next(new HttpError(429, 'Too many attempts, try again later'));
     next();
   };
 }

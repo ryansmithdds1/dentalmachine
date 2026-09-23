@@ -1,11 +1,11 @@
 import { Router } from 'express';
 import { requirePermission, HttpError } from '../auth.js';
-import { practiceNow, utcRange } from '../util.js';
+import { practiceNow, utcRange, mapSeq } from '../util.js';
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
-function range(req, db) {
-  const today = practiceNow(db, req.user.practice_id).slice(0, 10);
+async function range(req, db) {
+  const today = (await practiceNow(db, req.user.practice_id)).slice(0, 10);
   const from = req.query.from || `${today.slice(0, 7)}-01`;
   const to = req.query.to || today;
   if (!DATE.test(from) || !DATE.test(to)) throw new HttpError(400, 'from/to must be YYYY-MM-DD');
@@ -16,10 +16,10 @@ export default function reportRoutes({ db }) {
   const r = Router();
 
   // Front-desk dashboard: available to anyone who can see the schedule.
-  r.get('/dashboard', requirePermission('schedule:read'), (req, res) => {
+  r.get('/dashboard', requirePermission('schedule:read'), async (req, res) => {
     const pid = req.user.practice_id;
-    const { from, to, today } = range(req, db);
-    const appts = db.all(
+    const { from, to, today } = await range(req, db);
+    const appts = await db.all(
       `SELECT a.status, COUNT(*) AS n FROM appointments a WHERE a.practice_id = ? AND a.start_time >= ? AND a.start_time < ? GROUP BY a.status`,
       pid, `${today} 00:00`, `${today} 24:00`,
     );
@@ -28,22 +28,22 @@ export default function reportRoutes({ db }) {
       today,
       appointments_today: appts.filter((a) => !['cancelled', 'no_show'].includes(a.status)).reduce((s, a) => s + a.n, 0),
       appointments_by_status: byStatus,
-      recalls_due: db.get(
+      recalls_due: (await db.get(
         `SELECT COUNT(*) AS n FROM recalls r JOIN patients p ON p.id = r.patient_id
          WHERE r.practice_id = ? AND r.due_date <= ? AND r.status IN ('due','contacted') AND p.status = 'active'`, pid, today,
-      ).n,
-      active_patients: db.get("SELECT COUNT(*) AS n FROM patients WHERE practice_id = ? AND status = 'active'", pid).n,
+      )).n,
+      active_patients: (await db.get("SELECT COUNT(*) AS n FROM patients WHERE practice_id = ? AND status = 'active'", pid)).n,
     };
     if (req.user.role === 'admin' || ['dentist', 'billing'].includes(req.user.role)) {
       Object.assign(out, {
         period: { from, to },
-        production: db.get("SELECT COALESCE(SUM(amount),0) AS n FROM ledger_entries WHERE practice_id = ? AND type = 'charge' AND entry_date BETWEEN ? AND ?", pid, from, to).n,
-        collections: -db.get("SELECT COALESCE(SUM(amount),0) AS n FROM ledger_entries WHERE practice_id = ? AND type IN ('payment','insurance_payment') AND entry_date BETWEEN ? AND ?", pid, from, to).n,
-        adjustments: db.get("SELECT COALESCE(SUM(amount),0) AS n FROM ledger_entries WHERE practice_id = ? AND type = 'adjustment' AND entry_date BETWEEN ? AND ?", pid, from, to).n,
-        accounts_receivable: db.get('SELECT COALESCE(SUM(amount),0) AS n FROM ledger_entries WHERE practice_id = ?', pid).n,
-        outstanding_claims: db.get("SELECT COUNT(*) AS n, COALESCE(SUM(estimated_amount),0) AS amount FROM claims WHERE practice_id = ? AND status = 'submitted'", pid),
-        new_patients: db.get('SELECT COUNT(*) AS n FROM patients WHERE practice_id = ? AND created_at >= ? AND created_at < ?', pid, ...utcRange(db, pid, from, to)).n,
-        unscheduled_treatment: db.get(
+        production: (await db.get("SELECT COALESCE(SUM(amount),0) AS n FROM ledger_entries WHERE practice_id = ? AND type = 'charge' AND entry_date BETWEEN ? AND ?", pid, from, to)).n,
+        collections: -(await db.get("SELECT COALESCE(SUM(amount),0) AS n FROM ledger_entries WHERE practice_id = ? AND type IN ('payment','insurance_payment') AND entry_date BETWEEN ? AND ?", pid, from, to)).n,
+        adjustments: (await db.get("SELECT COALESCE(SUM(amount),0) AS n FROM ledger_entries WHERE practice_id = ? AND type = 'adjustment' AND entry_date BETWEEN ? AND ?", pid, from, to)).n,
+        accounts_receivable: (await db.get('SELECT COALESCE(SUM(amount),0) AS n FROM ledger_entries WHERE practice_id = ?', pid)).n,
+        outstanding_claims: await db.get("SELECT COUNT(*) AS n, COALESCE(SUM(estimated_amount),0) AS amount FROM claims WHERE practice_id = ? AND status = 'submitted'", pid),
+        new_patients: (await db.get('SELECT COUNT(*) AS n FROM patients WHERE practice_id = ? AND created_at >= ? AND created_at < ?', pid, ...(await utcRange(db, pid, from, to)))).n,
+        unscheduled_treatment: await db.get(
           `SELECT COUNT(*) AS n, COALESCE(SUM(pr.fee),0) AS amount FROM procedures pr JOIN treatment_plans tp ON tp.id = pr.treatment_plan_id
            WHERE pr.practice_id = ? AND pr.status = 'planned' AND pr.appointment_id IS NULL AND tp.status IN ('proposed','accepted')`, pid,
         ),
@@ -52,48 +52,48 @@ export default function reportRoutes({ db }) {
     res.json(out);
   });
 
-  r.get('/reports/production', requirePermission('reports:read'), (req, res) => {
+  r.get('/reports/production', requirePermission('reports:read'), async (req, res) => {
     const pid = req.user.practice_id;
-    const { from, to } = range(req, db);
+    const { from, to } = await range(req, db);
     res.json({
       from, to,
-      by_provider: db.all(
+      by_provider: await db.all(
         `SELECT pv.id, pv.name, COUNT(*) AS procedures, SUM(l.amount) AS production FROM ledger_entries l
          JOIN providers pv ON pv.id = l.provider_id WHERE l.practice_id = ? AND l.type = 'charge' AND l.entry_date BETWEEN ? AND ?
          GROUP BY pv.id ORDER BY production DESC`, pid, from, to,
       ),
-      by_category: db.all(
+      by_category: await db.all(
         `SELECT pr.category, COUNT(*) AS procedures, SUM(l.amount) AS production FROM ledger_entries l
          JOIN procedures pr ON pr.id = l.procedure_id WHERE l.practice_id = ? AND l.type = 'charge' AND l.entry_date BETWEEN ? AND ?
          GROUP BY pr.category ORDER BY production DESC`, pid, from, to,
       ),
-      by_day: db.all(
+      by_day: await db.all(
         `SELECT entry_date AS day,
            SUM(CASE WHEN type = 'charge' THEN amount ELSE 0 END) AS production,
            -SUM(CASE WHEN type IN ('payment','insurance_payment') THEN amount ELSE 0 END) AS collections
          FROM ledger_entries WHERE practice_id = ? AND entry_date BETWEEN ? AND ? GROUP BY entry_date ORDER BY entry_date`, pid, from, to,
       ),
-      top_procedures: db.all(
+      top_procedures: await db.all(
         `SELECT pr.code, pr.description, COUNT(*) AS count, SUM(pr.fee) AS production FROM procedures pr
          WHERE pr.practice_id = ? AND pr.status = 'completed' AND pr.completed_at >= ? AND pr.completed_at < ?
-         GROUP BY pr.code ORDER BY production DESC LIMIT 10`, pid, ...utcRange(db, pid, from, to),
+         GROUP BY pr.code ORDER BY production DESC LIMIT 10`, pid, ...(await utcRange(db, pid, from, to)),
       ),
     });
   });
 
   // Aging by patient: open balance is attributed to the most recent charges first (FIFO payment application).
-  r.get('/reports/aging', requirePermission('reports:read'), (req, res) => {
+  r.get('/reports/aging', requirePermission('reports:read'), async (req, res) => {
     const pid = req.user.practice_id;
-    const { today } = range(req, db);
-    const patients = db.all(
+    const { today } = await range(req, db);
+    const patients = await db.all(
       `SELECT p.id, p.first_name, p.last_name, p.phone, SUM(l.amount) AS balance FROM ledger_entries l JOIN patients p ON p.id = l.patient_id
-       WHERE l.practice_id = ? GROUP BY p.id HAVING balance > 0 ORDER BY balance DESC`, pid,
+       WHERE l.practice_id = ? GROUP BY p.id HAVING SUM(l.amount) > 0 ORDER BY balance DESC`, pid,
     );
     const buckets = ['current', 'd31_60', 'd61_90', 'd90_plus'];
     const totals = Object.fromEntries(buckets.map((b) => [b, 0]));
     const todayMs = Date.parse(`${today}T00:00:00Z`);
-    const rows = patients.map((p) => {
-      const charges = db.all("SELECT amount, entry_date FROM ledger_entries WHERE patient_id = ? AND practice_id = ? AND amount > 0 ORDER BY entry_date DESC, id DESC", p.id, pid);
+    const rows = await mapSeq(patients, async p => {
+      const charges = await db.all("SELECT amount, entry_date FROM ledger_entries WHERE patient_id = ? AND practice_id = ? AND amount > 0 ORDER BY entry_date DESC, id DESC", p.id, pid);
       const row = { ...p, ...Object.fromEntries(buckets.map((b) => [b, 0])) };
       let remaining = p.balance;
       for (const c of charges) {
@@ -111,11 +111,11 @@ export default function reportRoutes({ db }) {
   });
 
   // End-of-day "day sheet": what was produced, collected (by payment method, for the deposit) and how the schedule went.
-  r.get('/reports/daysheet', requirePermission('reports:read'), (req, res) => {
+  r.get('/reports/daysheet', requirePermission('reports:read'), async (req, res) => {
     const pid = req.user.practice_id;
-    const date = req.query.date || practiceNow(db, pid).slice(0, 10);
+    const date = req.query.date || (await practiceNow(db, pid)).slice(0, 10);
     if (!DATE.test(date)) throw new HttpError(400, 'date must be YYYY-MM-DD');
-    const entries = db.all(
+    const entries = await db.all(
       `SELECT l.*, p.first_name, p.last_name, pv.name AS provider_name, u.name AS created_by_name
        FROM ledger_entries l JOIN patients p ON p.id = l.patient_id LEFT JOIN providers pv ON pv.id = l.provider_id
        LEFT JOIN users u ON u.id = l.created_by WHERE l.practice_id = ? AND l.entry_date = ? ORDER BY l.type, l.id`, pid, date,
@@ -126,7 +126,7 @@ export default function reportRoutes({ db }) {
       const key = e.type === 'insurance_payment' ? `insurance_${e.method || 'check'}` : e.method || 'other';
       byMethod[key] = (byMethod[key] || 0) - e.amount;
     }
-    const appts = db.all(
+    const appts = await db.all(
       `SELECT status, COUNT(*) AS n FROM appointments WHERE practice_id = ? AND start_time >= ? AND start_time < ? GROUP BY status`,
       pid, `${date} 00:00`, `${date} 24:00`,
     );

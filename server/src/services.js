@@ -1,25 +1,25 @@
 import { HttpError } from './auth.js';
 import { coverageTier } from './defaults.js';
-import { insert, addMonths, practiceNow } from './util.js';
+import { insert, addMonths, practiceNow, mapSeq } from './util.js';
 
-export function patientBalance(db, practiceId, patientId) {
-  return db.get(
+export async function patientBalance(db, practiceId, patientId) {
+  return (await db.get(
     'SELECT COALESCE(SUM(amount), 0) AS balance FROM ledger_entries WHERE practice_id = ? AND patient_id = ?',
     practiceId, patientId,
-  ).balance;
+  )).balance;
 }
 
 // Benefits used this calendar year = insurance payments received against this policy's claims.
-export function benefitsUsed(db, policy, year = new Date().getUTCFullYear()) {
-  return db.get(
+export async function benefitsUsed(db, policy, year = new Date().getUTCFullYear()) {
+  return (await db.get(
     `SELECT COALESCE(SUM(paid_amount), 0) AS used FROM claims
-     WHERE patient_insurance_id = ? AND status IN ('paid','partially_paid') AND strftime('%Y', paid_at) = ?`,
+     WHERE patient_insurance_id = ? AND status IN ('paid','partially_paid') AND substr(paid_at, 1, 4) = ?`,
     policy.id, String(year),
-  ).used;
+  )).used;
 }
 
-export function primaryPolicy(db, practiceId, patientId) {
-  return db.get(
+export async function primaryPolicy(db, practiceId, patientId) {
+  return await db.get(
     `SELECT pi.*, c.name AS carrier_name FROM patient_insurance pi JOIN insurance_carriers c ON c.id = pi.carrier_id
      WHERE pi.practice_id = ? AND pi.patient_id = ? AND pi.active = 1
      ORDER BY CASE pi.priority WHEN 'primary' THEN 0 ELSE 1 END LIMIT 1`,
@@ -29,7 +29,7 @@ export function primaryPolicy(db, practiceId, patientId) {
 
 // Estimates insurance vs patient portion for a list of procedures, applying the
 // remaining deductible (not to preventive) and the remaining annual maximum in order.
-export function estimateCoverage(db, policy, procedures) {
+export async function estimateCoverage(db, policy, procedures) {
   if (!policy) {
     return {
       policy: null,
@@ -42,18 +42,18 @@ export function estimateCoverage(db, policy, procedures) {
     };
   }
   // In-network (PPO) carriers pay from their fee schedule; the difference is written off.
-  const scheduleId = policy.fee_schedule_id ?? db.get('SELECT fee_schedule_id FROM insurance_carriers WHERE id = ?', policy.carrier_id)?.fee_schedule_id;
-  const allowedFor = (p) => {
+  const scheduleId = policy.fee_schedule_id ?? (await db.get('SELECT fee_schedule_id FROM insurance_carriers WHERE id = ?', policy.carrier_id))?.fee_schedule_id;
+  const allowedFor = async p => {
     if (!scheduleId) return p.fee;
-    const row = db.get('SELECT fee FROM fee_schedule_items WHERE fee_schedule_id = ? AND code = ?', scheduleId, p.code);
+    const row = await db.get('SELECT fee FROM fee_schedule_items WHERE fee_schedule_id = ? AND code = ?', scheduleId, p.code);
     return row ? Math.min(row.fee, p.fee) : p.fee;
   };
-  let remainingMax = Math.max(0, policy.annual_max - benefitsUsed(db, policy));
+  let remainingMax = Math.max(0, policy.annual_max - (await benefitsUsed(db, policy)));
   let remainingDeductible = Math.max(0, policy.deductible - policy.deductible_met);
-  const items = procedures.map((p) => {
+  const items = await mapSeq(procedures, async p => {
     const tier = coverageTier(p.category);
     const pct = policy[`pct_${tier}`] ?? 0;
-    const contracted = allowedFor(p);
+    const contracted = await allowedFor(p);
     let allowed = contracted;
     let deductible = 0;
     if (tier !== 'preventive' && remainingDeductible > 0) {
@@ -80,20 +80,20 @@ export function estimateCoverage(db, policy, procedures) {
 
 const RECALL_CODES = { D1110: 'prophy', D1120: 'prophy', D4910: 'perio_maint' };
 
-export function completeProcedure(db, user, procedure, { providerId, appointmentId } = {}) {
+export async function completeProcedure(db, user, procedure, { providerId, appointmentId } = {}) {
   if (procedure.status === 'completed') throw new HttpError(409, 'Procedure already completed');
   if (procedure.status === 'cancelled') throw new HttpError(409, 'Cancelled procedures cannot be completed');
   const provider = providerId ?? procedure.provider_id;
   if (!provider) throw new HttpError(400, 'A provider is required to complete a procedure');
-  const today = practiceNow(db, procedure.practice_id).slice(0, 10);
+  const today = (await practiceNow(db, procedure.practice_id)).slice(0, 10);
 
-  db.tx(() => {
-    db.run(
+  await db.tx(async () => {
+    await db.run(
       `UPDATE procedures SET status = 'completed', completed_at = datetime('now'), provider_id = ?, appointment_id = COALESCE(?, appointment_id)
        WHERE id = ?`,
       provider, appointmentId ?? null, procedure.id,
     );
-    insert(db, 'ledger_entries', {
+    await insert(db, 'ledger_entries', {
       practice_id: procedure.practice_id,
       patient_id: procedure.patient_id,
       type: 'charge',
@@ -107,47 +107,51 @@ export function completeProcedure(db, user, procedure, { providerId, appointment
 
     const recallType = RECALL_CODES[procedure.code];
     if (recallType) {
-      const existing = db.get('SELECT * FROM recalls WHERE practice_id = ? AND patient_id = ? AND type = ?', procedure.practice_id, procedure.patient_id, recallType);
+      const existing = await db.get('SELECT * FROM recalls WHERE practice_id = ? AND patient_id = ? AND type = ?', procedure.practice_id, procedure.patient_id, recallType);
       const interval = existing?.interval_months ?? (recallType === 'perio_maint' ? 3 : 6);
       const due = addMonths(today, interval);
       if (existing) {
-        db.run("UPDATE recalls SET due_date = ?, status = 'due' WHERE id = ?", due, existing.id);
+        await db.run("UPDATE recalls SET due_date = ?, status = 'due' WHERE id = ?", due, existing.id);
       } else {
-        insert(db, 'recalls', { practice_id: procedure.practice_id, patient_id: procedure.patient_id, type: recallType, interval_months: interval, due_date: due });
+        await insert(db, 'recalls', { practice_id: procedure.practice_id, patient_id: procedure.patient_id, type: recallType, interval_months: interval, due_date: due });
       }
     }
 
     // Close out the treatment plan once nothing remains planned.
     if (procedure.treatment_plan_id) {
-      const remaining = db.get("SELECT COUNT(*) AS n FROM procedures WHERE treatment_plan_id = ? AND status = 'planned'", procedure.treatment_plan_id).n;
-      if (remaining === 0) db.run("UPDATE treatment_plans SET status = 'completed' WHERE id = ?", procedure.treatment_plan_id);
+      const remaining = (await db.get("SELECT COUNT(*) AS n FROM procedures WHERE treatment_plan_id = ? AND status = 'planned'", procedure.treatment_plan_id)).n;
+      if (remaining === 0) await db.run("UPDATE treatment_plans SET status = 'completed' WHERE id = ?", procedure.treatment_plan_id);
     }
   });
 }
 
 // Posts an insurance payment (and optional contractual write-off) against a claim.
-export function postClaimPayment(db, claim, { amount, writeOff = 0, final = true, method = 'check', reference = null, userId = null, date, payerClaimNumber = null }) {
-  const carrier = db.get('SELECT ic.name FROM patient_insurance pi JOIN insurance_carriers ic ON ic.id = pi.carrier_id WHERE pi.id = ?', claim.patient_insurance_id);
-  db.tx(() => {
+export async function postClaimPayment(
+  db,
+  claim,
+  { amount, writeOff = 0, final = true, method = 'check', reference = null, userId = null, date, payerClaimNumber = null }
+) {
+  const carrier = await db.get('SELECT ic.name FROM patient_insurance pi JOIN insurance_carriers ic ON ic.id = pi.carrier_id WHERE pi.id = ?', claim.patient_insurance_id);
+  await db.tx(async () => {
     if (amount > 0) {
-      insert(db, 'ledger_entries', {
+      await insert(db, 'ledger_entries', {
         practice_id: claim.practice_id, patient_id: claim.patient_id, type: 'insurance_payment', amount: -amount,
         description: `Insurance payment - ${carrier.name} (claim #${claim.id})`, method, reference, claim_id: claim.id, entry_date: date, created_by: userId,
       });
     }
     if (writeOff > 0) {
-      insert(db, 'ledger_entries', {
+      await insert(db, 'ledger_entries', {
         practice_id: claim.practice_id, patient_id: claim.patient_id, type: 'adjustment', amount: -writeOff,
         description: `Insurance write-off - ${carrier.name} (claim #${claim.id})`, claim_id: claim.id, entry_date: date, created_by: userId,
       });
     }
-    db.run(
+    await db.run(
       "UPDATE claims SET paid_amount = paid_amount + ?, status = ?, paid_at = datetime('now'), payer_claim_number = COALESCE(?, payer_claim_number) WHERE id = ?",
       amount, final ? 'paid' : 'partially_paid', payerClaimNumber, claim.id,
     );
     // First payment on a claim satisfies the deductible it applied.
     if (claim.status === 'submitted' && claim.deductible_applied > 0) {
-      db.run('UPDATE patient_insurance SET deductible_met = MIN(deductible, deductible_met + ?) WHERE id = ?', claim.deductible_applied, claim.patient_insurance_id);
+      await db.run('UPDATE patient_insurance SET deductible_met = CASE WHEN deductible_met + ? > deductible THEN deductible ELSE deductible_met + ? END WHERE id = ?', claim.deductible_applied, claim.deductible_applied, claim.patient_insurance_id);
     }
   });
 }

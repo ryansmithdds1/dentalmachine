@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { requirePermission, HttpError } from '../auth.js';
-import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, toCents, practiceNow } from '../util.js';
+import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, toCents, practiceNow, mapSeq } from '../util.js';
 
 const FREQ_DAYS = { weekly: 7, biweekly: 14 };
 
@@ -20,9 +20,9 @@ export function installmentDate(plan, i) {
 }
 
 // Adds schedule, amount paid, amount due to date and next due date to a plan row.
-export function planStatus(db, plan, today) {
+export async function planStatus(db, plan, today) {
   const financed = plan.total - plan.down_payment;
-  const paid = -db.get('SELECT COALESCE(SUM(amount), 0) AS n FROM ledger_entries WHERE payment_plan_id = ?', plan.id).n;
+  const paid = -(await db.get('SELECT COALESCE(SUM(amount), 0) AS n FROM ledger_entries WHERE payment_plan_id = ?', plan.id)).n;
   const schedule = Array.from({ length: plan.installments }, (_, i) => {
     const amount = i === plan.installments - 1 ? financed - plan.installment_amount * (plan.installments - 1) : plan.installment_amount;
     return { n: i + 1, due_date: installmentDate(plan, i), amount };
@@ -49,16 +49,16 @@ export function planStatus(db, plan, today) {
 
 export default function familyRoutes({ db }) {
   const r = Router();
-  const patientOr404 = (req, id = req.params.id) => findOr404(db, 'patients', id, req.user.practice_id, 'Patient');
+  const patientOr404 = async (req, id = req.params.id) => await findOr404(db, 'patients', id, req.user.practice_id, 'Patient');
   // The guarantor is responsible for the family's bills; a patient with no guarantor is their own.
-  const guarantorOf = (p) => (p.guarantor_id ? db.get('SELECT * FROM patients WHERE id = ?', p.guarantor_id) : p);
+  const guarantorOf = async p => (p.guarantor_id ? await db.get('SELECT * FROM patients WHERE id = ?', p.guarantor_id) : p);
 
   // ---- Family file ----
-  r.get('/patients/:id/family', requirePermission('patients:read'), (req, res) => {
+  r.get('/patients/:id/family', requirePermission('patients:read'), async (req, res) => {
     const pid = req.user.practice_id;
-    const g = guarantorOf(patientOr404(req));
-    const now = practiceNow(db, pid);
-    const members = db.all(
+    const g = await guarantorOf(await patientOr404(req));
+    const now = await practiceNow(db, pid);
+    const members = await db.all(
       `SELECT p.id, p.first_name, p.last_name, p.preferred_name, p.dob, p.phone, p.status, p.guarantor_id, p.medical_alerts,
         (SELECT COALESCE(SUM(amount),0) FROM ledger_entries l WHERE l.patient_id = p.id) AS balance,
         (SELECT MIN(start_time) FROM appointments a WHERE a.patient_id = p.id AND a.start_time >= ? AND a.status NOT IN ('cancelled','no_show')) AS next_appointment,
@@ -74,70 +74,73 @@ export default function familyRoutes({ db }) {
   });
 
   // Link an existing patient to this family (the guarantor of :id becomes theirs).
-  r.post('/patients/:id/family', requirePermission('patients:write'), (req, res) => {
-    const g = guarantorOf(patientOr404(req));
+  r.post('/patients/:id/family', requirePermission('patients:write'), async (req, res) => {
+    const g = await guarantorOf(await patientOr404(req));
     let memberId;
     if (req.body?.patient_id) {
-      const member = patientOr404(req, req.body.patient_id);
+      const member = await patientOr404(req, req.body.patient_id);
       if (member.id === g.id) throw new HttpError(400, 'That patient is already the guarantor');
-      if (db.get('SELECT id FROM patients WHERE guarantor_id = ? LIMIT 1', member.id)) {
+      if (await db.get('SELECT id FROM patients WHERE guarantor_id = ? LIMIT 1', member.id)) {
         throw new HttpError(409, `${member.first_name} is the guarantor of another family; move those members first`);
       }
-      update(db, 'patients', member.id, req.user.practice_id, { guarantor_id: g.id, updated_at: new Date().toISOString() });
+      await update(db, 'patients', member.id, req.user.practice_id, { guarantor_id: g.id, updated_at: new Date().toISOString() });
       memberId = member.id;
     } else {
       // New family member, inheriting the household's contact details.
       const row = pick(req.body, ['first_name', 'last_name', 'dob', 'gender', 'preferred_name']);
       requireFields(row, ['first_name']);
-      memberId = insert(db, 'patients', {
+      memberId = await insert(db, 'patients', {
         ...row, last_name: row.last_name || g.last_name, practice_id: req.user.practice_id, guarantor_id: g.id,
         phone: g.phone, email: g.email, address: g.address, city: g.city, state: g.state, zip: g.zip, primary_provider_id: g.primary_provider_id,
       });
     }
-    audit(db, req, 'family.link', 'patients', memberId, { guarantor_id: g.id });
-    res.status(201).json(db.get('SELECT * FROM patients WHERE id = ?', memberId));
+    await audit(db, req, 'family.link', 'patients', memberId, { guarantor_id: g.id });
+    res.status(201).json(await db.get('SELECT * FROM patients WHERE id = ?', memberId));
   });
 
-  r.delete('/patients/:id/family/:memberId', requirePermission('patients:write'), (req, res) => {
-    const member = patientOr404(req, req.params.memberId);
-    update(db, 'patients', member.id, req.user.practice_id, { guarantor_id: null, updated_at: new Date().toISOString() });
-    audit(db, req, 'family.unlink', 'patients', member.id);
+  r.delete('/patients/:id/family/:memberId', requirePermission('patients:write'), async (req, res) => {
+    const member = await patientOr404(req, req.params.memberId);
+    await update(db, 'patients', member.id, req.user.practice_id, { guarantor_id: null, updated_at: new Date().toISOString() });
+    await audit(db, req, 'family.unlink', 'patients', member.id);
     res.json({ ok: true });
   });
 
   // Make a member the head of household (e.g. a parent takes over from a grandparent).
-  r.post('/patients/:id/family/guarantor', requirePermission('patients:write'), (req, res) => {
-    const newG = patientOr404(req);
-    const oldG = guarantorOf(newG);
+  r.post('/patients/:id/family/guarantor', requirePermission('patients:write'), async (req, res) => {
+    const newG = await patientOr404(req);
+    const oldG = await guarantorOf(newG);
     if (oldG.id === newG.id) return res.json({ ok: true });
-    db.tx(() => {
-      db.run('UPDATE patients SET guarantor_id = ? WHERE practice_id = ? AND (guarantor_id = ? OR id = ?)', newG.id, req.user.practice_id, oldG.id, oldG.id);
-      db.run('UPDATE patients SET guarantor_id = NULL WHERE id = ?', newG.id);
+    await db.tx(async () => {
+      await db.run('UPDATE patients SET guarantor_id = ? WHERE practice_id = ? AND (guarantor_id = ? OR id = ?)', newG.id, req.user.practice_id, oldG.id, oldG.id);
+      await db.run('UPDATE patients SET guarantor_id = NULL WHERE id = ?', newG.id);
     });
-    audit(db, req, 'family.guarantor_change', 'patients', newG.id, { from: oldG.id });
+    await audit(db, req, 'family.guarantor_change', 'patients', newG.id, { from: oldG.id });
     res.json({ ok: true });
   });
 
   // ---- Payment plans ----
-  r.get('/payment-plans', requirePermission('billing:read'), (req, res) => {
+  r.get('/payment-plans', requirePermission('billing:read'), async (req, res) => {
     const pid = req.user.practice_id;
-    const today = practiceNow(db, pid).slice(0, 10);
+    const today = (await practiceNow(db, pid)).slice(0, 10);
     const status = req.query.status || 'active';
-    const plans = db.all(
+    const plans = await mapSeq((await db.all(
       `SELECT pp.*, p.first_name, p.last_name, p.phone FROM payment_plans pp JOIN patients p ON p.id = pp.patient_id
        WHERE pp.practice_id = ? AND (? = 'all' OR pp.status = ?) ORDER BY pp.created_at DESC`, pid, status, status,
-    ).map((p) => planStatus(db, p, today));
+    )), async p => await planStatus(db, p, today));
     res.json(req.query.overdue === 'true' ? plans.filter((p) => p.past_due > 0) : plans);
   });
 
-  r.get('/patients/:id/payment-plans', requirePermission('billing:read'), (req, res) => {
-    const g = guarantorOf(patientOr404(req));
-    const today = practiceNow(db, req.user.practice_id).slice(0, 10);
-    res.json(db.all('SELECT * FROM payment_plans WHERE practice_id = ? AND patient_id = ? ORDER BY id DESC', req.user.practice_id, g.id).map((p) => planStatus(db, p, today)));
+  r.get('/patients/:id/payment-plans', requirePermission('billing:read'), async (req, res) => {
+    const g = await guarantorOf(await patientOr404(req));
+    const today = (await practiceNow(db, req.user.practice_id)).slice(0, 10);
+    res.json(await mapSeq(
+      (await db.all('SELECT * FROM payment_plans WHERE practice_id = ? AND patient_id = ? ORDER BY id DESC', req.user.practice_id, g.id)),
+      async p => await planStatus(db, p, today)
+    ));
   });
 
-  r.post('/patients/:id/payment-plans', requirePermission('billing:write'), (req, res) => {
-    const g = guarantorOf(patientOr404(req));
+  r.post('/patients/:id/payment-plans', requirePermission('billing:write'), async (req, res) => {
+    const g = await guarantorOf(await patientOr404(req));
     const row = pick(req.body, ['total', 'down_payment', 'installments', 'frequency', 'start_date', 'notes']);
     requireFields(row, ['total', 'installments', 'start_date']);
     row.total = toCents(row.total, 'total');
@@ -149,18 +152,18 @@ export default function familyRoutes({ db }) {
     if (row.total <= 0 || row.down_payment < 0 || row.down_payment >= row.total) throw new HttpError(400, 'Down payment must be less than the total');
     if (!Number.isInteger(row.installments) || row.installments < 1 || row.installments > 120) throw new HttpError(400, 'Installments must be 1-120');
     const installment = Math.ceil((row.total - row.down_payment) / row.installments);
-    const id = insert(db, 'payment_plans', { ...row, installment_amount: installment, practice_id: req.user.practice_id, patient_id: g.id, created_by: req.user.id });
-    audit(db, req, 'payment_plan.create', 'payment_plans', id, { total: row.total });
-    res.status(201).json(planStatus(db, db.get('SELECT * FROM payment_plans WHERE id = ?', id), practiceNow(db, req.user.practice_id).slice(0, 10)));
+    const id = await insert(db, 'payment_plans', { ...row, installment_amount: installment, practice_id: req.user.practice_id, patient_id: g.id, created_by: req.user.id });
+    await audit(db, req, 'payment_plan.create', 'payment_plans', id, { total: row.total });
+    res.status(201).json(await planStatus(db, await db.get('SELECT * FROM payment_plans WHERE id = ?', id), (await practiceNow(db, req.user.practice_id)).slice(0, 10)));
   });
 
-  r.put('/payment-plans/:planId', requirePermission('billing:write'), (req, res) => {
-    const plan = findOr404(db, 'payment_plans', req.params.planId, req.user.practice_id, 'Payment plan');
+  r.put('/payment-plans/:planId', requirePermission('billing:write'), async (req, res) => {
+    const plan = await findOr404(db, 'payment_plans', req.params.planId, req.user.practice_id, 'Payment plan');
     const row = pick(req.body, ['status', 'notes']);
     requireOneOf(row.status, ['active', 'completed', 'cancelled'], 'status');
-    update(db, 'payment_plans', plan.id, req.user.practice_id, row);
-    audit(db, req, 'payment_plan.update', 'payment_plans', plan.id, row);
-    res.json(planStatus(db, db.get('SELECT * FROM payment_plans WHERE id = ?', plan.id), practiceNow(db, req.user.practice_id).slice(0, 10)));
+    await update(db, 'payment_plans', plan.id, req.user.practice_id, row);
+    await audit(db, req, 'payment_plan.update', 'payment_plans', plan.id, row);
+    res.json(await planStatus(db, await db.get('SELECT * FROM payment_plans WHERE id = ?', plan.id), (await practiceNow(db, req.user.practice_id)).slice(0, 10)));
   });
 
   return r;

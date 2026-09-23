@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { HttpError, rateLimit } from '../auth.js';
-import { insert, update, hashToken, practiceNow, normalizeDateTime, audit } from '../util.js';
+import { insert, update, hashToken, practiceNow, normalizeDateTime, audit, mapSeq } from '../util.js';
 import { MEDICAL_CONDITIONS, parseMedicalHistory, patientUpdatesFromHistory } from '../forms.js';
 import { openSlots } from './schedule.js';
 import { publish } from '../events.js';
@@ -21,59 +21,61 @@ export default function publicRoutes({ db }) {
   const r = Router();
   const limiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 30 });
   const reader = rateLimit({ windowMs: 60 * 1000, max: 120 });
-  const logPublic = (req, practiceId, action, entity, entityId, details) =>
-    audit(db, { ip: req.ip, user: { practice_id: practiceId, id: null } }, action, entity, entityId, details);
+  const logPublic = async (req, practiceId, action, entity, entityId, details) => await audit(db, { ip: req.ip, user: { practice_id: practiceId, id: null } }, action, entity, entityId, details);
 
-  const bookablePractice = (slug) => {
-    const p = db.get('SELECT * FROM practices WHERE slug = ? AND online_booking = 1', String(slug));
+  const bookablePractice = async slug => {
+    const p = await db.get('SELECT * FROM practices WHERE slug = ? AND online_booking = 1', String(slug));
     if (!p) throw new HttpError(404, 'Online booking is not available for this practice');
     return p;
   };
-  const reasonsFor = (practiceId) => {
-    const types = db.all('SELECT id, name, duration, provider_type FROM appointment_types WHERE practice_id = ? AND active = 1 AND online_bookable = 1 ORDER BY sort, name', practiceId);
+  const reasonsFor = async practiceId => {
+    const types = await db.all('SELECT id, name, duration, provider_type FROM appointment_types WHERE practice_id = ? AND active = 1 AND online_bookable = 1 ORDER BY sort, name', practiceId);
     return types.length ? types.map((t) => ({ label: t.name, duration: t.duration, type_id: t.id, provider_type: t.provider_type })) : FALLBACK_REASONS;
   };
-  const publicProviders = (practiceId) => db.all('SELECT id, name, type FROM providers WHERE practice_id = ? AND active = 1 ORDER BY type, name', practiceId);
+  const publicProviders = async practiceId => await db.all('SELECT id, name, type FROM providers WHERE practice_id = ? AND active = 1 ORDER BY type, name', practiceId);
 
   // ---- Online booking ----
-  r.get('/practices/:slug', reader, (req, res) => {
-    const p = bookablePractice(req.params.slug);
+  r.get('/practices/:slug', reader, async (req, res) => {
+    const p = await bookablePractice(req.params.slug);
     res.json({
       name: p.name, phone: p.phone, address: p.address, city: p.city, state: p.state, zip: p.zip,
-      today: practiceNow(db, p.id).slice(0, 10), providers: publicProviders(p.id), reasons: reasonsFor(p.id),
+      today: (await practiceNow(db, p.id)).slice(0, 10), providers: await publicProviders(p.id), reasons: await reasonsFor(p.id),
       open_days: Object.entries(officeHours(p)).filter(([, r]) => r.length).map(([d]) => Number(d)),
     });
   });
 
-  r.get('/practices/:slug/availability', reader, (req, res) => {
-    const p = bookablePractice(req.params.slug);
+  r.get('/practices/:slug/availability', reader, async (req, res) => {
+    const p = await bookablePractice(req.params.slug);
     const { date } = req.query;
     if (!DATE.test(date || '')) throw new HttpError(400, 'date must be YYYY-MM-DD');
-    const reasons = reasonsFor(p.id);
+    const reasons = await reasonsFor(p.id);
     const reason = reasons.find((x) => x.label === req.query.reason) || reasons[0];
     const duration = reason.duration;
-    const now = practiceNow(db, p.id);
+    const now = await practiceNow(db, p.id);
     // Office hours decide which days/times are offered; a hygiene visit is only offered with hygienists, etc.
-    const providers = publicProviders(p.id)
+    const all = await publicProviders(p.id);
+    const providers = all
       .filter((pv) => !req.query.provider_id || pv.id === Number(req.query.provider_id))
-      .filter((pv) => req.query.provider_id || !reason.provider_type || pv.type === reason.provider_type || !publicProviders(p.id).some((x) => x.type === reason.provider_type));
-    const slotsOn = (d) => providers
-      .flatMap((pv) => openSlots(db, p.id, pv.id, d, { duration, step: 30, after: now }).map((s) => ({ start: s, provider_id: pv.id, provider_name: pv.name })))
+      .filter((pv) => req.query.provider_id || !reason.provider_type || pv.type === reason.provider_type || !all.some((x) => x.type === reason.provider_type));
+    const slotsOn = async (d) => (await mapSeq(
+      providers,
+      async pv => (await openSlots(db, p.id, pv.id, d, { duration, step: 30, after: now })).map((s) => ({ start: s, provider_id: pv.id, provider_name: pv.name }))
+    )).flat()
       .sort((x, y) => x.start.localeCompare(y.start));
-    const slots = slotsOn(date);
+    const slots = await slotsOn(date);
     // Point patients at the next day with openings instead of making them click through full days.
     let nextAvailable = null;
     if (!slots.length || req.query.next === '1') {
       for (let i = 1; i <= 45 && !nextAvailable; i++) {
         const d = new Date(Date.parse(`${date}T12:00:00Z`) + i * 86400_000).toISOString().slice(0, 10);
-        if (slotsOn(d).length) nextAvailable = d;
+        if ((await slotsOn(d)).length) nextAvailable = d;
       }
     }
     res.json({ date, duration, slots, next_available: nextAvailable });
   });
 
-  r.post('/practices/:slug/booking-requests', limiter, (req, res) => {
-    const p = bookablePractice(req.params.slug);
+  r.post('/practices/:slug/booking-requests', limiter, async (req, res) => {
+    const p = await bookablePractice(req.params.slug);
     const b = req.body || {};
     if (b.website) return res.status(201).json({ ok: true }); // honeypot: silently drop bots
     const first = String(b.first_name || '').trim();
@@ -81,27 +83,27 @@ export default function publicRoutes({ db }) {
     if (!first || !last) throw new HttpError(400, 'First and last name are required');
     if (!b.phone && !b.email) throw new HttpError(400, 'A phone number or email is required so we can confirm');
     if (b.dob && !DATE.test(b.dob)) throw new HttpError(400, 'Date of birth must be YYYY-MM-DD');
-    const reasons = reasonsFor(p.id);
+    const reasons = await reasonsFor(p.id);
     const reason = reasons.find((x) => x.label === b.reason) || reasons[0];
     const start = normalizeDateTime(b.start, 'start');
-    if (start <= practiceNow(db, p.id)) throw new HttpError(400, 'Please choose a future time');
+    if (start <= (await practiceNow(db, p.id))) throw new HttpError(400, 'Please choose a future time');
     const providerId = Number(b.provider_id);
-    if (!publicProviders(p.id).some((pv) => pv.id === providerId)) throw new HttpError(400, 'Choose a provider');
-    const free = openSlots(db, p.id, providerId, start.slice(0, 10), { duration: reason.duration, step: 30 });
+    if (!(await publicProviders(p.id)).some((pv) => pv.id === providerId)) throw new HttpError(400, 'Choose a provider');
+    const free = await openSlots(db, p.id, providerId, start.slice(0, 10), { duration: reason.duration, step: 30 });
     if (!free.includes(start)) throw new HttpError(409, 'That time was just taken. Please pick another.');
-    const id = insert(db, 'booking_requests', {
+    const id = await insert(db, 'booking_requests', {
       practice_id: p.id, first_name: first.slice(0, 80), last_name: last.slice(0, 80), dob: b.dob || null,
       phone: b.phone ? String(b.phone).slice(0, 30) : null, email: b.email ? String(b.email).slice(0, 200) : null,
       reason: reason.label, duration: reason.duration, provider_id: providerId, requested_start: start,
       new_patient: b.new_patient === false ? 0 : 1, notes: b.notes ? String(b.notes).slice(0, 1000) : null, ip: req.ip,
     });
-    logPublic(req, p.id, 'booking.request', 'booking_requests', id);
+    await logPublic(req, p.id, 'booking.request', 'booking_requests', id);
     res.status(201).json({ ok: true, id });
   });
 
   // ---- Appointment confirmation links ----
-  const apptForToken = (token) => {
-    const a = db.get(
+  const apptForToken = async token => {
+    const a = await db.get(
       `SELECT a.*, p.first_name, pr.name AS practice_name, pr.phone AS practice_phone, pr.address, pr.city, pr.state, pr.zip,
          pv.name AS provider_name
        FROM appointments a JOIN patients p ON p.id = a.patient_id JOIN practices pr ON pr.id = a.practice_id
@@ -115,30 +117,30 @@ export default function publicRoutes({ db }) {
     practice: { name: a.practice_name, phone: a.practice_phone, address: a.address, city: a.city, state: a.state, zip: a.zip },
   });
 
-  r.get('/confirm/:token', reader, (req, res) => res.json(apptView(apptForToken(req.params.token))));
+  r.get('/confirm/:token', reader, async (req, res) => res.json(apptView(await apptForToken(req.params.token))));
 
-  r.post('/confirm/:token', limiter, (req, res) => {
-    const a = apptForToken(req.params.token);
+  r.post('/confirm/:token', limiter, async (req, res) => {
+    const a = await apptForToken(req.params.token);
     const action = req.body?.action;
-    if (a.start_time <= practiceNow(db, a.practice_id)) throw new HttpError(409, 'This appointment has already passed');
+    if (a.start_time <= (await practiceNow(db, a.practice_id))) throw new HttpError(409, 'This appointment has already passed');
     publish(a.practice_id, { type: 'schedule', dates: [a.start_time.slice(0, 10)], source: 'patient' });
     if (action === 'confirm') {
       if (!['scheduled', 'confirmed'].includes(a.status)) throw new HttpError(409, `This appointment is ${a.status.replace('_', ' ')}`);
-      db.run("UPDATE appointments SET status = 'confirmed', confirmed_at = COALESCE(confirmed_at, datetime('now')) WHERE id = ?", a.id);
+      await db.run("UPDATE appointments SET status = 'confirmed', confirmed_at = COALESCE(confirmed_at, datetime('now')) WHERE id = ?", a.id);
     } else if (action === 'cancel') {
       if (!['scheduled', 'confirmed'].includes(a.status)) throw new HttpError(409, `This appointment is ${a.status.replace('_', ' ')}`);
-      db.run("UPDATE appointments SET status = 'cancelled' WHERE id = ?", a.id);
-      db.run("UPDATE procedures SET appointment_id = NULL WHERE appointment_id = ? AND status = 'planned'", a.id);
+      await db.run("UPDATE appointments SET status = 'cancelled' WHERE id = ?", a.id);
+      await db.run("UPDATE procedures SET appointment_id = NULL WHERE appointment_id = ? AND status = 'planned'", a.id);
     } else {
       throw new HttpError(400, 'action must be confirm or cancel');
     }
-    logPublic(req, a.practice_id, `appointment.patient_${action}`, 'appointments', a.id);
-    res.json(apptView(apptForToken(req.params.token)));
+    await logPublic(req, a.practice_id, `appointment.patient_${action}`, 'appointments', a.id);
+    res.json(apptView(await apptForToken(req.params.token)));
   });
 
   // ---- Intake forms ----
-  const formForToken = (token) => {
-    const f = db.get(
+  const formForToken = async token => {
+    const f = await db.get(
       `SELECT fr.*, p.first_name, p.last_name, p.dob, p.phone, p.email, p.address, p.city, p.state, p.zip, p.emergency_contact,
          p.allergies, p.medications, pr.name AS practice_name
        FROM form_requests fr JOIN patients p ON p.id = fr.patient_id JOIN practices pr ON pr.id = fr.practice_id
@@ -150,8 +152,8 @@ export default function publicRoutes({ db }) {
     return f;
   };
 
-  r.get('/forms/:token', reader, (req, res) => {
-    const f = formForToken(req.params.token);
+  r.get('/forms/:token', reader, async (req, res) => {
+    const f = await formForToken(req.params.token);
     // Prefill contact details only; clinical history is always re-entered by the patient.
     res.json({
       practice_name: f.practice_name, kind: f.kind, first_name: f.first_name, last_name: f.last_name,
@@ -160,19 +162,19 @@ export default function publicRoutes({ db }) {
     });
   });
 
-  r.post('/forms/:token', limiter, (req, res) => {
-    const f = formForToken(req.params.token);
+  r.post('/forms/:token', limiter, async (req, res) => {
+    const f = await formForToken(req.params.token);
     const { answers, signatureName, signatureImage } = parseMedicalHistory(req.body);
-    const formId = db.tx(() => {
-      const id = insert(db, 'patient_forms', {
+    const formId = await db.tx(async () => {
+      const id = await insert(db, 'patient_forms', {
         practice_id: f.practice_id, patient_id: f.patient_id, request_id: f.id, kind: f.kind, data: JSON.stringify(answers),
         signature_name: signatureName, signature_image: signatureImage, ip: req.ip, user_agent: String(req.headers['user-agent'] || '').slice(0, 300),
       });
-      update(db, 'patients', f.patient_id, f.practice_id, { ...patientUpdatesFromHistory(answers), updated_at: new Date().toISOString() });
-      db.run("UPDATE form_requests SET status = 'completed', completed_at = datetime('now') WHERE id = ?", f.id);
+      await update(db, 'patients', f.patient_id, f.practice_id, { ...patientUpdatesFromHistory(answers), updated_at: new Date().toISOString() });
+      await db.run("UPDATE form_requests SET status = 'completed', completed_at = datetime('now') WHERE id = ?", f.id);
       return id;
     });
-    logPublic(req, f.practice_id, 'form.submit', 'patient_forms', formId, { patient_id: f.patient_id });
+    await logPublic(req, f.practice_id, 'form.submit', 'patient_forms', formId, { patient_id: f.patient_id });
     res.status(201).json({ ok: true });
   });
 

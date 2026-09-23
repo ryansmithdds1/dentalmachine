@@ -5,7 +5,8 @@ import { createApp } from '../src/app.js';
 
 let server;
 let base;
-const db = openDb(':memory:');
+const db = await openDb(':memory:');
+after(() => db.close());
 
 before(async () => {
   const app = createApp({ db, secret: 'test-secret' });
@@ -235,7 +236,7 @@ test('aging report buckets balances', async () => {
   const { api, provider, patient } = await setupPractice('aging');
   const proc = (await api.post(`/patients/${patient.id}/procedures`, { code: 'D0150', provider_id: provider.id, complete: true })).data;
   assert.equal(proc.status, 'completed');
-  db.run("UPDATE ledger_entries SET entry_date = date('now', '-45 days') WHERE procedure_id = ?", proc.id);
+  await db.run("UPDATE ledger_entries SET entry_date = ? WHERE procedure_id = ?", new Date(Date.now() - 45 * 86400_000).toISOString().slice(0, 10), proc.id);
   await api.post(`/patients/${patient.id}/procedures`, { code: 'D0274', provider_id: provider.id, complete: true });
   const aging = (await api.get('/reports/aging')).data;
   const row = aging.rows.find((r) => r.id === patient.id);
