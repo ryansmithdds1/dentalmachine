@@ -6,7 +6,7 @@ import { useAuth } from '../auth.jsx';
 import { money, label, practiceToday, shiftDate } from '../format.js';
 import { MembershipReport } from '../components/Memberships.jsx';
 import ReviewReport from '../components/ReviewReport.jsx';
-import { downloadCsv, dollars } from '../api.js';
+import { downloadCsv, dollars, getLocationId } from '../api.js';
 
 export default function Reports() {
   const [params, setParams] = useSearchParams();
@@ -33,20 +33,36 @@ function Operational() {
   const today = practiceToday(practice?.timezone);
   const [from, setFrom] = useState(`${today.slice(0, 7)}-01`);
   const [to, setTo] = useState(today);
-  const { data: prod } = useApi(`/reports/production?from=${from}&to=${to}`);
+  // Multi-location: reports follow the office picked in the sidebar ("All offices" is consolidated).
+  const office = getLocationId();
+  const at = office ? `&location_id=${office}` : '';
+  const { data: prod } = useApi(`/reports/production?from=${from}&to=${to}${at}`);
   const [agingGroup, setAgingGroup] = useState('patient');
   const [asOf, setAsOf] = useState('');
   const { data: aging } = useApi(`/reports/aging?group=${agingGroup}${asOf ? `&as_of=${asOf}` : ''}`);
-  const { data: byProv } = useApi(`/reports/collections-by-provider?from=${from}&to=${to}`);
-  const { data: adj } = useApi(`/reports/adjustments?from=${from}&to=${to}`);
+  const { data: byProv } = useApi(`/reports/collections-by-provider?from=${from}&to=${to}${at}`);
+  const { data: adj } = useApi(`/reports/adjustments?from=${from}&to=${to}${at}`);
   const [sheetDate, setSheetDate] = useState(today);
-  const { data: sheet } = useApi(`/reports/daysheet?date=${sheetDate}`);
+  const { data: sheet } = useApi(`/reports/daysheet?date=${sheetDate}${at}`);
   const maxDay = Math.max(1, ...(prod?.by_day || []).map((d) => Math.max(d.production, d.collections)));
   const total = (key) => (prod?.by_day || []).reduce((s, d) => s + d[key], 0);
 
   return (
     <>
       <DaySheet sheet={sheet} date={sheetDate} setDate={setSheetDate} />
+      {prod?.by_location && (
+        <div className="card" style={{ marginTop: 16 }}>
+          <div className="inline" style={{ justifyContent: 'space-between' }}>
+            <h2 style={{ margin: 0 }}>By office</h2>
+            <CsvButton name={`offices-${from}-to-${to}`} rows={prod.by_location} columns={[['Office', (r) => r.name], ['Production', (r) => dollars(r.production)], ['Patient payments', (r) => dollars(r.patient_collections)], ['Adjustments', (r) => dollars(r.adjustments)]]} />
+          </div>
+          <table className="compact-table">
+            <thead><tr><th>Office</th><th className="num">Production</th><th className="num">Patient payments</th><th className="num">Adjustments</th></tr></thead>
+            <tbody>{prod.by_location.map((l) => <tr key={l.id ?? 'none'}><td>{l.name}</td><td className="num">{money(l.production)}</td><td className="num">{money(l.patient_collections)}</td><td className="num">{money(l.adjustments)}</td></tr>)}</tbody>
+          </table>
+          <p className="muted" style={{ fontSize: 12 }}>{from} to {to}. {office ? 'Pick “All offices” in the sidebar for everything else on this page combined.' : 'Pick an office in the sidebar to see this page for one office.'} Insurance payments aren’t tied to an office.</p>
+        </div>
+      )}
 
       <div className="page-header" style={{ marginTop: 24 }}>
         <h2 style={{ margin: 0 }}>Production & collections</h2>

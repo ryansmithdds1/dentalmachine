@@ -14,6 +14,7 @@ export default function BookingPage() {
   const [loadError, setLoadError] = useState(null);
   const [reason, setReason] = useState('');
   const [providerId, setProviderId] = useState('');
+  const [locationId, setLocationId] = useState('');
   const [date, setDate] = useState('');
   const [slots, setSlots] = useState(null);
   const [nextAvailable, setNextAvailable] = useState(null);
@@ -28,8 +29,12 @@ export default function BookingPage() {
     api.get(`/public/practices/${slug}`).then((p) => {
       setPractice(p);
       setReason(p.reasons[0].label);
+      // Offices: one is picked for the patient; with several, a link can name one (?location=).
+      const office = p.locations?.length === 1 ? p.locations[0] : p.locations?.find((l) => String(l.id) === params.get('location'));
+      if (office) setLocationId(String(office.id));
+      const open = office?.open_days || p.open_days || [1, 2, 3, 4, 5];
       let first = shiftDate(p.today, 1);
-      for (let i = 0; i < 14 && !(p.open_days || [1, 2, 3, 4, 5]).includes(new Date(`${first}T12:00:00Z`).getUTCDay()); i++) first = shiftDate(first, 1);
+      for (let i = 0; i < 14 && !open.includes(new Date(`${first}T12:00:00Z`).getUTCDay()); i++) first = shiftDate(first, 1);
       setDate(first);
     }).catch(setLoadError);
   }, [slug]);
@@ -38,7 +43,8 @@ export default function BookingPage() {
     if (!practice || !date) return;
     setSlots(null);
     setSlot(null);
-    const q = new URLSearchParams({ date, reason, ...(providerId ? { provider_id: providerId } : {}) });
+    if (practice.locations?.length > 1 && !locationId) return;
+    const q = new URLSearchParams({ date, reason, ...(providerId ? { provider_id: providerId } : {}), ...(locationId ? { location_id: locationId } : {}) });
     api.get(`/public/practices/${slug}/availability?${q}`).then((r) => {
       // First load: jump straight to the first day with openings.
       if (!r.slots.length && r.next_available && !jumped.current) {
@@ -50,10 +56,10 @@ export default function BookingPage() {
       setSlots(r.slots);
       setNextAvailable(r.next_available);
     }).catch(() => setSlots([]));
-  }, [practice, slug, date, reason, providerId]);
+  }, [practice, slug, date, reason, providerId, locationId]);
 
   const { submit, busy, error } = useSubmit(async () => {
-    const r = await api.post(`/public/practices/${slug}/booking-requests`, { ...form, reason, start: slot.start, provider_id: slot.provider_id, language: lang });
+    const r = await api.post(`/public/practices/${slug}/booking-requests`, { ...form, reason, start: slot.start, provider_id: slot.provider_id, language: lang, ...(locationId ? { location_id: Number(locationId) } : {}) });
     // A deposit is paid on the secure card page, which brings the patient back here.
     if (r.checkout_url) { window.location.assign(r.checkout_url); return; }
     setDone(r.booked ? 'booked' : 'requested');
@@ -97,11 +103,24 @@ export default function BookingPage() {
   }
 
   // Only days the office is open (from Settings → Office hours).
-  const openDay = (d) => (practice.open_days || [1, 2, 3, 4, 5]).includes(new Date(`${d}T12:00:00Z`).getUTCDay());
+  const office = practice.locations?.find((l) => String(l.id) === locationId);
+  const openDay = (d) => (office?.open_days || practice.open_days || [1, 2, 3, 4, 5]).includes(new Date(`${d}T12:00:00Z`).getUTCDay());
   const days = Array.from({ length: 45 }, (_, i) => shiftDate(practice.today, i + 1)).filter(openDay).slice(0, 25);
 
   return (
     <PublicLayout title={t('Book an appointment')} practice={practice}>
+      {practice.locations?.length > 1 && (
+        <div className="card">
+          <h2>{t('Which office?')}</h2>
+          <div className="choice-grid">
+            {practice.locations.map((l) => (
+              <button key={l.id} className={`choice${locationId === String(l.id) ? ' selected' : ''}`} onClick={() => { setLocationId(String(l.id)); jumped.current = false; }}>
+                {l.name}<span className="muted">{[l.address, l.city].filter(Boolean).join(', ')}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       <div className="card">
         <h2>{t('1. What do you need?')}</h2>
         <div className="choice-grid">
@@ -133,7 +152,7 @@ export default function BookingPage() {
             </button>
           ))}
         </div>
-        {slots === null && <p className="muted">{t('Checking availability…')}</p>}
+        {slots === null && <p className="muted">{practice.locations?.length > 1 && !locationId ? t('Choose an office above to see open times.') : t('Checking availability…')}</p>}
         {slots?.length === 0 && (
           <p className="muted">
             {t('No openings this day.')}{' '}

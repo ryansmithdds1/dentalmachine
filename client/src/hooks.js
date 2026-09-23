@@ -26,6 +26,7 @@ const cache = new Map();
 export function useLookup(path) {
   const [data, setData] = useState(cache.get(path) || []);
   useEffect(() => {
+    if (!path) return undefined;
     let alive = true;
     api.get(path).then((d) => {
       cache.set(path, d);

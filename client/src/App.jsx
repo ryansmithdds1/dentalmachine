@@ -6,7 +6,7 @@ import Dashboard from './pages/Dashboard.jsx';
 import CommandPalette from './components/CommandPalette.jsx';
 import IdleLogout from './components/IdleLogout.jsx';
 import { Suspense, lazy, useEffect, useState } from 'react';
-import { api } from './api.js';
+import { api, getLocationId, setLocationId } from './api.js';
 import { useLiveEvents } from './live.js';
 import MfaSetup from './components/MfaSetup.jsx';
 
@@ -122,6 +122,24 @@ function StaffApp() {
   );
 }
 
+// Multi-location: which office this screen works in. Changing it reloads so every view follows.
+function LocationPicker({ user }) {
+  const list = user.locations || [];
+  if (!list.length) return null;
+  const saved = getLocationId();
+  const current = list.some((l) => String(l.id) === saved) ? saved : user.all_locations ? '' : String(list[0].id);
+  if (current !== saved) setLocationId(current);
+  return (
+    <label className="location-picker">
+      <span className="sr-only">Office</span>
+      <select value={current} onChange={(e) => { setLocationId(e.target.value); window.location.reload(); }} aria-label="Office">
+        {user.all_locations && <option value="">All offices</option>}
+        {list.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+      </select>
+    </label>
+  );
+}
+
 function Shell({ nav }) {
   const { user, practice, logout } = useAuth();
   return (
@@ -148,6 +166,7 @@ function Shell({ nav }) {
           ))}
         </nav>
         <div className="sidebar-footer">
+          <LocationPicker user={user} />
           <div style={{ color: '#fff' }}>{user.name}</div>
           <div>{label(user.role)}</div>
           <button className="small" onClick={logout}>Sign out</button>

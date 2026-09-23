@@ -49,7 +49,7 @@ export default function billingRoutes({ db, payments = { enabled: false } }) {
     }
     const id = await insert(db, 'ledger_entries', {
       payment_plan_id: plan?.id ?? null,
-      practice_id: req.user.practice_id, patient_id: patient.id, type: 'payment', amount: -amount,
+      practice_id: req.user.practice_id, location_id: req.location_id, patient_id: patient.id, type: 'payment', amount: -amount,
       description: row.description || `Patient payment (${row.method.replace('_', ' ')})`, method: row.method,
       reference: row.reference ?? null, entry_date: await checkPostingDate(db, req.user.practice_id, row.entry_date), created_by: req.user.id,
     });
@@ -93,7 +93,7 @@ export default function billingRoutes({ db, payments = { enabled: false } }) {
     }
     const id = await insert(db, 'ledger_entries', {
       adjustment_type: row.adjustment_type || null,
-      practice_id: req.user.practice_id, patient_id: patient.id, type: 'adjustment', amount,
+      practice_id: req.user.practice_id, location_id: req.location_id, patient_id: patient.id, type: 'adjustment', amount,
       description: row.description, entry_date: await checkPostingDate(db, req.user.practice_id, row.entry_date), created_by: req.user.id,
     });
     await audit(db, req, 'ledger.adjustment', 'ledger_entries', id, { amount });
@@ -126,7 +126,7 @@ export default function billingRoutes({ db, payments = { enabled: false } }) {
     }
     requireOneOf(method, PAYMENT_METHODS, 'method');
     const id = await insert(db, 'ledger_entries', {
-      practice_id: req.user.practice_id, patient_id: patient.id, type: 'refund', amount,
+      practice_id: req.user.practice_id, location_id: req.location_id, patient_id: patient.id, type: 'refund', amount,
       description: row.description || (original ? `Refund of ${original.entry_date} payment` : 'Refund to patient'), method, reference,
       refund_of_id: original?.id ?? null, entry_date: (await practiceNow(db, req.user.practice_id)).slice(0, 10), created_by: req.user.id,
     });

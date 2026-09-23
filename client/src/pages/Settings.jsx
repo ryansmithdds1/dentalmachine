@@ -22,7 +22,13 @@ const RESOURCES = {
     title: 'Providers', singular: 'provider', path: '/providers', columns: ['name', 'type', 'npi', 'color', 'working_hours'],
     fields: [['name', 'Name', 'text'], ['type', 'Type', 'select', ['dentist', 'hygienist', 'specialist']], ['npi', 'NPI (10 digits)', 'text'], ['license_number', 'License #', 'text'], ['dea_number', 'DEA # (controlled substances)', 'text'], ['erx_user_id', 'e-Rx user ID (DoseSpot)', 'text'], ['color', 'Schedule color', 'color'], ['daily_goal', 'Daily production goal ($, blank = none)', 'money'], ['active', 'Active', 'checkbox'], ['working_hours', 'Working hours', 'hours']],
   },
-  operatories: { title: 'Operatories', singular: 'operatory', path: '/operatories', columns: ['name', 'sort', 'is_hygiene'], fields: [['name', 'Name', 'text'], ['sort', 'Display order', 'number'], ['default_provider_id', 'Usually works here', 'provider'], ['is_hygiene', 'Hygiene chair', 'checkbox'], ['active', 'Active', 'checkbox']] },
+  locations: {
+    title: 'Offices', singular: 'office', path: '/locations', columns: ['name', 'city', 'phone', 'office_hours'],
+    intro: 'For practices with more than one office. Each chair belongs to an office; visits, production and front-desk payments are counted at their office, and staff can switch offices in the sidebar. Adding the first office puts your existing chairs and history there.',
+    fields: [['name', 'Name', 'text'], ['phone', 'Phone', 'text'], ['address', 'Address', 'text'], ['city', 'City', 'text'], ['state', 'State', 'text'], ['zip', 'ZIP', 'text'], ['npi', 'Office NPI (if billed separately)', 'text'], ['sort', 'Display order', 'number'], ['active', 'Active', 'checkbox'],
+      ['office_hours', 'Opening hours', 'hours', { note: 'Outside these hours the office is shaded on the calendar and online booking won’t offer times there.', same: 'Same as the practice’s office hours', alt: false }]],
+  },
+  operatories: { title: 'Operatories', singular: 'operatory', path: '/operatories', columns: ['name', 'location_id', 'sort', 'is_hygiene'], fields: [['name', 'Name', 'text'], ['location_id', 'Office', 'location'], ['sort', 'Display order', 'number'], ['default_provider_id', 'Usually works here', 'provider'], ['is_hygiene', 'Hygiene chair', 'checkbox'], ['active', 'Active', 'checkbox']] },
   codes: {
     title: 'Fee schedule', singular: 'procedure code', path: '/procedure-codes', columns: ['code', 'description', 'category', 'fee'],
     fields: [['code', 'Code', 'text'], ['description', 'Description', 'text'], ['category', 'Category', 'select', CATEGORIES], ['fee', 'Fee ($)', 'money'], ['area', 'Charted by (blank = automatic)', 'select', ['tooth', 'quadrant', 'arch', 'mouth']], ['time_units', 'Time units (10 min each)', 'number'], ['requires_tooth', 'Requires tooth', 'checkbox'], ['requires_surface', 'Requires surfaces', 'checkbox'], ['active', 'Active', 'checkbox']],
@@ -47,7 +53,7 @@ export default function Settings() {
   const admin = user.role === 'admin';
   const groups = [
     ['You', [['account', 'My account', true]]],
-    ['Practice', [['practice', 'Practice & security', admin], ['users', 'Users & roles', admin], ['providers', 'Providers', true], ['operatories', 'Operatories', true], ['types', 'Appointment types', true], ['import', 'Import from another system', admin]]],
+    ['Practice', [['practice', 'Practice & security', admin], ['users', 'Users & roles', admin], ['locations', 'Offices', admin], ['providers', 'Providers', true], ['operatories', 'Operatories', true], ['types', 'Appointment types', true], ['import', 'Import from another system', admin]]],
     ['Clinical', [['templates', 'Note templates', can('clinical:write')], ['forms', 'Forms & consents', can('patients:read')], ['labs', 'Labs', can('clinical:read')], ['referrals', 'Referral contacts', can('patients:read')]]],
     ['Billing', [['codes', 'Fee schedule', true], ['ppo', 'PPO fee schedules', can('billing:read')], ['carriers', 'Insurance carriers', can('billing:read')], ['memberships', 'Membership plans', can('billing:read')]]],
     ['Patients', [['messaging', 'Messages & reviews', admin], ['custom', 'Custom patient fields', admin], ['duplicates', 'Duplicate charts', admin]]],
@@ -529,7 +535,9 @@ function UserForm({ user, roles = [], perms, onDone }) {
   const [form, setForm] = useState({
     name: user?.name || '', email: user?.email || '', role: user?.role || 'front_desk', active: user ? !!user.active : true, password: '',
     custom_role_id: user?.custom_role_id || '', permissions_add: JSON.parse(user?.permissions_add || '[]'), permissions_remove: JSON.parse(user?.permissions_remove || '[]'),
+    location_ids: JSON.parse(user?.location_ids || '[]'),
   });
+  const offices = useLookup('/locations');
   const base = form.custom_role_id ? roles.find((r) => r.id === Number(form.custom_role_id))?.permissions || [] : perms?.roles[form.role] || [];
   // Each permission: from the role, added just for this person, or taken away from them.
   const state = (p) => (form.permissions_add.includes(p) ? 'add' : form.permissions_remove.includes(p) ? 'remove' : 'role');
@@ -560,6 +568,16 @@ function UserForm({ user, roles = [], perms, onDone }) {
           </label>
         )}
       </div>
+      {offices.length > 0 && (
+        <div style={{ marginTop: 10 }}>
+          <div className="muted" style={{ fontSize: 12 }}>Works at (none ticked = every office)</div>
+          <div className="inline" style={{ flexWrap: 'wrap', gap: 12 }}>
+            {offices.map((l) => (
+              <label key={l.id} className="checkbox"><input type="checkbox" checked={form.location_ids.includes(l.id)} onChange={(e) => setForm({ ...form, location_ids: e.target.checked ? [...form.location_ids, l.id] : form.location_ids.filter((x) => x !== l.id) })} /> {l.name}</label>
+            ))}
+          </div>
+        </div>
+      )}
       {form.role !== 'admin' && perms && (
         <details style={{ marginTop: 10 }}>
           <summary>Permissions for this person</summary>
@@ -588,6 +606,7 @@ function UserForm({ user, roles = [], perms, onDone }) {
 
 function ResourceTable({ spec, canWrite }) {
   const { data: rows, reload } = useApi(spec.path);
+  const locations = useLookup(spec.columns.includes('location_id') ? '/locations' : null);
   const [editing, setEditing] = useState(null);
   const done = () => {
     setEditing(null);
@@ -602,6 +621,8 @@ function ResourceTable({ spec, canWrite }) {
     if (col === 'duration') return `${row.duration} min`;
     if (col === 'procedure_codes') return (row.procedure_codes ? JSON.parse(row.procedure_codes) : []).join(', ') || '—';
     if (col === 'online_bookable') return row.online_bookable ? 'Online' : '—';
+    if (col === 'office_hours') return row.office_hours ? summarizeHours(JSON.parse(row.office_hours)) : 'Practice hours';
+    if (col === 'location_id') return locations.find((l) => l.id === row.location_id)?.name || '—';
     if (col === 'working_hours') return row.working_hours ? (() => { const h = JSON.parse(row.working_hours); return `${summarizeHours(h)}${h.alt ? ' · alternating weeks' : ''}`; })() : 'Office hours';
     return row[col] ?? '—';
   };
@@ -611,6 +632,7 @@ function ResourceTable({ spec, canWrite }) {
         <h2 style={{ margin: 0 }}>{spec.title}</h2>
         {canWrite && <button className="primary" onClick={() => setEditing({})}>+ Add</button>}
       </div>
+      {spec.intro && <p className="muted" style={{ fontSize: 13, margin: '0 16px 12px' }}>{spec.intro}</p>}
       <div className="table-wrap">
         <table>
           <thead><tr>{spec.columns.map((c) => <th key={c} className={c === 'fee' ? 'num' : ''}>{label(c)}</th>)}<th>Status</th><th /></tr></thead>
@@ -636,6 +658,7 @@ function ResourceTable({ spec, canWrite }) {
 
 function ResourceForm({ spec, row, onDone }) {
   const providerList = useLookup('/providers?active=true');
+  const locationList = useLookup(spec.fields.some((f) => f[2] === 'location') ? '/locations' : null);
   const { data: practice } = useApi(spec.fields.some((f) => f[2] === 'hours') ? '/practice' : null);
   const practiceHours = practice?.office_hours ? JSON.parse(practice.office_hours) : DEFAULT_HOURS;
   const [form, setForm] = useState(() => Object.fromEntries(spec.fields.map(([name, , type]) => {
@@ -667,12 +690,13 @@ function ResourceForm({ spec, row, onDone }) {
             <div key={name} className="full">
               <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>{text}</div>
               <label className="checkbox" style={{ color: 'var(--text)', marginBottom: 8 }}>
-                <input type="checkbox" checked={!form[name]} onChange={(e) => set(e.target.checked ? null : practiceHours)} /> Same as office hours
+                <input type="checkbox" checked={!form[name]} onChange={(e) => set(e.target.checked ? null : practiceHours)} /> {options?.same || 'Same as office hours'}
               </label>
-              {form[name] && <OfficeHours value={form[name]} onChange={set} note="Outside these hours the provider's column is shaded, online booking won't offer them, and staff are asked before booking." />}
-              {form[name] && <AltWeeks value={form[name]} onChange={set} />}
+              {form[name] && <OfficeHours value={form[name]} onChange={set} note={options?.note || "Outside these hours the provider's column is shaded, online booking won't offer them, and staff are asked before booking."} />}
+              {form[name] && options?.alt !== false && <AltWeeks value={form[name]} onChange={set} />}
             </div>
           );
+          if (type === 'location') return locationList.length ? <label key={name}>{text}<select value={form[name] || ''} onChange={(e) => set(e.target.value ? Number(e.target.value) : null)}><option value="">—</option>{locationList.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</select></label> : null;
           if (type === 'provider') return <label key={name}>{text}<select value={form[name] || ''} onChange={(e) => set(e.target.value ? Number(e.target.value) : null)}><option value="">—</option>{providerList.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>;
           if (type === 'select') return <label key={name}>{text}<select value={form[name]} onChange={(e) => set(e.target.value)}><option value="">—</option>{options.map((o) => <option key={o} value={o}>{label(o)}</option>)}</select></label>;
           return <label key={name} className={type === 'codes' ? 'full' : ''}>{text}<input type={type === 'money' || type === 'number' ? 'number' : type === 'codes' ? 'text' : type} step={type === 'money' ? '0.01' : undefined} value={form[name]} onChange={(e) => set(e.target.value)} /></label>;

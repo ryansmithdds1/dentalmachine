@@ -775,6 +775,23 @@ CREATE TABLE IF NOT EXISTS campaign_recipients (
   UNIQUE (campaign_id, channel, to_address)
 );
 -- After-visit "how did we do?" answers (review routing): happy patients go on to the public review page.
+-- Offices of a multi-location practice. A practice with none works as one office.
+CREATE TABLE IF NOT EXISTS locations (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  name TEXT NOT NULL,
+  address TEXT,
+  city TEXT,
+  state TEXT,
+  zip TEXT,
+  phone TEXT,
+  npi TEXT,
+  office_hours TEXT,
+  active INTEGER NOT NULL DEFAULT 1,
+  sort INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS review_feedback (
   id INTEGER PRIMARY KEY,
   practice_id INTEGER NOT NULL REFERENCES practices(id),
@@ -1217,6 +1234,11 @@ const COLUMNS = [
   ['providers', 'daily_goal', 'INTEGER'],
   ['booking_requests', 'language', 'TEXT'],
   ['appointment_types', 'name_es', 'TEXT'],
+  ['operatories', 'location_id', 'INTEGER REFERENCES locations(id)'],
+  ['appointments', 'location_id', 'INTEGER REFERENCES locations(id)'],
+  ['ledger_entries', 'location_id', 'INTEGER REFERENCES locations(id)'],
+  ['booking_requests', 'location_id', 'INTEGER REFERENCES locations(id)'],
+  ['users', 'location_ids', 'TEXT'],
   ['users', 'custom_role_id', 'INTEGER REFERENCES custom_roles(id)'],
   ['users', 'permissions_add', 'TEXT'],
   ['users', 'permissions_remove', 'TEXT'],

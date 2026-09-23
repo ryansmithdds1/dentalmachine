@@ -14,7 +14,7 @@ const CATEGORIES = ['diagnostic', 'preventive', 'restorative', 'endodontics', 'p
 const requireAdmin = (req, _res, next) => (req.user.role === 'admin' ? next() : next(new HttpError(403, 'Administrator access required')));
 
 // Simple practice-scoped resources share one CRUD shape.
-function resource(r, db, { path, table, fields, required, validate = () => {}, order = 'name' }) {
+function resource(r, db, { path, table, fields, required, validate = () => {}, order = 'name', afterCreate = null }) {
   r.get(`/${path}`, async (req, res) => {
     const activeOnly = req.query.active === 'true' ? ' AND active = 1' : '';
     res.json(await db.all(`SELECT * FROM ${table} WHERE practice_id = ?${activeOnly} ORDER BY ${order}`, req.user.practice_id));
@@ -24,6 +24,7 @@ function resource(r, db, { path, table, fields, required, validate = () => {}, o
     requireFields(row, required);
     await validate(row, req);
     const id = await insert(db, table, { ...row, practice_id: req.user.practice_id });
+    if (afterCreate) await afterCreate(id, req);
     await audit(db, req, `${table}.create`, table, id);
     res.status(201).json(await db.get(`SELECT * FROM ${table} WHERE id = ?`, id));
   });
@@ -130,7 +131,7 @@ export default function settingsRoutes({ db, secret, config = {} }) {
   });
 
   // ---- Users ----
-  const USER_COLS = 'id, practice_id, email, name, role, active, mfa_enabled, last_login_at, created_at, custom_role_id, permissions_add, permissions_remove';
+  const USER_COLS = 'id, practice_id, email, name, role, active, mfa_enabled, last_login_at, created_at, custom_role_id, permissions_add, permissions_remove, location_ids';
   // Custom role and per-person permission overrides, checked against the catalog and this practice.
   const permFields = async (req, row) => {
     const out = {};
@@ -141,6 +142,12 @@ export default function settingsRoutes({ db, secret, config = {} }) {
       const bad = list.find((p) => !(p in PERMISSION_CATALOG));
       if (bad) throw new HttpError(400, `Unknown permission ${bad}`);
       out[k] = list.length ? JSON.stringify([...new Set(list)]) : null;
+    }
+    // Offices this person works at (none = all of them).
+    if (req.body.location_ids !== undefined) {
+      const ids = [...new Set((Array.isArray(req.body.location_ids) ? req.body.location_ids : []).map(Number))];
+      for (const id of ids) await findOr404(db, 'locations', id, req.user.practice_id, 'Location');
+      out.location_ids = ids.length ? JSON.stringify(ids) : null;
     }
     return Object.assign(row, out);
   };
@@ -175,7 +182,7 @@ export default function settingsRoutes({ db, secret, config = {} }) {
     // Lost phone: an admin can clear a colleague's 2FA so they can enrol again.
     if (req.body.reset_mfa) Object.assign(row, { mfa_enabled: 0, mfa_secret: null, mfa_last_step: null });
     await permFields(req, row);
-    const permsChanged = ['custom_role_id', 'permissions_add', 'permissions_remove'].some((k) => k in row && row[k] !== existing[k]);
+    const permsChanged = ['custom_role_id', 'permissions_add', 'permissions_remove', 'location_ids'].some((k) => k in row && row[k] !== existing[k]);
     await update(db, 'users', existing.id, req.user.practice_id, row);
     // A new password, 2FA reset, role change or deactivation ends that person's open sessions.
     if (permsChanged || row.password_hash || req.body.reset_mfa || row.active === 0 || row.active === false || (row.role && row.role !== existing.role)) {
@@ -232,10 +239,32 @@ export default function settingsRoutes({ db, secret, config = {} }) {
     },
   });
 
+  // Offices of a multi-location practice. Adding the first one puts the existing chairs, visits and
+  // ledger there, since until now that was the only office.
+  resource(r, db, {
+    path: 'locations', table: 'locations', required: ['name'], order: 'sort, id',
+    fields: ['name', 'address', 'city', 'state', 'zip', 'phone', 'npi', 'office_hours', 'active', 'sort'],
+    validate: (row) => {
+      if (row.office_hours != null && row.office_hours !== '') row.office_hours = JSON.stringify(validateHours(typeof row.office_hours === 'string' ? JSON.parse(row.office_hours) : row.office_hours));
+      else if ('office_hours' in row) row.office_hours = null;
+      if (row.npi && !/^\d{10}$/.test(row.npi)) throw new HttpError(400, 'NPI must be 10 digits');
+      if (row.sort != null) row.sort = Number(row.sort) || 0;
+    },
+    afterCreate: async (id, req) => {
+      const pid = req.user.practice_id;
+      if ((await db.get('SELECT COUNT(*) AS n FROM locations WHERE practice_id = ?', pid)).n !== 1) return;
+      await db.run('UPDATE operatories SET location_id = ? WHERE practice_id = ? AND location_id IS NULL', id, pid);
+      await db.run('UPDATE appointments SET location_id = ? WHERE practice_id = ? AND location_id IS NULL', id, pid);
+      await db.run('UPDATE ledger_entries SET location_id = ? WHERE practice_id = ? AND location_id IS NULL', id, pid);
+    },
+  });
+
   // Chairs: display order, whether it's a hygiene chair, and who usually works in it (new visits dragged there default to them).
   resource(r, db, {
-    path: 'operatories', table: 'operatories', required: ['name'], fields: ['name', 'active', 'sort', 'is_hygiene', 'default_provider_id'], order: 'sort, id',
+    path: 'operatories', table: 'operatories', required: ['name'], fields: ['name', 'active', 'sort', 'is_hygiene', 'default_provider_id', 'location_id'], order: 'sort, id',
     validate: async (row, req) => {
+      if (row.location_id) await findOr404(db, 'locations', row.location_id, req.user.practice_id, 'Location');
+      else if ('location_id' in row) row.location_id = null;
       if (row.default_provider_id) await findOr404(db, 'providers', row.default_provider_id, req.user.practice_id, 'Provider');
       else if ('default_provider_id' in row) row.default_provider_id = null;
       if (row.sort != null) row.sort = Number(row.sort) || 0;

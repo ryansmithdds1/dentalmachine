@@ -3,6 +3,8 @@ export default {
   'Your dental office': 'Su consultorio dental',
   'Secured by Dental Machine': 'Protegido por Dental Machine',
   'Loading…': 'Cargando…',
+  'Which office?': '¿En qué oficina?',
+  'Choose an office above to see open times.': 'Elija una oficina arriba para ver los horarios disponibles.',
 
   // Shared
   'Thank you!': '¡Gracias!',

@@ -49,7 +49,7 @@ export async function finishBooking(db, b, { providerId, start, duration, patien
     const row = {
       patient_id: pat, provider_id: providerId, operatory_id: operatoryId ? Number(operatoryId) : null,
       start_time: start, end_time: `${start.slice(0, 10)} ${String(Math.floor(endMin / 60)).padStart(2, '0')}:${String(endMin % 60).padStart(2, '0')}`,
-      status: 'scheduled', reason: b.reason, notes: b.notes,
+      status: 'scheduled', reason: b.reason, notes: b.notes, location_id: b.location_id ?? null,
       appointment_type_id: (await db.get('SELECT id FROM appointment_types WHERE practice_id = ? AND name = ?', pid, b.reason))?.id ?? null,
     };
     await validateAppt(db, pid, row);

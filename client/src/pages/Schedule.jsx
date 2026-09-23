@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { api } from '../api.js';
+import { api, getLocationId } from '../api.js';
 import { useLookup } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
 import { useLiveEvents } from '../live.js';
@@ -72,7 +72,10 @@ export default function Schedule() {
     setParams(next, { replace: true });
   };
 
-  const operatories = useLookup('/operatories?active=true');
+  // Multi-location: the office picked in the sidebar decides which chairs and visits show.
+  const office = getLocationId();
+  const allChairs = useLookup('/operatories?active=true');
+  const operatories = useMemo(() => (office ? allChairs.filter((o) => String(o.location_id) === office) : allChairs), [allChairs, office]);
   const providers = useLookup('/providers?active=true');
   const from = view === 'week' ? weekStart(date) : date;
   const to = view === 'week' ? shiftDate(from, 6) : date;
@@ -86,7 +89,7 @@ export default function Schedule() {
   const [loading, setLoading] = useState(false);
 
   const fetchRange = useCallback(async (f, t) => {
-    const d = await api.get(`/schedule?from=${f}&to=${t}`);
+    const d = await api.get(`/schedule?from=${f}&to=${t}${office ? `&location_id=${office}` : ''}`);
     cache.current.set(`${f}|${t}`, d);
     return d;
   }, []);

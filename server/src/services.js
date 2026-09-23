@@ -40,12 +40,15 @@ export async function primaryPolicy(db, practiceId, patientId) {
 // Extractions (D7111-D7250): the tooth is charted missing once the extraction is done.
 export const isExtraction = (code) => /^D7(1[1-4]\d|2[0-5]\d)$/.test(String(code || ''));
 
-export async function completeProcedure(db, user, procedure, { providerId, appointmentId } = {}) {
+export async function completeProcedure(db, user, procedure, { providerId, appointmentId, locationId = null } = {}) {
   if (procedure.status === 'completed') throw new HttpError(409, 'Procedure already completed');
   if (procedure.status === 'cancelled') throw new HttpError(409, 'Cancelled procedures cannot be completed');
   const provider = providerId ?? procedure.provider_id;
   if (!provider) throw new HttpError(400, 'A provider is required to complete a procedure');
   const today = (await practiceNow(db, procedure.practice_id)).slice(0, 10);
+  // Production counts at the office of the visit, else where the procedure was entered.
+  const visit = appointmentId ?? procedure.appointment_id;
+  const location = (visit && (await db.get('SELECT location_id FROM appointments WHERE id = ?', visit))?.location_id) || locationId;
 
   await db.tx(async () => {
     await db.run(
@@ -61,6 +64,7 @@ export async function completeProcedure(db, user, procedure, { providerId, appoi
       description: `${procedure.code} ${procedure.description}${procedure.tooth ? ` #${procedure.tooth}` : ''}${procedure.surfaces ? ` ${procedure.surfaces}` : ''}${procedure.area ? ` ${procedure.area}` : ''}`,
       procedure_id: procedure.id,
       provider_id: provider,
+      location_id: location ?? null,
       entry_date: today,
       created_by: user.id,
     });
@@ -85,7 +89,7 @@ export async function completeProcedure(db, user, procedure, { providerId, appoi
         await insert(db, 'ledger_entries', {
           practice_id: procedure.practice_id, patient_id: procedure.patient_id, type: 'adjustment', adjustment_type: 'Treatment plan discount', amount: -off,
           description: `${plan.discount_pct}% treatment plan discount — ${procedure.code}${procedure.tooth ? ` #${procedure.tooth}` : ''}`,
-          procedure_id: procedure.id, provider_id: provider, entry_date: today, created_by: user.id,
+          procedure_id: procedure.id, provider_id: provider, location_id: location ?? null, entry_date: today, created_by: user.id,
         });
       }
     }
@@ -274,7 +278,7 @@ export async function reverseEntry(db, entry, { userId, reason, date }) {
   return insert(db, 'ledger_entries', {
     practice_id: entry.practice_id, patient_id: entry.patient_id, type: entry.type, amount: -entry.amount,
     description: `Void: ${entry.description}`.slice(0, 300), method: entry.method, reference: entry.reference,
-    procedure_id: entry.procedure_id, claim_id: entry.claim_id, provider_id: entry.provider_id, payment_plan_id: entry.payment_plan_id,
+    procedure_id: entry.procedure_id, claim_id: entry.claim_id, provider_id: entry.provider_id, payment_plan_id: entry.payment_plan_id, location_id: entry.location_id,
     adjustment_type: entry.adjustment_type ?? null, entry_date: date, created_by: userId ?? null, reverses_id: entry.id,
   });
 }

@@ -16,6 +16,25 @@ export const setToken = (t) => {
   }
 };
 
+// Multi-location practices: the office this screen works in (kept per computer), sent with every request.
+const LOCATION_KEY = 'dm_location';
+export const getLocationId = () => {
+  try {
+    return localStorage.getItem(LOCATION_KEY) || '';
+  } catch {
+    return '';
+  }
+};
+export const setLocationId = (id) => {
+  try {
+    if (id) localStorage.setItem(LOCATION_KEY, String(id));
+    else localStorage.removeItem(LOCATION_KEY);
+  } catch {
+    /* storage unavailable */
+  }
+};
+const locationHeader = () => (getLocationId() ? { 'X-Location-Id': getLocationId() } : {});
+
 export class ApiError extends Error {
   constructor(status, message, details) {
     super(message);
@@ -28,7 +47,7 @@ async function request(method, path, body) {
   const token = getToken();
   const res = await fetch(`/api${path}`, {
     method,
-    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...locationHeader() },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   const data = await res.json().catch(() => ({}));
@@ -51,7 +70,7 @@ export const api = {
 // Downloads a file from the API (with the session token) and saves it.
 export async function download(path, fallbackName = 'download') {
   const token = getToken();
-  const res = await fetch(`/api${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  const res = await fetch(`/api${path}`, { headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...locationHeader() } });
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
     throw new ApiError(res.status, data.error || res.statusText, data.details);

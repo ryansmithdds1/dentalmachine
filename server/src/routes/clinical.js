@@ -135,7 +135,7 @@ export default function clinicalRoutes({ db }) {
     const row = await buildProcedure(req, patient.id, req.body || {});
     const id = await db.tx(async () => {
       const newId = await insert(db, 'procedures', row);
-      if (req.body?.complete) await completeProcedure(db, req.user, await db.get('SELECT * FROM procedures WHERE id = ?', newId));
+      if (req.body?.complete) await completeProcedure(db, req.user, await db.get('SELECT * FROM procedures WHERE id = ?', newId), { locationId: req.location_id });
       return newId;
     });
     await audit(db, req, 'procedure.create', 'procedures', id, { code: row.code, complete: !!req.body?.complete });
@@ -166,7 +166,7 @@ export default function clinicalRoutes({ db }) {
   r.post('/procedures/:pid/complete', requirePermission('clinical:write'), async (req, res) => {
     const existing = await findOr404(db, 'procedures', req.params.pid, req.user.practice_id, 'Procedure');
     const providerId = req.body?.provider_id ? (await findOr404(db, 'providers', req.body.provider_id, req.user.practice_id, 'Provider')).id : undefined;
-    await completeProcedure(db, req.user, existing, { providerId, appointmentId: req.body?.appointment_id });
+    await completeProcedure(db, req.user, existing, { providerId, appointmentId: req.body?.appointment_id, locationId: req.location_id });
     await audit(db, req, 'procedure.complete', 'procedures', existing.id);
     res.json(await db.get('SELECT * FROM procedures WHERE id = ?', existing.id));
   });

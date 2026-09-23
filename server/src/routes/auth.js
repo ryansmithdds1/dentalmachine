@@ -17,11 +17,15 @@ async function session(user, secret, db) {
   const tv = (await db.get('SELECT token_version FROM users WHERE id = ?', id))?.token_version ?? 0;
   const mfaEnabled = !!(await db.get('SELECT mfa_enabled FROM users WHERE id = ?', id))?.mfa_enabled;
   const requireMfa = !!(await db.get('SELECT require_mfa FROM practices WHERE id = ?', practice_id))?.require_mfa;
+  // Offices this person can switch between (multi-location practices only).
+  const allowed = JSON.parse((await db.get('SELECT location_ids FROM users WHERE id = ?', id))?.location_ids || 'null');
+  const locations = (await db.all('SELECT id, name FROM locations WHERE practice_id = ? AND active = 1 ORDER BY sort, id', practice_id))
+    .filter((l) => !allowed || allowed.includes(l.id));
   return {
     token: signToken({ sub: id, pid: practice_id, role, aud: 'staff', tv }, secret),
     user: {
       id, practice_id, email, name, role, permissions: effectivePermissions(await db.get(`${USER_PERMISSION_SQL} WHERE u.id = ?`, id)),
-      mfa_enabled: mfaEnabled, mfa_setup_required: requireMfa && !mfaEnabled,
+      mfa_enabled: mfaEnabled, mfa_setup_required: requireMfa && !mfaEnabled, locations, all_locations: !allowed,
     },
   };
 }

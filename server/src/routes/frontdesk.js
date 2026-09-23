@@ -68,7 +68,7 @@ export default function frontDeskRoutes({ db, messenger }) {
     if (req.body?.complete_procedures) {
       if (!can(req.user, 'clinical:write')) throw new HttpError(403, 'Completing procedures needs clinical access');
       for (const p of await db.all("SELECT * FROM procedures WHERE appointment_id = ? AND status = 'planned' ORDER BY id", a.id)) {
-        await completeProcedure(db, req.user, p, { providerId: p.provider_id || a.provider_id, appointmentId: a.id });
+        await completeProcedure(db, req.user, p, { providerId: p.provider_id || a.provider_id, appointmentId: a.id, locationId: req.location_id });
         completed++;
       }
     }
