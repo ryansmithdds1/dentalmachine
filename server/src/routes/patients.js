@@ -1,13 +1,14 @@
 import { Router } from 'express';
 import { requirePermission, HttpError } from '../auth.js';
 import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, practiceNow } from '../util.js';
+import { schemaInfo } from '../db.js';
 import { patientBalance, primaryPolicy } from '../services.js';
 
 const FIELDS = [
   'first_name', 'last_name', 'preferred_name', 'dob', 'gender', 'email', 'phone', 'address', 'city', 'state', 'zip',
   'emergency_contact', 'medical_alerts', 'allergies', 'medications', 'notes', 'primary_provider_id', 'status', 'sms_opt_in', 'email_opt_in', 'guarantor_id', 'referral_source', 'office_alert',
   'asa_class', 'premed_required', 'medical_conditions',
-  'phone_home', 'phone_work', 'preferred_contact', 'language', 'primary_hygienist_id', 'photo',
+  'phone_home', 'phone_work', 'preferred_contact', 'language', 'primary_hygienist_id', 'photo', 'custom',
 ];
 
 export const MEDICAL_CONDITIONS = [
@@ -38,8 +39,154 @@ function validate(row) {
   }
 }
 
+// Custom patient fields: the practice defines them (text, number, date, yes/no or a pick list);
+// values are kept per patient as JSON and checked against the definitions.
+export const CUSTOM_TYPES = ['text', 'number', 'date', 'checkbox', 'select'];
+export async function customFieldDefs(db, practiceId) {
+  const p = await db.get('SELECT custom_fields FROM practices WHERE id = ?', practiceId);
+  try {
+    return JSON.parse(p?.custom_fields || '[]');
+  } catch {
+    return [];
+  }
+}
+async function validateCustom(db, practiceId, row, current) {
+  if (row.custom == null) return;
+  const defs = await customFieldDefs(db, practiceId);
+  const incoming = typeof row.custom === 'string' ? JSON.parse(row.custom) : row.custom;
+  if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming)) throw new HttpError(400, 'custom must be an object');
+  const out = { ...(current ? JSON.parse(current) : {}) };
+  for (const [key, raw] of Object.entries(incoming)) {
+    const def = defs.find((d) => d.key === key);
+    if (!def) {
+      // A field the practice has since removed: its old value can ride along unchanged.
+      if (key in out && JSON.stringify(out[key]) === JSON.stringify(raw)) continue;
+      throw new HttpError(400, `Unknown custom field ${key}`);
+    }
+    if (raw == null || raw === '') { delete out[key]; continue; }
+    let v = raw;
+    if (def.type === 'number') {
+      v = Number(raw);
+      if (!Number.isFinite(v)) throw new HttpError(400, `${def.label} must be a number`);
+    } else if (def.type === 'date') {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(raw))) throw new HttpError(400, `${def.label} must be a date`);
+    } else if (def.type === 'checkbox') v = !!raw;
+    else if (def.type === 'select') {
+      if (!(def.options || []).includes(raw)) throw new HttpError(400, `${def.label} must be one of: ${(def.options || []).join(', ')}`);
+    } else v = String(raw).slice(0, 500);
+    out[key] = v;
+  }
+  row.custom = JSON.stringify(out);
+}
+
+const digits = (s) => String(s || '').replace(/\D/g, '').slice(-10);
+
+// Charts that look like the same person: same name and birthday, or the same phone or email.
+export async function findDuplicates(db, practiceId, p, excludeId = 0) {
+  const rows = await db.all(
+    `SELECT id, first_name, last_name, dob, phone, email, status FROM patients
+     WHERE practice_id = ? AND id != ? AND status != 'archived'
+       AND ((lower(last_name) = lower(?) AND (lower(first_name) = lower(?) OR (CAST(? AS TEXT) IS NOT NULL AND dob = ?)))
+         OR (CAST(? AS TEXT) IS NOT NULL AND lower(email) = lower(?)) OR (CAST(? AS TEXT) IS NOT NULL AND phone LIKE ?))
+     LIMIT 200`,
+    practiceId, excludeId, p.last_name || '', p.first_name || '', p.dob || null, p.dob || null, p.email || null, p.email || null,
+    digits(p.phone).length === 10 ? 'x' : null, `%${digits(p.phone).slice(-4)}`,
+  );
+  const phone = digits(p.phone);
+  return rows.filter((r) => {
+    const sameName = r.last_name?.toLowerCase() === String(p.last_name || '').toLowerCase()
+      && (r.first_name?.toLowerCase() === String(p.first_name || '').toLowerCase() || (p.dob && r.dob === p.dob));
+    const samePhone = phone.length === 10 && digits(r.phone) === phone
+      // Families share a phone: a shared number only counts with the same first name or birthday.
+      && (r.first_name?.toLowerCase() === String(p.first_name || '').toLowerCase() || (p.dob && r.dob === p.dob));
+    const sameEmail = p.email && r.email?.toLowerCase() === String(p.email).toLowerCase() && r.first_name?.toLowerCase() === String(p.first_name || '').toLowerCase();
+    return sameName || samePhone || sameEmail;
+  }).slice(0, 5);
+}
+
 export default function patientRoutes({ db }) {
   const r = Router();
+
+  r.get('/custom-fields', requirePermission('patients:read'), async (req, res) => res.json(await customFieldDefs(db, req.user.practice_id)));
+  r.put('/custom-fields', requirePermission('patients:write'), async (req, res) => {
+    if (req.user.role !== 'admin') throw new HttpError(403, 'Only administrators can change custom fields');
+    const list = req.body?.fields;
+    if (!Array.isArray(list) || list.length > 40) throw new HttpError(400, 'fields must be a list of up to 40');
+    const seen = new Set();
+    const clean = list.map((f) => {
+      const label = String(f?.label || '').trim().slice(0, 60);
+      if (!label) throw new HttpError(400, 'Each field needs a label');
+      const type = CUSTOM_TYPES.includes(f.type) ? f.type : 'text';
+      // Keys stay the same when a label is renamed, so values aren't lost.
+      const key = f.key || label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 30) || `field_${seen.size + 1}`;
+      if (seen.has(key)) throw new HttpError(400, `Two fields are named ${label}`);
+      seen.add(key);
+      const options = type === 'select' ? [...new Set((Array.isArray(f.options) ? f.options : String(f.options || '').split(',')).map((o) => String(o).trim()).filter(Boolean))] : undefined;
+      if (type === 'select' && !options.length) throw new HttpError(400, `${label}: add the choices`);
+      return { key, label, type, ...(options ? { options } : {}) };
+    });
+    await db.run('UPDATE practices SET custom_fields = ? WHERE id = ?', JSON.stringify(clean), req.user.practice_id);
+    await audit(db, req, 'custom_fields.update', 'practices', req.user.practice_id);
+    res.json(clean);
+  });
+
+  r.get('/patients/duplicates', requirePermission('patients:read'), async (req, res) => {
+    res.json(await findDuplicates(db, req.user.practice_id, req.query, Number(req.query.exclude) || 0));
+  });
+
+  // Likely duplicate charts across the practice (same name and birthday), e.g. after an import.
+  r.get('/patients/duplicate-groups', requirePermission('patients:read'), async (req, res) => {
+    const rows = await db.all(
+      `SELECT id, first_name, last_name, dob, phone, email, created_at FROM patients
+       WHERE practice_id = ? AND status != 'archived' AND dob IS NOT NULL ORDER BY lower(last_name), lower(first_name), dob, id`,
+      req.user.practice_id,
+    );
+    const groups = new Map();
+    for (const r0 of rows) {
+      const key = `${r0.last_name.toLowerCase()}|${r0.first_name.toLowerCase()}|${r0.dob}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(r0);
+    }
+    res.json([...groups.values()].filter((g) => g.length > 1).slice(0, 200));
+  });
+
+  // Merge a duplicate chart into this one: everything that belonged to the duplicate (visits, charting,
+  // ledger, claims, documents, messages…) moves here, blank details are filled in, and the duplicate is removed.
+  r.post('/patients/:id/merge', requirePermission('patients:write'), async (req, res) => {
+    if (req.user.role !== 'admin') throw new HttpError(403, 'Only administrators can merge patients');
+    const keep = await findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient');
+    const from = await findOr404(db, 'patients', req.body?.from_id, req.user.practice_id, 'Patient');
+    if (keep.id === from.id) throw new HttpError(400, 'Choose a different chart to merge');
+    const moved = {};
+    await db.tx(async () => {
+      // Recalls are one per type: keep the sooner due date.
+      for (const rc of await db.all('SELECT * FROM recalls WHERE patient_id = ?', from.id)) {
+        const mine = await db.get('SELECT * FROM recalls WHERE patient_id = ? AND type = ?', keep.id, rc.type);
+        if (mine) {
+          if (rc.due_date < mine.due_date) await db.run('UPDATE recalls SET due_date = ? WHERE id = ?', rc.due_date, mine.id);
+          await db.run('DELETE FROM recall_contacts WHERE recall_id = ?', rc.id);
+          await db.run('DELETE FROM recalls WHERE id = ?', rc.id);
+        }
+      }
+      for (const [table, cols] of schemaInfo()) {
+        for (const c of cols) {
+          if (c.ref !== 'patients') continue;
+          const r0 = await db.run(`UPDATE ${table} SET ${c.name} = ? WHERE ${c.name} = ?`, keep.id, from.id);
+          if (r0.changes) moved[`${table}.${c.name}`] = r0.changes;
+        }
+      }
+      // The duplicate may have been this patient's guarantor.
+      await db.run('UPDATE patients SET guarantor_id = NULL WHERE id = ? AND guarantor_id = ?', keep.id, keep.id);
+      const fill = {};
+      for (const k of FIELDS) if ((keep[k] == null || keep[k] === '') && from[k] != null && from[k] !== '' && k !== 'status') fill[k] = from[k];
+      if (Object.keys(fill).length) await update(db, 'patients', keep.id, req.user.practice_id, fill);
+      await db.run('DELETE FROM conversation_state WHERE practice_id = ? AND thread = ? AND EXISTS (SELECT 1 FROM conversation_state x WHERE x.practice_id = ? AND x.thread = ?)', req.user.practice_id, `p${from.id}`, req.user.practice_id, `p${keep.id}`);
+      await db.run('UPDATE conversation_state SET thread = ? WHERE practice_id = ? AND thread = ?', `p${keep.id}`, req.user.practice_id, `p${from.id}`);
+      await db.run('DELETE FROM patients WHERE id = ?', from.id);
+    });
+    await audit(db, req, 'patient.merge', 'patients', keep.id, { merged: from.id, name: `${from.first_name} ${from.last_name}`, moved });
+    res.json({ ok: true, moved });
+  });
 
   r.get('/patients', requirePermission('patients:read'), async (req, res) => {
     const q = String(req.query.q || '').trim();
@@ -76,6 +223,7 @@ export default function patientRoutes({ db }) {
     const row = pick(req.body, FIELDS);
     requireFields(row, ['first_name', 'last_name']);
     validate(row);
+    await validateCustom(db, req.user.practice_id, row);
     if (row.primary_provider_id) await findOr404(db, 'providers', row.primary_provider_id, req.user.practice_id, 'Provider');
     if (row.primary_hygienist_id) await findOr404(db, 'providers', row.primary_hygienist_id, req.user.practice_id, 'Hygienist');
     else if ('primary_hygienist_id' in row) row.primary_hygienist_id = null;
@@ -119,6 +267,7 @@ export default function patientRoutes({ db }) {
     const existing = await findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient');
     const row = pick(req.body, FIELDS);
     validate(row);
+    await validateCustom(db, req.user.practice_id, row, existing.custom);
     if (row.first_name === null || row.last_name === null) throw new HttpError(400, 'Name cannot be blank');
     if (row.primary_provider_id) await findOr404(db, 'providers', row.primary_provider_id, req.user.practice_id, 'Provider');
     if (row.primary_hygienist_id) await findOr404(db, 'providers', row.primary_hygienist_id, req.user.practice_id, 'Hygienist');

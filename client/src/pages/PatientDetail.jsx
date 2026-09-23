@@ -18,6 +18,7 @@ import FamilyTab from '../components/patient/FamilyTab.jsx';
 import RxTab from '../components/patient/RxTab.jsx';
 import { LabCaseForm, TaskForm, WaitlistForm, LAB_STATUSES } from '../components/OfficeForms.jsx';
 import { api } from '../api.js';
+import { CustomFieldValues, MergeDialog } from '../components/Switching.jsx';
 
 export default function PatientDetail() {
   const { id } = useParams();
@@ -86,6 +87,7 @@ export default function PatientDetail() {
             </div>
             {can('schedule:write') && <button className="primary" onClick={() => setModal('appt')}>Book appointment</button>}
             {can('patients:write') && <button onClick={() => setModal('edit')}>Edit</button>}
+            {user?.role === 'admin' && <button onClick={() => setModal('merge')} title="Move a duplicate chart's history into this one">Merge…</button>}
             {user?.role === 'admin' && <Link to={`/settings?tab=audit&patient_id=${p.id}`}><button title="Who viewed or changed this patient's record">Access log</button></Link>}
           </div>
         </div>
@@ -120,6 +122,7 @@ export default function PatientDetail() {
           <PatientForm patient={p} onCancel={() => setModal(null)} onSaved={() => { setModal(null); reload(); }} />
         </Modal>
       )}
+      {modal === 'merge' && <MergeDialog patient={p} onClose={() => setModal(null)} onDone={() => { setModal(null); reload(); }} />}
       {modal === 'appt' && (
         <Modal title="Book appointment" onClose={() => setModal(null)}>
           <AppointmentForm patient={p} defaults={{ date: practiceToday(practice?.timezone) }} onCancel={() => setModal(null)} onSaved={() => { setModal(null); reload(); }} />
@@ -157,6 +160,7 @@ function Overview({ p, reload }) {
           <dt>Address</dt><dd>{[p.address, p.city, p.state, p.zip].filter(Boolean).join(', ') || '—'}</dd>
           <dt>Emergency contact</dt><dd>{p.emergency_contact || '—'}</dd>
           <dt>Referred by</dt><dd>{p.referral_source || '—'}</dd>
+          <CustomFieldValues patient={p} />
         </dl>
         <div className="inline" style={{ marginTop: 18, justifyContent: 'space-between' }}>
           <h2 style={{ margin: 0 }}>Medical history</h2>

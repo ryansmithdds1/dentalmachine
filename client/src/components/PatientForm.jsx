@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { api } from '../api.js';
 import { useLookup } from '../hooks.js';
+import { useNavigate } from 'react-router-dom';
 import { ErrorBox, useSubmit } from './ui.jsx';
+import { CustomFieldInputs, DuplicateWarning, parseCustom } from './Switching.jsx';
 
 const EMPTY = {
   first_name: '', last_name: '', preferred_name: '', dob: '', gender: '', phone: '', email: '', address: '', city: '', state: '', zip: '',
@@ -12,8 +14,17 @@ const EMPTY = {
 export default function PatientForm({ patient, onSaved, onCancel }) {
   const [form, setForm] = useState(() => ({ ...EMPTY, ...Object.fromEntries(Object.entries(patient || {}).filter(([k]) => k in EMPTY).map(([k, v]) => [k, v ?? ''])) }));
   const providers = useLookup('/providers?active=true');
-  const { submit, busy, error } = useSubmit(async () => {
-    const body = { ...form, primary_provider_id: form.primary_provider_id ? Number(form.primary_provider_id) : null, primary_hygienist_id: form.primary_hygienist_id ? Number(form.primary_hygienist_id) : null };
+  const [custom, setCustom] = useState(() => parseCustom(patient?.custom));
+  const [dupes, setDupes] = useState(null);
+  const nav = useNavigate();
+  const { submit, busy, error } = useSubmit(async (force) => {
+    // New charts: check for an existing chart for the same person first.
+    if (!patient && force !== true) {
+      const q = new URLSearchParams({ first_name: form.first_name, last_name: form.last_name, dob: form.dob, phone: form.phone, email: form.email });
+      const found = await api.get(`/patients/duplicates?${q}`);
+      if (found.length) return setDupes(found);
+    }
+    const body = { ...form, custom, primary_provider_id: form.primary_provider_id ? Number(form.primary_provider_id) : null, primary_hygienist_id: form.primary_hygienist_id ? Number(form.primary_hygienist_id) : null };
     const saved = patient ? await api.put(`/patients/${patient.id}`, body) : await api.post('/patients', body);
     onSaved(saved);
   });
@@ -91,6 +102,7 @@ export default function PatientForm({ patient, onSaved, onCancel }) {
             </select>
           </label>
         )}
+        <CustomFieldInputs value={custom} onChange={setCustom} />
         {area('medical_alerts', 'Medical alerts (shown prominently)')}
         {area('allergies', 'Allergies')}
         {area('medications', 'Medications')}
@@ -100,6 +112,7 @@ export default function PatientForm({ patient, onSaved, onCancel }) {
           <input value={form.office_alert} onChange={(e) => setForm({ ...form, office_alert: e.target.value })} placeholder="e.g. Anxious — offer nitrous; collect copay before seating" />
         </label>
       </div>
+      {dupes && <DuplicateWarning matches={dupes} busy={busy} onUseExisting={(m) => nav(`/patients/${m.id}`)} onCreateAnyway={() => submit(true)} />}
       <div className="form-actions">
         <button type="button" onClick={onCancel}>Cancel</button>
         <button className="primary" disabled={busy}>{busy ? 'Saving…' : 'Save patient'}</button>

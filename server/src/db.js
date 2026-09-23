@@ -995,6 +995,8 @@ const COLUMNS = [
   ['era_imports', 'provider_adjustments', 'TEXT'],
   ['tooth_conditions', 'resolved_at', 'TEXT'],
   ['practices', 'reminder_steps', 'TEXT'],
+  ['practices', 'custom_fields', 'TEXT'],
+  ['patients', 'custom', 'TEXT'],
   ['appointment_series', 'monthly_by', 'TEXT'],
   ['appointment_series', 'until_date', 'TEXT'],
   ['blockouts', 'series_key', 'TEXT'],
@@ -1075,6 +1077,42 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_user_email_ci ON users(lower(email));
 
 // Tables whose primary key is an integer "id" (INSERTs return it).
 const ID_TABLES = new Set([...SCHEMA.matchAll(/CREATE TABLE IF NOT EXISTS (\w+) \(\s*id INTEGER PRIMARY KEY/g)].map((m) => m[1]));
+
+// Every table and column, and which columns point at which table — read from the schema itself so
+// patient merge and backup restore always cover new tables. Columns named <table>_id without a
+// declared reference (added later as plain INTEGERs) are matched to their table by name.
+export function schemaInfo() {
+  const tables = new Map();
+  for (const m of SCHEMA.matchAll(/CREATE TABLE IF NOT EXISTS (\w+) \(([\s\S]*?)\n\);/g)) {
+    const cols = [];
+    for (const line of m[2].split('\n')) {
+      const c = /^\s+(\w+)\s+(INTEGER|TEXT|REAL|BLOB)\b(.*)$/.exec(line);
+      if (!c || ['UNIQUE', 'PRIMARY', 'FOREIGN', 'CHECK'].includes(c[1])) continue;
+      const ref = /REFERENCES (\w+)\(id\)/.exec(c[3]);
+      cols.push({ name: c[1], ref: ref ? ref[1] : null });
+      // "email TEXT, phone TEXT" style lines declare several columns.
+      for (const extra of c[3].matchAll(/,\s*(\w+)\s+(?:INTEGER|TEXT|REAL)/g)) cols.push({ name: extra[1], ref: null });
+    }
+    tables.set(m[1], cols);
+  }
+  for (const [table, column, def] of COLUMNS) {
+    const ref = /REFERENCES (\w+)\(id\)/.exec(def);
+    if (tables.has(table) && !tables.get(table).some((c) => c.name === column)) tables.get(table).push({ name: column, ref: ref ? ref[1] : null });
+  }
+  const aliases = { guarantor_id: 'patients', referred_by_id: 'referral_contacts', primary_provider_id: 'providers', primary_hygienist_id: 'providers', default_provider_id: 'providers', created_by: 'users', handled_by: 'users', recorded_by: 'users', reviewed_by: 'users', signed_by: 'users', voided_by: 'users', checked_out_by: 'users', assigned_to: 'users', author_id: 'users',
+    addendum_of: 'clinical_notes', plan_id: 'insurance_plans', batch_id: 'edi_batches', primary_claim_id: 'claims', corrected_from_id: 'claims', reverses_id: 'ledger_entries', refund_of_id: 'ledger_entries' };
+  for (const [table, cols] of tables) {
+    for (const c of cols) {
+      if (c.ref || c.name === 'id') continue;
+      if (aliases[c.name]) c.ref = aliases[c.name];
+      else {
+        const base = c.name.replace(/_id$/, '');
+        if (base !== c.name && tables.has(`${base}s`)) c.ref = `${base}s`;
+      }
+    }
+  }
+  return tables;
+}
 
 export async function openDb(target = process.env.DATABASE_URL || process.env.DATABASE_PATH || './data/dentalmachine.db') {
   if (target === ':memory:' && process.env.TEST_DATABASE_URL) return openPostgres(process.env.TEST_DATABASE_URL, { freshSchema: true });
