@@ -92,7 +92,7 @@ The "OD / Curve" column shows which competitor has the feature: ✓ = has it, ~ 
 | 11 | ✅ _(Done: office fee schedules alongside PPO ones, set per patient, provider or office — patient first — and a history of every fee change.)_ **Multiple office fee schedules:** standard, cash, per provider, and fee history. | Associates and specialists often have different fees. | ✓ / ✓ | P2 | M |
 | 12 | ✅ _(Done: Billing → Collections: past-due family accounts, 30/60/90-day letters sent or printed, monthly finance charges and late fees with preview, agency referral and bad-debt write-off, with history.)_ **Collections workflow.** Finance charges, late fees, collection letters (30/60/90), bad-debt write-off, sending to a collection agency. | Standard A/R control. | ✓ / ~ | P2 | M |
 | 13 | ✅ **Balance transfers between family members,** and income transfers. | Common front-desk correction. | ✓ / ✓ | P2 | S |
-| 14 | **Batch eligibility** for tomorrow's schedule, parsing frequency and history from the 271 response. | Saves 1–2 hours of front-desk work a day. | ✓ / ✓ | P2 | M |
+| 14 | ✅ _(Done: Billing → Eligibility checks a day's patients at once and runs each evening for tomorrow; frequency limits and last-done dates are read from the 271 and applied to the plan.)_ **Batch eligibility** for tomorrow's schedule, parsing frequency and history from the 271 response. | Saves 1–2 hours of front-desk work a day. | ✓ / ✓ | P2 | M |
 | 15 | ✅ (expiry & status rules) **Pre-auth expiry dates,** with approved amounts feeding estimates. | Accuracy. | ✓ / ✓ | P3 | S |
 | 16 | **Deposit slips and bank reconciliation.** | Office manager close-out. | ✓ / ~ | P2 | S |
 

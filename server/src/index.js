@@ -11,6 +11,7 @@ import { runFormSends } from './formtemplates.js';
 import { runMembershipBilling } from './memberships.js';
 import { runCampaigns } from './campaigns.js';
 import { deliverWebhooks, scanPayments } from './webhooks.js';
+import { createEligibility, runEligibilityBatches } from './eligibility.js';
 
 let secret = process.env.JWT_SECRET;
 if (!secret) {
@@ -76,6 +77,17 @@ if (app.locals.payments.enabled && process.env.AUTOPAY !== 'off') {
     .catch((err) => console.error('Autopay failed:', err.message));
   setInterval(charge, 60 * 60 * 1000).unref();
   setTimeout(charge, 30_000).unref();
+}
+// Tomorrow's patients' insurance is checked each evening when a real-time (or sandbox) clearinghouse is connected.
+{
+  const eligibility = createEligibility({ db, config, clearinghouse: ch });
+  if (eligibility.automatic && process.env.ELIGIBILITY_BATCH !== 'off') {
+    const run = () => runExclusive('eligibility', 30 * 60 * 1000, () => runEligibilityBatches(db, eligibility))
+      .then((r) => r?.length && console.log(`Eligibility: ${r.map((x) => `${x.checked} checked for ${x.date}`).join(', ')}`))
+      .catch((err) => console.error('Eligibility batch failed:', err.message));
+    setInterval(run, 60 * 60 * 1000).unref();
+    setTimeout(run, 90_000).unref();
+  }
 }
 console.log(`Clearinghouse: ${ch?.name || 'manual'}${ch?.realtime ? ' + real-time eligibility/status' : ''}`);
 console.log(`Database: ${db.dialect} · cluster: ${cluster.mode}`);

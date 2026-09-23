@@ -11,6 +11,7 @@ import InsurancePlanForm from '../components/InsurancePlanForm.jsx';
 import { useLookup } from '../hooks.js';
 import { downloadCsv, dollars } from '../api.js';
 import Collections from '../components/Collections.jsx';
+import EligibilityBatch from '../components/EligibilityBatch.jsx';
 
 const FILTERS = [['draft', 'Ready to send'], ['submitted', 'Submitted'], ['partially_paid', 'Partially paid'], ['denied', 'Denied'], ['paid', 'Paid'], ['void', 'Void'], ['', 'All']];
 
@@ -22,7 +23,7 @@ export default function Claims() {
     <>
       <div className="page-header"><h1>Billing</h1></div>
       <div className="tabs">
-        {[['claims', 'Claims'], ['checks', 'Insurance payments'], ['followup', 'Insurance follow-up'], ['preauths', 'Pre-authorizations'], ['era', 'Remittance (ERA)'], ['insplans', 'Insurance plans'], ['statements', 'Statements'], ['plans', 'Payment plans'], ['collections', 'Collections']].map(([k, l]) => (
+        {[['claims', 'Claims'], ['checks', 'Insurance payments'], ['eligibility', 'Eligibility'], ['followup', 'Insurance follow-up'], ['preauths', 'Pre-authorizations'], ['era', 'Remittance (ERA)'], ['insplans', 'Insurance plans'], ['statements', 'Statements'], ['plans', 'Payment plans'], ['collections', 'Collections']].map(([k, l]) => (
           <button key={k} className={tab === k ? 'active' : ''} onClick={() => setParams({ tab: k })}>{l}</button>
         ))}
       </div>
@@ -35,6 +36,7 @@ export default function Claims() {
       {tab === 'preauths' && <Preauths />}
       {tab === 'statements' && <Statements />}
       {tab === 'collections' && <Collections />}
+      {tab === 'eligibility' && <EligibilityBatch />}
     </>
   );
 }

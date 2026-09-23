@@ -1,20 +1,24 @@
 import express, { Router } from 'express';
 import { requirePermission, HttpError } from '../auth.js';
 import { findOr404, audit, insert, update, practiceNow, mapSeq } from '../util.js';
-import { build837D, build270, build276, parse271, parse277, sandbox277, x12Type } from '../x12.js';
+import { build837D, build276, parse271, parse277, sandbox277, x12Type } from '../x12.js';
 import { pollClearinghouse, processInbound } from '../clearinghouse.js';
 import { claimEvent } from '../era.js';
 import { runExclusive } from '../cluster.js';
-import { benefitsUsed, benefitYear } from '../services.js';
-import { savePolicy } from '../benefits.js';
+import { benefitYear } from '../services.js';
+import { savePolicy, withPlan } from '../benefits.js';
 import { importEra, parseControl } from '../era.js';
 import { attachmentHints } from '../attachments.js';
+import { createEligibility, mergeFrequencies } from '../eligibility.js';
+
+const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 // Electronic claims (837D), eligibility (270/271) and remittance (835) through a clearinghouse.
 // EDI_MODE=manual (default): files are generated for upload to the clearinghouse portal and responses are imported.
 // EDI_MODE=sandbox: eligibility returns a simulated 271 built from the policy on file, for demos and training.
 export default function ediRoutes({ db, config, clearinghouse: ch }) {
   const r = Router();
+  const eligibility = createEligibility({ db, config, clearinghouse: ch });
   const ids = (practice) => ({
     senderId: config.ediSubmitterId || String(practice.tax_id || '').replace(/\D/g, '') || `DM${practice.id}`,
     receiverId: config.ediReceiverId || 'CLEARINGHOUSE',
@@ -239,27 +243,6 @@ export default function ediRoutes({ db, config, clearinghouse: ch }) {
   });
 
   // ---- Eligibility ----
-  async function sandbox271(policy, patient, trace) {
-    const used = await benefitsUsed(db, policy);
-    const pct = (v) => (1 - v / 100).toFixed(2);
-    return [
-      'ISA*00*          *00*          *ZZ*SANDBOX        *ZZ*DENTALMACHINE  *000101*0000*^*00501*000000001*0*T*:',
-      'GS*HB*SANDBOX*DENTALMACHINE*20000101*0000*1*X*005010X279A1', 'ST*271*0001*005010X279A1', `BHT*0022*11*${trace}*20000101*0000`,
-      'HL*1**20*1', 'NM1*PR*2*SANDBOX PAYER*****PI*00000', 'HL*2*1*21*1', 'NM1*1P*2*PROVIDER', 'HL*3*2*22*0',
-      `NM1*IL*1*${patient.last_name.toUpperCase()}*${patient.first_name.toUpperCase()}****MI*${policy.subscriber_id}`,
-      `DTP*346*D8*${new Date().getUTCFullYear()}0101`,
-      'EB*1*IND*35**DENTAL PPO',
-      `EB*C*IND*35***23*${(policy.deductible / 100).toFixed(2)}`,
-      `EB*C*IND*35***29*${(Math.max(0, policy.deductible - policy.deductible_met) / 100).toFixed(2)}`,
-      `EB*F*IND*35***23*${(policy.annual_max / 100).toFixed(2)}`,
-      `EB*F*IND*35***29*${(Math.max(0, policy.annual_max - used) / 100).toFixed(2)}`,
-      `EB*A*IND*23^41*****${pct(policy.pct_preventive)}`,
-      `EB*A*IND*25^26^24^40*****${pct(policy.pct_basic)}`,
-      `EB*A*IND*36^39*****${pct(policy.pct_major)}`,
-      'MSG*SANDBOX RESPONSE - NOT FROM A REAL PAYER', 'SE*20*0001', 'GE*1*1', 'IEA*1*000000001',
-    ].join('~') + '~';
-  }
-
   const eligView = (row) => ({ ...row, summary: row.summary ? JSON.parse(row.summary) : null });
 
   r.get('/patients/:id/eligibility', requirePermission('billing:read'), async (req, res) => {
@@ -273,29 +256,26 @@ export default function ediRoutes({ db, config, clearinghouse: ch }) {
   });
 
   r.post('/insurance/:iid/eligibility', requirePermission('billing:read'), async (req, res) => {
-    const pid = req.user.practice_id;
-    const policy = await findOr404(db, 'patient_insurance', req.params.iid, pid, 'Policy');
-    const patient = await db.get('SELECT * FROM patients WHERE id = ?', policy.patient_id);
-    const carrier = await db.get('SELECT * FROM insurance_carriers WHERE id = ?', policy.carrier_id);
-    const practice = await db.get('SELECT * FROM practices WHERE id = ?', pid);
-    const trace = `EL${Date.now()}`;
-    const request = build270({ practice, patient, policy, carrier, ...ids(practice), control: nextControl(), trace });
-    let row = { practice_id: pid, patient_id: patient.id, patient_insurance_id: policy.id, request_x12: request, created_by: req.user.id, status: 'pending' };
-    if (ch?.realtime || config.ediMode === 'sandbox' || ch?.mode === 'sandbox') {
-      const live = !!ch?.realtime;
-      const response = live ? await ch.realtime.eligibility(request) : await sandbox271(policy, patient, trace);
-      let summary;
-      try {
-        summary = parse271(response);
-      } catch {
-        throw new HttpError(502, `The clearinghouse answered with a ${x12Type(response) || 'non-X12'} instead of an eligibility response (271)`);
-      }
-      row = { ...row, response_x12: response, summary: JSON.stringify({ ...summary, ...(live ? {} : { sandbox: true }) }), status: summary.errors.length ? 'error' : summary.active ? 'active' : 'inactive' };
-    }
-    const id = await insert(db, 'eligibility_checks', row);
-    const mode = ch?.realtime ? 'realtime' : row.response_x12 ? 'sandbox' : 'manual';
+    const policy = await findOr404(db, 'patient_insurance', req.params.iid, req.user.practice_id, 'Policy');
+    const { id, mode } = await eligibility.check(policy, { userId: req.user.id });
     await audit(db, req, 'eligibility.check', 'eligibility_checks', id, { mode });
     res.status(201).json({ ...eligView(await db.get('SELECT id, patient_insurance_id, status, summary, created_at FROM eligibility_checks WHERE id = ?', id)), mode });
+  });
+
+  // Tomorrow's (or any day's) patients: each one's primary insurance and when it was last checked.
+  r.get('/eligibility/batch', requirePermission('billing:read'), async (req, res) => {
+    const date = DATE.test(req.query.date || '') ? req.query.date : null;
+    if (!date) throw new HttpError(400, 'date must be YYYY-MM-DD');
+    res.json({ date, automatic: eligibility.automatic, rows: (await eligibility.forDay(req.user.practice_id, date)).map((x) => ({ ...x, summary: x.summary ? JSON.parse(x.summary) : null })) });
+  });
+  // Check everyone on that day not checked in the last few days (real-time or sandbox clearinghouse only).
+  r.post('/eligibility/batch', requirePermission('billing:read'), async (req, res) => {
+    const date = DATE.test(req.body?.date || '') ? req.body.date : null;
+    if (!date) throw new HttpError(400, 'date must be YYYY-MM-DD');
+    if (!eligibility.automatic) throw new HttpError(409, 'Batch checks need a real-time clearinghouse connection (Settings → Integrations)');
+    const out = await eligibility.batch(req.user.practice_id, date, { userId: req.user.id, maxAgeDays: Number(req.body?.max_age_days ?? 7) });
+    await audit(db, req, 'eligibility.batch', 'practices', req.user.practice_id, { date, checked: out.checked });
+    res.json(out);
   });
 
   r.get('/eligibility/:eid/270', requirePermission('billing:read'), async (req, res) => {
@@ -329,6 +309,10 @@ export default function ediRoutes({ db, config, clearinghouse: ch }) {
     if (s.deductible != null) row.deductible = s.deductible;
     if (s.deductible != null && s.deductible_remaining != null) row.deductible_met = Math.max(0, s.deductible - s.deductible_remaining);
     for (const tier of ['preventive', 'basic', 'major']) if (s.coinsurance?.[tier] != null) row[`pct_${tier}`] = s.coinsurance[tier];
+    if (s.frequencies?.length) {
+      const { plan } = await withPlan(db, await db.get('SELECT * FROM patient_insurance WHERE id = ?', e.patient_insurance_id));
+      row.frequencies = mergeFrequencies(plan.frequencies ? JSON.parse(plan.frequencies) : null, s.frequencies);
+    }
     if (row.deductible_met != null) {
       const policy = await db.get('SELECT * FROM patient_insurance WHERE id = ?', e.patient_insurance_id);
       row.deductible_year = benefitYear(policy, (await practiceNow(db, req.user.practice_id)).slice(0, 10)).start;

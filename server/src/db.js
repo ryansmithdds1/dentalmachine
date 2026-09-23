@@ -1274,6 +1274,7 @@ const COLUMNS = [
   ['practices', 'finance_charge_min', 'INTEGER NOT NULL DEFAULT 0'],
   ['practices', 'late_fee', 'INTEGER NOT NULL DEFAULT 0'],
   ['practices', 'collection_agency', 'TEXT'],
+  ['practices', 'eligibility_batch_date', 'TEXT'],
   ['users', 'custom_role_id', 'INTEGER REFERENCES custom_roles(id)'],
   ['users', 'permissions_add', 'TEXT'],
   ['users', 'permissions_remove', 'TEXT'],

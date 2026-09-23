@@ -176,12 +176,23 @@ const cents = (v) => Math.round(Number(v || 0) * 100);
 export function parse271(text) {
   const segs = parseX12(text);
   if (!segs.some((s) => s.id === 'ST' && s.e[1] === '271')) throw new Error('Not a 271 eligibility response');
-  const out = { active: null, plan_name: null, plan_begin: null, deductible: null, deductible_remaining: null, annual_max: null, max_remaining: null, coinsurance: {}, messages: [], errors: [] };
+  const out = { active: null, plan_name: null, plan_begin: null, deductible: null, deductible_remaining: null, annual_max: null, max_remaining: null, coinsurance: {}, frequencies: [], history: [], messages: [], errors: [], };
+  // Frequency limits and service history belong to the EB they follow: its procedure codes (EB13, "AD:D1110")
+  // and HSD ("2 per service year", "1 per 36 months") or DTP*304 (last done).
+  let procs = [];
+  const d8 = (v) => `${v.slice(0, 4)}-${v.slice(4, 6)}-${v.slice(6, 8)}`;
   for (const s of segs) {
     if (s.id === 'AAA') out.errors.push({ code: s.e[3], followup: s.e[4] });
     if (s.id === 'MSG') out.messages.push(s.e[1]);
+    if (s.id === 'HSD' && procs.length && Number(s.e[2]) > 0) {
+      const [qty, unit, n] = [Number(s.e[2]), s.e[5], Number(s.e[6]) || 1];
+      const months = unit === '21' ? n * 12 : unit === '34' ? n : null;
+      if (months || ['22', '23'].includes(unit)) out.frequencies.push({ codes: procs, count: qty, ...(months ? { months } : { per: 'benefit_year' }) });
+    }
+    if (s.id === 'DTP' && s.e[1] === '304' && procs.length && /^\d{8}$/.test(s.e[3] || '')) out.history.push({ codes: procs, date: d8(s.e[3]) });
     if (s.id === 'DTP' && (s.e[1] === '346' || s.e[1] === '356') && !out.plan_begin) out.plan_begin = `${s.e[3].slice(0, 4)}-${s.e[3].slice(4, 6)}-${s.e[3].slice(6, 8)}`;
     if (s.id !== 'EB') continue;
+    procs = String(s.e[13] || '').split(/[:^>]/).filter((c) => /^D\d{4}$/.test(c));
     const [info, level, services, , planName, period, amount, percent] = s.e.slice(1); // EB01..EB08
     const inNetwork = s.e[12];
     if (inNetwork === 'N') continue; // prefer in-network figures
