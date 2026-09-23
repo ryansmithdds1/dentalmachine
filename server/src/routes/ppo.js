@@ -168,7 +168,8 @@ export default function ppoRoutes({ db, config }) {
          p.first_name, p.last_name, ic.name AS carrier_name, ic.phone AS carrier_phone,
          (SELECT MAX(created_at) FROM followups f WHERE f.practice_id = c.practice_id AND f.kind = 'claim' AND f.note LIKE '%#' || c.id || '%') AS last_followup
        FROM claims c JOIN patients p ON p.id = c.patient_id JOIN patient_insurance pi ON pi.id = c.patient_insurance_id JOIN insurance_carriers ic ON ic.id = pi.carrier_id
-       WHERE c.practice_id = ? AND c.status IN ('submitted','partially_paid') ORDER BY c.submitted_at`, req.user.practice_id,
+       WHERE c.practice_id = ? AND c.status IN ('submitted','partially_paid')${req.query.carrier_id ? ' AND ic.id = ?' : ''} ORDER BY c.submitted_at`,
+      req.user.practice_id, ...(req.query.carrier_id ? [Number(req.query.carrier_id)] : []),
     );
     for (const c of rows) c.days_out = c.submitted_at ? Math.round((Date.parse(`${today}T00:00:00Z`) - Date.parse(`${c.submitted_at.slice(0, 10)}T00:00:00Z`)) / 86400_000) : null;
     const bucket = (d) => (d <= 30 ? 'd0_30' : d <= 60 ? 'd31_60' : d <= 90 ? 'd61_90' : 'd90_plus');

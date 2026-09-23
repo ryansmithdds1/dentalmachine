@@ -787,6 +787,21 @@ CREATE TABLE IF NOT EXISTS fee_history (
 );
 CREATE INDEX IF NOT EXISTS idx_fee_history ON fee_history(practice_id, code);
 
+-- Saved reports, optionally emailed on a schedule (the owner's Monday-morning numbers).
+CREATE TABLE IF NOT EXISTS saved_reports (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  name TEXT NOT NULL,
+  report TEXT NOT NULL,
+  params TEXT,
+  schedule TEXT CHECK (schedule IS NULL OR schedule IN ('daily','weekly','monthly')),
+  recipients TEXT,
+  last_sent_at TEXT,
+  last_sent_for TEXT,
+  created_by INTEGER,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Day and month closes: the totals when the books were closed (the lock date moves up to the period end).
 CREATE TABLE IF NOT EXISTS period_closes (
   id INTEGER PRIMARY KEY,

@@ -238,7 +238,9 @@ function Plans() {
 }
 
 function InsuranceFollowup() {
-  const { data } = useApi('/reports/outstanding-claims');
+  const [carrier, setCarrier] = useState('');
+  const { data } = useApi(`/reports/outstanding-claims${carrier ? `?carrier_id=${carrier}` : ''}`);
+  const carriers = useLookup('/carriers');
   if (!data) return <div className="empty">Loading…</div>;
   const B = [['d0_30', '0–30 days'], ['d31_60', '31–60 days'], ['d61_90', '61–90 days'], ['d90_plus', '90+ days']];
   return (
@@ -248,6 +250,10 @@ function InsuranceFollowup() {
       </div>
       <div className="card" style={{ padding: 0 }}>
         <div className="inline no-print" style={{ justifyContent: 'flex-end', padding: '10px 16px 0' }}>
+          <select value={carrier} onChange={(e) => setCarrier(e.target.value)} aria-label="Payer">
+            <option value="">All payers</option>
+            {carriers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
           <button className="small" disabled={!data.rows.length} onClick={() => downloadCsv('outstanding-claims', data.rows, [['Claim #', (c) => c.id], ['Patient', (c) => `${c.first_name} ${c.last_name}`], ['Carrier', (c) => c.carrier_name], ['Carrier phone', (c) => c.carrier_phone || ''], ['Submitted', (c) => c.submitted_at || ''], ['Days out', (c) => c.days_out], ['Expected', (c) => dollars(c.estimated_amount - c.paid_amount)], ['Status', (c) => c.status]])}>⬇ CSV</button>
           <button className="small" onClick={() => window.print()}>Print / PDF</button>
         </div>

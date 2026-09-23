@@ -12,6 +12,7 @@ import { runMembershipBilling } from './memberships.js';
 import { runCampaigns } from './campaigns.js';
 import { deliverWebhooks, scanPayments } from './webhooks.js';
 import { createEligibility, runEligibilityBatches } from './eligibility.js';
+import { runScheduledReports } from './savedreports.js';
 
 let secret = process.env.JWT_SECRET;
 if (!secret) {
@@ -88,6 +89,14 @@ if (app.locals.payments.enabled && process.env.AUTOPAY !== 'off') {
     setInterval(run, 60 * 60 * 1000).unref();
     setTimeout(run, 90_000).unref();
   }
+}
+// Saved reports emailed on their schedule (checked hourly; each goes out once a day at most, after 7am).
+{
+  const run = () => runExclusive('scheduled-reports', 30 * 60 * 1000, () => runScheduledReports(db, messenger))
+    .then((n) => n && console.log(`Scheduled reports: ${n} emailed`))
+    .catch((err) => console.error('Scheduled reports failed:', err.message));
+  setInterval(run, 60 * 60 * 1000).unref();
+  setTimeout(run, 120_000).unref();
 }
 console.log(`Clearinghouse: ${ch?.name || 'manual'}${ch?.realtime ? ' + real-time eligibility/status' : ''}`);
 console.log(`Database: ${db.dialect} · cluster: ${cluster.mode}`);

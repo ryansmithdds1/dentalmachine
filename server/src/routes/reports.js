@@ -14,10 +14,15 @@ async function range(req, db) {
   return { from, to, today };
 }
 
-// ?location_id= narrows a report to one office of a multi-location practice.
+// Report filters on ledger rows: ?location_id= (one office of a multi-location practice) and ?provider_id=.
 const atLocation = (req, alias = '') => {
-  const id = Number(req.query.location_id) || null;
-  return id ? { sql: ` AND ${alias}location_id = ?`, args: [id] } : { sql: '', args: [] };
+  const where = [];
+  const args = [];
+  for (const k of ['location_id', 'provider_id']) {
+    const id = Number(req.query[k]) || null;
+    if (id) { where.push(` AND ${alias}${k} = ?`); args.push(id); }
+  }
+  return { sql: where.join(''), args };
 };
 
 export default function reportRoutes({ db }) {

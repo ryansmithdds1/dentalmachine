@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import Analytics from '../components/Analytics.jsx';
-import { useApi } from '../hooks.js';
+import { useApi, useLookup } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
 import { money, label, practiceToday, shiftDate } from '../format.js';
 import { MembershipReport } from '../components/Memberships.jsx';
 import ReviewReport from '../components/ReviewReport.jsx';
 import CloseBooks from '../components/CloseBooks.jsx';
+import SavedReports from '../components/SavedReports.jsx';
 import { downloadCsv, dollars, getLocationId } from '../api.js';
 
 export default function Reports() {
@@ -24,8 +25,9 @@ export default function Reports() {
         <button className={tab === 'hygiene' ? 'active' : ''} onClick={() => setParams({ tab: 'hygiene' })}>Hygiene</button>
         <button className={tab === 'plans' ? 'active' : ''} onClick={() => setParams({ tab: 'plans' })}>Treatment plans</button>
         <button className={tab === 'close' ? 'active' : ''} onClick={() => setParams({ tab: 'close' })}>Close</button>
+        <button className={tab === 'saved' ? 'active' : ''} onClick={() => setParams({ tab: 'saved' })}>Saved & scheduled</button>
       </div>
-      {tab === 'kpis' ? <Analytics /> : tab === 'hygiene' ? <HygieneReport /> : tab === 'plans' ? <PlanReport /> : tab === 'close' ? <CloseBooks /> : tab === 'referrals' ? <ReferralReport /> : tab === 'memberships' ? <MembershipReport /> : tab === 'reviews' ? <ReviewReport /> : <Operational />}
+      {tab === 'kpis' ? <Analytics /> : tab === 'hygiene' ? <HygieneReport /> : tab === 'plans' ? <PlanReport /> : tab === 'close' ? <CloseBooks /> : tab === 'saved' ? <SavedReports /> : tab === 'referrals' ? <ReferralReport /> : tab === 'memberships' ? <MembershipReport /> : tab === 'reviews' ? <ReviewReport /> : <Operational />}
     </>
   );
 }
@@ -37,7 +39,9 @@ function Operational() {
   const [to, setTo] = useState(today);
   // Multi-location: reports follow the office picked in the sidebar ("All offices" is consolidated).
   const office = getLocationId();
-  const at = office ? `&location_id=${office}` : '';
+  const [prov, setProv] = useState('');
+  const providers = useLookup('/providers');
+  const at = `${office ? `&location_id=${office}` : ''}${prov ? `&provider_id=${prov}` : ''}`;
   const { data: prod } = useApi(`/reports/production?from=${from}&to=${to}${at}`);
   const [agingGroup, setAgingGroup] = useState('patient');
   const [asOf, setAsOf] = useState('');
@@ -73,6 +77,10 @@ function Operational() {
           <button onClick={() => { setFrom(shiftDate(today, -29)); setTo(today); }}>Last 30 days</button>
           <button onClick={() => { setFrom(`${today.slice(0, 4)}-01-01`); setTo(today); }}>YTD</button>
           <button className="no-print" onClick={() => window.print()} title="Print, or choose “Save as PDF” in the print dialog">Print / PDF</button>
+          <select value={prov} onChange={(e) => setProv(e.target.value)} aria-label="Provider" style={{ width: 170 }}>
+            <option value="">All providers</option>
+            {providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
           <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} style={{ width: 150 }} />
           <span>to</span>
           <input type="date" value={to} onChange={(e) => setTo(e.target.value)} style={{ width: 150 }} />

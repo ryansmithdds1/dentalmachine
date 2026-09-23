@@ -645,3 +645,4 @@ a.button.primary { background: var(--primary); color: #fff; }
 .close-list { list-style: none; padding: 0; margin: 0 0 12px; }
 .close-list li { padding: 5px 0; border-bottom: 1px solid var(--border); }
 .close-list li.done { color: #15803d; }
+.report-preview { white-space: pre-wrap; font-size: 13px; background: var(--bg); padding: 12px; border-radius: 8px; margin: 0; }
