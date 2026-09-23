@@ -1215,6 +1215,8 @@ const COLUMNS = [
   ['blockouts', 'kind', "TEXT NOT NULL DEFAULT 'blocked'"],
   ['blockouts', 'appointment_type_ids', 'TEXT'],
   ['providers', 'daily_goal', 'INTEGER'],
+  ['booking_requests', 'language', 'TEXT'],
+  ['appointment_types', 'name_es', 'TEXT'],
   ['users', 'custom_role_id', 'INTEGER REFERENCES custom_roles(id)'],
   ['users', 'permissions_add', 'TEXT'],
   ['users', 'permissions_remove', 'TEXT'],

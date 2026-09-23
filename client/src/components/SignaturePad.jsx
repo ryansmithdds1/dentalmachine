@@ -1,7 +1,9 @@
 import { useEffect, useRef } from 'react';
+import { useT } from '../pages/public/i18n.js';
 
 // Finger/mouse signature capture. Calls onChange with a PNG data URL (or null when cleared).
 export default function SignaturePad({ onChange }) {
+  const t = useT();
   const canvas = useRef(null);
   const drawing = useRef(false);
   const dirty = useRef(false);
@@ -52,7 +54,7 @@ export default function SignaturePad({ onChange }) {
   return (
     <div>
       <canvas ref={canvas} className="signature-pad" onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerLeave={up} />
-      <button type="button" className="small" onClick={clear} style={{ marginTop: 6 }}>Clear signature</button>
+      <button type="button" className="small" onClick={clear} style={{ marginTop: 6 }}>{t('Clear signature')}</button>
     </div>
   );
 }

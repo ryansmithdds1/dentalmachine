@@ -1,5 +1,5 @@
 import { insert, friendlyDateTime, newToken, localNow } from './util.js';
-import { templatesFor, renderTemplate } from './templates.js';
+import { templatesFor, renderTemplate, patientLang, fixedText, subjectFor } from './templates.js';
 
 // Delivery drivers. "log" records the message without sending it (development / not yet configured).
 export function createMessenger({ env = process.env, fetchImpl = globalThis.fetch } = {}) {
@@ -81,7 +81,7 @@ export async function sendMessage(db, messenger, { practiceId, patientId, appoin
 // Sends a reminder with a one-tap confirmation link, rotating the appointment's confirm token.
 export async function sendAppointmentReminder(db, messenger, { appointmentId, appUrl, userId, channel: requested, kind = 'reminder' }) {
   const a = await db.get(
-    `SELECT a.*, p.first_name, p.phone, p.email, p.sms_opt_in, p.email_opt_in, pr.name AS practice_name, pr.phone AS practice_phone, pr.message_templates, pv.name AS provider_name
+    `SELECT a.*, p.first_name, p.phone, p.email, p.sms_opt_in, p.email_opt_in, p.language, pr.name AS practice_name, pr.phone AS practice_phone, pr.message_templates, pv.name AS provider_name
      FROM appointments a JOIN patients p ON p.id = a.patient_id JOIN practices pr ON pr.id = a.practice_id JOIN providers pv ON pv.id = a.provider_id
      WHERE a.id = ?`, appointmentId,
   );
@@ -90,15 +90,16 @@ export async function sendAppointmentReminder(db, messenger, { appointmentId, ap
   const { token, hash } = newToken();
   await db.run('UPDATE appointments SET confirm_token_hash = ? WHERE id = ?', hash, a.id);
   const link = `${appUrl}/c/${token}`;
-  const when = friendlyDateTime(a.start_time);
-  const templates = templatesFor({ message_templates: a.message_templates });
+  const lang = patientLang(a);
+  const when = friendlyDateTime(a.start_time, lang);
+  const templates = templatesFor({ message_templates: a.message_templates }, lang);
   const vars = { first_name: a.first_name, practice: a.practice_name, when, provider: a.provider_name, link, phone: a.practice_phone || '' };
   const body = kind === 'booking_confirmation'
     ? renderTemplate(templates.booking_confirmation, vars)
-    : `${renderTemplate(templates.reminder, vars)}${target.channel === 'sms' ? ' Reply C to confirm, or call us to reschedule. Reply STOP to opt out.' : ''}`;
+    : `${renderTemplate(templates.reminder, vars)}${target.channel === 'sms' ? fixedText(lang).sms_reply : ''}`;
   const msg = await sendMessage(db, messenger, {
     practiceId: a.practice_id, patientId: a.patient_id, appointmentId: a.id, userId, kind,
-    channel: target.channel, to: target.to, subject: `Your appointment at ${a.practice_name}`, body,
+    channel: target.channel, to: target.to, subject: subjectFor(lang, 'reminder', `Your appointment at ${a.practice_name}`, a.practice_name), body,
   });
   if (msg.status === 'sent' && kind === 'reminder') await db.run("UPDATE appointments SET reminder_sent_at = datetime('now') WHERE id = ?", a.id);
   return msg;
@@ -174,7 +175,6 @@ export async function runReviewRequests(db, messenger, { now = new Date(), appUr
        AND a.start_time >= ? AND a.end_time <= ?`,
       practice.id, `${local.slice(0, 10)} 00:00`, local,
     );
-    const templates = templatesFor(practice);
     for (const { id, patient_id: patientId } of due) {
       await db.run("UPDATE appointments SET review_sent_at = datetime('now') WHERE id = ?", id);
       const recent = await db.get("SELECT 1 FROM messages WHERE patient_id = ? AND kind = 'review' AND created_at > ?", patientId, new Date(Date.now() - 180 * 86400_000).toISOString().slice(0, 19).replace('T', ' '));
@@ -187,8 +187,8 @@ export async function runReviewRequests(db, messenger, { now = new Date(), appUr
       await insert(db, 'review_feedback', { practice_id: practice.id, patient_id: patientId, appointment_id: id, token_hash: hash });
       const msg = await sendMessage(db, messenger, {
         practiceId: practice.id, patientId, appointmentId: id, kind: 'review', channel: target.channel, to: target.to,
-        subject: `Thanks for visiting ${practice.name}`,
-        body: renderTemplate(templates.review, { first_name: patient.first_name, practice: practice.name, link: `${appUrl}/r/${token}`, phone: practice.phone || '' }),
+        subject: subjectFor(patientLang(patient), 'review', `Thanks for visiting ${practice.name}`, practice.name),
+        body: renderTemplate(templatesFor(practice, patientLang(patient)).review, { first_name: patient.first_name, practice: practice.name, link: `${appUrl}/r/${token}`, phone: practice.phone || '' }),
       });
       if (msg.status === 'sent') sent++;
     }

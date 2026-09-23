@@ -1,7 +1,7 @@
 import { HttpError } from './auth.js';
 import { insert, localNow, addMonths } from './util.js';
 import { sendMessage, preferredChannel } from './messaging.js';
-import { renderTemplate, templatesFor } from './templates.js';
+import { renderTemplate, templatesFor, patientLang, fixedText, subjectFor } from './templates.js';
 
 // The recall types a practice starts with. X-ray recalls start switched off; offices that track
 // them separately turn them on.
@@ -77,13 +77,12 @@ export async function runRecallSequences(db, messenger, { appUrl, now = new Date
     const today = nowLocal.slice(0, 10);
     const horizon = new Date(Date.parse(`${today}T12:00:00Z`) - steps[0].days * 86400000).toISOString().slice(0, 10);
     const due = await db.all(
-      `SELECT r.*, p.first_name, p.phone, p.email, p.sms_opt_in, p.email_opt_in FROM recalls r JOIN patients p ON p.id = r.patient_id
+      `SELECT r.*, p.first_name, p.phone, p.email, p.sms_opt_in, p.email_opt_in, p.language FROM recalls r JOIN patients p ON p.id = r.patient_id
        WHERE r.practice_id = ? AND r.status IN ('due','contacted') AND r.due_date <= ? AND p.status = 'active'
          AND NOT EXISTS (SELECT 1 FROM appointments a WHERE a.patient_id = r.patient_id AND a.start_time >= ? AND a.status IN ('scheduled','confirmed'))
        ORDER BY r.due_date`,
       practice.id, horizon, nowLocal,
     );
-    const templates = templatesFor(practice);
     const byPatient = new Map();
     for (const r of due) {
       if (!byPatient.has(r.patient_id)) byPatient.set(r.patient_id, []);
@@ -103,8 +102,8 @@ export async function runRecallSequences(db, messenger, { appUrl, now = new Date
       const target = preferredChannel(r, step.channel === 'auto' ? undefined : step.channel);
       const message = target ? await sendMessage(db, messenger, {
         practiceId: practice.id, patientId: r.patient_id, kind: 'recall', channel: target.channel, to: target.to,
-        subject: `Time for your visit at ${practice.name}`,
-        body: renderTemplate(templates.recall, { first_name: r.first_name, practice: practice.name, phone: practice.phone || 'the office', link: practice.slug ? `${appUrl}/book/${practice.slug}` : practice.phone || '' }),
+        subject: subjectFor(patientLang(r), 'recall', `Time for your visit at ${practice.name}`, practice.name),
+        body: renderTemplate(templatesFor(practice, patientLang(r)).recall, { first_name: r.first_name, practice: practice.name, phone: practice.phone || fixedText(patientLang(r)).the_office, link: practice.slug ? `${appUrl}/book/${practice.slug}${patientLang(r) === 'es' ? '?lang=es' : ''}` : practice.phone || '' }),
       }) : null;
       if (message?.status === 'sent') sent++;
       for (const p of pending) {

@@ -69,6 +69,7 @@ export default function PatientForm({ patient, onSaved, onCancel }) {
           Language
           <input list="languages" value={form.language} onChange={(e) => setForm({ ...form, language: e.target.value })} placeholder="English" />
           <datalist id="languages">{['English', 'Spanish', 'Vietnamese', 'Chinese', 'Tagalog', 'Arabic', 'Korean', 'Russian', 'French', 'Portuguese'].map((x) => <option key={x} value={x} />)}</datalist>
+          {/^(es\b|spanish|espa)/i.test(form.language || '') && <span className="muted" style={{ fontSize: 12 }}>Texts, emails and patient pages go out in Spanish.</span>}
         </label>
         {field('address', 'Address', { full: true })}
         {field('city', 'City')}

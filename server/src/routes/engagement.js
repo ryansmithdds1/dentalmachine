@@ -4,7 +4,7 @@ import { pick, requireFields, requireOneOf, insert, findOr404, audit, friendlyDa
 import { sendMessage, sendAppointmentReminder, runReminders, preferredChannel } from '../messaging.js';
 import { runRecallSequences } from '../recalls.js';
 import { publish } from '../events.js';
-import { templatesFor, renderTemplate, messageText } from '../templates.js';
+import { templatesFor, renderTemplate, messageText, patientLang, fixedText, subjectFor } from '../templates.js';
 import { createPacket, runFormSends } from '../formtemplates.js';
 import { finishBooking } from '../onlinebooking.js';
 
@@ -65,11 +65,12 @@ export default function engagementRoutes({ db, messenger, config }) {
     const target = preferredChannel(patient, req.body?.channel);
     if (!target) throw new HttpError(400, 'Patient has no reachable phone or email (or has opted out)');
     const practice = publicPractice(await db.get('SELECT * FROM practices WHERE id = ?', req.user.practice_id));
-    const bookLink = practice.online_booking && practice.slug ? `Book online: ${config.appUrl}/book/${practice.slug}` : '';
+    const lang = patientLang(patient);
+    const bookLink = practice.online_booking && practice.slug ? `${lang === 'es' ? 'Reserve en línea' : 'Book online'}: ${config.appUrl}/book/${practice.slug}${lang === 'es' ? '?lang=es' : ''}` : '';
     const msg = await sendMessage(db, messenger, {
       practiceId: req.user.practice_id, patientId: patient.id, userId: req.user.id, kind: 'recall', channel: target.channel, to: target.to,
-      subject: `Time for your next visit at ${practice.name}`,
-      body: renderTemplate(templatesFor(practice).recall, { first_name: patient.first_name, practice: practice.name, phone: practice.phone || 'the office', link: bookLink }),
+      subject: subjectFor(lang, 'recall', `Time for your next visit at ${practice.name}`, practice.name),
+      body: renderTemplate(templatesFor(practice, lang).recall, { first_name: patient.first_name, practice: practice.name, phone: practice.phone || fixedText(lang).the_office, link: bookLink }),
     });
     if (msg.status === 'sent') await db.run("UPDATE recalls SET status = 'contacted', last_contacted_at = datetime('now') WHERE id = ?", recall.id);
     await audit(db, req, 'recall.remind', 'recalls', recall.id);
@@ -153,15 +154,16 @@ export default function engagementRoutes({ db, messenger, config }) {
       const practice = await db.get('SELECT name, phone FROM practices WHERE id = ?', req.user.practice_id);
       // A reply to their own request is fine to send — unless they're a patient who opted out of that channel.
       const known = await db.get(
-        "SELECT sms_opt_in, email_opt_in FROM patients WHERE practice_id = ? AND ((phone IS NOT NULL AND phone = ?) OR (email IS NOT NULL AND lower(email) = lower(?))) ORDER BY id LIMIT 1",
+        "SELECT sms_opt_in, email_opt_in, language FROM patients WHERE practice_id = ? AND ((phone IS NOT NULL AND phone = ?) OR (email IS NOT NULL AND lower(email) = lower(?))) ORDER BY id LIMIT 1",
         req.user.practice_id, b.phone || '', b.email || '',
       );
       const target = preferredChannel({ ...b, sms_opt_in: known ? known.sms_opt_in : 1, email_opt_in: known ? known.email_opt_in : 1 });
+      const lang = b.language === 'es' ? 'es' : patientLang(known);
       if (target) {
         message = await sendMessage(db, messenger, {
           practiceId: req.user.practice_id, userId: req.user.id, kind: 'booking_declined', channel: target.channel, to: target.to,
-          subject: `Your appointment request at ${practice.name}`,
-          body: await messageText(db, req.user.practice_id, 'booking_declined', { first_name: b.first_name, when: friendlyDateTime(b.requested_start), reason: req.body?.reason ? String(req.body.reason).slice(0, 300) : '' }),
+          subject: subjectFor(lang, 'booking_declined', `Your appointment request at ${practice.name}`, practice.name),
+          body: await messageText(db, req.user.practice_id, 'booking_declined', { first_name: b.first_name, when: friendlyDateTime(b.requested_start, lang), reason: req.body?.reason ? String(req.body.reason).slice(0, 300) : '' }, lang),
         });
       }
     }

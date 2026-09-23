@@ -7,6 +7,7 @@ import { sendMessage } from '../messaging.js';
 import { publish } from '../events.js';
 import { planStatus } from './family.js';
 import { estimateCoverage, primaryPolicy, pendingInsurance } from '../services.js';
+import { patientLang } from '../templates.js';
 
 const CODE_TTL_MINUTES = 10;
 const SESSION_HOURS = 2;
@@ -133,6 +134,7 @@ export function portalRoutes({ db, secret, config, payments }) {
       patient: pick(patient, ['id', 'first_name', 'last_name', 'preferred_name', 'email', 'phone', 'address', 'city', 'state', 'zip', 'sms_opt_in', 'email_opt_in']),
       household: household.map((h) => ({ id: h.id, first_name: h.first_name, last_name: h.last_name, dob: h.dob, is_you: h.id === patient.id })),
       is_guarantor: !patient.guarantor_id,
+      language: patientLang(patient),
       balance, pending_insurance: pending, amount_due: Math.max(0, balance - pending),
       appointments: (await db.all(
         `SELECT a.id, a.patient_id, a.start_time, a.end_time, a.status, a.reason, pv.name AS provider_name FROM appointments a JOIN providers pv ON pv.id = a.provider_id

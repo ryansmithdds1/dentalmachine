@@ -1,4 +1,5 @@
 import SignaturePad from './SignaturePad.jsx';
+import { useT } from '../pages/public/i18n.js';
 
 // Photos are shrunk in the browser before upload (phone cameras take 5–12 MB pictures).
 async function shrink(file, max = 1600) {
@@ -26,6 +27,7 @@ async function shrink(file, max = 1600) {
 
 // Renders a practice form's fields for the patient to fill in (also used for the preview in Settings).
 export default function FormFields({ fields, answers, onChange, signatureName, onSignatureName, preview = false }) {
+  const t = useT();
   const set = (k, v) => onChange({ ...answers, [k]: v });
   const req = (f) => (f.required ? <span style={{ color: 'var(--danger)' }}> *</span> : null);
   return (
@@ -50,7 +52,7 @@ export default function FormFields({ fields, answers, onChange, signatureName, o
                 <div className="inline" style={{ gap: 16 }}>
                   {['yes', 'no'].map((v) => (
                     <label key={v} className="checkbox" style={{ color: 'var(--text)' }}>
-                      <input type="radio" name={`${key}-${preview ? 'p' : 'f'}`} checked={answers[f.key] === v} onChange={() => set(f.key, v)} /> {v === 'yes' ? 'Yes' : 'No'}
+                      <input type="radio" name={`${key}-${preview ? 'p' : 'f'}`} checked={answers[f.key] === v} onChange={() => set(f.key, v)} /> {v === 'yes' ? t('Yes') : t('No')}
                     </label>
                   ))}
                 </div>
@@ -61,7 +63,7 @@ export default function FormFields({ fields, answers, onChange, signatureName, o
               <label key={key} style={{ margin: '10px 0' }}>
                 <span>{f.label}{req(f)}</span>
                 <select value={answers[f.key] || ''} onChange={(e) => set(f.key, e.target.value)}>
-                  <option value="">Choose…</option>
+                  <option value="">{t('Choose…')}</option>
                   {f.options.map((o) => <option key={o} value={o}>{o}</option>)}
                 </select>
               </label>
@@ -69,7 +71,7 @@ export default function FormFields({ fields, answers, onChange, signatureName, o
           case 'initials':
             return (
               <div key={key} className="inline" style={{ margin: '10px 0', gap: 10, alignItems: 'center' }}>
-                <input style={{ width: 70, textAlign: 'center', textTransform: 'uppercase' }} maxLength={4} aria-label={`Initials: ${f.label}`} value={answers[f.key] || ''} onChange={(e) => set(f.key, e.target.value)} placeholder="Initials" />
+                <input style={{ width: 70, textAlign: 'center', textTransform: 'uppercase' }} maxLength={4} aria-label={`${t('Initials')}: ${f.label}`} value={answers[f.key] || ''} onChange={(e) => set(f.key, e.target.value)} placeholder={t('Initials')} />
                 <span style={{ fontSize: 14 }}>{f.label}{req(f)}</span>
               </div>
             );
@@ -77,9 +79,9 @@ export default function FormFields({ fields, answers, onChange, signatureName, o
             return (
               <div key={key} style={{ margin: '14px 0' }}>
                 <div style={{ fontSize: 14, marginBottom: 4 }}>{f.label}{req(f)}</div>
-                {preview ? <div className="signature-pad" style={{ display: 'grid', placeItems: 'center', color: 'var(--muted)' }}>Signature</div> : <SignaturePad onChange={(v) => set(f.key, v)} />}
+                {preview ? <div className="signature-pad" style={{ display: 'grid', placeItems: 'center', color: 'var(--muted)' }}>{t('Signature')}</div> : <SignaturePad onChange={(v) => set(f.key, v)} />}
                 {onSignatureName && (
-                  <label style={{ marginTop: 10 }}>Type your full legal name<input value={signatureName} onChange={(e) => onSignatureName(e.target.value)} autoComplete="name" /></label>
+                  <label style={{ marginTop: 10 }}>{t('Type your full legal name')}<input value={signatureName} onChange={(e) => onSignatureName(e.target.value)} autoComplete="name" /></label>
                 )}
               </div>
             );

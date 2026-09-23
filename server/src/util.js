@@ -132,11 +132,13 @@ export function newToken() {
 export const hashToken = (token) => createHash('sha256').update(String(token)).digest('hex');
 
 // "Tue, Sep 22 at 9:00 AM" from a practice-local 'YYYY-MM-DD HH:MM'.
-export function friendlyDateTime(value) {
+export function friendlyDateTime(value, lang = 'en') {
   const d = new Date(`${value.slice(0, 10)}T12:00:00Z`);
-  const day = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' });
   const [h, m] = value.slice(11, 16).split(':').map(Number);
-  return `${day} at ${((h + 11) % 12) + 1}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`;
+  const time = `${((h + 11) % 12) + 1}:${String(m).padStart(2, '0')}`;
+  if (lang === 'es') return `${d.toLocaleDateString('es-US', { weekday: 'long', month: 'long', day: 'numeric', timeZone: 'UTC' })}, a las ${time} ${h < 12 ? 'a. m.' : 'p. m.'}`;
+  const day = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' });
+  return `${day} at ${time} ${h < 12 ? 'AM' : 'PM'}`;
 }
 
 // UTC timestamp ('YYYY-MM-DD HH:MM:SS', as SQLite datetime('now') stores) for a practice-local wall-clock time.

@@ -114,7 +114,7 @@ The "OD / Curve" column shows which competitor has the feature: ✓ = has it, ~ 
 | 28 | **Supply inventory.** | Open Dental has basic inventory. | ✓ / ✗ | P3 | M |
 | 29 | **Installable app (PWA)** with an offline read-only view of today's schedule. | Resilience when the internet drops. | ~ / ~ | P3 | M |
 | 30 | **Accessibility pass** (WCAG AA: labels, focus, contrast). | Legal exposure and quality. | ~ / ~ | P2 | M |
-| 31 | **Spanish (and other language) support** for patient-facing pages and messages. | A large share of US patients. | ~ / ✓ | P2 | M |
+| 31 | ✅ **Spanish (and other language) support** _(Done: Spanish booking, confirm, forms, review, treatment-plan, portal and unsubscribe pages with a language toggle; every automated text and email in Spanish for patients whose language is Spanish, with editable Spanish wording; "Sí" confirms by text; Spanish names for visit types. Form questions stay as the practice writes them.)_ for patient-facing pages and messages. | A large share of US patients. | ~ / ✓ | P2 | M |
 
 ### 2.3 Scheduling and front desk
 

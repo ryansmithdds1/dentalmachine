@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { messageText } from '../templates.js';
+import { messageText, patientLang, subjectFor } from '../templates.js';
 import { requirePermission, HttpError, rateLimit } from '../auth.js';
 import { pick, requireFields, insert, findOr404, audit, newToken, hashToken } from '../util.js';
 import { estimateCoverage, primaryPolicy } from '../services.js';
@@ -64,8 +64,8 @@ export default function casePresentationRoutes({ db, messenger, config, erx }) {
       const practice = await db.get('SELECT name FROM practices WHERE id = ?', req.user.practice_id);
       message = await sendMessage(db, messenger, {
         practiceId: req.user.practice_id, patientId: patient.id, userId: req.user.id, kind: 'treatment_plan', channel: target.channel, to: target.to,
-        subject: `Your treatment plan from ${practice.name}`,
-        body: await messageText(db, req.user.practice_id, 'treatment_plan', { first_name: patient.first_name, link: url }),
+        subject: subjectFor(patientLang(patient), 'treatment_plan', `Your treatment plan from ${practice.name}`, practice.name),
+        body: await messageText(db, req.user.practice_id, 'treatment_plan', { first_name: patient.first_name, link: url }, patientLang(patient)),
       });
     }
     await audit(db, req, 'treatment_plan.present', 'treatment_plans', plan.id);
@@ -192,10 +192,10 @@ export function publicCasePresentation({ db }) {
     const live = await planView(db, plan);
     // After signing, the patient sees exactly the version they signed.
     const v = plan.signed_snapshot ? { ...live, ...JSON.parse(plan.signed_snapshot) } : live;
-    const patient = await db.get('SELECT first_name FROM patients WHERE id = ?', plan.patient_id);
+    const patient = await db.get('SELECT first_name, language FROM patients WHERE id = ?', plan.patient_id);
     const practice = await db.get('SELECT name, phone, address, city, state, zip FROM practices WHERE id = ?', plan.practice_id);
     return {
-      name: v.name, status: v.status, notes: v.notes, signed_at: v.signed_at, signature_name: v.signature_name, first_name: patient.first_name, practice,
+      name: v.name, status: v.status, notes: v.notes, signed_at: v.signed_at, signature_name: v.signature_name, first_name: patient.first_name, language: patientLang(patient), practice,
       procedures: v.procedures.map((p) => ({ code: p.code, description: p.description, tooth: p.tooth, surfaces: p.surfaces, fee: p.fee, status: p.status })),
       estimate: { ...v.estimate, items: v.estimate.items.map(({ procedure_id: _, ...rest }) => rest) },
     };

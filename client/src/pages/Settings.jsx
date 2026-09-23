@@ -29,7 +29,7 @@ const RESOURCES = {
   },
   types: {
     title: 'Appointment types', singular: 'appointment type', path: '/appointment-types', columns: ['name', 'duration', 'color', 'procedure_codes', 'online_bookable'],
-    fields: [['name', 'Name', 'text'], ['duration', 'Length (minutes)', 'number'], ['color', 'Calendar color', 'color'], ['procedure_codes', 'Procedures added when booked (e.g. D0120, D1110)', 'codes'],
+    fields: [['name', 'Name', 'text'], ['name_es', 'Name in Spanish (online booking)', 'text'], ['duration', 'Length (minutes)', 'number'], ['color', 'Calendar color', 'color'], ['procedure_codes', 'Procedures added when booked (e.g. D0120, D1110)', 'codes'],
       ['provider_type', 'Usually booked with', 'select', ['dentist', 'hygienist', 'specialist']], ['online_bookable', 'Patients can book online', 'checkbox'], ['deposit', 'Deposit to book online ($, needs Stripe)', 'money'], ['sort', 'Sort order', 'number'], ['active', 'Active', 'checkbox']],
   },
   referrals: {
@@ -961,6 +961,7 @@ function RecallTypes() {
 function Messaging() {
   const { data: practice } = useApi('/practice');
   const { data: meta } = useApi('/message-templates/meta');
+  const [tplLang, setTplLang] = useState('en');
   const [form, setForm] = useState(null);
   const [saved, setSaved] = useState(false);
   const { refresh } = useAuth();
@@ -1060,15 +1061,21 @@ function Messaging() {
       </div>
       <div className="card">
         <h2>Message templates</h2>
-        <p className="muted" style={{ fontSize: 13 }}>Every automatic message, in your own words. Leave one blank to use the standard wording. Texts over 160 characters are sent in parts.</p>
-        {Object.entries(meta).map(([k, m]) => {
+        <p className="muted" style={{ fontSize: 13 }}>Every automatic message, in your own words. Leave one blank to use the standard wording. Texts over 160 characters are sent in parts. Patients whose language is Spanish (on their chart) get the Spanish wording.</p>
+        <div className="seg" style={{ marginBottom: 10 }}>
+          <button type="button" className={tplLang === 'en' ? 'active' : ''} onClick={() => setTplLang('en')}>English</button>
+          <button type="button" className={tplLang === 'es' ? 'active' : ''} onClick={() => setTplLang('es')}>Español</button>
+        </div>
+        {Object.entries(meta).map(([base, m]) => {
+          const k = tplLang === 'es' ? `${base}_es` : base;
+          const std = tplLang === 'es' ? m.es : m.text;
           const value = cur.templates[k] ?? '';
-          const out = render(value || m.text, k === 'booking_declined' ? { reason: 'We are fully booked that morning.' } : {});
+          const out = render(value || std, base === 'booking_declined' ? { reason: tplLang === 'es' ? 'Ya no tenemos espacio esa mañana.' : 'We are fully booked that morning.' } : {});
           return (
             <div key={k} className="template-row">
-              <label>{m.label}<textarea rows={2} value={value} placeholder={m.text} onChange={(e) => change({ templates: { ...cur.templates, [k]: e.target.value } })} /></label>
+              <label>{m.label}{tplLang === 'es' ? ' (Spanish)' : ''}<textarea rows={2} value={value} placeholder={std} lang={tplLang} onChange={(e) => change({ templates: { ...cur.templates, [k]: e.target.value } })} /></label>
               <div className="muted" style={{ fontSize: 12 }}>
-                {m.help} Uses {m.vars.map((v) => <code key={v} style={{ cursor: 'pointer' }} title="Add to the message" onClick={() => change({ templates: { ...cur.templates, [k]: `${value || m.text} {${v}}` } })}>{`{${v}}`}</code>).reduce((a, b) => [a, ' ', b])}
+                {m.help} Uses {m.vars.map((v) => <code key={v} style={{ cursor: 'pointer' }} title="Add to the message" onClick={() => change({ templates: { ...cur.templates, [k]: `${value || std} {${v}}` } })}>{`{${v}}`}</code>).reduce((a, b) => [a, ' ', b])}
                 {m.required.length > 0 && <> · must include {m.required.map((v) => `{${v}}`).join(', ')}</>}
               </div>
               <div className="sms-preview">{out}<span className="muted" style={{ float: 'right', fontSize: 11 }}>{out.length} chars{out.length > 160 ? ` · ${Math.ceil(out.length / 153)} texts` : ''}</span></div>

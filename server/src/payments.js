@@ -3,7 +3,7 @@ import { HttpError } from './auth.js';
 import { insert, practiceNow } from './util.js';
 import { planStatus } from './routes/family.js';
 import { sendMessage, preferredChannel } from './messaging.js';
-import { messageText } from './templates.js';
+import { messageText, patientLang, subjectFor } from './templates.js';
 
 // Card processing. Stripe when STRIPE_SECRET_KEY is set; PAYMENTS=sandbox simulates it for demos
 // (test cards: 4242… approves, 4000 0000 0000 0002 declines, like Stripe's test mode).
@@ -169,8 +169,8 @@ async function autopayPlan(db, payments, messenger, plan, today) {
     if (target && messenger) {
       await sendMessage(db, messenger, {
         practiceId: plan.practice_id, patientId: patient.id, kind: 'payment_request', channel: target.channel, to: target.to,
-        subject: `Payment plan payment didn't go through — ${practice.name}`,
-        body: await messageText(db, plan.practice_id, 'card_declined', { first_name: patient.first_name, amount, reason: out.reason }),
+        subject: subjectFor(patientLang(patient), 'card_declined', `Payment plan payment didn't go through — ${practice.name}`, practice.name),
+        body: await messageText(db, plan.practice_id, 'card_declined', { first_name: patient.first_name, amount, reason: out.reason }, patientLang(patient)),
       }).catch(() => {});
     }
     return { plan_id: plan.id, ok: false, reason: out.reason, paused: !!paused };

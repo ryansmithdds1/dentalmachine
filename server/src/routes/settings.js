@@ -259,7 +259,7 @@ export default function settingsRoutes({ db, secret, config = {} }) {
 
   resource(r, db, {
     path: 'appointment-types', table: 'appointment_types', required: ['name', 'duration'], order: 'sort, name',
-    fields: ['name', 'duration', 'color', 'procedure_codes', 'provider_type', 'online_bookable', 'deposit', 'active', 'sort'],
+    fields: ['name', 'name_es', 'duration', 'color', 'procedure_codes', 'provider_type', 'online_bookable', 'deposit', 'active', 'sort'],
     validate: (row) => {
       if (row.deposit != null) {
         row.deposit = Math.round(Number(row.deposit) || 0);

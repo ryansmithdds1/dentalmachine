@@ -3,6 +3,7 @@ import { HttpError, rateLimit } from '../auth.js';
 import { insert, update, hashToken, practiceNow, normalizeDateTime, audit, mapSeq, publicPractice } from '../util.js';
 import { MEDICAL_CONDITIONS, parseMedicalHistory, contactUpdatesFromHistory } from '../forms.js';
 import { fillFields, checkAnswers, formPdf } from '../formtemplates.js';
+import { patientLang } from '../templates.js';
 import { finishBooking } from '../onlinebooking.js';
 import { emitAppointment } from '../webhooks.js';
 import { sendAppointmentReminder } from '../messaging.js';
@@ -47,7 +48,7 @@ export default function publicRoutes({ db, storage, payments, messenger, config 
   const reasonsFor = async (practiceId) => {
     const types = await db.all('SELECT id, name, duration, provider_type, deposit FROM appointment_types WHERE practice_id = ? AND active = 1 AND online_bookable = 1 ORDER BY sort, name', practiceId);
     // Deposits are only asked for when card payments are set up.
-    return types.length ? types.map((t) => ({ label: t.name, duration: t.duration, type_id: t.id, provider_type: t.provider_type, deposit: payments?.mode === 'stripe' ? t.deposit || 0 : 0 })) : FALLBACK_REASONS;
+    return types.length ? types.map((t) => ({ label: t.name, label_es: t.name_es || null, duration: t.duration, type_id: t.id, provider_type: t.provider_type, deposit: payments?.mode === 'stripe' ? t.deposit || 0 : 0 })) : FALLBACK_REASONS;
   };
   const publicProviders = async (practiceId) => await db.all('SELECT id, name, type FROM providers WHERE practice_id = ? AND active = 1 ORDER BY type, name', practiceId);
 
@@ -115,7 +116,7 @@ export default function publicRoutes({ db, storage, payments, messenger, config 
       practice_id: p.id, first_name: first.slice(0, 80), last_name: last.slice(0, 80), dob: b.dob || null,
       phone: clip(b.phone, 30), email: clip(b.email, 200),
       reason: reason.label, duration: reason.duration, provider_id: providerId, requested_start: start,
-      new_patient: b.new_patient === false ? 0 : 1, notes: clip(b.notes, 1000), ip: req.ip,
+      new_patient: b.new_patient === false ? 0 : 1, notes: clip(b.notes, 1000), ip: req.ip, language: b.language === 'es' ? 'es' : null,
       insurance_carrier: clip(b.insurance_carrier, 100), insurance_member_id: clip(b.insurance_member_id, 40), insurance_subscriber: clip(b.insurance_subscriber, 120),
       ...(deposit ? { deposit_amount: deposit, deposit_status: 'awaiting', hold_until: new Date(Date.now() + 35 * 60_000).toISOString() } : {}),
     });
@@ -144,7 +145,7 @@ export default function publicRoutes({ db, storage, payments, messenger, config 
   // ---- Appointment confirmation links ----
   const apptForToken = async (token) => {
     const a = await db.get(
-      `SELECT a.*, p.first_name, pr.name AS practice_name, pr.phone AS practice_phone, pr.address, pr.city, pr.state, pr.zip,
+      `SELECT a.*, p.first_name, p.language, pr.name AS practice_name, pr.phone AS practice_phone, pr.address, pr.city, pr.state, pr.zip,
          pv.name AS provider_name
        FROM appointments a JOIN patients p ON p.id = a.patient_id JOIN practices pr ON pr.id = a.practice_id
        JOIN providers pv ON pv.id = a.provider_id WHERE a.confirm_token_hash = ?`, hashToken(token),
@@ -153,7 +154,7 @@ export default function publicRoutes({ db, storage, payments, messenger, config 
     return a;
   };
   const apptView = (a) => ({
-    first_name: a.first_name, start_time: a.start_time, end_time: a.end_time, status: a.status, provider_name: a.provider_name,
+    first_name: a.first_name, start_time: a.start_time, end_time: a.end_time, status: a.status, provider_name: a.provider_name, language: patientLang(a),
     practice: { name: a.practice_name, phone: a.practice_phone, address: a.address, city: a.city, state: a.state, zip: a.zip },
   });
 
@@ -186,7 +187,7 @@ export default function publicRoutes({ db, storage, payments, messenger, config 
   // lower ratings go privately to the office, which gets a task to follow up.
   const reviewFor = async (token) => {
     const f = await db.get(
-      `SELECT rf.*, p.first_name, p.last_name, pr.name AS practice_name, pr.review_url, pr.review_threshold, pr.phone AS practice_phone
+      `SELECT rf.*, p.first_name, p.last_name, p.language, pr.name AS practice_name, pr.review_url, pr.review_threshold, pr.phone AS practice_phone
        FROM review_feedback rf JOIN patients p ON p.id = rf.patient_id JOIN practices pr ON pr.id = rf.practice_id WHERE rf.token_hash = ?`, hashToken(token),
     );
     if (!f) throw new HttpError(404, 'This link is not valid');
@@ -194,7 +195,7 @@ export default function publicRoutes({ db, storage, payments, messenger, config 
     return f;
   };
   const reviewView = (f) => ({
-    practice_name: f.practice_name, first_name: f.first_name, rating: f.rating, comment: f.comment, practice_phone: f.practice_phone,
+    practice_name: f.practice_name, first_name: f.first_name, rating: f.rating, comment: f.comment, practice_phone: f.practice_phone, language: patientLang(f),
     happy: f.rating != null && f.rating >= (f.review_threshold || 4), review_link: !!f.review_url,
   });
   r.get('/review/:token', reader, async (req, res) => res.json(reviewView(await reviewFor(req.params.token))));
@@ -232,7 +233,7 @@ export default function publicRoutes({ db, storage, payments, messenger, config 
   const packetForToken = async (token) => {
     const f = await db.get(
       `SELECT fr.*, p.first_name, p.last_name, p.dob, p.phone, p.email, p.address, p.city, p.state, p.zip, p.emergency_contact,
-         p.allergies, p.medications, pr.name AS practice_name
+         p.allergies, p.medications, p.language, pr.name AS practice_name
        FROM form_requests fr JOIN patients p ON p.id = fr.patient_id JOIN practices pr ON pr.id = fr.practice_id
        WHERE fr.token_hash = ?`, hashToken(token),
     );
@@ -256,7 +257,7 @@ export default function publicRoutes({ db, storage, payments, messenger, config 
     const history = items.find((x) => x.kind === 'medical_history');
     // Prefill contact details only; clinical history is always re-entered by the patient.
     res.json({
-      practice_name: f.practice_name, kind: history ? 'medical_history' : 'custom', first_name: f.first_name, last_name: f.last_name,
+      practice_name: f.practice_name, kind: history ? 'medical_history' : 'custom', first_name: f.first_name, last_name: f.last_name, language: patientLang(f),
       conditions: MEDICAL_CONDITIONS,
       prefill: { phone: f.phone, email: f.email, address: f.address, city: f.city, state: f.state, zip: f.zip, emergency_contact: f.emergency_contact },
       forms: items.map((x) => (x.kind === 'medical_history'

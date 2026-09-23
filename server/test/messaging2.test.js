@@ -62,3 +62,27 @@ test('review routing: happy patients go on to the review page, unhappy ones reac
   assert.deepEqual([report.sent, report.responded, report.happy, report.unhappy, report.went_to_review, report.average], [2, 2, 1, 1, 1, 3.5]);
   assert.equal(report.feedback[0].comment, 'Waited 40 minutes');
 });
+
+test('Spanish: patients with Spanish on file get Spanish messages; offices can edit the Spanish wording', async () => {
+  const { api, patient, provider } = await h.practice();
+  await api.put(`/patients/${patient.id}`, { language: 'Spanish', sms_opt_in: true, phone: '5125550123' });
+  const appt = (await api.post('/appointments', { patient_id: patient.id, provider_id: provider.id, start_time: '2031-05-06 09:00', end_time: '2031-05-06 10:00' })).data;
+  let before = h.sent.length;
+  await api.post(`/appointments/${appt.id}/remind`, { channel: 'sms' });
+  const reminder = h.sent.slice(before)[0].body;
+  assert.match(reminder, /^Hola Jane, le recordamos de Practice \d+ su cita el martes, 6 de mayo, a las 9:00 a\. m\./);
+  assert.match(reminder, /Responda C para confirmar/);
+  const token = /\/c\/([\w-]+)/.exec(reminder)[1];
+  assert.equal((await h.client().get(`/public/confirm/${token}`)).data.language, 'es');
+
+  // The Spanish template is checked like the English one, and used for Spanish speakers only.
+  assert.equal((await api.put('/practice', { message_templates: { forms_es: 'Llene esto por favor' } })).status, 400);
+  assert.equal((await api.put('/practice', { message_templates: { forms_es: '¡Hola {first_name}! Sus formularios: {link}' } })).status, 200);
+  before = h.sent.length;
+  await api.post(`/patients/${patient.id}/form-requests`, { send: 'sms' });
+  assert.match(h.sent.slice(before)[0].body, /^¡Hola Jane! Sus formularios: https:/);
+  await api.put(`/patients/${patient.id}`, { language: 'English' });
+  before = h.sent.length;
+  await api.post(`/patients/${patient.id}/form-requests`, { send: 'sms' });
+  assert.match(h.sent.slice(before)[0].body, /^Hi Jane, please complete/);
+});

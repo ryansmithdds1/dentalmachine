@@ -3,7 +3,7 @@ import { HttpError } from './auth.js';
 import { PdfDoc, dataUrlImage } from './pdf.js';
 import { insert, newToken, hashToken, practiceNow } from './util.js';
 import { preferredChannel, sendMessage } from './messaging.js';
-import { messageText } from './templates.js';
+import { messageText, patientLang, subjectFor } from './templates.js';
 
 // Practice-defined forms: consents, policies and intake questions, built from a list of fields.
 // A signed form is kept as answers + the exact fields it was signed against, and filed as a PDF.
@@ -255,11 +255,14 @@ export async function createPacket(db, messenger, { practiceId, patient, templat
   let message = null;
   if (target) {
     const practice = await db.get('SELECT name FROM practices WHERE id = ?', practiceId);
-    const what = items.length === 1 ? (history ? 'your health history' : templates[0].name.toLowerCase()) : `${items.length} forms`;
+    const lang = patientLang(patient);
+    const what = items.length === 1
+      ? (history ? (lang === 'es' ? 'su historial médico' : 'your health history') : templates[0].name.toLowerCase())
+      : (lang === 'es' ? `${items.length} formularios` : `${items.length} forms`);
     message = await sendMessage(db, messenger, {
       practiceId, patientId: patient.id, userId, appointmentId, kind: 'intake_form', channel: target.channel, to: target.to,
-      subject: `Please complete your forms for ${practice.name}`,
-      body: await messageText(db, practiceId, 'forms', { first_name: patient.first_name, forms: what, link: url }),
+      subject: subjectFor(lang, 'forms', `Please complete your forms for ${practice.name}`, practice.name),
+      body: await messageText(db, practiceId, 'forms', { first_name: patient.first_name, forms: what, link: url }, lang),
     });
   }
   return { id: ids[0], ids, url, expires_at: expires, message };

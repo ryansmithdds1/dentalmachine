@@ -1,7 +1,7 @@
 import { HttpError } from './auth.js';
 import { insert, practiceNow } from './util.js';
 import { preferredChannel, sendMessage } from './messaging.js';
-import { messageText } from './templates.js';
+import { messageText, patientLang, subjectFor } from './templates.js';
 
 // In-house membership plans for patients without insurance: a monthly or yearly fee, some services
 // included each membership year (cleanings, exams, x-rays), and a discount on everything else.
@@ -147,8 +147,8 @@ async function billPeriod(db, payments, m, today, messenger) {
           if (target && messenger) {
             await sendMessage(db, messenger, {
               practiceId: m.practice_id, patientId: patient.id, kind: 'payment_request', channel: target.channel, to: target.to,
-              subject: `Membership payment didn't go through — ${practice.name}`,
-              body: await messageText(db, m.practice_id, 'card_declined', { first_name: patient.first_name, amount: m.price, reason: out.reason }),
+              subject: subjectFor(patientLang(patient), 'card_declined', `Membership payment didn't go through — ${practice.name}`, practice.name),
+              body: await messageText(db, m.practice_id, 'card_declined', { first_name: patient.first_name, amount: m.price, reason: out.reason }, patientLang(patient)),
             }).catch(() => {});
           }
         }

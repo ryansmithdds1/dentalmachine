@@ -4,10 +4,11 @@ import { requirePermission, HttpError } from '../auth.js';
 import { sendMessage } from '../messaging.js';
 import { insert, findOr404, audit, practiceNow, friendlyDateTime } from '../util.js';
 import { publish } from '../events.js';
+import { patientLang } from '../templates.js';
 
 const STOP = ['STOP', 'STOPALL', 'UNSUBSCRIBE', 'CANCEL', 'END', 'QUIT', 'OPTOUT'];
 const START = ['START', 'UNSTOP', 'YES START', 'SUBSCRIBE'];
-const CONFIRM = ['C', 'CONFIRM', 'CONFIRMED', 'Y', 'YES', 'OK'];
+const CONFIRM = ['C', 'CONFIRM', 'CONFIRMED', 'Y', 'YES', 'OK', 'SI', 'CONFIRMO', 'CONFIRMAR', 'CONFIRMADO'];
 const digits = (s) => String(s || '').replace(/\D/g, '').slice(-10);
 const xml = (s) => String(s).replace(/[<>&'"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' })[c]);
 const twiml = (reply) => `<?xml version="1.0" encoding="UTF-8"?><Response>${reply ? `<Message>${xml(reply)}</Message>` : ''}</Response>`;
@@ -44,11 +45,11 @@ export function smsWebhook({ db, config }) {
       to_address: to, from_address: from, body, status: 'sent', provider_id: req.body.MessageSid || null, sent_at: new Date().toISOString(),
     });
 
-    const keyword = body.toUpperCase().replace(/[^A-Z ]/g, '').trim();
+    const keyword = body.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z ]/g, '').trim();
     let reply = null;
     // A patient who writes "cancel" (the carriers' opt-out word, or "I need to cancel…") usually means their
     // appointment. We can't cancel it for them from one word, so the front desk gets a task to call.
-    const wantsToCancel = candidates.length && (keyword === 'CANCEL' || /\bcancel|resched/i.test(body));
+    const wantsToCancel = candidates.length && (keyword === 'CANCEL' || /\bcancel|resched|\bcambiar|reprogram/i.test(body));
     if (wantsToCancel) {
       const now = await practiceNow(db, practice.id);
       const appt = await db.get(
@@ -78,7 +79,10 @@ export function smsWebhook({ db, config }) {
       if (appt) {
         await db.run("UPDATE appointments SET status = 'confirmed', confirmed_at = datetime('now'), confirmed_via = 'text' WHERE id = ?", appt.id);
         publish(practice.id, { type: 'schedule', dates: [appt.start_time.slice(0, 10)], source: 'sms' });
-        reply = `Thanks! You're confirmed for ${friendlyDateTime(appt.start_time)} at ${practice.name}.`;
+        const lang = patientLang(candidates.find((p) => p.id === appt.patient_id));
+        reply = lang === 'es'
+          ? `¡Gracias! Su cita quedó confirmada para el ${friendlyDateTime(appt.start_time, 'es')} en ${practice.name}.`
+          : `Thanks! You're confirmed for ${friendlyDateTime(appt.start_time)} at ${practice.name}.`;
       }
     }
     if (reply) {

@@ -213,6 +213,20 @@ test('two-way texting: signed inbound webhook, C to confirm, STOP opts out', asy
   assert.equal((await api.get(`/patients/${patient.id}`)).data.sms_opt_in, 1);
 });
 
+test('two-way texting in Spanish: "Sí" confirms and the reply is in Spanish', async () => {
+  const { api, provider, patient } = await setup();
+  await api.put('/practice', { sms_number: '+15125559998' });
+  await api.put(`/patients/${patient.id}`, { language: 'Spanish' });
+  const appt = (await api.post('/appointments', { patient_id: patient.id, provider_id: provider.id, start_time: '2030-05-01 14:30', end_time: '2030-05-01 15:00' })).data;
+  const params = { From: '+15125550100', To: '+15125559998', MessageSid: 'SM9', Body: 'Sí' };
+  const res = await fetch(`${origin}/api/webhooks/twilio/sms`, {
+    method: 'POST', body: new URLSearchParams(params),
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Twilio-Signature': twilioSignature('twilio-secret', 'https://app.example.com/api/webhooks/twilio/sms', params) },
+  });
+  assert.match(await res.text(), /Su cita quedó confirmada para el miércoles, 1 de mayo, a las 2:30 p\. m\./);
+  assert.equal((await api.get(`/appointments/${appt.id}`)).data.status, 'confirmed');
+});
+
 test('EDI: 837D export, sandbox eligibility with 271 apply, and 835 ERA auto-posting', async () => {
   const { api, provider, patient } = await setup();
   const carrier = (await api.post('/carriers', { name: 'Delta Dental', payer_id: '94276' })).data;

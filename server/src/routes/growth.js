@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { requirePermission, HttpError } from '../auth.js';
 import { insert, audit, practiceNow, toCents, utcRange, publicPractice } from '../util.js';
 import { sendMessage, preferredChannel } from '../messaging.js';
-import { renderTemplate, templatesFor } from '../templates.js';
+import { renderTemplate, templatesFor, patientLang, fixedText, subjectFor } from '../templates.js';
 import { mailable, statementHtml } from '../mail.js';
 import { statementData } from './billing.js';
 import { portalKey } from './portal.js';
@@ -197,7 +197,6 @@ export default function growthRoutes({ db, messenger, config, mailer = { enabled
     const ids = (req.body?.recall_ids || []).map(Number);
     if (!ids.length) throw new HttpError(400, 'Choose at least one patient');
     const practice = publicPractice(await db.get('SELECT * FROM practices WHERE id = ?', pid));
-    const templates = templatesFor(practice);
     let sent = 0;
     let skipped = 0;
     for (const rid of ids.slice(0, 500)) {
@@ -209,11 +208,13 @@ export default function growthRoutes({ db, messenger, config, mailer = { enabled
         skipped++;
         continue;
       }
-      const body = renderTemplate(templates.recall, {
-        first_name: patient.first_name, practice: practice.name, phone: practice.phone || 'the office',
-        link: practice.online_booking && practice.slug ? `${config.appUrl}/book/${practice.slug}` : '',
+      const lang = patientLang(patient);
+      const body = renderTemplate(templatesFor(practice, lang).recall, {
+        first_name: patient.first_name, practice: practice.name, phone: practice.phone || fixedText(lang).the_office,
+        link: practice.online_booking && practice.slug ? `${config.appUrl}/book/${practice.slug}${lang === 'es' ? '?lang=es' : ''}` : '',
       });
-      const msg = await sendMessage(db, messenger, { practiceId: pid, patientId: patient.id, userId: req.user.id, kind: 'recall', channel: target.channel, to: target.to, subject: `Time for your next visit at ${practice.name}`, body });
+      const subject = subjectFor(lang, 'recall', `Time for your next visit at ${practice.name}`, practice.name);
+      const msg = await sendMessage(db, messenger, { practiceId: pid, patientId: patient.id, userId: req.user.id, kind: 'recall', channel: target.channel, to: target.to, subject, body });
       if (msg.status === 'sent') {
         sent++;
         await db.run("UPDATE recalls SET status = 'contacted', last_contacted_at = datetime('now') WHERE id = ?", recall.id);

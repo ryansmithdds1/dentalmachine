@@ -1,5 +1,5 @@
 import express, { Router } from 'express';
-import { messageText } from '../templates.js';
+import { messageText, patientLang, subjectFor } from '../templates.js';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { requirePermission, HttpError } from '../auth.js';
 import { findOr404, insert, audit, toCents, practiceNow } from '../util.js';
@@ -37,8 +37,8 @@ export default function paymentRoutes({ db, config, messenger, payments, mailer 
       const practice = await db.get('SELECT name FROM practices WHERE id = ?', req.user.practice_id);
       message = await sendMessage(db, messenger, {
         practiceId: req.user.practice_id, patientId: g.id, userId: req.user.id, kind: 'payment_request', channel: target.channel, to: target.to,
-        subject: `Save a card for your payment plan — ${practice.name}`,
-        body: await messageText(db, req.user.practice_id, 'card_setup', { first_name: g.first_name, link: url }),
+        subject: subjectFor(patientLang(g), 'card_setup', `Save a card for your payment plan — ${practice.name}`, practice.name),
+        body: await messageText(db, req.user.practice_id, 'card_setup', { first_name: g.first_name, link: url }, patientLang(g)),
       });
     }
     await audit(db, req, 'card.setup_link', 'patients', g.id);
@@ -111,8 +111,8 @@ export default function paymentRoutes({ db, config, messenger, payments, mailer 
       if (target) {
         message = await sendMessage(db, messenger, {
           practiceId: req.user.practice_id, patientId: patient.id, userId: req.user.id, kind: 'payment_request', channel: target.channel, to: target.to,
-          subject: `Payment request from ${practice.name}`,
-          body: await messageText(db, req.user.practice_id, 'payment_link', { first_name: patient.first_name, amount, link: session.url }),
+          subject: subjectFor(patientLang(patient), 'payment_link', `Payment request from ${practice.name}`, practice.name),
+          body: await messageText(db, req.user.practice_id, 'payment_link', { first_name: patient.first_name, amount, link: session.url }, patientLang(patient)),
         });
       }
     }
