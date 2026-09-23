@@ -54,6 +54,7 @@ export default function DocumentsTab({ patient }) {
   const [viewing, setViewing] = useState(null);
   const [compare, setCompare] = useState(null);
   const input = useRef(null);
+  const [focusMount, setFocusMount] = useState(null);
 
   const upload = async (files) => {
     setUploading(true);
@@ -103,8 +104,8 @@ export default function DocumentsTab({ patient }) {
 
   return (
     <>
-      <ImagingBar patient={patient} />
-      <Mounts patient={patient} docs={(docs || []).filter((d) => viewerable(d.mime))} onOpen={open} canEdit={can('clinical:write')} />
+      <ImagingBar patient={patient} onCapture={setFocusMount} canCapture={can('clinical:write')} />
+      <Mounts patient={patient} docs={(docs || []).filter((d) => viewerable(d.mime))} onOpen={open} canEdit={can('clinical:write')} focus={focusMount} />
       {can('clinical:write') && (
         <div className="card">
           <div className="inline" style={{ flexWrap: 'wrap', gap: 12 }}>
@@ -177,11 +178,35 @@ const readWs = () => {
 };
 
 // Open the patient in the imaging software on this operatory's PC (through its imaging bridge).
-function ImagingBar({ patient }) {
+function ImagingBar({ patient, onCapture, canCapture }) {
   const { data: agents } = useApi('/imaging/agents');
   const [ws, setWs] = useState(readWs);
   const [status, setStatus] = useState(null);
   const [error, setError] = useState(null);
+  const [template, setTemplate] = useState('fmx18');
+  const [capture, setCapture] = useState(null);
+  // While a capture runs, follow it: the mount fills in as exposures arrive (live events reload it).
+  useEffect(() => {
+    if (!capture) return undefined;
+    let alive = true;
+    const tick = async () => {
+      try {
+        const c = await api.get(`/imaging/commands/${capture.id}`);
+        if (!alive) return;
+        if (c.status === 'expired') { setCapture(null); setError(new Error(`${capture.workstation} didn't pick up the capture — is the imaging bridge running?`)); return; }
+        if (c.status === 'done' || c.status === 'error') {
+          setCapture(null);
+          if (c.status === 'error') setError(new Error(c.result || 'Capture failed'));
+          else setStatus(c.result || 'Capture finished');
+          return;
+        }
+        setCapture((x) => x && { ...x, status: c.status });
+      } catch { /* keep polling */ }
+      if (alive) setTimeout(tick, 1500);
+    };
+    const t = setTimeout(tick, 800);
+    return () => { alive = false; clearTimeout(t); };
+  }, [capture?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!agents?.length) return null;
   const agent = agents.find((a) => String(a.id) === String(ws));
   const choose = (id) => {
@@ -223,13 +248,40 @@ function ImagingBar({ patient }) {
         <div className="inline" style={{ flexWrap: 'wrap', gap: 6 }}>
           <span className={`live-dot${agent.online ? ' on' : ''}`}>{agent.online ? 'Bridge online' : 'Bridge offline'}</span>
           {agent.apps.map((app) => <button key={app.id} className="small primary" disabled={!agent.online} onClick={() => launch(app)}>Open in {app.name}</button>)}
-          {!agent.apps.length && <span className="muted">No imaging programs set up on {agent.name}.</span>}
+          {!agent.apps.length && !agent.sensor && <span className="muted">No imaging programs set up on {agent.name}.</span>}
+        </div>
+      )}
+      {agent?.sensor && canCapture && (
+        <div className="inline imaging-capture" style={{ flexWrap: 'wrap', gap: 6 }}>
+          {capture ? (
+            <>
+              <span className="live-dot on">{capture.status === 'delivered' ? `Ready — take the exposures on ${agent.sensor}; each one fills the next spot` : `Starting ${agent.sensor} on ${agent.name}…`}</span>
+              <button className="small" onClick={() => api.post(`/imaging/commands/${capture.id}/stop`).then(() => setCapture(null)).catch(setError)}>Stop capture</button>
+            </>
+          ) : (
+            <>
+              <select aria-label="Series to capture" value={template} onChange={(e) => setTemplate(e.target.value)} style={{ width: 'auto' }}>
+                {Object.entries(MOUNTS).map(([k, m]) => <option key={k} value={k}>{m.label}</option>)}
+              </select>
+              <button className="small primary" disabled={!agent.online} onClick={startCapture}>Capture from {agent.sensor}</button>
+            </>
+          )}
         </div>
       )}
       {status && <div className="muted imaging-status">{status}</div>}
       <ErrorBox error={error} />
     </div>
   );
+
+  async function startCapture() {
+    setError(null);
+    setStatus(null);
+    try {
+      const c = await api.post(`/patients/${patient.id}/imaging/capture`, { agent_id: agent.id, template });
+      setCapture({ id: c.id, workstation: c.workstation, status: 'pending' });
+      onCapture?.(c.mount_id);
+    } catch (e) { setError(e); }
+  }
 }
 
 // Mount layouts: rows of labelled slots (FMX, bitewings, photo series).
@@ -262,9 +314,15 @@ function MountThumb({ docId, onClick, label, onClear }) {
 }
 
 // FMX and other mounts: images placed into a layout, opened in the viewer.
-function Mounts({ patient, docs, onOpen, canEdit }) {
+function Mounts({ patient, docs, onOpen, canEdit, focus }) {
   const { data: mounts, reload } = useApi(`/patients/${patient.id}/mounts`);
   const [open, setOpen] = useState(null);
+  useLiveEvents((e) => ['mounts', 'documents'].includes(e.type) && e.patient_id === patient.id && reload());
+  useEffect(() => {
+    if (!focus) return;
+    setOpen(focus);
+    reload();
+  }, [focus]); // eslint-disable-line react-hooks/exhaustive-deps
   const [picking, setPicking] = useState(null);
   const [error, setError] = useState(null);
   const current = mounts?.find((m) => m.id === open) || mounts?.[0];

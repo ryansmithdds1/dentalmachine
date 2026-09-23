@@ -103,3 +103,81 @@ test('imaging bridge: launch the imaging program from the chart and import captu
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('sensor capture: the bridge takes exposures straight into a mount, then stops when it is full', async () => {
+  const { api, patient } = await h.practice();
+  const created = (await api.post('/imaging/agents', { name: 'Op 3' })).data;
+  const dir = mkdtempSync(join(tmpdir(), 'dm-sensor-'));
+  // A stand-in TWAIN acquire command: writes one small PNG (a different one each time) to {output}.
+  const png = 'Buffer.concat([Buffer.from([0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a]), Buffer.from(String(Date.now() + Math.random()))])';
+  writeFileSync(join(dir, 'config.json'), JSON.stringify({
+    server: h.origin, token: created.token, scanSeconds: 5,
+    sensor: { name: 'Test sensor', mode: 'command', command: process.execPath, args: ['-e', `require("fs").writeFileSync(process.argv[1], ${png})`, '{output}'], extension: 'png' },
+  }));
+  const agent = spawn(process.execPath, [agentPath, join(dir, 'config.json')], { stdio: ['ignore', 'pipe', 'pipe'] });
+  let out = '';
+  agent.stdout.on('data', (d) => (out += d));
+  agent.stderr.on('data', (d) => (out += d));
+  try {
+    const ws = await waitFor(async () => (await api.get('/imaging/agents')).data.find((a) => a.name === 'Op 3' && a.online && a.sensor));
+    assert.equal(ws.sensor, 'Test sensor');
+    assert.equal((await api.post(`/patients/${patient.id}/imaging/capture`, { agent_id: ws.id, template: 'nope' })).status, 400);
+
+    const cap = await api.post(`/patients/${patient.id}/imaging/capture`, { agent_id: ws.id, template: 'bw4' });
+    assert.equal(cap.status, 201, JSON.stringify(cap.data));
+    const mount = await waitFor(async () => {
+      const m = (await api.get(`/patients/${patient.id}/mounts`)).data.find((x) => x.id === cap.data.mount_id);
+      return Object.keys(m.slots).length === 4 ? m : null;
+    }, 20_000);
+    assert.deepEqual(Object.keys(mount.slots).sort(), ['0', '1', '2', '3']);
+    const docs = (await api.get(`/patients/${patient.id}/documents`)).data;
+    assert.equal(docs.filter((d) => d.category === 'xray' && d.mime === 'image/png').length, 4);
+    const done = await waitFor(async () => {
+      const c = (await api.get(`/imaging/commands/${cap.data.id}`)).data;
+      return c.status === 'done' ? c : null;
+    });
+    assert.match(done.result, /Mount complete/);
+    await new Promise((r) => setTimeout(r, 500));
+    assert.equal((await api.get(`/patients/${patient.id}/documents`)).data.length, 4, 'no exposures after the mount is full');
+
+    // A full mount can't be captured into again; a stopped capture rejects further images.
+    assert.equal((await api.post(`/patients/${patient.id}/imaging/capture`, { agent_id: ws.id, mount_id: mount.id })).status, 409);
+    const upload = (q) => fetch(`${h.origin}/api/bridge/images?${new URLSearchParams(q)}`, { method: 'POST', headers: { Authorization: `Bridge ${created.token}` }, body: Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]) });
+    assert.equal((await upload({ filename: 'late.png', capture_id: cap.data.id })).status, 409);
+  } catch (err) {
+    err.message += `\nagent output:\n${out}`;
+    throw err;
+  } finally {
+    agent.kill();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('sensor capture: stopping from the chart ends it; workstations without a sensor are refused', async () => {
+  const { api, patient } = await h.practice();
+  const created = (await api.post('/imaging/agents', { name: 'Op 4' })).data;
+  const bridge = (method, path, body) => fetch(`${h.origin}/api/bridge${path}`, { method, headers: { Authorization: `Bridge ${created.token}`, ...(body && !Buffer.isBuffer(body) ? { 'Content-Type': 'application/json' } : {}) }, body: body ? (Buffer.isBuffer(body) ? body : JSON.stringify(body)) : undefined });
+  await bridge('POST', '/hello', { apps: [], hostname: 'op4' });
+  const ws = (await api.get('/imaging/agents')).data.find((a) => a.name === 'Op 4');
+  assert.equal((await api.post(`/patients/${patient.id}/imaging/capture`, { agent_id: ws.id })).status, 400, 'no sensor');
+
+  await bridge('POST', '/hello', { apps: [], sensor: { name: 'Folder sensor', mode: 'folder' } });
+  const cap = (await api.post(`/patients/${patient.id}/imaging/capture`, { agent_id: ws.id, template: 'fmx18' })).data;
+  const cmds = await (await bridge('GET', '/commands?wait=0')).json();
+  assert.equal(cmds[0].type, 'capture');
+  assert.equal(cmds[0].total, 18);
+  const img = await bridge('POST', `/images?filename=img1.png&capture_id=${cap.id}`, Buffer.from([0x89, 0x50, 0x4e, 0x47, 9, 9]));
+  assert.equal(img.status, 201);
+  assert.deepEqual([(await img.json()).slot, 17], [0, 17]);
+  assert.deepEqual(await (await bridge('GET', `/captures/${cap.id}`)).json(), { active: true, filled: 1, total: 18 });
+
+  await api.post(`/imaging/commands/${cap.id}/stop`);
+  assert.equal((await (await bridge('GET', `/captures/${cap.id}`)).json()).active, false);
+  assert.equal((await bridge('POST', `/images?filename=img2.png&capture_id=${cap.id}`, Buffer.from([0x89, 0x50, 0x4e, 0x47, 8, 8]))).status, 409);
+
+  // Captures only take images for their own patient.
+  const cap2 = (await api.post(`/patients/${patient.id}/imaging/capture`, { agent_id: ws.id, mount_id: cap.mount_id })).data;
+  await bridge('GET', '/commands?wait=0');
+  const other = (await api.post('/patients', { first_name: 'Otto', last_name: 'Other', dob: '1970-01-01' })).data;
+  assert.equal((await bridge('POST', `/images?filename=P${other.id}_x.png&patient_id=${other.id}&capture_id=${cap2.id}`, Buffer.from([0x89, 0x50, 0x4e, 0x47, 7]))).status, 422);
+});

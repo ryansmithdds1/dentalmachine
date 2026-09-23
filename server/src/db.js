@@ -1454,6 +1454,7 @@ const COLUMNS = [
   ['ledger_entries', 'deposit_id', 'INTEGER REFERENCES deposits(id)'],
   ['appointments', 'video_url', 'TEXT'],
   ['ledger_entries', 'ortho_case_id', 'INTEGER REFERENCES ortho_cases(id)'],
+  ['bridge_agents', 'sensor', 'TEXT'],
   ['appointment_types', 'is_video', 'INTEGER NOT NULL DEFAULT 0'],
   ['providers', 'video_room_url', 'TEXT'],
   ['users', 'custom_role_id', 'INTEGER REFERENCES custom_roles(id)'],

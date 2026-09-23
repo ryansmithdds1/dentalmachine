@@ -2,14 +2,16 @@
 // Dental Machine imaging bridge — runs on each operatory PC (Windows, macOS or Linux, Node 18+).
 //  • "Open in DEXIS" (etc.) from the chart launches your imaging program with the patient.
 //  • New images in your imaging program's export folders are uploaded to the patient's chart.
+//  • "Capture from sensor" in the chart takes x-rays straight from the sensor into a mount, through a
+//    TWAIN/WIA acquire command (e.g. NAPS2's console) or the folder the sensor driver saves to.
 // Usage: node dental-machine-bridge.mjs bridge-config.json
 import { spawn } from 'node:child_process';
-import { readFileSync, writeFileSync, readdirSync, statSync, existsSync, mkdirSync, renameSync } from 'node:fs';
+import { readFileSync, writeFileSync, readdirSync, statSync, existsSync, mkdirSync, renameSync, rmSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { hostname } from 'node:os';
+import { hostname, tmpdir } from 'node:os';
 import { join, resolve, dirname, basename } from 'node:path';
 
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
 const configPath = resolve(process.argv[2] || 'bridge-config.json');
 const config = JSON.parse(readFileSync(configPath, 'utf8'));
 const server = String(config.server || '').replace(/\/$/, '');
@@ -65,6 +67,10 @@ async function commandLoop() {
       for (const cmd of commands) {
         let result;
         try {
+          if (cmd.type === 'capture') {
+            capture(cmd); // runs until the mount is full or it's stopped from the chart; reports its own result
+            continue;
+          }
           result = { ok: true, message: cmd.type === 'launch' ? launch(cmd) : `Unknown command ${cmd.type}` };
         } catch (err) {
           result = { ok: false, message: err.message };
@@ -78,6 +84,96 @@ async function commandLoop() {
       await new Promise((r) => setTimeout(r, 5000));
     }
   }
+}
+
+// ---- Direct sensor capture ----
+// "command" mode runs an acquire command once per exposure; it writes the image to {output} and exits
+// (NAPS2.Console with the TWAIN or WIA driver, scanimage, or the sensor vendor's own CLI).
+// "folder" mode picks up whatever the sensor driver saves into a folder while the capture is running.
+const sensor = config.sensor || null;
+let capturing = null;
+const run = (command, args) => new Promise((resolveRun) => {
+  const child = spawn(command, args, { stdio: 'ignore', windowsHide: true });
+  const timer = setTimeout(() => child.kill(), (Number(sensor.timeoutSeconds) || 120) * 1000);
+  child.on('error', (err) => { clearTimeout(timer); resolveRun({ ok: false, message: err.message }); });
+  child.on('exit', (code) => { clearTimeout(timer); resolveRun({ ok: code === 0, message: `exit code ${code}` }); });
+});
+const stable = (path) => {
+  try {
+    const st = statSync(path);
+    return st.isFile() && Date.now() - st.mtimeMs > 1000 ? st : null;
+  } catch {
+    return null;
+  }
+};
+
+async function sendCaptured(cmd, path) {
+  const data = readFileSync(path);
+  const params = new URLSearchParams({ filename: basename(path), capture_id: cmd.id });
+  return call('POST', `/images?${params}`, data, { 'Content-Type': 'application/octet-stream' });
+}
+
+async function capture(cmd) {
+  if (capturing) await call('POST', `/commands/${capturing}/result`, { ok: true, message: 'Replaced by a new capture' }).catch(() => {});
+  capturing = cmd.id;
+  const who = `${cmd.patient.first_name} ${cmd.patient.last_name}`;
+  log(`Capturing ${cmd.total} images for ${who} with ${sensor?.name || 'the sensor'}`);
+  const finish = (ok, message) => {
+    if (capturing === cmd.id) capturing = null;
+    log(message);
+    return call('POST', `/commands/${cmd.id}/result`, { ok, message }).catch(() => {});
+  };
+  if (!sensor) return finish(false, 'No sensor is set up in bridge-config.json');
+  const status = () => call('GET', `/captures/${cmd.id}`).catch(() => ({ active: true }));
+  const idleLimit = (Number(sensor.idleMinutes) || 20) * 60_000;
+  let lastImage = Date.now();
+  let failures = 0;
+  const since = Date.now();
+  const sent = new Set();
+  while (capturing === cmd.id) {
+    const s = await status();
+    if (!s.active) return finish(true, `Capture for ${who} finished (${s.filled ?? '?'} of ${s.total ?? cmd.total})`);
+    if (Date.now() - lastImage > idleLimit) return finish(true, `Capture for ${who} stopped after ${sensor.idleMinutes || 20} idle minutes`);
+    let files = [];
+    if (sensor.mode === 'folder') {
+      if (existsSync(sensor.folder)) {
+        files = readdirSync(sensor.folder).map((n) => join(sensor.folder, n)).filter((p) => !sent.has(p)).filter((p) => {
+          const st = stable(p);
+          return st && st.mtimeMs >= since - 5000;
+        }).sort();
+      }
+      if (!files.length) await new Promise((r) => setTimeout(r, 700));
+    } else {
+      const output = join(tmpdir(), `dm-capture-${cmd.id}-${Date.now()}.${sensor.extension || 'png'}`);
+      const outcome = await run(fill(sensor.command, cmd.patient), (sensor.args || []).map((a) => fill(String(a).split('{output}').join(output), cmd.patient)));
+      if (capturing !== cmd.id) return undefined;
+      if (!outcome.ok || !existsSync(output)) {
+        // A sensor that timed out waiting for an exposure just tries again; repeated errors give up.
+        if (++failures >= (Number(sensor.maxFailures) || 3)) return finish(false, `Sensor capture failed (${outcome.message})`);
+        continue;
+      }
+      failures = 0;
+      files = [output];
+    }
+    for (const path of files) {
+      sent.add(path);
+      try {
+        const out = await sendCaptured(cmd, path);
+        lastImage = Date.now();
+        log(`${basename(path)} → spot ${out.slot + 1} (${out.remaining} to go)`);
+        if (sensor.mode === 'folder' && sensor.moveTo) {
+          mkdirSync(sensor.moveTo, { recursive: true });
+          renameSync(path, join(sensor.moveTo, basename(path)));
+        } else if (sensor.mode !== 'folder') rmSync(path, { force: true });
+      } catch (err) {
+        if (err.details?.duplicate) log(`${basename(path)}: ${err.message}`);
+        else if (err.status === 409) return finish(true, `Capture for ${who} was stopped`);
+        log(`${basename(path)}: upload failed (${err.message})`);
+        if (err.status >= 500 || !err.status) sent.delete(path); // retried on the next pass
+      }
+    }
+  }
+  return undefined;
 }
 
 // Picks up new files from each watched folder once they've finished writing.
@@ -124,8 +220,8 @@ async function scan() {
   }
 }
 
-const hello = await call('POST', '/hello', { apps: (config.apps || []).map((a) => ({ id: a.id, name: a.name })), hostname: hostname(), version: VERSION });
-log(`Connected to ${hello.practice} as "${hello.workstation}". Programs: ${(config.apps || []).map((a) => a.name).join(', ') || 'none'}. Watching: ${(config.watch || []).map((w) => w.folder).join(', ') || 'nothing'}.`);
+const hello = await call('POST', '/hello', { apps: (config.apps || []).map((a) => ({ id: a.id, name: a.name })), sensor: sensor ? { name: sensor.name || 'Sensor', mode: sensor.mode || 'command' } : null, hostname: hostname(), version: VERSION });
+log(`Connected to ${hello.practice} as "${hello.workstation}". Programs: ${(config.apps || []).map((a) => a.name).join(', ') || 'none'}. Watching: ${(config.watch || []).map((w) => w.folder).join(', ') || 'nothing'}.${sensor ? ` Sensor: ${sensor.name || 'yes'}.` : ''}`);
 setInterval(() => scan().catch((err) => log('scan failed:', err.message)), pollSeconds * 1000);
 scan().catch(() => {});
 commandLoop();

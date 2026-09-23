@@ -6,18 +6,55 @@
       "id": "dexis",
       "name": "DEXIS",
       "command": "C:\\DEXIS\\DEXIS.exe",
-      "args": ["/P{patientId}", "/N{lastName}, {firstName}", "/B{dobMDY}"]
+      "args": [
+        "/P{patientId}",
+        "/N{lastName}, {firstName}",
+        "/B{dobMDY}"
+      ]
     },
     {
       "id": "sidexis",
       "name": "Sidexis",
-      "writeFile": { "path": "C:\\Sidexis\\Bridge\\patient.txt", "content": "{patientId}\r\n{lastName}\r\n{firstName}\r\n{dobYMD}\r\n{gender}\r\n" },
+      "writeFile": {
+        "path": "C:\\Sidexis\\Bridge\\patient.txt",
+        "content": "{patientId}\r\n{lastName}\r\n{firstName}\r\n{dobYMD}\r\n{gender}\r\n"
+      },
       "command": "C:\\Program Files\\Dentsply Sirona\\SIDEXIS 4\\sidexis4.exe"
     }
   ],
   "watch": [
-    { "folder": "C:\\DEXIS\\Export", "category": "xray", "moveTo": "C:\\DEXIS\\Export\\sent" },
-    { "folder": "C:\\Users\\Public\\Pictures\\Intraoral camera", "category": "photo" }
+    {
+      "folder": "C:\\DEXIS\\Export",
+      "category": "xray",
+      "moveTo": "C:\\DEXIS\\Export\\sent"
+    },
+    {
+      "folder": "C:\\Users\\Public\\Pictures\\Intraoral camera",
+      "category": "photo"
+    }
   ],
-  "scanSeconds": 5
+  "scanSeconds": 5,
+  "sensor": {
+    "name": "Schick 33",
+    "mode": "command",
+    "command": "C:\\Program Files\\NAPS2\\NAPS2.Console.exe",
+    "args": [
+      "-o",
+      "{output}",
+      "--noprofile",
+      "--driver",
+      "twain",
+      "--device",
+      "Schick 33",
+      "--force"
+    ],
+    "extension": "png",
+    "timeoutSeconds": 120
+  },
+  "_sensorFolderExample": {
+    "name": "Sensor",
+    "mode": "folder",
+    "folder": "C:\\SensorCapture",
+    "moveTo": "C:\\SensorCapture\\sent"
+  }
 }
