@@ -14,6 +14,7 @@ export default function ClaimDetail() {
   const { data: c, reload, error: loadErr } = useApi(`/claims/${id}`);
   const [modal, setModal] = useState(null);
   const [checks, setChecks] = useState(0);
+  const [edits, setEdits] = useState(0);
   const [err, setErr] = useState(null);
   const { data: ch } = useApi('/clearinghouse');
   const act = async (fn) => {
@@ -44,6 +45,7 @@ export default function ClaimDetail() {
           {w && ['draft', 'denied'].includes(c.status) && <button onClick={() => act(() => api.post(`/claims/${c.id}/submit`))}>{c.status === 'denied' ? 'Resubmitted on paper' : 'Mark sent on paper'}</button>}
           {w && ['submitted', 'partially_paid'].includes(c.status) && <button className="primary" onClick={() => setModal('pay')}>Enter EOB payment</button>}
           {w && c.status === 'submitted' && <button className="danger" onClick={() => setModal('deny')}>Denied</button>}
+          {w && ['draft', 'denied'].includes(c.status) && <button onClick={() => setModal('edit')}>Edit claim</button>}
           {w && ['draft', 'denied'].includes(c.status) && <button className="danger" onClick={() => confirm('Void this claim? Procedures become billable again.') && act(() => api.post(`/claims/${c.id}/void`))}>Void</button>}
           {w && ['submitted', 'denied'].includes(c.status) && (
             <>
@@ -114,7 +116,23 @@ export default function ClaimDetail() {
         </div>
       </div>
 
-      <ClaimEdiCard claim={c} onChange={reload} />
+      {c.remarks && <div className="card"><strong>Note to payer:</strong> {c.remarks}</div>}
+      <ClaimEdiCard key={edits} claim={c} onChange={reload} />
+      {modal === 'edit' && <Modal title={`Edit claim #${c.id}`} wide onClose={() => setModal(null)}><EditClaim claim={c} onDone={(r) => { setModal(r?.corrected ? null : 'edited'); setEdits((n) => n + 1); if (r?.corrected) navigate(`/claims/${r.corrected}`); else reload(); }} /></Modal>}
+      {modal === 'edited' && (
+        <Modal title="Claim updated" onClose={() => setModal(null)}>
+          <p>The changes are saved and listed in the claim's history.</p>
+          {c.status === 'denied' && c.payer_claim_number
+            ? <p>The payer already has this claim (#{c.payer_claim_number}). Send it as a <strong>corrected claim</strong> so it replaces the original instead of being denied as a duplicate.</p>
+            : <p>Send it again when you're ready.</p>}
+          <div className="form-actions">
+            <button onClick={() => setModal(null)}>Later</button>
+            {c.status === 'denied' && c.payer_claim_number
+              ? <button className="primary" onClick={() => act(async () => { const n = await api.post(`/claims/${c.id}/correct`, { original_reference: c.payer_claim_number }); setModal(null); navigate(`/claims/${n.id}`); })}>Create corrected claim</button>
+              : <button className="primary" onClick={() => { setModal(null); sendElectronic(); }}>{ch?.batch ? 'Send to clearinghouse' : 'Download 837'}</button>}
+          </div>
+        </Modal>
+      )}
       {modal === 'pay' && <Modal title="Enter insurance payment (EOB)" onClose={() => setModal(null)}><PaymentForm claim={c} onDone={() => { setModal(null); reload(); }} /></Modal>}
       {modal === 'deny' && <Modal title="Record denial" onClose={() => setModal(null)}><DenyForm claim={c} onDone={() => { setModal(null); reload(); }} /></Modal>}
     </>
@@ -236,5 +254,44 @@ function Attachments({ claim, onChange }) {
         </Modal>
       )}
     </div>
+  );
+}
+
+// Fix a rejected or denied claim: codes, teeth and surfaces (corrected on the chart too), the prior
+// authorization number and a note to the payer. Changes are kept in the claim's history.
+function EditClaim({ claim, onDone }) {
+  const [items, setItems] = useState(() => claim.items.map((i) => ({ claim_item_id: i.id, code: i.code, tooth: i.tooth || '', surfaces: i.surfaces || '', description: i.description })));
+  const [remarks, setRemarks] = useState(claim.remarks || '');
+  const [preauth, setPreauth] = useState(claim.preauth_number || '');
+  const setItem = (idx, k, v) => setItems(items.map((x, i) => (i === idx ? { ...x, [k]: v } : x)));
+  const { submit, busy, error } = useSubmit(async () => {
+    await api.put(`/claims/${claim.id}`, { items: items.map(({ description: _, ...x }) => x), remarks, preauth_number: preauth });
+    onDone();
+  });
+  return (
+    <form onSubmit={(e) => { e.preventDefault(); submit(); }}>
+      <ErrorBox error={error} />
+      {claim.ch_message && claim.ch_status === 'rejected' && <div className="error" style={{ marginBottom: 8 }}>Rejected: {claim.ch_message}</div>}
+      {claim.denial_reason && <div className="error" style={{ marginBottom: 8 }}>Denied: {claim.denial_reason}</div>}
+      <table>
+        <thead><tr><th>Code</th><th>Description</th><th>Tooth</th><th>Surfaces</th></tr></thead>
+        <tbody>
+          {items.map((it, idx) => (
+            <tr key={it.claim_item_id}>
+              <td><input aria-label="Procedure code" value={it.code} onChange={(e) => setItem(idx, 'code', e.target.value.toUpperCase())} style={{ width: 90 }} /></td>
+              <td className="muted">{it.description}</td>
+              <td><input aria-label="Tooth" value={it.tooth} onChange={(e) => setItem(idx, 'tooth', e.target.value)} style={{ width: 60 }} /></td>
+              <td><input aria-label="Surfaces" value={it.surfaces} onChange={(e) => setItem(idx, 'surfaces', e.target.value.toUpperCase())} style={{ width: 80 }} /></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="form-grid" style={{ marginTop: 12 }}>
+        <label>Prior authorization #<input value={preauth} onChange={(e) => setPreauth(e.target.value)} /></label>
+        <label className="full">Note to payer (sent with the claim, 80 characters)<input maxLength={80} value={remarks} onChange={(e) => setRemarks(e.target.value)} placeholder="e.g. Tooth #3 corrected from #4; narrative attached" /></label>
+      </div>
+      <p className="muted" style={{ fontSize: 12 }}>Code, tooth and surface changes also correct the procedure in the patient's chart.</p>
+      <div className="form-actions"><button className="primary" disabled={busy}>Save changes</button></div>
+    </form>
   );
 }

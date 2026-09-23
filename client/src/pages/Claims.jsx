@@ -14,7 +14,7 @@ import Collections from '../components/Collections.jsx';
 import EligibilityBatch from '../components/EligibilityBatch.jsx';
 import Deposits from '../components/Deposits.jsx';
 
-const FILTERS = [['draft', 'Ready to send'], ['submitted', 'Submitted'], ['partially_paid', 'Partially paid'], ['denied', 'Denied'], ['paid', 'Paid'], ['void', 'Void'], ['', 'All']];
+const FILTERS = [['attention', 'Needs attention'], ['draft', 'Ready to send'], ['submitted', 'Submitted'], ['partially_paid', 'Partially paid'], ['denied', 'Denied'], ['paid', 'Paid'], ['void', 'Void'], ['', 'All']];
 
 // Billing workspace: claims (with 837 batches), ERA remittance posting and payment plans.
 export default function Claims() {
@@ -56,8 +56,13 @@ async function download(path, body, filename) {
 function ClaimList() {
   const nav = useNavigate();
   const { can } = useAuth();
-  const [status, setStatus] = useState('draft');
-  const { data: claims, reload } = useApi(`/claims${status ? `?status=${status}` : ''}`);
+  const [status, setStatus] = useState('attention');
+  const [carrier, setCarrier] = useState('');
+  const [age, setAge] = useState('');
+  const q = new URLSearchParams({ ...(status === 'attention' ? { attention: '1' } : status ? { status } : {}), ...(carrier ? { carrier_id: carrier } : {}), ...(age ? { age } : {}) });
+  const { data: claims, reload } = useApi(`/claims?${q}`);
+  const carriers = useLookup('/carriers');
+  const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState([]);
   const [err, setErr] = useState(null);
   const [notice, setNotice] = useState(null);
@@ -65,7 +70,21 @@ function ClaimList() {
   const { data: ch } = useApi('/clearinghouse');
   const totals = (claims || []).reduce((t, c) => ({ billed: t.billed + c.total_fee, est: t.est + c.estimated_amount, paid: t.paid + c.paid_amount }), { billed: 0, est: 0, paid: 0 });
   const sendable = (claims || []).filter((c) => ['draft', 'denied'].includes(c.status));
-
+  const picked = (claims || []).filter((c) => selected.includes(c.id));
+  const each = async (list, fn, done) => {
+    setErr(null);
+    setNotice(null);
+    setBusy(true);
+    let ok = 0;
+    const failed = [];
+    for (const c of list) {
+      try { await fn(c); ok++; } catch (e) { failed.push(`#${c.id}: ${e.message}`); }
+    }
+    setBusy(false);
+    setNotice(`${done(ok)}${failed.length ? ` — ${failed.length} failed (${failed.join('; ')})` : ''}`);
+    setSelected([]);
+    reload();
+  };
   const batch = async (ids) => {
     setErr(null);
     setNotice(null);
@@ -85,35 +104,63 @@ function ClaimList() {
       <div className="tabs" style={{ borderBottom: 'none', marginBottom: 8 }}>
         {FILTERS.map(([v, text]) => <button key={v} className={status === v ? 'active' : ''} onClick={() => { setStatus(v); setSelected([]); }}>{text}</button>)}
       </div>
+      <div className="inline" style={{ gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+        <select aria-label="Payer" value={carrier} onChange={(e) => { setCarrier(e.target.value); setSelected([]); }} style={{ width: 'auto' }}>
+          <option value="">All payers</option>
+          {carriers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+        <select aria-label="Age" value={age} onChange={(e) => { setAge(e.target.value); setSelected([]); }} style={{ width: 'auto' }}>
+          <option value="">Any age</option>
+          <option value="0-30">0–30 days</option><option value="31-60">31–60 days</option><option value="61-90">61–90 days</option><option value="90+">Over 90 days</option>
+        </select>
+      </div>
       <ClearinghousePanel onChange={reload} version={sent} />
       <ErrorBox error={err} />
       {notice && <div className="public-notice ok" style={{ marginBottom: 12 }}>{notice}</div>}
-      {can('billing:write') && sendable.length > 0 && (
+      {can('billing:write') && picked.length > 0 && (
         <div className="card inline" style={{ justifyContent: 'space-between', flexWrap: 'wrap', marginBottom: 12 }}>
-          <span>{selected.length ? `${selected.length} selected` : `${sendable.length} claim${sendable.length === 1 ? '' : 's'} ready`} · {ch?.batch ? `Sends an 837D batch straight to ${ch.name}.` : 'Creates an 837D file to upload in your clearinghouse portal.'}</span>
+          <span>{picked.length} selected</span>
+          <span className="inline" style={{ flexWrap: 'wrap' }}>
+            <button onClick={() => setSelected([])}>Clear</button>
+            {picked.some((c) => ['submitted', 'partially_paid'].includes(c.status)) && (
+              <button disabled={busy} onClick={() => each(picked.filter((c) => ['submitted', 'partially_paid'].includes(c.status)), (c) => api.post(`/claims/${c.id}/status-check`), (n) => `Checked status on ${n} claim${n === 1 ? '' : 's'}.`)}>Check status</button>
+            )}
+            {picked.some((c) => ['draft', 'denied'].includes(c.status)) && (
+              <button className="danger" disabled={busy} onClick={() => window.confirm('Void the selected unsent/denied claims? Their procedures can go on a new claim.') && each(picked.filter((c) => ['draft', 'denied'].includes(c.status)), (c) => api.post(`/claims/${c.id}/void`), (n) => `Voided ${n} claim${n === 1 ? '' : 's'}.`)}>Void</button>
+            )}
+            {picked.some((c) => ['draft', 'denied'].includes(c.status)) && (
+              <button className="primary" onClick={() => batch(picked.filter((c) => ['draft', 'denied'].includes(c.status)).map((c) => c.id))}>{ch?.batch ? 'Send to clearinghouse' : 'Download as 837'}</button>
+            )}
+            <button onClick={() => downloadCsv('claims.csv', picked, [['Claim', (c) => c.id], ['Patient', (c) => `${c.first_name} ${c.last_name}`], ['Payer', (c) => c.carrier_name], ['Status', (c) => c.status], ['Age (days)', (c) => c.age_days], ['Billed', (c) => dollars(c.total_fee)], ['Estimated', (c) => dollars(c.estimated_amount)], ['Paid', (c) => dollars(c.paid_amount)], ['Needs', (c) => c.attention || '']])}>Export</button>
+          </span>
+        </div>
+      )}
+      {can('billing:write') && !picked.length && sendable.length > 0 && (
+        <div className="card inline" style={{ justifyContent: 'space-between', flexWrap: 'wrap', marginBottom: 12 }}>
+          <span>{`${sendable.length} claim${sendable.length === 1 ? '' : 's'} ready`} · {ch?.batch ? `Sends an 837D batch straight to ${ch.name}.` : 'Creates an 837D file to upload in your clearinghouse portal.'}</span>
           <span className="inline">
-            <button onClick={() => setSelected(selected.length === sendable.length ? [] : sendable.map((c) => c.id))}>{selected.length === sendable.length ? 'Clear' : 'Select all'}</button>
-            <button className="primary" disabled={!selected.length} onClick={() => batch(selected)}>{ch?.batch ? `Send ${selected.length || ''} to clearinghouse` : `Download ${selected.length || ''} as 837`}</button>
+            <button onClick={() => setSelected(sendable.map((c) => c.id))}>Select all ready</button>
+            <button className="primary" onClick={() => batch(sendable.map((c) => c.id))}>{ch?.batch ? `Send all ${sendable.length} to clearinghouse` : `Download all ${sendable.length} as 837`}</button>
           </span>
         </div>
       )}
       <div className="card" style={{ padding: 0 }}>
         <div className="table-wrap">
           <table>
-            <thead><tr><th /><th>Claim</th><th>Patient</th><th>Carrier</th><th>Created</th><th>Submitted</th><th>Status</th><th>Electronic</th><th className="num">Billed</th><th className="num">Estimated</th><th className="num">Paid</th></tr></thead>
+            <thead><tr><th><input type="checkbox" style={{ width: 'auto' }} aria-label="Select all claims" checked={!!claims?.length && selected.length === claims.length} onChange={(e) => setSelected(e.target.checked ? claims.map((c) => c.id) : [])} /></th><th>Claim</th><th>Patient</th><th>Carrier</th><th>Created</th><th>Submitted</th><th>Status</th><th>Electronic</th><th className="num">Billed</th><th className="num">Estimated</th><th className="num">Paid</th></tr></thead>
             <tbody>
               {claims?.map((c) => (
                 <tr key={c.id} className="clickable" onClick={() => nav(`/claims/${c.id}`)}>
                   <td onClick={(e) => e.stopPropagation()}>
-                    {['draft', 'denied'].includes(c.status) && can('billing:write') && (
+                    {can('billing:write') && (
                       <input type="checkbox" style={{ width: 'auto' }} aria-label={`Select claim ${c.id}`} checked={selected.includes(c.id)} onChange={(e) => setSelected(e.target.checked ? [...selected, c.id] : selected.filter((x) => x !== c.id))} />
                     )}
                   </td>
                   <td>#{c.id}</td>
-                  <td>{c.first_name} {c.last_name}</td>
+                  <td>{c.first_name} {c.last_name}{c.attention && <div className="claim-attention">{c.attention}</div>}</td>
                   <td>{c.carrier_name}</td>
                   <td>{fmtDate(c.created_at)}</td>
-                  <td>{fmtDate(c.submitted_at)}</td>
+                  <td>{fmtDate(c.submitted_at)}{c.submitted_at && <div className="muted" style={{ fontSize: 12 }}>{c.age_days} days</div>}</td>
                   <td><Badge value={c.status} /></td>
                   <td><ChStatus claim={c} /></td>
                   <td className="num">{money(c.total_fee)}</td>

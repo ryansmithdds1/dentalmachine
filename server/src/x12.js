@@ -95,6 +95,7 @@ export function build837D({ practice, claims, senderId, receiverId, control = 1,
     for (const a of attachments) if (a.control_number) segs.push(`PWK*${a.report_type}*${a.transmission}***AC*${clean(a.control_number, 50)}`);
     if (claim.preauth_number) segs.push(`REF*G1*${clean(claim.preauth_number, 50)}`);
     if (freq !== '1' && claim.original_reference) segs.push(`REF*F8*${clean(claim.original_reference, 50)}`);
+    if (claim.remarks) segs.push(`NTE*ADD*${clean(claim.remarks, 80)}`);
     const rendering = items.find((i) => i.provider_npi);
     if (rendering) {
       const rn = splitName(rendering.provider_name.replace(/,.*$/, '').replace(/^DR\.?\s*/i, ''));

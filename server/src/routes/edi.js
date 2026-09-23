@@ -225,7 +225,8 @@ export default function ediRoutes({ db, config, clearinghouse: ch }) {
 
   r.get('/claims/:cid/events', requirePermission('billing:read'), async (req, res) => {
     const claim = await findOr404(db, 'claims', req.params.cid, req.user.practice_id, 'Claim');
-    res.json(await db.all('SELECT id, source, status, message, created_at FROM claim_events WHERE claim_id = ? ORDER BY id', claim.id));
+    const rows = await db.all('SELECT e.id, e.source, e.status, e.message, e.details, e.created_at, u.name AS user_name FROM claim_events e LEFT JOIN users u ON u.id = e.user_id WHERE e.claim_id = ? ORDER BY e.id', claim.id);
+    res.json(rows.map((e) => ({ ...e, details: e.details ? JSON.parse(e.details) : null })));
   });
 
   // One or more claims as a single 837D batch file. mark_submitted moves drafts to submitted.

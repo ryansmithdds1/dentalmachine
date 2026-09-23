@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { requirePermission, HttpError } from '../auth.js';
-import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, toCents, practiceNow, mapSeq, publicPractice } from '../util.js';
+import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, toCents, practiceNow, mapSeq, publicPractice, validTooth } from '../util.js';
 import { estimateCoverage, postClaimPayment, benefitYear, deductibleMet, reverseEntry, createClaim, checkPostingDate } from '../services.js';
 import { savePolicy, validatePlan, syncPlan, PLAN_BENEFITS, DEFAULT_FREQUENCIES, planFor } from '../benefits.js';
 
@@ -160,7 +160,27 @@ export default function insuranceRoutes({ db }) {
       where.push('c.patient_id = ?');
       params.push(Number(req.query.patient_id));
     }
-    res.json(await db.all(`${CLAIM_SELECT} WHERE ${where.join(' AND ')} ORDER BY c.created_at DESC, c.id DESC`, ...params));
+    if (req.query.carrier_id) {
+      where.push('ic.id = ?');
+      params.push(Number(req.query.carrier_id));
+    }
+    const rows = await db.all(`${CLAIM_SELECT} WHERE ${where.join(' AND ')} ORDER BY c.created_at DESC, c.id DESC`, ...params);
+    // Worklist: how old each claim is (since it was sent, or created if not yet sent) and whether it needs
+    // someone — rejected, denied, or no answer from the payer after 30 days. Those come first.
+    const now = Date.now();
+    for (const c of rows) {
+      const since = c.submitted_at || c.created_at;
+      c.age_days = Math.max(0, Math.floor((now - Date.parse(since.includes('T') ? since : `${since.replace(' ', 'T')}Z`)) / 86400_000));
+      c.attention = c.ch_status === 'rejected' && c.status === 'draft' ? `Rejected: ${c.ch_message || 'see claim history'}`
+        : c.status === 'denied' ? `Denied${c.denial_reason ? `: ${c.denial_reason}` : ''}`
+          : ['submitted', 'partially_paid'].includes(c.status) && c.age_days > 30 ? `No payment after ${c.age_days} days`
+            : null;
+    }
+    const [min, max] = { '0-30': [0, 30], '31-60': [31, 60], '61-90': [61, 90], '90+': [91, Infinity] }[req.query.age] || [0, Infinity];
+    let out = rows.filter((c) => c.age_days >= min && c.age_days <= max);
+    if (req.query.attention === '1') out = out.filter((c) => c.attention);
+    out.sort((a, b) => (!!b.attention - !!a.attention) || (a.attention ? b.age_days - a.age_days : 0));
+    res.json(out);
   });
 
   r.get('/claims/:cid', requirePermission('billing:read'), async (req, res) => {
@@ -235,6 +255,73 @@ export default function insuranceRoutes({ db }) {
     res.json(await db.get(`${CLAIM_SELECT} WHERE c.id = ?`, claim.id));
   });
 
+  // Fix a claim before (re)sending it — after a clearinghouse rejection or a payer denial: the procedure
+  // code, tooth and surfaces (corrected on the chart too), the prior-authorization number, and a note to
+  // the payer. What changed is kept on the claim's history. A claim the payer already has goes back out as a
+  // corrected claim (below) once edited.
+  r.put('/claims/:cid', requirePermission('billing:write'), async (req, res) => {
+    const claim = await findOr404(db, 'claims', req.params.cid, req.user.practice_id, 'Claim');
+    if (!['draft', 'denied'].includes(claim.status)) {
+      throw new HttpError(409, claim.status === 'submitted' ? 'This claim is with the payer — send a corrected claim instead' : `A ${claim.status} claim can't be edited${['paid', 'partially_paid'].includes(claim.status) ? ' — reopen it first' : ''}`);
+    }
+    const b = req.body || {};
+    const changes = [];
+    const claimRow = {};
+    for (const [key, label, max] of [['remarks', 'Note to payer', 80], ['preauth_number', 'Prior authorization #', 50]]) {
+      if (b[key] === undefined) continue;
+      const v = String(b[key] || '').trim().slice(0, max) || null;
+      if (v !== (claim[key] || null)) { claimRow[key] = v; changes.push({ field: label, from: claim[key] || null, to: v }); }
+    }
+    const items = await db.all('SELECT ci.id, ci.procedure_id, pr.code, pr.tooth, pr.surfaces FROM claim_items ci JOIN procedures pr ON pr.id = ci.procedure_id WHERE ci.claim_id = ?', claim.id);
+    const procUpdates = [];
+    for (const it of Array.isArray(b.items) ? b.items : []) {
+      const line = items.find((x) => x.id === Number(it.claim_item_id));
+      if (!line) throw new HttpError(400, `Line ${it.claim_item_id} isn't on this claim`);
+      const row = {};
+      if (it.code !== undefined && String(it.code).trim().toUpperCase() !== line.code) {
+        const code = await db.get('SELECT * FROM procedure_codes WHERE practice_id = ? AND code = ?', req.user.practice_id, String(it.code).trim().toUpperCase());
+        if (!code) throw new HttpError(400, `Unknown procedure code ${it.code}`);
+        Object.assign(row, { code_id: code.id, code: code.code, description: code.description, category: code.category });
+      }
+      if (it.tooth !== undefined) {
+        const t = String(it.tooth || '').trim().toUpperCase() || null;
+        if (t && !validTooth(t)) throw new HttpError(400, `Line ${line.code}: tooth must be 1-32 or A-T`);
+        if (t !== (line.tooth || null)) row.tooth = t;
+      }
+      if (it.surfaces !== undefined) {
+        const s = String(it.surfaces || '').toUpperCase().replace(/[^MODBLIF]/g, '') || null;
+        if (s !== (line.surfaces || null)) row.surfaces = s;
+      }
+      if (!Object.keys(row).length) continue;
+      procUpdates.push([line, row]);
+      const name = `${line.code}${line.tooth ? ` #${line.tooth}` : ''}`;
+      if (row.code) changes.push({ field: `${name} code`, from: line.code, to: row.code });
+      if ('tooth' in row) changes.push({ field: `${name} tooth`, from: line.tooth || null, to: row.tooth });
+      if ('surfaces' in row) changes.push({ field: `${name} surfaces`, from: line.surfaces || null, to: row.surfaces });
+    }
+    if (!changes.length) throw new HttpError(400, 'Nothing changed');
+    await db.tx(async () => {
+      if (Object.keys(claimRow).length) await update(db, 'claims', claim.id, req.user.practice_id, claimRow);
+      for (const [line, row] of procUpdates) {
+        await db.run(`UPDATE procedures SET ${Object.keys(row).map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, ...Object.values(row), line.procedure_id);
+      }
+      // A different code can change what insurance covers: re-estimate this claim's lines.
+      if (procUpdates.some(([, row]) => row.code)) {
+        const policy = await db.get('SELECT pi.*, c.name AS carrier_name FROM patient_insurance pi JOIN insurance_carriers c ON c.id = pi.carrier_id WHERE pi.id = ?', claim.patient_insurance_id);
+        if (policy.priority !== 'secondary') {
+          const procs = await db.all(`SELECT * FROM procedures WHERE id IN (${items.map(() => '?').join(',')})`, ...items.map((i) => i.procedure_id));
+          const est = await estimateCoverage(db, policy, procs);
+          for (const e of est.items) await db.run('UPDATE claim_items SET estimated_amount = ?, write_off = ? WHERE claim_id = ? AND procedure_id = ?', e.insurance, e.write_off, claim.id, e.procedure_id);
+          await db.run('UPDATE claims SET estimated_amount = ?, deductible_applied = ?, write_off_estimate = ? WHERE id = ?', est.total_insurance, est.total_deductible, est.total_write_off, claim.id);
+        }
+      }
+      const summary = changes.map((c) => `${c.field}: ${c.from ?? '—'} → ${c.to ?? '—'}`).join('; ');
+      await insert(db, 'claim_events', { practice_id: claim.practice_id, claim_id: claim.id, source: 'edit', status: claim.ch_status || claim.status, message: `Edited — ${summary}`.slice(0, 500), details: JSON.stringify(changes), user_id: req.user.id });
+    });
+    await audit(db, req, 'claim.edit', 'claims', claim.id, { changes });
+    res.json({ ...(await db.get(`${CLAIM_SELECT} WHERE c.id = ?`, claim.id)), changes });
+  });
+
   // Corrected (replacement) or void claims to the payer. The original is closed here, a new claim goes out
   // with frequency 7 (replaces) or 8 (cancels) and the payer's original claim number.
   r.post('/claims/:cid/correct', requirePermission('billing:write'), async (req, res) => {
@@ -250,7 +337,7 @@ export default function insuranceRoutes({ db }) {
       await db.run("UPDATE claims SET status = 'void', ch_status = ?, ch_message = ? WHERE id = ?", 'replaced', kind === 'void' ? 'Cancelled at the payer by a void claim' : 'Replaced by a corrected claim', claim.id);
       const newId = await createClaim(db, {
         practiceId: req.user.practice_id, policyId: claim.patient_insurance_id, procedureIds, userId: req.user.id,
-        extra: { frequency_code: kind === 'void' ? '8' : '7', original_reference: reference.slice(0, 50), corrected_from_id: claim.id, preauth_number: claim.preauth_number },
+        extra: { frequency_code: kind === 'void' ? '8' : '7', original_reference: reference.slice(0, 50), corrected_from_id: claim.id, preauth_number: claim.preauth_number, remarks: claim.remarks },
       });
       // A void notice pays nothing; it only tells the payer to cancel the original.
       if (kind === 'void') await db.run('UPDATE claims SET estimated_amount = 0, write_off_estimate = 0 WHERE id = ?', newId);

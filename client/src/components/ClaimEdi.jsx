@@ -177,15 +177,26 @@ export function ClaimEdiCard({ claim, onChange }) {
   return (
     <div className="card">
       <div className="inline" style={{ justifyContent: 'space-between' }}>
-        <h2 style={{ margin: 0 }}>Electronic status</h2>
+        <h2 style={{ margin: 0 }}>Status and history</h2>
         {canCheck && <button className="small" disabled={checking} onClick={check}>{checking ? 'Asking payer…' : 'Check status with payer'}</button>}
       </div>
       <ErrorBox error={err} />
       <ol className="timeline">
         {events?.map((e) => (
           <li key={e.id} className={`tl-${(CH_STATUS[e.status] || [])[1] || 'info'}`}>
-            <div><strong>{(CH_STATUS[e.status] || [e.status])[0]}</strong> <span className="muted">· {e.source} · {fmtUtcDateTime(e.created_at, practice?.timezone)}</span></div>
-            {e.message && <div className="muted">{e.message}</div>}
+            {e.source === 'edit' ? (
+              <>
+                <div><strong>Edited</strong> <span className="muted">· {e.user_name || 'staff'} · {fmtUtcDateTime(e.created_at, practice?.timezone)}</span></div>
+                <ul className="claim-diff">
+                  {(e.details || []).map((d, i) => <li key={i}>{d.field}: <del>{d.from ?? '—'}</del> → <ins>{d.to ?? '—'}</ins></li>)}
+                </ul>
+              </>
+            ) : (
+              <>
+                <div><strong>{(CH_STATUS[e.status] || [e.status])[0]}</strong> <span className="muted">· {e.source} · {fmtUtcDateTime(e.created_at, practice?.timezone)}</span></div>
+                {e.message && <div className="muted">{e.message}</div>}
+              </>
+            )}
           </li>
         ))}
         {!events?.length && <li className="muted">Not sent electronically yet.</li>}

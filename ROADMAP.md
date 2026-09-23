@@ -249,8 +249,8 @@ Works well: drag, resize and create; undo; live updates; conflict checks; open-t
 6. **P2** Payment plans: editable schedule, late fees, and the amount due shown on statements.
 
 ### Claims and EDI
-1. **P1** Claims worklist: filters by payer, age and status; bulk actions; "needs attention" first.
-2. **P1** Claim edit after rejection, with a diff of what changed; resubmit as a corrected claim.
+1. ✅ **P1** Claims worklist: filters by payer, age and status; bulk actions; "needs attention" first. _(Done: “Needs attention” tab (rejected, denied, no payment after 30 days) sorted oldest first with the reason on each row; payer and age filters; bulk send, status check, void and export.)_
+2. ✅ **P1** Claim edit after rejection, with a diff of what changed; resubmit as a corrected claim. _(Done: edit code, tooth, surfaces (chart corrected too, estimate redone), prior-auth # and a note to the payer (NTE in the 837); each edit is kept in the claim history as a before/after list; a denied claim the payer already has is offered as a corrected claim.)_
 3. **P2** Record insurance follow-up calls on the claim (like follow-up lists).
 4. **P2** Print an ADA 2024 claim form (paper fallback).
 
