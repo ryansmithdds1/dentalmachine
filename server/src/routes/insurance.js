@@ -88,6 +88,7 @@ export default function insuranceRoutes({ db }) {
   const planView = (plan, members) => ({
     ...plan, members, frequencies: plan.frequencies ? JSON.parse(plan.frequencies) : DEFAULT_FREQUENCIES,
     coverage_overrides: plan.coverage_overrides ? JSON.parse(plan.coverage_overrides) : {},
+    age_limits: plan.age_limits ? JSON.parse(plan.age_limits) : [],
   });
   r.get('/insurance-plans', requirePermission('billing:read'), async (req, res) => {
     const rows = await db.all(
@@ -119,6 +120,8 @@ export default function insuranceRoutes({ db }) {
   r.put('/insurance-plans/:pid', requirePermission('billing:write'), async (req, res) => {
     const plan = await findOr404(db, 'insurance_plans', req.params.pid, req.user.practice_id, 'Plan');
     const row = validatePlan(pick(req.body, PLAN_FIELDS.filter((f) => f !== 'carrier_id')));
+    // Where the breakdown came from (the portal, a call, an AI-read document) and when, for the next person who asks.
+    if (['portal', 'phone', 'fax', 'eligibility', 'ai_read'].includes(req.body.verified_source)) Object.assign(row, { verified_source: req.body.verified_source, verified_at: new Date().toISOString().slice(0, 19).replace('T', ' ') });
     if (row.fee_schedule_id) await findOr404(db, 'fee_schedules', row.fee_schedule_id, req.user.practice_id, 'Fee schedule');
     await db.tx(async () => {
       await update(db, 'insurance_plans', plan.id, req.user.practice_id, row);

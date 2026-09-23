@@ -25,6 +25,7 @@ import { voiceWebhooks } from './routes/voice.js';
 import financeRoutes, { financePublicRoutes } from './routes/finance.js';
 import scribeRoutes from './routes/scribe.js';
 import xrayAiRoutes from './routes/xrayai.js';
+import insuranceAiRoutes from './routes/insuranceai.js';
 import { createXrayAi, registerXrayAi } from './xrayai.js';
 import { registerFill } from './fill.js';
 import { createPlaid } from './finance/plaid.js';
@@ -149,10 +150,10 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   app.use(deliveryWebhooks({ db, config }));
   app.use(voiceWebhooks({ db, config }));
   app.use(financePublicRoutes({ db, config, secret, plaid, qbo }));
-  // Signed forms can carry photos (insurance cards, ID), so that one route takes larger bodies.
+  // Signed forms can carry photos (insurance cards, ID), and documents sent to be read (benefit summaries, EOBs), so those routes take larger bodies.
   const jsonBody = express.json({ limit: '1mb' });
   const formBody = express.json({ limit: '15mb' });
-  app.use((req, res, next) => (/^\/api\/public\/forms\/[^/]+\/\d+$/.test(req.path) ? formBody : jsonBody)(req, res, next));
+  app.use((req, res, next) => (/^\/api\/public\/forms\/[^/]+\/\d+$|^\/api\/insurance-plans\/\d+\/read-benefits$|^\/api\/eobs\/read$/.test(req.path) ? formBody : jsonBody)(req, res, next));
   app.use((req, res, next) => {
     // Patient data isn't left in the browser's or a proxy's disk cache.
     if (req.path.startsWith('/api/')) res.set('Cache-Control', 'no-store');
@@ -219,6 +220,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(financeRoutes({ db, config, secret, plaid, qbo }));
   api.use(scribeRoutes({ db, config }));
   api.use(xrayAiRoutes({ db, xrayAi }));
+  api.use(insuranceAiRoutes({ db, config }));
   api.use(attachmentRoutes({ db, storage, sender: attachmentSender ?? createAttachmentSender(attachmentConfig(process.env, config.ediMode), fetchImpl) }));
   api.use(billingRoutes({ db, payments, config, messenger }));
   api.use(insuranceRoutes({ db }));

@@ -9,7 +9,7 @@ import { insert, addMonths, practiceNow, mapSeq } from './util.js';
 export const PLAN_BENEFITS = [
   'annual_max', 'deductible', 'family_deductible', 'pct_preventive', 'pct_basic', 'pct_major', 'benefit_month',
   'ortho_max', 'ortho_pct', 'ortho_age_limit', 'wait_basic_months', 'wait_major_months', 'downgrade_composites',
-  'frequencies', 'coverage_overrides', 'fee_schedule_id',
+  'frequencies', 'coverage_overrides', 'fee_schedule_id', 'missing_tooth_clause', 'age_limits', 'benefit_notes',
 ];
 const SYNCED = ['annual_max', 'deductible', 'pct_preventive', 'pct_basic', 'pct_major', 'benefit_month'];
 
@@ -24,6 +24,9 @@ export const DEFAULT_FREQUENCIES = [
   { label: 'Crowns (same tooth)', codes: ['D27', 'D6065'], count: 1, months: 60, per_tooth: true },
   { label: 'Scaling & root planing (same quadrant)', codes: ['D4341', 'D4342'], count: 1, months: 24, per_area: true },
 ];
+
+// Implants, pontics, partials and dentures replace missing teeth.
+const REPLACES_TOOTH = /^D(60[0-9]{2}|62[0-9]{2}|52[0-9]{2}|51[0-9]{2})$/;
 
 const json = (v, fallback) => {
   if (v == null || v === '') return fallback;
@@ -48,6 +51,13 @@ export function validatePlan(row) {
   for (const k of ['wait_basic_months', 'wait_major_months', 'ortho_age_limit']) if (row[k] != null && row[k] !== '') row[k] = Math.max(0, Math.round(Number(row[k]) || 0));
   if (row.benefit_month != null && !(Number(row.benefit_month) >= 1 && Number(row.benefit_month) <= 12)) throw new HttpError(400, 'benefit_month must be 1-12');
   if (row.downgrade_composites != null) row.downgrade_composites = row.downgrade_composites ? 1 : 0;
+  if (row.missing_tooth_clause != null) row.missing_tooth_clause = row.missing_tooth_clause ? 1 : 0;
+  if (row.benefit_notes != null) row.benefit_notes = String(row.benefit_notes).slice(0, 2000) || null;
+  if (row.age_limits != null) {
+    const list = json(row.age_limits, null);
+    if (!Array.isArray(list) || list.some((a) => !Array.isArray(a.codes) || !a.codes.length || !(Number(a.max_age) >= 0))) throw new HttpError(400, 'age_limits must be a list of { codes, max_age }');
+    row.age_limits = JSON.stringify(list.map((a) => ({ codes: a.codes.map((c) => String(c).toUpperCase()), max_age: Math.round(Number(a.max_age)) })));
+  }
   if (row.frequencies != null) {
     const list = json(row.frequencies, null);
     if (!Array.isArray(list) || list.some((f) => !Array.isArray(f.codes) || !f.codes.length || !(Number(f.count) >= 0) || (!f.months && f.per !== 'benefit_year'))) {
@@ -247,6 +257,20 @@ export async function estimateCoverage(db, rawPolicy, procedures, { primary = nu
       } else if (plan.ortho_age_limit && age != null && age >= plan.ortho_age_limit) {
         covered = false;
         notes.push(`Orthodontics covered only under age ${plan.ortho_age_limit}`);
+      }
+    }
+    // Age limits (fluoride and sealants for children, usually): past the age, not covered.
+    const limit = covered && json(plan.age_limits, []).find((l) => l.codes.some((c) => p.code.startsWith(c)));
+    if (limit && patient?.dob && Math.floor((Date.parse(dos) - Date.parse(patient.dob)) / (365.25 * 86400_000)) > limit.max_age) {
+      covered = false;
+      notes.push(`Covered only through age ${limit.max_age}`);
+    }
+    // Missing tooth clause: replacing a tooth that was already missing when coverage began isn't covered.
+    if (covered && plan.missing_tooth_clause && REPLACES_TOOTH.test(p.code) && p.tooth) {
+      const missing = await db.get("SELECT recorded_at FROM tooth_conditions WHERE patient_id = ? AND tooth = ? AND condition = 'missing' ORDER BY recorded_at LIMIT 1", p.patient_id, String(p.tooth).toUpperCase());
+      if (missing && (!policy.effective_date || String(missing.recorded_at).slice(0, 10) < policy.effective_date)) {
+        covered = false;
+        notes.push(policy.effective_date ? 'Missing tooth clause: the tooth was missing before coverage began' : 'Missing tooth clause: check when the tooth was lost');
       }
     }
     // Alternate benefit: posterior composites paid as amalgam.

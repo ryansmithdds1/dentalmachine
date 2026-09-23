@@ -8,6 +8,7 @@ import { Badge, ErrorBox, Modal, MoreRows } from '../components/ui.jsx';
 import { PlanSummary } from '../components/patient/PaymentPlans.jsx';
 import { ChStatus, ClearinghousePanel, sendClaims, describeResponses, CallForm, CALL_OUTCOMES } from '../components/ClaimEdi.jsx';
 import InsurancePlanForm from '../components/InsurancePlanForm.jsx';
+import AiFileRead from '../components/AiFileRead.jsx';
 import { useLookup } from '../hooks.js';
 import { downloadCsv, dollars } from '../api.js';
 import Collections from '../components/Collections.jsx';
@@ -574,7 +575,23 @@ function CheckForm({ onDone }) {
   const [lineMode, setLineMode] = useState({});
   const [err, setErr] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [eob, setEob] = useState(null);
   const row = (id) => rows[id] || { paid: '', write_off: '', final: true, lines: {} };
+  const d = (c) => (c == null ? '' : (c / 100).toFixed(2));
+  // A paper EOB read by AI fills the check in: header, then each claim it matched, line by line.
+  const fromEob = (r) => {
+    setEob(r);
+    setHead({ ...head, carrier_id: r.carrier_id ? String(r.carrier_id) : head.carrier_id, check_number: r.check_number || head.check_number, check_date: r.check_date || head.check_date, amount: r.amount != null ? d(r.amount) : head.amount, method: r.method || head.method });
+    const next = {};
+    const byLine = {};
+    for (const c of r.claims.filter((x) => x.claim_id)) {
+      const lines = Object.fromEntries(c.lines.filter((l) => l.claim_item_id).map((l) => [l.claim_item_id, { paid: d(l.paid), write_off: d(l.write_off) }]));
+      next[c.claim_id] = { paid: d(c.paid), write_off: d(c.write_off), final: true, lines };
+      if (c.lines.length && c.lines.every((l) => l.claim_item_id)) byLine[c.claim_id] = true;
+    }
+    setRows(next);
+    setLineMode(byLine);
+  };
   const setRow = (id, patch) => setRows({ ...rows, [id]: { ...row(id), ...patch } });
   const chosen = (open || []).filter((c) => row(c.id).paid !== '' || row(c.id).write_off !== '');
   const total = chosen.reduce((s, c) => s + toCents(row(c.id).paid || 0), 0);
@@ -608,6 +625,16 @@ function CheckForm({ onDone }) {
   return (
     <div>
       <ErrorBox error={err} />
+      <AiFileRead path="/eobs/read" label="Read a paper EOB" hint="Upload a scan or photo of the EOB and the check fills in below, matched to your claims, for you to check and post." onRead={fromEob} />
+      {eob && (
+        <div className="public-notice" style={{ marginBottom: 10 }}>
+          Read {eob.claims.length} claim{eob.claims.length === 1 ? '' : 's'} from {eob.payer_name || 'the EOB'}; {eob.claims.filter((c) => c.claim_id).length} matched.
+          {!eob.carrier_id && ' Pick the carrier — the payer name didn’t match one on file.'}
+          {!eob.totals_match && ' The claims don’t add up to the check total — check the amounts.'}
+          {eob.claims.filter((c) => !c.claim_id).map((c, i) => <div key={i}>Not matched: {c.patient_name}{c.date_of_service ? `, ${fmtDate(c.date_of_service)}` : ''} — {money(c.paid)}{c.denied ? ' (denied)' : ''}{c.remarks ? ` · ${c.remarks}` : ''}</div>)}
+          {eob.claims.filter((c) => c.claim_id && (c.denied || c.remarks)).map((c, i) => <div key={`r${i}`}>Claim #{c.claim_id}: {c.denied ? 'denied. ' : ''}{c.remarks}</div>)}
+        </div>
+      )}
       <div className="form-grid">
         <label>Carrier<select value={head.carrier_id} onChange={(e) => { setHead({ ...head, carrier_id: e.target.value }); setRows({}); }}><option value="">Select…</option>{carriers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
         <label>Check / EFT #<input value={head.check_number} onChange={(e) => setHead({ ...head, check_number: e.target.value })} /></label>

@@ -1980,6 +1980,11 @@ const COLUMNS = [
   ['practices', 'auto_fill', 'INTEGER NOT NULL DEFAULT 1'],
   ['practices', 'fill_batch', 'INTEGER NOT NULL DEFAULT 5'],
   ['practices', 'confirm_calls', 'INTEGER NOT NULL DEFAULT 0'],
+  ['insurance_plans', 'missing_tooth_clause', 'INTEGER NOT NULL DEFAULT 0'],
+  ['insurance_plans', 'age_limits', 'TEXT'],
+  ['insurance_plans', 'benefit_notes', 'TEXT'],
+  ['insurance_plans', 'verified_at', 'TEXT'],
+  ['insurance_plans', 'verified_source', 'TEXT'],
 ];
 
 // CHECK constraints widened after release: [table, constraint name on Postgres, old text, new text].

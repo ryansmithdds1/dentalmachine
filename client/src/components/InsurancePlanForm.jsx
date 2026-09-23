@@ -3,6 +3,16 @@ import { api } from '../api.js';
 import { useLookup } from '../hooks.js';
 import { toCents, fromCents } from '../format.js';
 import { ErrorBox, useSubmit } from './ui.jsx';
+import AiFileRead from './AiFileRead.jsx';
+
+const toFreqRow = (f) => ({ ...f, codes: f.codes.join(', '), window: f.per === 'benefit_year' ? 'year' : String(f.months) });
+const LABELS = {
+  annual_max: 'Annual maximum', deductible: 'Deductible', family_deductible: 'Family deductible', pct_preventive: 'Preventive %', pct_basic: 'Basic %', pct_major: 'Major %',
+  benefit_month: 'Benefit year', wait_basic_months: 'Basic waiting period', wait_major_months: 'Major waiting period', ortho_max: 'Ortho maximum', ortho_pct: 'Ortho %',
+  ortho_age_limit: 'Ortho age limit', downgrade_composites: 'Composite downgrade', missing_tooth_clause: 'Missing tooth clause', frequencies: 'Frequency limits',
+  coverage_overrides: 'Coverage exceptions', age_limits: 'Age limits',
+};
+const MONEY = new Set(['annual_max', 'deductible', 'family_deductible', 'ortho_max']);
 
 const MONTHS = Array.from({ length: 12 }, (_, i) => new Date(2000, i, 1).toLocaleString('en-US', { month: 'long' }));
 
@@ -27,11 +37,32 @@ export default function InsurancePlanForm({ plan, carrierId, onDone }) {
     ortho_pct: plan?.ortho_pct ?? 50,
     ortho_age_limit: plan?.ortho_age_limit ?? '',
     downgrade_composites: !!plan?.downgrade_composites,
+    missing_tooth_clause: !!plan?.missing_tooth_clause,
+    benefit_notes: plan?.benefit_notes || '',
+    age_limits: (plan?.age_limits || []).map((a) => ({ codes: a.codes.join(', '), max_age: a.max_age })),
     fee_schedule_id: plan?.fee_schedule_id ?? '',
     notes: plan?.notes || '',
-    frequencies: (plan?.frequencies || []).map((f) => ({ ...f, codes: f.codes.join(', '), window: f.per === 'benefit_year' ? 'year' : String(f.months) })),
+    frequencies: (plan?.frequencies || []).map(toFreqRow),
     overrides: Object.entries(plan?.coverage_overrides || {}).map(([code, pct]) => ({ code, pct })),
   }));
+  const [read, setRead] = useState(null);
+  // What the AI read goes into the form, field by field, for a person to check and save.
+  const applyRead = (r) => {
+    const p = r.proposed;
+    const next = { ...form };
+    for (const [k, v] of Object.entries(p)) {
+      if (k === 'frequencies') next.frequencies = v.map(toFreqRow);
+      else if (k === 'coverage_overrides') next.overrides = Object.entries(v).map(([code, pct]) => ({ code, pct }));
+      else if (k === 'age_limits') next.age_limits = v.map((a) => ({ codes: a.codes.join(', '), max_age: a.max_age }));
+      else if (k === 'downgrade_composites' || k === 'missing_tooth_clause') next[k] = !!v;
+      else next[k] = MONEY.has(k) ? fromCents(v) : v;
+    }
+    if (r.notes?.length) next.benefit_notes = [form.benefit_notes, ...r.notes].filter(Boolean).join('\n');
+    if (!form.name && r.plan_name) next.name = r.plan_name;
+    setForm(next);
+    const changed = Object.keys(p).filter((k) => JSON.stringify(p[k]) !== JSON.stringify(r.current[k]));
+    setRead({ ...r, changed });
+  };
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value });
   const setRow = (list, i, patch) => setForm({ ...form, [list]: form[list].map((r, j) => (j === i ? { ...r, ...patch } : r)) });
   const { submit, busy, error } = useSubmit(async () => {
@@ -41,7 +72,10 @@ export default function InsurancePlanForm({ plan, carrierId, onDone }) {
       pct_preventive: Number(form.pct_preventive), pct_basic: Number(form.pct_basic), pct_major: Number(form.pct_major), benefit_month: Number(form.benefit_month),
       wait_basic_months: Number(form.wait_basic_months || 0), wait_major_months: Number(form.wait_major_months || 0),
       ortho_max: toCents(form.ortho_max || 0), ortho_pct: Number(form.ortho_pct), ortho_age_limit: form.ortho_age_limit === '' ? null : Number(form.ortho_age_limit),
-      downgrade_composites: form.downgrade_composites, fee_schedule_id: form.fee_schedule_id ? Number(form.fee_schedule_id) : null,
+      downgrade_composites: form.downgrade_composites, missing_tooth_clause: form.missing_tooth_clause, benefit_notes: form.benefit_notes || null,
+      age_limits: form.age_limits.filter((a) => a.codes.trim()).map((a) => ({ codes: a.codes.split(/[\s,]+/).filter(Boolean), max_age: Number(a.max_age) })),
+      ...(read ? { verified_source: 'ai_read' } : {}),
+      fee_schedule_id: form.fee_schedule_id ? Number(form.fee_schedule_id) : null,
       // A new plan with no limits entered starts from the usual ones.
       ...(!plan?.id && !form.frequencies.length ? {} : { frequencies: form.frequencies.filter((f) => f.codes.trim()).map((f) => ({
         label: f.label, codes: f.codes.split(/[\s,]+/).filter(Boolean), count: Number(f.count),
@@ -55,6 +89,20 @@ export default function InsurancePlanForm({ plan, carrierId, onDone }) {
   return (
     <form onSubmit={(e) => { e.preventDefault(); submit(); }}>
       <ErrorBox error={error} />
+      {plan?.id && (
+        <AiFileRead
+          path={`/insurance-plans/${plan.id}/read-benefits`} label="Read a benefit summary"
+          hint="Upload the payer portal’s benefit page (saved as PDF or a screenshot) or a breakdown fax, and the fields below fill in for you to check."
+          onRead={applyRead}
+        />
+      )}
+      {read && (
+        <div className="public-notice" style={{ marginBottom: 10 }}>
+          {read.changed.length ? <>Filled in from the document — check before saving: <strong>{read.changed.map((k) => LABELS[k] || k).join(', ')}</strong>.</> : 'The document matches what’s on file.'}
+          {read.history?.length > 0 && <div style={{ marginTop: 4 }}>History on the document: {read.history.map((h) => `${h.codes.join('/')} on ${h.date}`).join('; ')}</div>}
+        </div>
+      )}
+      {plan?.verified_at && !read && <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>Breakdown last verified {plan.verified_at.slice(0, 10)}{plan.verified_source ? ` (${plan.verified_source === 'ai_read' ? 'read from a document' : plan.verified_source})` : ''}.</div>}
       {plan?.members > 1 && <div className="public-notice" style={{ marginBottom: 10 }}>Shared by {plan.members} patients — changes apply to all of them.</div>}
       <div className="form-grid">
         <label>
@@ -86,6 +134,7 @@ export default function InsurancePlanForm({ plan, carrierId, onDone }) {
         <label>Ortho %<input type="number" min="0" max="100" value={form.ortho_pct} onChange={set('ortho_pct')} /></label>
         <label>Ortho age limit<input type="number" min="0" value={form.ortho_age_limit} onChange={set('ortho_age_limit')} placeholder="none" /></label>
         <label className="checkbox full"><input type="checkbox" checked={form.downgrade_composites} onChange={set('downgrade_composites')} /> Posterior composites are paid as amalgam (alternate benefit)</label>
+        <label className="checkbox full"><input type="checkbox" checked={form.missing_tooth_clause} onChange={set('missing_tooth_clause')} /> Missing tooth clause (teeth missing before coverage began aren’t replaced)</label>
       </div>
 
       <h3 style={{ marginTop: 16 }}>How often services are covered</h3>
@@ -124,6 +173,17 @@ export default function InsurancePlanForm({ plan, carrierId, onDone }) {
         </div>
       ))}
       <button type="button" className="small" onClick={() => setForm({ ...form, overrides: [...form.overrides, { code: '', pct: 50 }] })}>+ Exception</button>
+      <h3 style={{ marginTop: 16 }}>Age limits</h3>
+      <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>Services covered only up to an age (fluoride through 14, sealants through 15…).</p>
+      {form.age_limits.map((a, i) => (
+        <div key={i} className="inline" style={{ marginBottom: 6 }}>
+          <input value={a.codes} onChange={(e) => setRow('age_limits', i, { codes: e.target.value })} placeholder="D1206, D1208" style={{ width: 180 }} />
+          through age <input type="number" min="0" value={a.max_age} onChange={(e) => setRow('age_limits', i, { max_age: e.target.value })} style={{ width: 70 }} />
+          <button type="button" className="small" onClick={() => setForm({ ...form, age_limits: form.age_limits.filter((_, j) => j !== i) })}>✕</button>
+        </div>
+      ))}
+      <button type="button" className="small" onClick={() => setForm({ ...form, age_limits: [...form.age_limits, { codes: '', max_age: 14 }] })}>+ Age limit</button>
+      <label style={{ marginTop: 12 }}>Benefit notes (from the breakdown)<textarea rows={2} value={form.benefit_notes} onChange={set('benefit_notes')} placeholder="Exclusions and special rules" /></label>
       <label style={{ marginTop: 12 }}>Notes<textarea rows={2} value={form.notes} onChange={set('notes')} placeholder="Missing tooth clause, implant coverage, anything to remember" /></label>
       <div className="form-actions"><button className="primary" disabled={busy}>Save plan</button></div>
     </form>
