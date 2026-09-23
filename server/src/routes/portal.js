@@ -240,7 +240,9 @@ export function portalRoutes({ db, secret, config, payments, messenger, storage 
       row = { ...row, operatory_id: null };
       await validateAppt(db, practice.id, row);
     }
-    await db.run('UPDATE appointments SET start_time = ?, end_time = ?, operatory_id = ?, status = ?, confirmed_at = NULL, reminder_sent_at = NULL WHERE id = ?', start, end, row.operatory_id, 'scheduled', a.id);
+    // The new time gets its reminders afresh, and a confirmation of the move.
+    await db.run("UPDATE appointments SET start_time = ?, end_time = ?, operatory_id = ?, status = ?, confirmed_at = NULL, reminder_sent_at = NULL, notice_due = 'booked' WHERE id = ?", start, end, row.operatory_id, 'scheduled', a.id);
+    await db.run('DELETE FROM appointment_reminders WHERE appointment_id = ?', a.id);
     const p = req.portal.household.find((h) => h.id === a.patient_id);
     await insert(db, 'tasks', {
       practice_id: practice.id, patient_id: a.patient_id, priority: 'normal', due_date: now.slice(0, 10),

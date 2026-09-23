@@ -36,6 +36,7 @@ export async function seedDemo(db) {
       name: 'Bright Smiles Family Dentistry', address: '1200 Main Street, Suite 200', city: 'Austin', state: 'TX', zip: '78701',
       phone: '(512) 555-0142', email: 'office@brightsmiles.example', npi: '1987654321', tax_id: '74-1234567', timezone: 'America/Chicago',
       slug: 'bright-smiles', online_booking: 1, reminder_hours: 48,
+      reminder_steps: JSON.stringify([{ hours: 168, channel: 'email', confirmed: false }, { hours: 48, channel: 'auto', confirmed: false }, { hours: 4, channel: 'sms', confirmed: true }]),
     });
     await seedPracticeDefaults(db, practiceId);
 

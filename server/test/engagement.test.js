@@ -84,7 +84,7 @@ async function setup() {
   const reg = await client().post('/auth/register', { practice_name: `Eng ${n}`, name: 'Admin', email: `eng${n}@example.com`, password: 'correct-horse-battery' });
   assert.equal(reg.status, 201);
   const api = client(reg.data.token);
-  await api.put('/practice', { office_hours: Object.fromEntries([0, 1, 2, 3, 4, 5, 6].map((d) => [d, [['00:00', '23:59']]])) }); // tests book at any hour
+  await api.put('/practice', { send_from: '00:00', send_until: '00:00', office_hours: Object.fromEntries([0, 1, 2, 3, 4, 5, 6].map((d) => [d, [['00:00', '23:59']]])) }); // tests book at any hour
   const provider = (await api.post('/providers', { name: 'Dr. Who', type: 'dentist' })).data;
   const patient = (await api.post('/patients', { first_name: 'Pat', last_name: 'Smith', phone: '(512) 555-0100', email: 'pat@example.com' })).data;
   return { api, provider, patient, email: `eng${n}@example.com` };

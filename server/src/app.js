@@ -20,6 +20,7 @@ import terminalRoutes from './routes/terminal.js';
 import setupRoutes from './routes/setup.js';
 import familyRoutes from './routes/family.js';
 import conversationRoutes, { smsWebhook } from './routes/sms.js';
+import { deliveryWebhooks } from './routes/delivery.js';
 import ediRoutes from './routes/edi.js';
 import officeRoutes from './routes/office.js';
 import ppoRoutes from './routes/ppo.js';
@@ -75,6 +76,7 @@ export function loadConfig(env = process.env) {
     stripeWebhookSecret: env.STRIPE_WEBHOOK_SECRET || null,
     payments: env.PAYMENTS || null,
     twilioAuthToken: env.TWILIO_AUTH_TOKEN || null,
+    sendgridWebhookKey: env.SENDGRID_WEBHOOK_KEY || null,
     ediMode: env.EDI_MODE || 'manual',
     ediSubmitterId: env.EDI_SUBMITTER_ID || null,
     ediReceiverId: env.EDI_RECEIVER_ID || null,
@@ -123,6 +125,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   app.use(requestLogger());
   app.use(stripeWebhook({ db, config, payments, messenger })); // needs the raw body, so before express.json
   app.use(smsWebhook({ db, config }));
+  app.use(deliveryWebhooks({ db, config }));
   // Signed forms can carry photos (insurance cards, ID), so that one route takes larger bodies.
   const jsonBody = express.json({ limit: '1mb' });
   const formBody = express.json({ limit: '15mb' });

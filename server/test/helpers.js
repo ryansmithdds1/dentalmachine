@@ -51,7 +51,7 @@ export function harness({ config: extra = {}, messenger, fetchImpl } = {}) {
     const email = `admin${n}-${Math.random().toString(36).slice(2, 7)}@example.com`;
     const reg = await h.client().post('/auth/register', { practice_name: `Practice ${n}`, name: 'Admin', email, password: 'correct-horse-battery' });
     const api = h.client(reg.data.token);
-    await api.put('/practice', { npi: '1234567893', tax_id: '74-1234567', address: '1 Main St', city: 'Austin', state: 'TX', zip: '78701', phone: '(512) 555-0142', ...extraPractice });
+    await api.put('/practice', { npi: '1234567893', tax_id: '74-1234567', address: '1 Main St', city: 'Austin', state: 'TX', zip: '78701', phone: '(512) 555-0142', send_from: '00:00', send_until: '00:00', ...extraPractice });
     const provider = (await api.post('/providers', { name: 'Dr. Ann Lee, DDS', type: 'dentist', npi: '1987654321' })).data;
     const patient = (await api.post('/patients', { first_name: 'Jane', last_name: 'Doe', dob: '1985-04-12', phone: '(512) 555-0100', email: 'jane@example.com', address: '9 Elm', city: 'Austin', state: 'TX', zip: '78704', gender: 'female' })).data;
     return { api, token: reg.data.token, email, provider, patient, practiceId: reg.data.user?.practice_id };

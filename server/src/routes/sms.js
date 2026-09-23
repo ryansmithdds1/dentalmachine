@@ -1,14 +1,16 @@
 import express, { Router } from 'express';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { requirePermission, HttpError } from '../auth.js';
-import { sendMessage, recordOptOut, clearOptOut, isOptedOutAddress } from '../messaging.js';
+import { sendMessage, recordOptOut, clearOptOut, isOptedOutAddress, visitsText, markBad } from '../messaging.js';
 import { insert, findOr404, audit, practiceNow, friendlyDateTime } from '../util.js';
 import { publish } from '../events.js';
 import { patientLang } from '../templates.js';
 
 const STOP = ['STOP', 'STOPALL', 'UNSUBSCRIBE', 'CANCEL', 'END', 'QUIT', 'OPTOUT'];
 const START = ['START', 'UNSTOP', 'YES START', 'SUBSCRIBE'];
-const CONFIRM = ['C', 'CONFIRM', 'CONFIRMED', 'Y', 'YES', 'OK', 'SI', 'CONFIRMO', 'CONFIRMAR', 'CONFIRMADO'];
+const CONFIRM = ['C', 'CONFIRM', 'CONFIRMED', 'Y', 'YES', 'OK', 'SI', 'CONFIRMO', 'CONFIRMAR', 'CONFIRMADO', 'YES CONFIRM', 'C YES', 'OK THANKS', 'YES THANKS', 'THANKS YES', 'SI GRACIAS', 'CONFIRMED THANKS', 'CONFIRM THANKS', 'THUMBS UP'];
+const HELP = ['HELP', 'INFO', 'AYUDA'];
+const RESCHEDULE = ['R', 'RESCHEDULE', 'CHANGE', 'MOVE', 'CAMBIAR', 'CAMBIO'];
 const digits = (s) => String(s || '').replace(/\D/g, '').slice(-10);
 const xml = (s) => String(s).replace(/[<>&'"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' })[c]);
 const twiml = (reply) => `<?xml version="1.0" encoding="UTF-8"?><Response>${reply ? `<Message>${xml(reply)}</Message>` : ''}</Response>`;
@@ -56,23 +58,45 @@ export function smsWebhook({ db, config }) {
       to_address: to, from_address: from, body, status: 'sent', provider_id: req.body.MessageSid || null, sent_at: new Date().toISOString(),
     });
 
-    const keyword = body.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z ]/g, '').trim();
+    const keyword = body.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z ]/g, '').replace(/\s+/g, ' ').trim();
+    const lang = patientLang(patient);
+    const phone = practice.phone || (lang === 'es' ? 'la oficina' : 'the office');
     let reply = null;
+    // The visits a reply can be about: those of everyone at this number, and of the children (or others without
+    // their own phone) whose guarantor this is — the parent answers for the family.
+    const dependents = candidates.length ? (await db.all(
+      `SELECT * FROM patients WHERE practice_id = ? AND status != 'archived' AND guarantor_id IN (${candidates.map(() => '?').join(',')})`, practice.id, ...candidates.map((p) => p.id),
+    )).filter((d) => !candidates.some((c) => c.id === d.id) && (!d.phone || digits(d.phone) === digits(from) || (d.dob && d.dob > `${new Date().getUTCFullYear() - 18}${new Date().toISOString().slice(4, 10)}`))) : [];
+    const household = [...candidates, ...dependents];
+    const ids = household.map((p) => p.id);
+    const inList = ids.map(() => '?').join(',');
+    const upcoming = async (statuses) => (ids.length ? db.all(
+      `SELECT a.*, p.first_name FROM appointments a JOIN patients p ON p.id = a.patient_id WHERE a.practice_id = ? AND a.patient_id IN (${inList})
+       AND a.status IN (${statuses.map(() => '?').join(',')}) AND a.start_time > ? ORDER BY a.start_time`, practice.id, ...ids, ...statuses, await practiceNow(db, practice.id),
+    ) : []);
+    // The front desk gets a task to call about it: we don't cancel or move a visit from a text.
+    const callTask = async (appt, what) => {
+      const who = household.find((p) => p.id === appt.patient_id);
+      const now = await practiceNow(db, practice.id);
+      await insert(db, 'tasks', {
+        practice_id: practice.id, patient_id: appt.patient_id, priority: 'high', due_date: now.slice(0, 10),
+        title: `${who.first_name} ${who.last_name} texted "${body.slice(0, 60)}" — ${what} ${friendlyDateTime(appt.start_time)}. Call to reschedule.`,
+      });
+      publish(practice.id, { type: 'tasks' });
+    };
     // A patient who writes "cancel" (the carriers' opt-out word, or "I need to cancel…") usually means their
     // appointment. We can't cancel it for them from one word, so the front desk gets a task to call.
     const wantsToCancel = candidates.length && (keyword === 'CANCEL' || /\bcancel|resched|\bcambiar|reprogram/i.test(body));
-    if (wantsToCancel) {
-      const now = await practiceNow(db, practice.id);
-      const appt = await db.get(
-        `SELECT * FROM appointments WHERE practice_id = ? AND patient_id IN (${candidates.map(() => '?').join(',')})
-         AND status IN ('scheduled','confirmed') AND start_time > ? ORDER BY start_time LIMIT 1`, practice.id, ...candidates.map((p) => p.id), now,
-      );
+    const wantsToMove = candidates.length && RESCHEDULE.includes(keyword);
+    if (wantsToCancel || wantsToMove) {
+      const [appt] = await upcoming(['scheduled', 'confirmed']);
       if (appt) {
-        const who = candidates.find((p) => p.id === appt.patient_id);
-        await insert(db, 'tasks', {
-          practice_id: practice.id, patient_id: appt.patient_id, priority: 'high', due_date: now.slice(0, 10),
-          title: `${who.first_name} ${who.last_name} texted "${body.slice(0, 60)}" — may want to cancel ${friendlyDateTime(appt.start_time)}. Call to reschedule.`,
-        });
+        await callTask(appt, wantsToMove ? 'wants a new time instead of' : 'may want to cancel');
+        if (wantsToMove) {
+          reply = lang === 'es'
+            ? `Entendido. Alguien de ${practice.name} le llamará para buscar otro horario, o llámenos al ${phone}.`
+            : `Got it — someone from ${practice.name} will call you to find a new time, or call us at ${phone}.`;
+        }
       }
     }
     if (STOP.includes(keyword)) {
@@ -84,19 +108,34 @@ export function smsWebhook({ db, config }) {
     } else if (START.includes(keyword)) {
       for (const p of candidates) await db.run('UPDATE patients SET sms_opt_in = 1 WHERE id = ?', p.id);
       await clearOptOut(db, practice.id, 'sms', from);
+    } else if (HELP.includes(keyword)) {
+      // Carriers require an answer to HELP: who we are, how to reach a person, how to stop.
+      reply = lang === 'es'
+        ? `${practice.name}: recordatorios de citas. Para ayuda llame al ${phone}. Responda STOP para no recibir mensajes. Pueden aplicar tarifas de mensajes y datos.`
+        : `${practice.name}: appointment reminders. For help call ${phone}. Reply STOP to opt out. Msg & data rates may apply.`;
     } else if (CONFIRM.includes(keyword) && candidates.length) {
-      const now = await practiceNow(db, practice.id);
-      const appt = await db.get(
-        `SELECT * FROM appointments WHERE practice_id = ? AND patient_id IN (${candidates.map(() => '?').join(',')})
-         AND status = 'scheduled' AND start_time > ? ORDER BY start_time LIMIT 1`, practice.id, ...candidates.map((p) => p.id), now,
-      );
-      if (appt) {
+      // Confirms everyone at this number who's coming in on the next visit day (a family's visits together).
+      const open = await upcoming(['scheduled']);
+      const day = open[0]?.start_time.slice(0, 10);
+      const confirm = open.filter((a) => a.start_time.startsWith(day));
+      for (const appt of confirm) {
         await db.run("UPDATE appointments SET status = 'confirmed', confirmed_at = datetime('now'), confirmed_via = 'text' WHERE id = ?", appt.id);
-        publish(practice.id, { type: 'schedule', dates: [appt.start_time.slice(0, 10)], source: 'sms' });
-        const lang = patientLang(candidates.find((p) => p.id === appt.patient_id));
-        reply = lang === 'es'
-          ? `¡Gracias! Su cita quedó confirmada para el ${friendlyDateTime(appt.start_time, 'es')} en ${practice.name}.`
-          : `Thanks! You're confirmed for ${friendlyDateTime(appt.start_time)} at ${practice.name}.`;
+      }
+      if (confirm.length) {
+        publish(practice.id, { type: 'schedule', dates: [day], source: 'sms' });
+        if (confirm.length > 1 || confirm[0].patient_id !== patient.id) {
+          const what = visitsText(confirm, lang, { providers: false });
+          reply = lang === 'es' ? `¡Gracias! Quedaron confirmadas en ${practice.name}: ${what}.` : `Thanks! Confirmed at ${practice.name}: ${what}.`;
+        } else {
+          reply = lang === 'es'
+            ? `¡Gracias! Su cita quedó confirmada para el ${friendlyDateTime(confirm[0].start_time, 'es')} en ${practice.name}.`
+            : `Thanks! You're confirmed for ${friendlyDateTime(confirm[0].start_time)} at ${practice.name}.`;
+        }
+      } else {
+        const [next] = await upcoming(['confirmed']);
+        reply = next
+          ? (lang === 'es' ? `Ya está confirmado para el ${friendlyDateTime(next.start_time, 'es')}. ¡Lo esperamos!` : `You're already confirmed for ${friendlyDateTime(next.start_time)}. See you then!`)
+          : (lang === 'es' ? `No encontramos una cita por confirmar. Llámenos al ${phone} si necesita algo.` : `We didn't find a visit waiting to be confirmed. Call us at ${phone} if you need anything.`);
       }
     }
     if (reply) {

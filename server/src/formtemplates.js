@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { HttpError } from './auth.js';
 import { PdfDoc, dataUrlImage } from './pdf.js';
 import { insert, newToken, hashToken, practiceNow } from './util.js';
-import { preferredChannel, sendMessage } from './messaging.js';
+import { preferredChannel, sendMessage, withinSendHours } from './messaging.js';
 import { messageText, patientLang, subjectFor } from './templates.js';
 
 // Practice-defined forms: consents, policies and intake questions, built from a list of fields.
@@ -292,6 +292,7 @@ export async function runFormSends(db, messenger, { appUrl }) {
   for (const { id: practiceId } of await db.all('SELECT DISTINCT practice_id AS id FROM form_templates WHERE auto_send = 1 AND active = 1')) {
     const templates = await db.all('SELECT * FROM form_templates WHERE practice_id = ? AND auto_send = 1 AND active = 1', practiceId);
     const now = await practiceNow(db, practiceId);
+    if (!withinSendHours(await db.get('SELECT send_from, send_until FROM practices WHERE id = ?', practiceId), now)) continue;
     const until = new Date(`${now.slice(0, 10)}T00:00:00Z`);
     until.setUTCDate(until.getUTCDate() + 3);
     const appts = await db.all(

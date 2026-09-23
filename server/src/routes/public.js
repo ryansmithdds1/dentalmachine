@@ -1,18 +1,20 @@
 import express, { Router } from 'express';
 import { HttpError, rateLimit, signToken, verifyToken } from '../auth.js';
-import { insert, update, hashToken, practiceNow, normalizeDateTime, audit, mapSeq, publicPractice } from '../util.js';
+import { insert, update, hashToken, practiceNow, normalizeDateTime, audit, mapSeq, publicPractice, friendlyDateTime } from '../util.js';
 import { MEDICAL_CONDITIONS, parseMedicalHistory, contactUpdatesFromHistory } from '../forms.js';
 import { fillFields, checkAnswers, formPdf } from '../formtemplates.js';
 import { patientLang } from '../templates.js';
 import { finishBooking } from '../onlinebooking.js';
 import { emitAppointment } from '../webhooks.js';
-import { sendAppointmentReminder } from '../messaging.js';
-import { openSlots } from './schedule.js';
+import { sendAppointmentReminder, visitsIcs, mapsUrl, recordOptOut } from '../messaging.js';
+import { openSlots, releaseAppointment } from './schedule.js';
 import { publish } from '../events.js';
 import { officeHours } from '../hours.js';
 import { parseDurations } from '../patterns.js';
 import { sniffMime } from './imaging.js';
 import { MAX_UPLOAD_BYTES } from './documents.js';
+
+const escHtml = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
 // Used only for practices that haven't marked any appointment types as bookable online.
 const FALLBACK_REASONS = [
@@ -198,46 +200,139 @@ export default function publicRoutes({ db, storage, payments, messenger, config,
   });
 
   // ---- Appointment confirmation links ----
-  const apptForToken = async (token) => {
-    const a = await db.get(
-      `SELECT a.*, p.first_name, p.language, pr.name AS practice_name, pr.phone AS practice_phone, pr.address, pr.city, pr.state, pr.zip,
+  // A link covers one visit, or a family's visits on one day. Older links keep working until the day after
+  // the visit; links from before shared links existed are found on the appointment itself.
+  const linkFor = async (token) => {
+    const hash = hashToken(token);
+    const rows = await db.all('SELECT * FROM confirm_links WHERE token_hash = ? ORDER BY id', hash);
+    if (rows.length) return { ids: rows.map((x) => x.appointment_id), recipientId: rows[0].recipient_id, channel: rows[0].channel, address: rows[0].address };
+    const old = await db.get('SELECT id FROM appointments WHERE confirm_token_hash = ?', hash);
+    if (!old) throw new HttpError(404, 'This link is no longer valid');
+    return { ids: [old.id], recipientId: null, channel: null, address: null };
+  };
+  const visitsFor = async (token, { expired = true } = {}) => {
+    const link = await linkFor(token);
+    const visits = await db.all(
+      `SELECT a.*, p.first_name, p.language, pr.name AS practice_name, pr.phone AS practice_phone, pr.address, pr.city, pr.state, pr.zip, pr.timezone,
          pv.name AS provider_name
        FROM appointments a JOIN patients p ON p.id = a.patient_id JOIN practices pr ON pr.id = a.practice_id
-       JOIN providers pv ON pv.id = a.provider_id WHERE a.confirm_token_hash = ?`, hashToken(token),
+       JOIN providers pv ON pv.id = a.provider_id WHERE a.id IN (${link.ids.map(() => '?').join(',')}) ORDER BY a.start_time, a.id`, ...link.ids,
     );
-    if (!a) throw new HttpError(404, 'This link is no longer valid');
-    // A reminder link stops working the day after the visit.
-    const yesterday = new Date(Date.parse(`${(await practiceNow(db, a.practice_id)).slice(0, 10)}T00:00:00Z`) - 86400_000).toISOString().slice(0, 10);
-    if (a.start_time.slice(0, 10) < yesterday) throw new HttpError(410, 'This link has expired');
-    return a;
+    if (!visits.length) throw new HttpError(404, 'This link is no longer valid');
+    // A reminder link stops working the day after the (last) visit.
+    const yesterday = new Date(Date.parse(`${(await practiceNow(db, visits[0].practice_id)).slice(0, 10)}T00:00:00Z`) - 86400_000).toISOString().slice(0, 10);
+    if (expired && visits.every((v) => v.start_time.slice(0, 10) < yesterday)) throw new HttpError(410, 'This link has expired');
+    const recipient = link.recipientId ? await db.get('SELECT id, first_name, language FROM patients WHERE id = ?', link.recipientId) : null;
+    return { link, visits, recipient };
   };
-  const apptView = (a) => ({
-    first_name: a.first_name, start_time: a.start_time, end_time: a.end_time, status: a.status, provider_name: a.provider_name, language: patientLang(a), video_url: a.video_url || null,
-    practice: { name: a.practice_name, phone: a.practice_phone, address: a.address, city: a.city, state: a.state, zip: a.zip },
+  const OPEN = ['scheduled', 'confirmed'];
+  const view = async ({ visits, recipient }) => {
+    const a = visits[0];
+    const now = await practiceNow(db, a.practice_id);
+    const practice = { name: a.practice_name, phone: a.practice_phone, address: a.address, city: a.city, state: a.state, zip: a.zip };
+    return {
+      first_name: recipient?.first_name || a.first_name, start_time: a.start_time, end_time: a.end_time, status: a.status, provider_name: a.provider_name,
+      language: patientLang(recipient || a), video_url: a.video_url || null,
+      practice: { ...practice, maps_url: mapsUrl(practice), timezone: a.timezone },
+      visits: visits.map((v) => ({
+        id: v.id, first_name: v.first_name, start_time: v.start_time, end_time: v.end_time, status: v.status, provider_name: v.provider_name,
+        video_url: v.video_url || null, upcoming: v.start_time > now,
+      })),
+    };
+  };
+  // Which visits an action is for: the one named, or all of them.
+  const pick = (visits, id) => {
+    if (id == null) return visits;
+    const v = visits.find((x) => x.id === Number(id));
+    if (!v) throw new HttpError(404, 'That visit isn’t on this link');
+    return [v];
+  };
+
+  r.get('/confirm/:token', reader, async (req, res) => res.json(await view(await visitsFor(req.params.token))));
+
+  // The visits as a calendar file.
+  r.get('/confirm/:token/calendar.ics', reader, async (req, res) => {
+    const { visits } = await visitsFor(req.params.token);
+    const active = visits.filter((v) => OPEN.includes(v.status));
+    if (!active.length) throw new HttpError(404, 'No upcoming visits on this link');
+    const practice = await db.get('SELECT * FROM practices WHERE id = ?', visits[0].practice_id);
+    res.set('Content-Type', 'text/calendar; charset=utf-8').set('Content-Disposition', 'attachment; filename="appointment.ics"')
+      .send(visitsIcs(active, practice, `${config.appUrl}/c/${req.params.token}`));
   });
 
-  r.get('/confirm/:token', reader, async (req, res) => res.json(apptView(await apptForToken(req.params.token))));
-
   r.post('/confirm/:token', limiter, async (req, res) => {
-    const a = await apptForToken(req.params.token);
+    const found = await visitsFor(req.params.token);
+    const { visits, link } = found;
     const action = req.body?.action;
-    if (a.start_time <= (await practiceNow(db, a.practice_id))) throw new HttpError(409, 'This appointment has already passed');
-    publish(a.practice_id, { type: 'schedule', dates: [a.start_time.slice(0, 10)], source: 'patient' });
+    const now = await practiceNow(db, visits[0].practice_id);
+    const practiceId = visits[0].practice_id;
+    const targets = pick(visits, req.body?.appointment_id).filter((v) => v.start_time > now);
+    if (!targets.length) throw new HttpError(409, 'This appointment has already passed');
+    if (!['confirm', 'cancel', 'reschedule'].includes(action)) throw new HttpError(400, 'action must be confirm, cancel or reschedule');
+    // Cancelling or moving one visit of several needs to say which.
+    if (action !== 'confirm' && req.body?.appointment_id == null && targets.length > 1) throw new HttpError(400, 'Choose which visit');
+    const open = targets.filter((v) => OPEN.includes(v.status));
+    if (!open.length) throw new HttpError(409, `This appointment is ${targets[0].status.replace('_', ' ')}`);
+
     if (action === 'confirm') {
-      if (!['scheduled', 'confirmed'].includes(a.status)) throw new HttpError(409, `This appointment is ${a.status.replace('_', ' ')}`);
-      // Confirmed from the link in the last reminder: by text or by email.
-      const last = await db.get("SELECT channel FROM messages WHERE appointment_id = ? AND direction = 'outbound' ORDER BY id DESC LIMIT 1", a.id);
-      await db.run("UPDATE appointments SET status = 'confirmed', confirmed_at = COALESCE(confirmed_at, datetime('now')), confirmed_via = ? WHERE id = ?", last?.channel === 'email' ? 'email' : 'text', a.id);
-    } else if (action === 'cancel') {
-      if (!['scheduled', 'confirmed'].includes(a.status)) throw new HttpError(409, `This appointment is ${a.status.replace('_', ' ')}`);
-      await db.run("UPDATE appointments SET status = 'cancelled' WHERE id = ?", a.id);
-      await db.run("UPDATE procedures SET appointment_id = NULL WHERE appointment_id = ? AND status = 'planned'", a.id);
+      // Confirmed from a link: by text or by email, whichever the link came in.
+      const via = link.channel || (await db.get("SELECT channel FROM messages WHERE appointment_id = ? AND direction = 'outbound' ORDER BY id DESC LIMIT 1", open[0].id))?.channel;
+      for (const v of open) {
+        await db.run("UPDATE appointments SET status = 'confirmed', confirmed_at = COALESCE(confirmed_at, datetime('now')), confirmed_via = ? WHERE id = ? AND status IN ('scheduled','confirmed')", via === 'email' ? 'email' : 'text', v.id);
+      }
     } else {
-      throw new HttpError(400, 'action must be confirm or cancel');
+      const v = open[0];
+      const hoursLeft = (Date.parse(`${v.start_time.replace(' ', 'T')}:00Z`) - Date.parse(`${now.replace(' ', 'T')}:00Z`)) / 3600000;
+      const when = friendlyDateTime(v.start_time);
+      const note = String(req.body?.note || '').trim().slice(0, 300);
+      if (action === 'cancel') {
+        await db.run("UPDATE appointments SET status = 'cancelled' WHERE id = ?", v.id);
+        await releaseAppointment(db, v.id);
+        // The front desk hears about it, with who might fill the opening.
+        const asap = (await db.get(
+          "SELECT COUNT(*) AS n FROM appointments WHERE practice_id = ? AND asap = 1 AND status IN ('scheduled','confirmed') AND start_time > ? AND patient_id != ?", practiceId, v.start_time, v.patient_id,
+        )).n + (await db.get("SELECT COUNT(*) AS n FROM waitlist WHERE practice_id = ? AND status = 'waiting' AND patient_id != ?", practiceId, v.patient_id)).n;
+        const p = await db.get('SELECT first_name, last_name FROM patients WHERE id = ?', v.patient_id);
+        await insert(db, 'tasks', {
+          practice_id: practiceId, patient_id: v.patient_id, priority: hoursLeft < 48 ? 'high' : 'normal', due_date: now.slice(0, 10),
+          title: `${p.first_name} ${p.last_name} cancelled ${when} with ${v.provider_name} from their reminder${hoursLeft < 24 ? ' (less than 24 hours’ notice)' : ''}.${asap ? ` ${asap} on the ASAP list / waitlist could take the opening.` : ''} Call to rebook.${note ? ` They wrote: "${note}"` : ''}`,
+        });
+      } else {
+        const p = await db.get('SELECT first_name, last_name FROM patients WHERE id = ?', v.patient_id);
+        await insert(db, 'tasks', {
+          practice_id: practiceId, patient_id: v.patient_id, priority: hoursLeft < 72 ? 'high' : 'normal', due_date: now.slice(0, 10),
+          title: `${p.first_name} ${p.last_name} asked for a new time instead of ${when} with ${v.provider_name}.${note ? ` They wrote: "${note}"` : ''} Call to reschedule.`,
+        });
+      }
     }
-    await logPublic(req, a.practice_id, `appointment.patient_${action}`, 'appointments', a.id);
-    await emitAppointment(db, a.id);
-    res.json(apptView(await apptForToken(req.params.token)));
+    publish(practiceId, { type: 'schedule', dates: [...new Set(open.map((v) => v.start_time.slice(0, 10)))], source: 'patient' });
+    publish(practiceId, { type: 'tasks' });
+    for (const v of action === 'confirm' ? open : open.slice(0, 1)) {
+      await logPublic(req, practiceId, `appointment.patient_${action}`, 'appointments', v.id);
+      if (action !== 'reschedule') await emitAppointment(db, v.id);
+    }
+    res.json({ ...(await view(await visitsFor(req.params.token))), ...(action === 'reschedule' ? { reschedule_requested: open[0].id } : {}) });
+  });
+
+  // "Stop appointment emails", from the email footer or the mail app's one-click unsubscribe (a POST).
+  // The GET only shows a button, so link scanners can't unsubscribe anyone.
+  const stopEmails = async (token) => {
+    const { link, visits, recipient } = await visitsFor(token, { expired: false });
+    const practiceId = visits[0].practice_id;
+    const address = link.channel === 'email' ? link.address : (await db.get('SELECT email FROM patients WHERE id = ?', recipient?.id ?? visits[0].patient_id))?.email;
+    if (address) await recordOptOut(db, practiceId, 'email', address, 'unsubscribe');
+    await db.run('UPDATE patients SET email_opt_in = 0 WHERE id = ?', recipient?.id ?? visits[0].patient_id);
+    return visits[0].practice_name;
+  };
+  const page = (title, body) => `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escHtml(title)}</title></head><body style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:480px;margin:40px auto;padding:0 16px;color:#1f2933">${body}</body></html>`;
+  r.get('/confirm/:token/stop-emails', reader, async (req, res) => {
+    const { visits } = await visitsFor(req.params.token, { expired: false });
+    res.type('html').send(page('Appointment emails', `<h2>${escHtml(visits[0].practice_name)}</h2><p>Stop getting appointment emails? You'll still get texts if you have them on.</p><form method="post"><button style="padding:10px 18px;font-size:16px">Stop appointment emails</button></form>`));
+  });
+  r.post('/confirm/:token/stop-emails', limiter, express.urlencoded({ extended: false, limit: '4kb' }), async (req, res) => {
+    const name = await stopEmails(req.params.token);
+    await logPublic(req, (await visitsFor(req.params.token, { expired: false })).visits[0].practice_id, 'patient.email_optout', 'patients', null);
+    res.type('html').send(page('Unsubscribed', `<h2>${escHtml(name)}</h2><p>Done — you won't get appointment emails from us anymore. To turn them back on, just let the office know.</p>`));
   });
 
   // ---- Review routing ----

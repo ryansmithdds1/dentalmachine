@@ -40,6 +40,7 @@ export default function AppointmentForm({ appointment, defaults = {}, patient: i
     appointment_type_id: appointment?.appointment_type_id || defaults.appointment_type_id || '',
     asap: !!appointment?.asap,
     video: !!appointment?.video_url,
+    notify: true,
     provider_id: appointment?.provider_id || defaults.provider_id || '',
     operatory_id: appointment?.operatory_id || defaults.operatory_id || '',
     status: appointment?.status || 'scheduled',
@@ -84,6 +85,7 @@ export default function AppointmentForm({ appointment, defaults = {}, patient: i
       appointment_type_id: form.appointment_type_id ? Number(form.appointment_type_id) : null,
       asap: form.asap,
       video: form.video,
+      notify: form.notify,
       ...(forceBlockout ? { override_blockout: true } : {}),
       patient_id: patient.id,
       provider_id: Number(form.provider_id),
@@ -168,6 +170,7 @@ export default function AppointmentForm({ appointment, defaults = {}, patient: i
         <label className="full">Notes<textarea rows={2} value={form.notes} onChange={set('notes')} /></label>
         <label className="checkbox full"><input type="checkbox" checked={form.video} onChange={(e) => setForm({ ...form, video: e.target.checked })} /> Video visit (the patient gets a link to join)</label>
         <label className="checkbox full"><input type="checkbox" checked={form.asap} onChange={(e) => setForm({ ...form, asap: e.target.checked })} /> Add to ASAP list (patient wants an earlier opening)</label>
+        <label className="checkbox full"><input type="checkbox" checked={form.notify} onChange={(e) => setForm({ ...form, notify: e.target.checked })} /> Let the patient know {appointment ? 'if the time changes' : 'it’s booked'} (text or email, with the confirm link)</label>
         {!appointment && (
           <div className="full repeat-row">
             <label>

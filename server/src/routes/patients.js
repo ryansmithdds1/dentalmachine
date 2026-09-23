@@ -343,6 +343,9 @@ export default function patientRoutes({ db }) {
       throw new HttpError(409, 'This number replied STOP to our texts. The patient needs to text START to that number to receive texts again.');
     }
     if (row.email_opt_in && !existing.email_opt_in && (row.email ?? existing.email)) await clearOptOut(db, req.user.practice_id, 'email', row.email ?? existing.email);
+    // A new number or address gets a fresh start after a landline or bounce report.
+    if ('phone' in row && row.phone !== existing.phone) Object.assign(row, { sms_bad_at: null, sms_bad_reason: null });
+    if ('email' in row && row.email !== existing.email) Object.assign(row, { email_bad_at: null, email_bad_reason: null });
     if (row.guarantor_id) {
       const g = await findOr404(db, 'patients', row.guarantor_id, req.user.practice_id, 'Guarantor');
       if (g.id === existing.id) row.guarantor_id = null;

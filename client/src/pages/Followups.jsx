@@ -10,7 +10,7 @@ import AppointmentForm from '../components/AppointmentForm.jsx';
 const OUTCOMES = [['left_voicemail', 'Left voicemail'], ['texted', 'Texted'], ['emailed', 'Emailed'], ['spoke_scheduled', 'Spoke — scheduled'], ['spoke_will_call', 'Spoke — will call back'], ['declined', 'Declined'], ['wrong_number', 'Wrong number'], ['note', 'Note']];
 const outcomeLabel = (o) => OUTCOMES.find((x) => x[0] === o)?.[1] || o;
 
-// The front desk's call lists: recall, unscheduled treatment and broken appointments.
+// The front desk's call lists: unconfirmed visits, recall, unscheduled treatment and broken appointments.
 export default function Followups() {
   const [params, setParams] = useSearchParams();
   const tab = params.get('tab') || 'recall';
@@ -25,13 +25,103 @@ export default function Followups() {
         </div>
       </div>
       <div className="tabs">
+        <button className={tab === 'unconfirmed' ? 'active' : ''} onClick={() => setParams({ tab: 'unconfirmed' })}>Unconfirmed</button>
         <button className={tab === 'recall' ? 'active' : ''} onClick={() => setParams({ tab: 'recall' })}>Recall</button>
         <button className={tab === 'unscheduled' ? 'active' : ''} onClick={() => setParams({ tab: 'unscheduled' })}>Unscheduled treatment {unsched ? <span className="count">{unsched.length}</span> : null}</button>
         <button className={tab === 'broken' ? 'active' : ''} onClick={() => setParams({ tab: 'broken' })}>Broken appointments {broken ? <span className="count">{broken.length}</span> : null}</button>
       </div>
+      {tab === 'unconfirmed' && <Unconfirmed />}
       {tab === 'recall' && <Recall />}
       {tab === 'unscheduled' && <CallList kind="unscheduled" rows={unsched} onChange={reloadUnsched} />}
       {tab === 'broken' && <CallList kind="broken" rows={broken} onChange={reloadBroken} />}
+    </>
+  );
+}
+
+const SENT = { reminder: 'Reminder', booking_confirmation: 'Booked', no_show: 'Missed visit' };
+const deliveryText = (m) => (m.status === 'blocked' ? 'not sent (opted out)' : m.status === 'failed' ? 'failed' : m.delivery || 'sent');
+const pct = (n) => (n == null ? '—' : `${n}%`);
+
+// Visits coming up that nobody has confirmed: who to call, what's already been tried (the texts and emails
+// sent and whether they arrived, the patient's last reply), and one click to record the outcome.
+function Unconfirmed() {
+  const { can } = useAuth();
+  const [days, setDays] = useState(2);
+  const { data: rows, reload } = useApi(`/followups/unconfirmed?days=${days}`);
+  const { data: stats } = useApi('/followups/confirmation-stats');
+  const [busy, setBusy] = useState(null);
+  const [error, setError] = useState(null);
+  const act = async (r, what) => {
+    setBusy(`${r.id}-${what}`);
+    setError(null);
+    try {
+      if (what === 'confirm') await api.patch(`/appointments/${r.id}/status`, { status: 'confirmed', confirmed_via: 'phone' });
+      else if (what === 'left') await api.patch(`/appointments/${r.id}/status`, { status: 'scheduled', confirmed_via: 'left_message' });
+      else await api.post(`/appointments/${r.id}/remind`, {});
+      await reload();
+    } catch (e) {
+      setError(e);
+    } finally {
+      setBusy(null);
+    }
+  };
+  return (
+    <>
+      {stats && (
+        <div className="stat-strip">
+          <div><strong>{pct(stats.confirmed_pct)}</strong><span>confirmed before the visit (30 days)</span></div>
+          <div><strong>{pct(stats.no_show_pct_confirmed)}</strong><span>no-shows when confirmed</span></div>
+          <div><strong>{pct(stats.no_show_pct_unconfirmed)}</strong><span>no-shows when not confirmed</span></div>
+          <div><strong>{stats.messages.sent}</strong><span>reminders sent · {stats.messages.not_delivered} didn&apos;t arrive</span></div>
+        </div>
+      )}
+      <div className="inline" style={{ margin: '8px 0', alignItems: 'center' }}>
+        <span className="muted">{rows ? `${rows.length} unconfirmed` : 'Loading…'} in the</span>
+        <select value={days} onChange={(e) => setDays(Number(e.target.value))}>
+          <option value={1}>next day</option><option value={2}>next 2 days</option><option value={3}>next 3 days</option><option value={7}>next week</option>
+        </select>
+      </div>
+      <ErrorBox error={error} />
+      <div className="card" style={{ padding: 0 }}>
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>Visit</th><th>Patient</th><th>Tried</th><th>Last reply</th><th /></tr></thead>
+            <tbody>
+              {(rows || []).map((r) => (
+                <tr key={r.id}>
+                  <td style={{ whiteSpace: 'nowrap' }}>{fmtDateTime(r.start_time)}<div className="muted">{r.reason || 'Visit'} · {r.provider_name}</div></td>
+                  <td>
+                    <Link to={`/patients/${r.patient_id}`}><strong>{r.name}</strong></Link>
+                    <div className="muted">{r.contact ? <>via {r.contact} · </> : null}{r.phone ? <a href={`tel:${r.phone}`}>{r.phone}</a> : 'no phone'}</div>
+                    {r.problems.map((p) => <div key={p}><span className="badge warn">{p}</span></div>)}
+                  </td>
+                  <td>
+                    {r.messages.length === 0 && <span className="muted">{r.reach ? 'Nothing sent yet' : 'Can’t be texted or emailed'}</span>}
+                    {r.messages.slice(0, 3).map((m) => (
+                      <div key={m.id} style={{ fontSize: 12 }}>
+                        {SENT[m.kind] || label(m.kind)} by {m.channel === 'sms' ? 'text' : m.channel} · <span className={/failed|undelivered|bounced|not sent/.test(deliveryText(m)) ? 'text-danger' : ''}>{deliveryText(m)}</span>
+                        <span className="muted"> · {fmtDate(m.created_at)}</span>
+                      </div>
+                    ))}
+                    {r.left_message && <div style={{ fontSize: 12 }}><span className="badge">Left a message</span></div>}
+                  </td>
+                  <td style={{ maxWidth: 220 }}>{r.last_reply ? <><div>&ldquo;{r.last_reply.body}&rdquo;</div><div className="muted" style={{ fontSize: 11 }}>{fmtDate(r.last_reply.created_at)}</div></> : <span className="muted">—</span>}</td>
+                  <td style={{ whiteSpace: 'nowrap' }}>
+                    {can('schedule:write') && (
+                      <>
+                        <button className="small primary" disabled={!!busy} onClick={() => act(r, 'confirm')}>Confirmed</button>{' '}
+                        <button className="small" disabled={!!busy} onClick={() => act(r, 'left')}>Left message</button>{' '}
+                        <button className="small" disabled={!!busy || !r.reach} title={r.reach ? `Send the reminder again by ${r.reach === 'sms' ? 'text' : 'email'}` : 'No working phone or email'} onClick={() => act(r, 'send')}>Send again</button>
+                      </>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {rows?.length === 0 && <div className="empty">Everyone&apos;s confirmed. 🎉</div>}
+        </div>
+      </div>
     </>
   );
 }

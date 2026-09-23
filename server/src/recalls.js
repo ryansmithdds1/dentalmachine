@@ -1,6 +1,6 @@
 import { HttpError } from './auth.js';
 import { insert, localNow, addMonths } from './util.js';
-import { sendMessage, preferredChannel } from './messaging.js';
+import { sendMessage, preferredChannel, withinSendHours } from './messaging.js';
 import { renderTemplate, templatesFor, patientLang, fixedText, subjectFor } from './templates.js';
 
 // The recall types a practice starts with. X-ray recalls start switched off; offices that track
@@ -74,6 +74,7 @@ export async function runRecallSequences(db, messenger, { appUrl, now = new Date
     const steps = recallSteps(practice);
     if (!steps.length) continue;
     const nowLocal = localNow(practice.timezone, now);
+    if (!withinSendHours(practice, nowLocal)) continue;
     const today = nowLocal.slice(0, 10);
     const horizon = new Date(Date.parse(`${today}T12:00:00Z`) - steps[0].days * 86400000).toISOString().slice(0, 10);
     const due = await db.all(

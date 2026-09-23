@@ -330,7 +330,8 @@ export default function scheduleRoutes({ db }) {
         row.series_id = seriesId;
         series = { id: seriesId, ...repeat, created: 1, skipped: [] };
       }
-      const newId = await insert(db, 'appointments', { ...row, practice_id: req.user.practice_id });
+      // The patient hears about it on the next reminder run (unless the office says not to).
+      const newId = await insert(db, 'appointments', { ...row, practice_id: req.user.practice_id, notice_due: req.body.notify === false ? null : 'booked' });
       if (withTypeProcs) await addTypeProcedures(req, type, newId, row);
       // Later visits in the series: book what's free and report what isn't.
       for (let i = 1; repeat && i < repeat.count; i++) {
@@ -388,7 +389,7 @@ export default function scheduleRoutes({ db }) {
           const p = await db.get('SELECT first_name FROM patients WHERE id = ?', row.patient_id);
           throw new HttpError(err.status, `${p?.first_name || `Member ${i + 1}`}: ${err.message}`, err.details);
         }
-        const id = await insert(db, 'appointments', { ...row, practice_id: pid });
+        const id = await insert(db, 'appointments', { ...row, practice_id: pid, notice_due: b.notify === false ? null : 'booked' });
         await addTypeProcedures(req, type, id, row);
         await linkRecalls(db, pid, id);
         out.push(id);
@@ -420,7 +421,7 @@ export default function scheduleRoutes({ db }) {
     const inactive = ['cancelled', 'no_show'];
     // A moved appointment needs a fresh reminder and confirmation.
     if (row.start_time !== existing.start_time) {
-      Object.assign(row, { reminder_sent_at: null, confirmed_at: null, confirmed_via: null });
+      Object.assign(row, { reminder_sent_at: null, confirmed_at: null, confirmed_via: null, notice_due: req.body.notify === false || !['scheduled', 'confirmed'].includes(row.status) ? null : 'moved' });
       await db.run('DELETE FROM appointment_reminders WHERE appointment_id = ?', existing.id);
     }
     await update(db, 'appointments', existing.id, req.user.practice_id, row);
@@ -449,7 +450,7 @@ export default function scheduleRoutes({ db }) {
         try {
           await validateAppt(db, req.user.practice_id, next);
           const moved = next.start_time !== occ.start_time;
-          await update(db, 'appointments', occ.id, req.user.practice_id, { ...pick(next, ['provider_id', 'operatory_id', 'appointment_type_id', 'reason', 'start_time', 'end_time']), ...(moved ? { reminder_sent_at: null, confirmed_at: null, confirmed_via: null, status: 'scheduled' } : {}) });
+          await update(db, 'appointments', occ.id, req.user.practice_id, { ...pick(next, ['provider_id', 'operatory_id', 'appointment_type_id', 'reason', 'start_time', 'end_time']), ...(moved ? { reminder_sent_at: null, confirmed_at: null, confirmed_via: null, status: 'scheduled', notice_due: req.body.notify === false ? null : 'moved' } : {}) });
           if (moved) await db.run('DELETE FROM appointment_reminders WHERE appointment_id = ?', occ.id);
           if (Number(next.provider_id) !== occ.provider_id) await db.run("UPDATE procedures SET provider_id = ? WHERE appointment_id = ? AND status = 'planned'", next.provider_id, occ.id);
           seriesUpdate.updated++;

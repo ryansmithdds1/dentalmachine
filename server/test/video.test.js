@@ -26,7 +26,7 @@ test('video visits: a room link on the visit, in the reminder and on the confirm
   const before = h.sent.length;
   await api.post(`/appointments/${t.id}/remind`, { channel: 'email' });
   const msg = h.sent.slice(before)[0];
-  assert.match(msg.body, /video visit — join here at the time: https:\/\/doxy\.me\/drlee$/);
+  assert.match(msg.body, /video visit — join here at the time: https:\/\/doxy\.me\/drlee(\n|$)/);
   const token = /\/c\/([\w-]+)/.exec(msg.body)[1];
   assert.equal((await h.client().get(`/public/confirm/${token}`)).data.video_url, 'https://doxy.me/drlee');
 });

@@ -9,9 +9,34 @@ export const TEMPLATE_META = {
     es: 'Hola {first_name}, le recordamos de {practice} su cita el {when} con {provider}. Por favor confirme: {link}',
   },
   booking_confirmation: {
-    label: 'Booking confirmation', help: 'When an online request is accepted.', vars: ['first_name', 'practice', 'when', 'provider', 'link', 'phone'], required: [],
+    label: 'Booking confirmation', help: 'When a visit is booked, by the office or online.', vars: ['first_name', 'practice', 'when', 'provider', 'link', 'phone'], required: [],
     text: "Hi {first_name}, you're booked at {practice} on {when} with {provider}. Details or changes: {link}",
     es: 'Hola {first_name}, su cita en {practice} quedó para el {when} con {provider}. Detalles o cambios: {link}',
+  },
+  reminder_confirmed: {
+    label: 'Reminder (already confirmed)', help: 'Reminder steps that also go to confirmed patients, like a same-day "see you soon".', vars: ['first_name', 'practice', 'when', 'provider', 'link', 'phone'], required: [],
+    text: 'Hi {first_name}, see you {when} at {practice}. Directions and details: {link}',
+    es: 'Hola {first_name}, lo esperamos el {when} en {practice}. Dirección y detalles: {link}',
+  },
+  appointment_moved: {
+    label: 'Appointment moved', help: 'When the office moves a visit to a new time.', vars: ['first_name', 'practice', 'when', 'provider', 'link', 'phone'], required: [],
+    text: 'Hi {first_name}, your appointment at {practice} is now {when} with {provider}. Please confirm the new time: {link}',
+    es: 'Hola {first_name}, su cita en {practice} cambió al {when} con {provider}. Por favor confirme el nuevo horario: {link}',
+  },
+  family_reminder: {
+    label: 'Family reminder', help: "One reminder for several visits on the same day (a family sharing a phone), or a child's visit sent to the parent. {visits} lists who and when.", vars: ['first_name', 'practice', 'visits', 'link', 'phone'], required: ['visits'],
+    text: 'Hi {first_name}, this is {practice} with a reminder: {visits}. Please confirm: {link}',
+    es: 'Hola {first_name}, le recordamos de {practice}: {visits}. Por favor confirme: {link}',
+  },
+  family_booked: {
+    label: 'Family visits booked or changed', help: 'Booked or moved visits for a family, or for a child, sent to the parent. {visits} lists who and when.', vars: ['first_name', 'practice', 'visits', 'link', 'phone'], required: ['visits'],
+    text: 'Hi {first_name}, here are the upcoming visits at {practice}: {visits}. Details or changes: {link}',
+    es: 'Hola {first_name}, estas son las próximas citas en {practice}: {visits}. Detalles o cambios: {link}',
+  },
+  no_show: {
+    label: 'Missed appointment', help: 'The same day, when a visit is marked as a no-show (Settings → Reminders can turn this off).', vars: ['first_name', 'practice', 'phone', 'link'], required: [],
+    text: "Hi {first_name}, we missed you at {practice} today. We hope everything is OK! Reply to this message or call {phone} and we'll find a new time.",
+    es: 'Hola {first_name}, lo extrañamos hoy en {practice}. ¡Esperamos que todo esté bien! Responda a este mensaje o llame al {phone} y le buscamos otro horario.',
   },
   booking_declined: {
     label: 'Online request declined', help: 'When the office declines an online booking request. {reason} is what staff type, if anything.', vars: ['first_name', 'practice', 'when', 'reason', 'phone'], required: [],
@@ -103,8 +128,14 @@ export function templatesFor(practice, lang = 'en') {
 
 // Words around the templates that aren't themselves editable.
 export const FIXED_TEXT = {
-  en: { sms_reply: ' Reply C to confirm, or call us to reschedule. Reply STOP to opt out.', the_office: 'the office' },
-  es: { sms_reply: ' Responda C para confirmar, o llámenos para cambiar su cita. Responda STOP para no recibir mensajes.', the_office: 'la oficina' },
+  en: {
+    sms_reply: ' Reply C to confirm or R to reschedule. Reply STOP to opt out.', sms_stop: ' Reply STOP to opt out.', the_office: 'the office',
+    with: 'with', and: 'and',
+  },
+  es: {
+    sms_reply: ' Responda C para confirmar o R para cambiar la cita. Responda STOP para no recibir mensajes.', sms_stop: ' Responda STOP para no recibir mensajes.', the_office: 'la oficina',
+    with: 'con', and: 'y',
+  },
 };
 export const fixedText = (lang) => FIXED_TEXT[lang === 'es' ? 'es' : 'en'];
 // A patient's language on file is free text ("Spanish", "es", "Español"); messages go out in Spanish or English.
@@ -145,7 +176,7 @@ export async function messageText(db, practiceId, key, vars = {}, lang = 'en') {
 
 // Email subjects in Spanish; English subjects stay with their callers.
 const SUBJECTS_ES = {
-  reminder: 'Su cita en {practice}', booking_confirmation: 'Su cita en {practice}', review: 'Gracias por visitar {practice}',
+  reminder: 'Su cita en {practice}', booking_confirmation: 'Su cita en {practice}', reminder_confirmed: 'Lo esperamos en {practice}', appointment_moved: 'Su cita en {practice} cambió', family_reminder: 'Sus citas en {practice}', family_booked: 'Sus citas en {practice}', no_show: 'Lo extrañamos en {practice}', review: 'Gracias por visitar {practice}',
   recall: 'Ya le toca su próxima visita en {practice}', card_declined: 'Su pago no se procesó — {practice}', forms: 'Por favor complete sus formularios para {practice}',
   booking_declined: 'Su solicitud de cita en {practice}', card_setup: 'Guarde una tarjeta para sus pagos — {practice}', payment_link: 'Solicitud de pago de {practice}',
   treatment_plan: 'Su plan de tratamiento de {practice}', receipt: 'Su recibo de {practice}', waitlist_offer: 'Se abrió una cita en {practice}',

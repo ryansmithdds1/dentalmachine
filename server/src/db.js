@@ -601,6 +601,22 @@ CREATE TABLE IF NOT EXISTS bridge_agents (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Links in appointment messages. One link can cover several visits (a family's, on one day), and an
+-- appointment keeps every link it was sent, so an older reminder still works.
+CREATE TABLE IF NOT EXISTS confirm_links (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  token_hash TEXT NOT NULL,
+  appointment_id INTEGER NOT NULL REFERENCES appointments(id),
+  recipient_id INTEGER REFERENCES patients(id),
+  channel TEXT,
+  address TEXT,
+  message_id INTEGER REFERENCES messages(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_confirm_links_token ON confirm_links(token_hash);
+CREATE INDEX IF NOT EXISTS idx_confirm_links_appt ON confirm_links(appointment_id);
+
 CREATE TABLE IF NOT EXISTS assistant_log (
   id INTEGER PRIMARY KEY,
   practice_id INTEGER NOT NULL REFERENCES practices(id),
@@ -1727,6 +1743,20 @@ const COLUMNS = [
   ['practices', 'sso_only', 'INTEGER NOT NULL DEFAULT 0'],
   ['users', 'sso_subject', 'TEXT'],
   ['appointments', 'series_id', 'INTEGER REFERENCES appointment_series(id)'],
+  // Confirmations: a notice owed for a new or moved visit ('booked' | 'moved'), the missed-visit text,
+  // delivery reports, contact details that stopped working, and each practice's sending rules.
+  ['appointments', 'notice_due', 'TEXT'],
+  ['appointments', 'no_show_msg_at', 'TEXT'],
+  ['messages', 'delivery', 'TEXT'],
+  ['messages', 'error_code', 'TEXT'],
+  ['patients', 'sms_bad_at', 'TEXT'],
+  ['patients', 'sms_bad_reason', 'TEXT'],
+  ['patients', 'email_bad_at', 'TEXT'],
+  ['patients', 'email_bad_reason', 'TEXT'],
+  ['practices', 'send_from', "TEXT NOT NULL DEFAULT '08:00'"],
+  ['practices', 'send_until', "TEXT NOT NULL DEFAULT '20:00'"],
+  ['practices', 'booking_notices', 'INTEGER NOT NULL DEFAULT 1'],
+  ['practices', 'no_show_texts', 'INTEGER NOT NULL DEFAULT 1'],
 ];
 
 // CHECK constraints widened after release: [table, constraint name on Postgres, old text, new text].

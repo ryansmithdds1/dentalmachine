@@ -1127,6 +1127,8 @@ function RecallTypes() {
   );
 }
 
+const RECOMMENDED_STEPS = [{ hours: 168, channel: 'email', confirmed: false }, { hours: 48, channel: 'auto', confirmed: false }, { hours: 4, channel: 'sms', confirmed: true }];
+
 // Reminders, recall automation, message templates and the Google review request program.
 function Messaging() {
   const { data: practice } = useApi('/practice');
@@ -1140,6 +1142,7 @@ function Messaging() {
     await api.put('/practice', {
       review_url: form.review_url || null, review_requests: form.review_requests, review_threshold: Number(form.review_threshold), message_templates: form.templates,
       reminder_steps: form.reminder_steps.map((s) => ({ ...s, hours: Number(s.hours) })), recall_auto: form.recall_auto, recall_steps: form.recall_steps.map((s) => ({ ...s, days: Number(s.days) })),
+      send_from: form.send_from, send_until: form.send_until, booking_notices: form.booking_notices, no_show_texts: form.no_show_texts,
     });
     setSaved(true);
     refresh();
@@ -1149,11 +1152,12 @@ function Messaging() {
     review_url: practice.review_url || '', review_requests: !!practice.review_requests, review_threshold: practice.review_threshold || 4, templates: JSON.parse(practice.message_templates || '{}'),
     reminder_steps: practice.reminder_steps ? JSON.parse(practice.reminder_steps) : (practice.reminder_hours > 0 ? [{ hours: practice.reminder_hours, channel: 'auto', confirmed: false }] : []),
     recall_auto: !!practice.recall_auto,
+    send_from: practice.send_from || '08:00', send_until: practice.send_until || '20:00', booking_notices: practice.booking_notices !== 0, no_show_texts: practice.no_show_texts !== 0,
     recall_steps: practice.recall_steps ? JSON.parse(practice.recall_steps) : [{ days: -14, channel: 'auto' }, { days: 0, channel: 'auto' }, { days: 30, channel: 'auto' }, { days: 90, channel: 'auto' }],
   };
   const setStep = (list, i, patch) => change({ [list]: cur[list].map((s, j) => (j === i ? { ...s, ...patch } : s)) });
   const change = (patch) => { setSaved(false); setForm({ ...cur, ...patch }); };
-  const sample = { first_name: 'Maria', practice: practice.name, when: 'Tue, Oct 6 at 9:00 AM', provider: 'Dr. Chen', link: 'https://…/c/abc123', phone: practice.phone || '(555) 555-0100', forms: '3 forms', amount: '$125.00', reason: 'Card declined (insufficient funds)', date: 'Oct 6', method: 'credit card', balance: '$80.00', receipt: '#1042', code: '482913', minutes: '10' };
+  const sample = { first_name: 'Maria', practice: practice.name, when: 'Tue, Oct 6 at 9:00 AM', visits: 'Tue, Oct 6: Maria at 9:00 AM with Dr. Chen, Sofia at 10:00 AM with Dr. Chen', provider: 'Dr. Chen', link: 'https://…/c/abc123', phone: practice.phone || '(555) 555-0100', forms: '3 forms', amount: '$125.00', reason: 'Card declined (insufficient funds)', date: 'Oct 6', method: 'credit card', balance: '$80.00', receipt: '#1042', code: '482913', minutes: '10' };
   const render = (t, extra = {}) => t.replace(/\{(\w+)\}/g, (_, k) => extra[k] ?? sample[k] ?? '');
   return (
     <>
@@ -1182,7 +1186,21 @@ function Messaging() {
             {!cur.reminder_steps.length && <tr><td colSpan={4} className="muted">No automatic reminders.</td></tr>}
           </tbody>
         </table>
-        {cur.reminder_steps.length < 5 && <button type="button" className="small" onClick={() => change({ reminder_steps: [...cur.reminder_steps, { hours: 24, channel: 'auto', confirmed: false }] })}>+ Reminder</button>}
+        <div className="inline" style={{ marginTop: 8 }}>
+          {cur.reminder_steps.length < 5 && <button type="button" className="small" onClick={() => change({ reminder_steps: [...cur.reminder_steps, { hours: 24, channel: 'auto', confirmed: false }] })}>+ Reminder</button>}
+          <button type="button" className="small" title="An email a week out with the calendar invite, a text two days out asking for a yes, and a same-day “see you soon” text" onClick={() => change({ reminder_steps: RECOMMENDED_STEPS })}>Use the recommended schedule</button>
+        </div>
+        <h3 style={{ marginTop: 18 }}>Also</h3>
+        <label className="checkbox"><input type="checkbox" checked={cur.booking_notices} onChange={(e) => change({ booking_notices: e.target.checked })} /> Tell patients when the office books or moves a visit (a text or email with the time and the confirm link; untick “Let the patient know” when booking to skip one)</label>
+        <label className="checkbox"><input type="checkbox" checked={cur.no_show_texts} onChange={(e) => change({ no_show_texts: e.target.checked })} /> Send a “we missed you” message the same day when a visit is marked as a no-show</label>
+        <div className="inline" style={{ marginTop: 10, alignItems: 'center' }}>
+          <span>Automatic messages go out between</span>
+          <input type="time" aria-label="Send from" value={cur.send_from} onChange={(e) => change({ send_from: e.target.value })} style={{ width: 140 }} />
+          <span>and</span>
+          <input type="time" aria-label="Send until" value={cur.send_until} onChange={(e) => change({ send_until: e.target.value })} style={{ width: 140 }} />
+          <span className="muted" style={{ fontSize: 12 }}>(office time; texting laws allow 8 AM–9 PM in the patient’s time zone)</span>
+        </div>
+        <p className="muted" style={{ fontSize: 12 }}>A family sharing a phone gets one message for everyone&apos;s visits that day, and a child&apos;s reminders go to the parent. Patients reply C to confirm, R for a new time, HELP or STOP. Texts to a landline and emails that bounce are noticed and the other channel is used.</p>
       </div>
       <div className="card">
         <h2>Recall</h2>

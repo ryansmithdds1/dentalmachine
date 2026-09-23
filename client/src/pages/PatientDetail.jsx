@@ -166,10 +166,10 @@ function Overview({ p, reload }) {
       <div className="card">
         <h2>Contact</h2>
         <dl className="kv">
-          <dt>Mobile</dt><dd>{p.phone || '—'}</dd>
+          <dt>Mobile</dt><dd>{p.phone || '—'}{p.sms_bad_at && <span className="badge warn" style={{ marginLeft: 6 }} title="Reminders go by email until the number is changed">{p.sms_bad_reason || 'Can’t get texts'}</span>}</dd>
           {p.phone_home && (<><dt>Home</dt><dd>{p.phone_home}</dd></>)}
           {p.phone_work && (<><dt>Work</dt><dd>{p.phone_work}</dd></>)}
-          <dt>Email</dt><dd>{p.email || '—'}</dd>
+          <dt>Email</dt><dd>{p.email || '—'}{p.email_bad_at && <span className="badge warn" style={{ marginLeft: 6 }} title="Reminders go by text until the address is changed">Bounced</span>}</dd>
           {(p.preferred_contact || p.language) && (<><dt>Prefers</dt><dd>{[p.preferred_contact && { text: 'Text', call: 'Phone call', email: 'Email' }[p.preferred_contact], p.language].filter(Boolean).join(' · ')}</dd></>)}
           <dt>Address</dt><dd>{[p.address, p.city, p.state, p.zip].filter(Boolean).join(', ') || '—'}</dd>
           <dt>Emergency contact</dt><dd>{p.emergency_contact || '—'}</dd>

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { requirePermission, HttpError, can } from '../auth.js';
 import { pick, requireFields, insert, update, findOr404, audit, practiceNow, mapSeq, friendlyDateTime } from '../util.js';
-import { sendMessage, preferredChannel } from '../messaging.js';
+import { sendMessage, preferredChannel, recipientFor } from '../messaging.js';
 import { messageText, patientLang, subjectFor } from '../templates.js';
 import { primaryPolicy, patientBalance, estimateCoverage, completeProcedure } from '../services.js';
 import { recallTypes } from '../recalls.js';
@@ -340,6 +340,86 @@ export default function frontDeskRoutes({ db, messenger }) {
       last_contact: await lastContact(x.patient_id, 'broken')
     }));
     res.json(req.query.all ? rows : rows.filter((x) => x.last_contact?.outcome !== 'declined' || x.start_time > x.last_contact.created_at));
+  });
+
+  // Visits coming up that nobody has confirmed yet, soonest first, with what's been tried: the messages
+  // sent and whether they arrived, the patient's last reply, whether the office left a message, and how
+  // (and to whom) the patient can be reached.
+  r.get('/followups/unconfirmed', requirePermission('schedule:read'), async (req, res) => {
+    const pid = req.user.practice_id;
+    const now = await practiceNow(db, pid);
+    const days = Math.min(Math.max(Number(req.query.days) || 2, 1), 14);
+    const rows = await db.all(
+      `SELECT a.id, a.patient_id, a.start_time, a.end_time, a.reason, a.confirmed_via, a.reminder_sent_at, a.location_id, pv.name AS provider_name,
+         p.first_name, p.last_name, p.preferred_name, p.phone, p.email, p.preferred_contact, p.language, p.dob, p.guarantor_id, p.practice_id,
+         p.sms_opt_in, p.email_opt_in, p.sms_bad_at, p.sms_bad_reason, p.email_bad_at, p.email_bad_reason
+       FROM appointments a JOIN patients p ON p.id = a.patient_id JOIN providers pv ON pv.id = a.provider_id
+       WHERE a.practice_id = ? AND a.status = 'scheduled' AND a.start_time > ? AND a.start_time <= ? ORDER BY a.start_time, a.id`,
+      pid, now, `${addDays(now.slice(0, 10), days)} 23:59`,
+    );
+    res.json(await mapSeq(rows, async (a) => {
+      const to = await recipientFor(db, { ...a, id: a.patient_id });
+      const reach = preferredChannel(to);
+      const messages = await db.all(
+        `SELECT id, channel, kind, status, delivery, error, created_at FROM messages
+         WHERE practice_id = ? AND (id IN (SELECT message_id FROM confirm_links WHERE appointment_id = ?) OR (appointment_id = ? AND direction = 'outbound'))
+         ORDER BY id DESC LIMIT 6`, pid, a.id, a.id,
+      );
+      const reply = await db.get(
+        `SELECT body, created_at FROM messages WHERE practice_id = ? AND direction = 'inbound' AND patient_id IN (?, ?) AND created_at > ? ORDER BY id DESC LIMIT 1`,
+        pid, a.patient_id, to.id, new Date(Date.now() - 14 * 86400_000).toISOString().replace('T', ' ').slice(0, 19),
+      );
+      return {
+        id: a.id, patient_id: a.patient_id, start_time: a.start_time, end_time: a.end_time, reason: a.reason, provider_name: a.provider_name,
+        name: `${a.preferred_name || a.first_name} ${a.last_name}`, phone: to.phone || a.phone, left_message: a.confirmed_via === 'left_message',
+        contact: to.id !== a.patient_id ? `${to.first_name} ${to.last_name}` : null,
+        reach: reach ? reach.channel : null,
+        problems: [
+          ...(to.phone && !to.sms_opt_in ? ['Texts turned off'] : []), ...(to.sms_bad_at ? [`Texts: ${to.sms_bad_reason || 'not working'}`] : []),
+          ...(to.email_bad_at ? [`Email: ${to.email_bad_reason || 'bounced'}`] : []), ...(!to.phone && !to.email ? ['No phone or email'] : []),
+        ],
+        messages, last_reply: reply || null,
+      };
+    }));
+  });
+
+  // How well confirmations work: how many visits were confirmed and how, and how often confirmed and
+  // unconfirmed patients didn't show; the reminders sent and whether they arrived.
+  r.get('/followups/confirmation-stats', requirePermission('schedule:read'), async (req, res) => {
+    const pid = req.user.practice_id;
+    const now = await practiceNow(db, pid);
+    const to = /^\d{4}-\d{2}-\d{2}$/.test(req.query.to || '') ? req.query.to : now.slice(0, 10);
+    const from = /^\d{4}-\d{2}-\d{2}$/.test(req.query.from || '') ? req.query.from : addDays(to, -30);
+    const visits = await db.all(
+      `SELECT status, confirmed_at, confirmed_via FROM appointments WHERE practice_id = ? AND start_time >= ? AND start_time <= ? AND start_time <= ?`,
+      pid, `${from} 00:00`, `${to} 23:59`, now,
+    );
+    const came = ['checked_in', 'in_chair', 'completed', 'confirmed'];
+    const held = visits.filter((v) => v.status !== 'cancelled');
+    const wasConfirmed = (v) => !!v.confirmed_at && v.confirmed_via !== 'left_message';
+    const rate = (list) => {
+      const done = list.filter((v) => came.includes(v.status) || v.status === 'no_show');
+      return done.length ? Math.round((1000 * done.filter((v) => v.status === 'no_show').length) / done.length) / 10 : null;
+    };
+    const byVia = {};
+    for (const v of held.filter(wasConfirmed)) byVia[v.confirmed_via || 'other'] = (byVia[v.confirmed_via || 'other'] || 0) + 1;
+    const sent = await db.all(
+      `SELECT channel, status, delivery FROM messages WHERE practice_id = ? AND direction = 'outbound' AND kind IN ('reminder','booking_confirmation')
+       AND created_at >= ? AND created_at < ?`, pid, `${from} 00:00:00`, `${addDays(to, 1)} 00:00:00`,
+    );
+    const count = (f) => sent.filter(f).length;
+    res.json({
+      from, to, visits: held.length, cancelled: visits.length - held.length,
+      confirmed: held.filter(wasConfirmed).length,
+      confirmed_pct: held.length ? Math.round((1000 * held.filter(wasConfirmed).length) / held.length) / 10 : null,
+      by_via: byVia,
+      no_show_pct: rate(held), no_show_pct_confirmed: rate(held.filter(wasConfirmed)), no_show_pct_unconfirmed: rate(held.filter((v) => !wasConfirmed(v))),
+      messages: {
+        sent: count((m) => m.status === 'sent'), texts: count((m) => m.channel === 'sms' && m.status === 'sent'), emails: count((m) => m.channel === 'email' && m.status === 'sent'),
+        delivered: count((m) => m.delivery === 'delivered'), not_delivered: count((m) => m.status === 'failed' || ['undelivered', 'failed', 'bounced'].includes(m.delivery)),
+        blocked: count((m) => m.status === 'blocked'),
+      },
+    });
   });
 
   r.get('/patients/:id/followups', requirePermission('patients:read'), async (req, res) => {
