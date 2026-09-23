@@ -85,7 +85,7 @@ export default function AppointmentForm({ appointment, defaults = {}, patient: i
       reason: form.reason,
       notes: form.notes,
     };
-    const rule = REPEATS.find((r) => r.value === repeat.rule);
+    const rule = repeat.rule ? REPEATS.find((r) => r.value === repeat.rule) : null;
     try {
       const saved = appointment
         ? await api.put(`/appointments/${appointment.id}`, { ...body, ...(appointment.series_id && scope === 'following' ? { scope: 'following' } : {}) })

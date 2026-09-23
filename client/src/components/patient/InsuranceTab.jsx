@@ -192,7 +192,7 @@ function PolicyForm({ patient, policy, onDone }) {
             </select>
           </label>
         )}
-        {chosenPlan?.members > (policy?.plan_id === chosenPlan.id ? 1 : 0) && <div className="full muted" style={{ fontSize: 12 }}>Benefit changes below apply to everyone on this plan ({chosenPlan.members} patient{chosenPlan.members === 1 ? '' : 's'}).</div>}
+        {chosenPlan && chosenPlan.members > (policy?.plan_id === chosenPlan.id ? 1 : 0) && <div className="full muted" style={{ fontSize: 12 }}>Benefit changes below apply to everyone on this plan ({chosenPlan.members} patient{chosenPlan.members === 1 ? '' : 's'}).</div>}
         <label>Subscriber name *<input required value={form.subscriber_name} onChange={set('subscriber_name')} /></label>
         <label>Member ID *<input required value={form.subscriber_id} onChange={set('subscriber_id')} /></label>
         <label>Subscriber DOB<input type="date" value={form.subscriber_dob} onChange={set('subscriber_dob')} /></label>
