@@ -19,6 +19,10 @@ import familyRoutes from './routes/family.js';
 import conversationRoutes, { smsWebhook } from './routes/sms.js';
 import ediRoutes from './routes/edi.js';
 import officeRoutes from './routes/office.js';
+import ppoRoutes from './routes/ppo.js';
+import frontDeskRoutes from './routes/frontdesk.js';
+import casePresentationRoutes, { publicCasePresentation } from './routes/casepres.js';
+import growthRoutes from './routes/growth.js';
 import { createMessenger } from './messaging.js';
 import { createStorage } from './storage.js';
 
@@ -63,7 +67,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   app.use('/api/public', (_req, res, next) => {
     res.set('Cache-Control', 'no-store');
     next();
-  }, publicRoutes({ db }));
+  }, publicRoutes({ db }), publicCasePresentation({ db }));
 
   const api = express.Router();
   api.use(authenticate(db, secret));
@@ -85,6 +89,10 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(conversationRoutes({ db }));
   api.use(ediRoutes({ db, config }));
   api.use(officeRoutes({ db }));
+  api.use(ppoRoutes({ db, config }));
+  api.use(frontDeskRoutes({ db }));
+  api.use(casePresentationRoutes({ db, messenger, config }));
+  api.use(growthRoutes({ db, messenger, config }));
   app.use('/api', api);
   app.use('/api', (_req, _res, next) => next(new HttpError(404, 'Not found')));
 

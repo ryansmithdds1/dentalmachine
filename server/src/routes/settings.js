@@ -3,6 +3,7 @@ import { HttpError, hashPassword } from '../auth.js';
 import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, toCents } from '../util.js';
 import { validatePassword } from './auth.js';
 import { validateHours } from '../hours.js';
+import { validateTemplates, DEFAULT_TEMPLATES } from '../templates.js';
 
 const ROLES = ['admin', 'dentist', 'hygienist', 'assistant', 'front_desk', 'billing'];
 const CATEGORIES = ['diagnostic', 'preventive', 'restorative', 'endodontics', 'periodontics', 'prosthodontics', 'oral_surgery', 'orthodontics', 'implants', 'adjunctive'];
@@ -37,8 +38,16 @@ export default function settingsRoutes({ db }) {
   const r = Router();
 
   r.get('/practice', (req, res) => res.json(db.get('SELECT * FROM practices WHERE id = ?', req.user.practice_id)));
+  r.get('/message-templates/defaults', (_req, res) => res.json(DEFAULT_TEMPLATES));
   r.put('/practice', requireAdmin, (req, res) => {
-    const row = pick(req.body, ['name', 'address', 'city', 'state', 'zip', 'phone', 'email', 'tax_id', 'npi', 'timezone', 'slug', 'online_booking', 'reminder_hours', 'require_mfa', 'office_hours', 'daily_goal', 'sms_number']);
+    const row = pick(req.body, ['name', 'address', 'city', 'state', 'zip', 'phone', 'email', 'tax_id', 'npi', 'timezone', 'slug', 'online_booking', 'reminder_hours', 'require_mfa', 'office_hours', 'daily_goal', 'sms_number', 'review_url', 'review_requests', 'idle_timeout_minutes', 'message_templates', 'hygiene_goal']);
+    if (row.message_templates != null) row.message_templates = validateTemplates(row.message_templates);
+    if (row.review_url && !/^https:\/\/\S+$/.test(row.review_url)) throw new HttpError(400, 'Review link must start with https://');
+    if (row.idle_timeout_minutes != null) {
+      row.idle_timeout_minutes = Number(row.idle_timeout_minutes);
+      if (!Number.isInteger(row.idle_timeout_minutes) || row.idle_timeout_minutes < 5 || row.idle_timeout_minutes > 240) throw new HttpError(400, 'Automatic sign-out must be 5-240 minutes');
+    }
+    if (row.hygiene_goal != null) row.hygiene_goal = toCents(row.hygiene_goal, 'hygiene_goal');
     if (row.office_hours != null) row.office_hours = JSON.stringify(validateHours(typeof row.office_hours === 'string' ? JSON.parse(row.office_hours) : row.office_hours));
     if (row.daily_goal != null) row.daily_goal = toCents(row.daily_goal, 'daily_goal');
     if (row.slug != null) {
@@ -101,7 +110,7 @@ export default function settingsRoutes({ db }) {
 
   resource(r, db, {
     path: 'providers', table: 'providers', required: ['name'],
-    fields: ['name', 'type', 'npi', 'license_number', 'color', 'active', 'user_id'],
+    fields: ['name', 'type', 'npi', 'license_number', 'dea_number', 'color', 'active', 'user_id'],
     validate: (row, req) => {
       requireOneOf(row.type, ['dentist', 'hygienist', 'specialist'], 'type');
       if (row.npi && !/^\d{10}$/.test(row.npi)) throw new HttpError(400, 'NPI must be 10 digits');

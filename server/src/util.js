@@ -125,3 +125,19 @@ export function friendlyDateTime(value) {
   const [h, m] = value.slice(11, 16).split(':').map(Number);
   return `${day} at ${((h + 11) % 12) + 1}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`;
 }
+
+// UTC timestamp ('YYYY-MM-DD HH:MM:SS', as SQLite datetime('now') stores) for a practice-local wall-clock time.
+// Used to compare created_at-style UTC columns against practice-local date ranges.
+export function zonedToUtc(timeZone, date, time = '00:00') {
+  const guess = new Date(`${date}T${time}:00Z`);
+  const local = localNow(timeZone, guess);
+  const offset = Date.parse(`${local.replace(' ', 'T')}:00Z`) - guess.getTime();
+  return new Date(guess.getTime() - offset).toISOString().replace('T', ' ').slice(0, 19);
+}
+
+// [startUtc, endUtcExclusive] covering practice-local dates from..to inclusive.
+export function utcRange(db, practiceId, from, to) {
+  const tz = db.get('SELECT timezone FROM practices WHERE id = ?', practiceId)?.timezone || 'America/New_York';
+  const next = new Date(Date.parse(`${to}T12:00:00Z`) + 86400_000).toISOString().slice(0, 10);
+  return [zonedToUtc(tz, from), zonedToUtc(tz, next)];
+}

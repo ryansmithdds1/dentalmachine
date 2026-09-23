@@ -135,10 +135,10 @@ export default function insuranceRoutes({ db }) {
     const id = db.tx(() => {
       const claimId = insert(db, 'claims', {
         practice_id: pid, patient_id: policy.patient_id, patient_insurance_id: policy.id,
-        total_fee: est.total_fee, estimated_amount: est.total_insurance, deductible_applied: est.total_deductible,
+        total_fee: est.total_fee, estimated_amount: est.total_insurance, deductible_applied: est.total_deductible, write_off_estimate: est.total_write_off,
       });
       est.items.forEach((item) => insert(db, 'claim_items', {
-        claim_id: claimId, procedure_id: item.procedure_id, fee: item.fee, estimated_amount: item.insurance,
+        claim_id: claimId, procedure_id: item.procedure_id, fee: item.fee, estimated_amount: item.insurance, write_off: item.write_off,
       }));
       return claimId;
     });

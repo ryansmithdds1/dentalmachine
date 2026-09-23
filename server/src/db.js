@@ -451,6 +451,80 @@ CREATE TABLE IF NOT EXISTS lab_cases (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS fee_schedules (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  name TEXT NOT NULL,
+  notes TEXT,
+  active INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS fee_schedule_items (
+  fee_schedule_id INTEGER NOT NULL REFERENCES fee_schedules(id) ON DELETE CASCADE,
+  code TEXT NOT NULL,
+  fee INTEGER NOT NULL,
+  PRIMARY KEY (fee_schedule_id, code)
+);
+
+CREATE TABLE IF NOT EXISTS preauths (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  patient_insurance_id INTEGER NOT NULL REFERENCES patient_insurance(id),
+  treatment_plan_id INTEGER REFERENCES treatment_plans(id),
+  status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','submitted','approved','denied')),
+  procedure_ids TEXT NOT NULL,
+  total_fee INTEGER NOT NULL,
+  estimated_amount INTEGER NOT NULL DEFAULT 0,
+  approved_amount INTEGER,
+  payer_reference TEXT,
+  notes TEXT,
+  submitted_at TEXT,
+  responded_at TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS prescriptions (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  provider_id INTEGER NOT NULL REFERENCES providers(id),
+  drug TEXT NOT NULL,
+  strength TEXT,
+  sig TEXT NOT NULL,
+  quantity TEXT NOT NULL,
+  refills INTEGER NOT NULL DEFAULT 0,
+  dispense_as_written INTEGER NOT NULL DEFAULT 0,
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS followups (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  kind TEXT NOT NULL,
+  outcome TEXT NOT NULL,
+  note TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_followups ON followups(practice_id, patient_id, kind);
+
+CREATE TABLE IF NOT EXISTS statement_runs (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  accounts INTEGER NOT NULL,
+  emailed INTEGER NOT NULL DEFAULT 0,
+  printed INTEGER NOT NULL DEFAULT 0,
+  total INTEGER NOT NULL,
+  patient_ids TEXT NOT NULL,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS tasks (
   id INTEGER PRIMARY KEY,
   practice_id INTEGER NOT NULL REFERENCES practices(id),
@@ -495,6 +569,25 @@ const COLUMNS = [
   ['claims', 'control_number', 'TEXT'],
   ['claims', 'payer_claim_number', 'TEXT'],
   ['insurance_carriers', 'electronic', 'INTEGER NOT NULL DEFAULT 1'],
+  ['insurance_carriers', 'fee_schedule_id', 'INTEGER REFERENCES fee_schedules(id)'],
+  ['patients', 'referral_source', 'TEXT'],
+  ['patients', 'office_alert', 'TEXT'],
+  ['patients', 'statement_sent_at', 'TEXT'],
+  ['patients', 'medical_reviewed_at', 'TEXT'],
+  ['practices', 'review_url', 'TEXT'],
+  ['practices', 'review_requests', 'INTEGER NOT NULL DEFAULT 0'],
+  ['practices', 'idle_timeout_minutes', 'INTEGER NOT NULL DEFAULT 15'],
+  ['practices', 'message_templates', 'TEXT'],
+  ['practices', 'hygiene_goal', 'INTEGER NOT NULL DEFAULT 0'],
+  ['providers', 'dea_number', 'TEXT'],
+  ['treatment_plans', 'signature_name', 'TEXT'],
+  ['treatment_plans', 'signature_image', 'TEXT'],
+  ['treatment_plans', 'signed_at', 'TEXT'],
+  ['treatment_plans', 'sign_token_hash', 'TEXT'],
+  ['treatment_plans', 'presented_at', 'TEXT'],
+  ['appointments', 'review_sent_at', 'TEXT'],
+  ['claim_items', 'write_off', 'INTEGER NOT NULL DEFAULT 0'],
+  ['claims', 'write_off_estimate', 'INTEGER NOT NULL DEFAULT 0'],
 ];
 
 function migrate(db) {

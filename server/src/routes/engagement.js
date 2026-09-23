@@ -4,6 +4,7 @@ import { pick, requireFields, requireOneOf, insert, findOr404, audit, newToken, 
 import { sendMessage, sendAppointmentReminder, runReminders, preferredChannel } from '../messaging.js';
 import { validateAppt } from './schedule.js';
 import { publish } from '../events.js';
+import { templatesFor, renderTemplate } from '../templates.js';
 
 const requireAdmin = (req, _res, next) => (req.user.role === 'admin' ? next() : next(new HttpError(403, 'Administrator access required')));
 
@@ -61,12 +62,12 @@ export default function engagementRoutes({ db, messenger, config }) {
     const patient = db.get('SELECT * FROM patients WHERE id = ?', recall.patient_id);
     const target = preferredChannel(patient, req.body?.channel);
     if (!target) throw new HttpError(400, 'Patient has no reachable phone or email (or has opted out)');
-    const practice = db.get('SELECT name, phone, slug, online_booking FROM practices WHERE id = ?', req.user.practice_id);
-    const bookLink = practice.online_booking && practice.slug ? ` Book online: ${config.appUrl}/book/${practice.slug}` : '';
+    const practice = db.get('SELECT * FROM practices WHERE id = ?', req.user.practice_id);
+    const bookLink = practice.online_booking && practice.slug ? `Book online: ${config.appUrl}/book/${practice.slug}` : '';
     const msg = await sendMessage(db, messenger, {
       practiceId: req.user.practice_id, patientId: patient.id, userId: req.user.id, kind: 'recall', channel: target.channel, to: target.to,
       subject: `Time for your next visit at ${practice.name}`,
-      body: `Hi ${patient.first_name}, it's time for your next checkup and cleaning at ${practice.name}. Call us at ${practice.phone || 'the office'} to schedule.${bookLink}`,
+      body: renderTemplate(templatesFor(practice).recall, { first_name: patient.first_name, practice: practice.name, phone: practice.phone || 'the office', link: bookLink }),
     });
     if (msg.status === 'sent') db.run("UPDATE recalls SET status = 'contacted', last_contacted_at = datetime('now') WHERE id = ?", recall.id);
     audit(db, req, 'recall.remind', 'recalls', recall.id);

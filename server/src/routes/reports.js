@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { requirePermission, HttpError } from '../auth.js';
-import { practiceNow } from '../util.js';
+import { practiceNow, utcRange } from '../util.js';
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -42,7 +42,7 @@ export default function reportRoutes({ db }) {
         adjustments: db.get("SELECT COALESCE(SUM(amount),0) AS n FROM ledger_entries WHERE practice_id = ? AND type = 'adjustment' AND entry_date BETWEEN ? AND ?", pid, from, to).n,
         accounts_receivable: db.get('SELECT COALESCE(SUM(amount),0) AS n FROM ledger_entries WHERE practice_id = ?', pid).n,
         outstanding_claims: db.get("SELECT COUNT(*) AS n, COALESCE(SUM(estimated_amount),0) AS amount FROM claims WHERE practice_id = ? AND status = 'submitted'", pid),
-        new_patients: db.get('SELECT COUNT(*) AS n FROM patients WHERE practice_id = ? AND date(created_at) BETWEEN ? AND ?', pid, from, to).n,
+        new_patients: db.get('SELECT COUNT(*) AS n FROM patients WHERE practice_id = ? AND created_at >= ? AND created_at < ?', pid, ...utcRange(db, pid, from, to)).n,
         unscheduled_treatment: db.get(
           `SELECT COUNT(*) AS n, COALESCE(SUM(pr.fee),0) AS amount FROM procedures pr JOIN treatment_plans tp ON tp.id = pr.treatment_plan_id
            WHERE pr.practice_id = ? AND pr.status = 'planned' AND pr.appointment_id IS NULL AND tp.status IN ('proposed','accepted')`, pid,
@@ -75,8 +75,8 @@ export default function reportRoutes({ db }) {
       ),
       top_procedures: db.all(
         `SELECT pr.code, pr.description, COUNT(*) AS count, SUM(pr.fee) AS production FROM procedures pr
-         WHERE pr.practice_id = ? AND pr.status = 'completed' AND date(pr.completed_at) BETWEEN ? AND ?
-         GROUP BY pr.code ORDER BY production DESC LIMIT 10`, pid, from, to,
+         WHERE pr.practice_id = ? AND pr.status = 'completed' AND pr.completed_at >= ? AND pr.completed_at < ?
+         GROUP BY pr.code ORDER BY production DESC LIMIT 10`, pid, ...utcRange(db, pid, from, to),
       ),
     });
   });

@@ -1,4 +1,5 @@
 import { insert, friendlyDateTime, newToken, localNow } from './util.js';
+import { templatesFor, renderTemplate } from './templates.js';
 
 // Delivery drivers. "log" records the message without sending it (development / not yet configured).
 export function createMessenger({ env = process.env, fetchImpl = globalThis.fetch } = {}) {
@@ -80,7 +81,7 @@ export async function sendMessage(db, messenger, { practiceId, patientId, appoin
 // Sends a reminder with a one-tap confirmation link, rotating the appointment's confirm token.
 export async function sendAppointmentReminder(db, messenger, { appointmentId, appUrl, userId, channel: requested, kind = 'reminder' }) {
   const a = db.get(
-    `SELECT a.*, p.first_name, p.phone, p.email, p.sms_opt_in, p.email_opt_in, pr.name AS practice_name, pr.phone AS practice_phone, pv.name AS provider_name
+    `SELECT a.*, p.first_name, p.phone, p.email, p.sms_opt_in, p.email_opt_in, pr.name AS practice_name, pr.phone AS practice_phone, pr.message_templates, pv.name AS provider_name
      FROM appointments a JOIN patients p ON p.id = a.patient_id JOIN practices pr ON pr.id = a.practice_id JOIN providers pv ON pv.id = a.provider_id
      WHERE a.id = ?`, appointmentId,
   );
@@ -90,9 +91,11 @@ export async function sendAppointmentReminder(db, messenger, { appointmentId, ap
   db.run('UPDATE appointments SET confirm_token_hash = ? WHERE id = ?', hash, a.id);
   const link = `${appUrl}/c/${token}`;
   const when = friendlyDateTime(a.start_time);
+  const templates = templatesFor({ message_templates: a.message_templates });
+  const vars = { first_name: a.first_name, practice: a.practice_name, when, provider: a.provider_name, link, phone: a.practice_phone || '' };
   const body = kind === 'booking_confirmation'
-    ? `Hi ${a.first_name}, you're booked at ${a.practice_name} on ${when} with ${a.provider_name}. Details or changes: ${link}`
-    : `Hi ${a.first_name}, this is ${a.practice_name} reminding you of your appointment on ${when} with ${a.provider_name}. Please confirm: ${link}${target.channel === 'sms' ? ' Reply STOP to opt out.' : ''}`;
+    ? renderTemplate(templates.booking_confirmation, vars)
+    : `${renderTemplate(templates.reminder, vars)}${target.channel === 'sms' ? ' Reply C to confirm, STOP to opt out.' : ''}`;
   const msg = await sendMessage(db, messenger, {
     practiceId: a.practice_id, patientId: a.patient_id, appointmentId: a.id, userId, kind,
     channel: target.channel, to: target.to, subject: `Your appointment at ${a.practice_name}`, body,
@@ -116,6 +119,34 @@ export async function runReminders(db, messenger, { appUrl, now = new Date() } =
       if (msg?.status === 'sent') sent++;
       // Mark attempted even without a reachable channel so we don't retry every cycle.
       if (!msg) db.run("UPDATE appointments SET reminder_sent_at = datetime('now') WHERE id = ?", id);
+    }
+  }
+  return sent + (await runReviewRequests(db, messenger, { now }));
+}
+
+// After a completed visit, ask happy patients for an online review (at most once every 6 months).
+export async function runReviewRequests(db, messenger, { now = new Date() } = {}) {
+  let sent = 0;
+  for (const practice of db.all("SELECT * FROM practices WHERE review_requests = 1 AND review_url IS NOT NULL AND review_url != ''")) {
+    const local = localNow(practice.timezone, now);
+    const due = db.all(
+      `SELECT a.id, a.patient_id FROM appointments a WHERE a.practice_id = ? AND a.status = 'completed' AND a.review_sent_at IS NULL
+       AND a.start_time >= ? AND a.end_time <= ?`,
+      practice.id, `${local.slice(0, 10)} 00:00`, local,
+    );
+    const templates = templatesFor(practice);
+    for (const { id, patient_id: patientId } of due) {
+      db.run("UPDATE appointments SET review_sent_at = datetime('now') WHERE id = ?", id);
+      const recent = db.get("SELECT 1 FROM messages WHERE patient_id = ? AND kind = 'review' AND created_at > datetime('now', '-180 days')", patientId);
+      const patient = db.get('SELECT * FROM patients WHERE id = ?', patientId);
+      const target = preferredChannel(patient);
+      if (recent || !target) continue;
+      const msg = await sendMessage(db, messenger, {
+        practiceId: practice.id, patientId, appointmentId: id, kind: 'review', channel: target.channel, to: target.to,
+        subject: `Thanks for visiting ${practice.name}`,
+        body: renderTemplate(templates.review, { first_name: patient.first_name, practice: practice.name, link: practice.review_url, phone: practice.phone || '' }),
+      });
+      if (msg.status === 'sent') sent++;
     }
   }
   return sent;

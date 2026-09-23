@@ -84,7 +84,8 @@ export function build837D({ practice, claims, senderId, receiverId, control = 1,
         `DMG*D8*${d8(patient.dob)}*${GENDER(patient.gender)}`,
       );
     }
-    segs.push(`CLM*${clean(claim.control_number, 20)}*${money(claim.total_fee)}***11:B:1*Y*A*Y*Y`);
+    // CLM19 = PB marks a predetermination of benefits (pre-authorization) rather than a claim for payment.
+    segs.push(`CLM*${clean(claim.control_number, 20)}*${money(claim.total_fee)}***11:B:1*Y*A*Y*Y${claim.predetermination ? `${'*'.repeat(10)}PB` : ''}`);
     const rendering = items.find((i) => i.provider_npi);
     if (rendering) {
       const rn = splitName(rendering.provider_name.replace(/,.*$/, '').replace(/^DR\.?\s*/i, ''));

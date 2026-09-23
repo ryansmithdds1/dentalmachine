@@ -33,19 +33,28 @@ export function estimateCoverage(db, policy, procedures) {
   if (!policy) {
     return {
       policy: null,
-      items: procedures.map((p) => ({ procedure_id: p.id, fee: p.fee, deductible: 0, insurance: 0, patient: p.fee })),
+      items: procedures.map((p) => ({ procedure_id: p.id, fee: p.fee, allowed: p.fee, write_off: 0, deductible: 0, insurance: 0, patient: p.fee })),
       total_fee: procedures.reduce((s, p) => s + p.fee, 0),
+      total_write_off: 0,
       total_deductible: 0,
       total_insurance: 0,
       total_patient: procedures.reduce((s, p) => s + p.fee, 0),
     };
   }
+  // In-network (PPO) carriers pay from their fee schedule; the difference is written off.
+  const scheduleId = policy.fee_schedule_id ?? db.get('SELECT fee_schedule_id FROM insurance_carriers WHERE id = ?', policy.carrier_id)?.fee_schedule_id;
+  const allowedFor = (p) => {
+    if (!scheduleId) return p.fee;
+    const row = db.get('SELECT fee FROM fee_schedule_items WHERE fee_schedule_id = ? AND code = ?', scheduleId, p.code);
+    return row ? Math.min(row.fee, p.fee) : p.fee;
+  };
   let remainingMax = Math.max(0, policy.annual_max - benefitsUsed(db, policy));
   let remainingDeductible = Math.max(0, policy.deductible - policy.deductible_met);
   const items = procedures.map((p) => {
     const tier = coverageTier(p.category);
     const pct = policy[`pct_${tier}`] ?? 0;
-    let allowed = p.fee;
+    const contracted = allowedFor(p);
+    let allowed = contracted;
     let deductible = 0;
     if (tier !== 'preventive' && remainingDeductible > 0) {
       deductible = Math.min(remainingDeductible, allowed);
@@ -55,13 +64,14 @@ export function estimateCoverage(db, policy, procedures) {
     let insurance = Math.round((allowed * pct) / 100);
     insurance = Math.min(insurance, remainingMax);
     remainingMax -= insurance;
-    return { procedure_id: p.id, fee: p.fee, tier, pct, deductible, insurance, patient: p.fee - insurance };
+    return { procedure_id: p.id, fee: p.fee, allowed: contracted, write_off: p.fee - contracted, tier, pct, deductible, insurance, patient: contracted - insurance };
   });
   const sum = (k) => items.reduce((s, i) => s + i[k], 0);
   return {
     policy: { id: policy.id, carrier_name: policy.carrier_name, annual_max: policy.annual_max },
     items,
     total_fee: sum('fee'),
+    total_write_off: sum('write_off'),
     total_deductible: sum('deductible'),
     total_insurance: sum('insurance'),
     total_patient: sum('patient'),
