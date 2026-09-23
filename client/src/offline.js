@@ -1,5 +1,6 @@
 // Today's schedule kept on this device so the office can still see who's coming if the internet drops.
-// Only today's list (times, names, reasons, chairs) is kept, and it's removed at sign-out.
+// Only today's list (times, names, reasons, chairs) is kept, for this browser tab only (it goes when the
+// tab closes), and it's removed at sign-out.
 const KEY = 'dm_offline_day';
 
 export function saveOfflineDay(practice, date, appointments, operatories = [], providers = []) {
@@ -13,13 +14,16 @@ export function saveOfflineDay(practice, date, appointments, operatories = [], p
       alert: !!(a.medical_alerts || a.premed_required),
     })),
   };
-  try { localStorage.setItem(KEY, JSON.stringify(day)); } catch { /* storage full or blocked */ }
+  try { sessionStorage.setItem(KEY, JSON.stringify(day)); } catch { /* storage full or blocked */ }
 }
 
 export function readOfflineDay() {
-  try { return JSON.parse(localStorage.getItem(KEY) || 'null'); } catch { return null; }
+  try { return JSON.parse(sessionStorage.getItem(KEY) || 'null'); } catch { return null; }
 }
 
+// Patient details kept in the browser, cleared at sign-out: today's list, and the pinboard (ids only).
+export const PINBOARD_KEY = 'dm_pinboard';
 export function clearOfflineDay() {
-  try { localStorage.removeItem(KEY); } catch { /* storage blocked */ }
+  try { sessionStorage.removeItem(KEY); } catch { /* storage blocked */ }
+  try { localStorage.removeItem(KEY); localStorage.removeItem(PINBOARD_KEY); } catch { /* storage blocked */ }
 }

@@ -15,7 +15,7 @@ import { TABLE as IMPORT_TABLES } from './importer.js';
 
 export const FORMAT = 'dentalmachine-backup';
 // Short-lived login and device state that has no business in a backup.
-const SKIP = new Set(['portal_codes', 'password_resets', 'sso_logins', 'edi_sandbox_mailbox', 'bridge_agents', 'bridge_commands']);
+const SKIP = new Set(['portal_codes', 'password_resets', 'sso_logins', 'edi_sandbox_mailbox', 'bridge_agents', 'bridge_commands', 'staff_sessions']);
 
 // Tables in the backup and how to find a practice's rows in each (directly, or through a parent row).
 export function backupTables() {

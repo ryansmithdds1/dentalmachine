@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api, getLocationId } from '../api.js';
-import { saveOfflineDay } from '../offline.js';
+import { saveOfflineDay, PINBOARD_KEY } from '../offline.js';
 import { useLookup } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
 import { useLiveEvents } from '../live.js';
@@ -174,11 +174,22 @@ export default function Schedule() {
     if (id === 'new') setModal({ type: 'new', defaults: { date } });
     else api.get(`/patients/${id}`).then((p) => setModal({ type: 'new', defaults: { date }, patient: p })).catch(() => {});
   }, [params.get('book')]); // eslint-disable-line react-hooks/exhaustive-deps
-  // Pinboard: appointments parked here (on this computer) to be placed on another day or time.
-  const [pins, setPinsState] = useState(() => { try { return JSON.parse(localStorage.getItem('dm_pinboard') || '[]'); } catch { return []; } });
+  // Pinboard: appointments parked here (on this computer) to be placed on another day or time. Only their
+  // ids are kept on the device; the details are fetched fresh, and the list is cleared at sign-out.
+  const [pins, setPinsState] = useState([]);
+  useEffect(() => {
+    let ids = [];
+    try {
+      // Older versions kept whole appointments here: keep just their ids.
+      ids = JSON.parse(localStorage.getItem(PINBOARD_KEY) || '[]').map((x) => Number(typeof x === 'object' ? x?.id : x)).filter(Boolean);
+      localStorage.setItem(PINBOARD_KEY, JSON.stringify(ids));
+    } catch { /* storage blocked */ }
+    Promise.all(ids.map((id) => api.get(`/appointments/${id}`).catch(() => null)))
+      .then((rows) => setPinsState(rows.filter((a) => a && !['cancelled', 'no_show', 'completed'].includes(a.status))));
+  }, []);
   const setPins = (fn) => setPinsState((cur) => {
     const next = typeof fn === 'function' ? fn(cur) : fn;
-    try { localStorage.setItem('dm_pinboard', JSON.stringify(next)); } catch { /* private mode */ }
+    try { localStorage.setItem(PINBOARD_KEY, JSON.stringify(next.map((p) => p.id))); } catch { /* private mode */ }
     return next;
   });
   const onPin = useCallback((a) => {

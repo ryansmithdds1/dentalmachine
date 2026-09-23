@@ -878,6 +878,19 @@ CREATE TABLE IF NOT EXISTS upload_links (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Staff sign-in sessions: ended at sign-out, and refused after the practice's idle timeout.
+CREATE TABLE IF NOT EXISTS staff_sessions (
+  id INTEGER PRIMARY KEY,
+  sid TEXT NOT NULL UNIQUE,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  ip TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  last_seen_at TEXT NOT NULL,
+  ended_at TEXT,
+  end_reason TEXT
+);
+
 -- New insurance sent in from the patient portal (with card photos), for the office to check and enter.
 CREATE TABLE IF NOT EXISTS insurance_updates (
   id INTEGER PRIMARY KEY,

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useAuth } from '../auth.jsx';
+import { api } from '../api.js';
 
 // HIPAA automatic logoff: sign out after the practice's idle timeout, with a 60-second warning.
 export default function IdleLogout() {
@@ -7,6 +8,7 @@ export default function IdleLogout() {
   const minutes = practice?.idle_timeout_minutes || 15;
   const [warn, setWarn] = useState(false);
   const last = useRef(Date.now());
+  const pinged = useRef(Date.now());
 
   useEffect(() => {
     const bump = () => {
@@ -27,8 +29,15 @@ export default function IdleLogout() {
         /* ignore */
       }
       const idle = Date.now() - shared;
-      if (idle > minutes * 60_000) logout();
-      else setWarn(idle > minutes * 60_000 - 60_000);
+      if (idle > minutes * 60_000) logout('idle');
+      else {
+        setWarn(idle > minutes * 60_000 - 60_000);
+        // The server ends sessions it hasn't heard from; reading a chart without clicking through still counts.
+        if (idle < 120_000 && Date.now() - pinged.current > 120_000) {
+          pinged.current = Date.now();
+          api.post('/auth/ping').catch(() => {});
+        }
+      }
     }, 5000);
     return () => {
       events.forEach((e) => window.removeEventListener(e, bump));

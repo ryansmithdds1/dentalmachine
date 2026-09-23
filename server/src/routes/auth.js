@@ -12,8 +12,11 @@ export function validatePassword(pw) {
   }
 }
 
-async function session(user, secret, db) {
+async function session(user, secret, db, req = null) {
   const { id, practice_id, email, name, role } = user;
+  // A fresh token for someone already signed in (after a password change, say) keeps their session.
+  const sid = req?.session_sid || randomBytes(18).toString('base64url');
+  if (!req?.session_sid) await db.run('INSERT INTO staff_sessions (sid, user_id, practice_id, ip, last_seen_at) VALUES (?, ?, ?, ?, ?)', sid, id, practice_id, req?.ip ?? null, new Date().toISOString());
   const tv = (await db.get('SELECT token_version FROM users WHERE id = ?', id))?.token_version ?? 0;
   const mfaEnabled = !!(await db.get('SELECT mfa_enabled FROM users WHERE id = ?', id))?.mfa_enabled;
   const requireMfa = !!(await db.get('SELECT require_mfa FROM practices WHERE id = ?', practice_id))?.require_mfa;
@@ -22,7 +25,7 @@ async function session(user, secret, db) {
   const locations = (await db.all('SELECT id, name FROM locations WHERE practice_id = ? AND active = 1 ORDER BY sort, id', practice_id))
     .filter((l) => !allowed || allowed.includes(l.id));
   return {
-    token: signToken({ sub: id, pid: practice_id, role, aud: 'staff', tv }, secret),
+    token: signToken({ sub: id, pid: practice_id, role, aud: 'staff', tv, sid }, secret),
     user: {
       id, practice_id, email, name, role, permissions: effectivePermissions(await db.get(`${USER_PERMISSION_SQL} WHERE u.id = ?`, id)),
       mfa_enabled: mfaEnabled, mfa_setup_required: requireMfa && !mfaEnabled, locations, all_locations: !allowed,
@@ -58,7 +61,7 @@ export default function authRoutes({ db, secret, config = {}, fetchImpl = global
     });
     req.user = user;
     await audit(db, req, 'practice.register', 'practices', user.practice_id);
-    res.status(201).json(await session(user, secret, db));
+    res.status(201).json(await session(user, secret, db, req));
   });
 
   r.post('/login', limiter, async (req, res) => {
@@ -90,7 +93,7 @@ export default function authRoutes({ db, secret, config = {}, fetchImpl = global
     await db.run("UPDATE users SET last_login_at = datetime('now'), failed_logins = 0, locked_until = NULL WHERE id = ?", user.id);
     req.user = user;
     await audit(db, req, 'auth.login', 'users', user.id);
-    res.json(await session(user, secret, db));
+    res.json(await session(user, secret, db, req));
   });
 
   // ---- Single sign-on (OpenID Connect) ----
@@ -176,7 +179,7 @@ export default function authRoutes({ db, secret, config = {}, fetchImpl = global
       if (!user.sso_subject && user.role === 'admin' && !login.user_id) throw new HttpError(403, 'Administrators link single sign-on first: sign in with your password, then Settings → Single sign-on → Link my account');
       await db.run("UPDATE users SET sso_subject = ?, last_login_at = datetime('now') WHERE id = ?", subject, user.id);
       await audit(db, { ip: req.ip, user }, 'auth.sso_login', 'users', user.id, { provider: cfg.practice.sso_provider });
-      back(res, { sso: (await session(user, secret, db)).token });
+      back(res, { sso: (await session(user, secret, db, req)).token });
     } catch (err) {
       await audit(db, { ip: req.ip, user: null }, 'auth.sso_failed', null, null, { error: err.message }).catch(() => {});
       back(res, { sso_error: err instanceof HttpError ? err.message : 'Single sign-on failed' });
@@ -185,7 +188,7 @@ export default function authRoutes({ db, secret, config = {}, fetchImpl = global
 
   r.get('/me', authenticate(db, secret, { allowMfaSetup: true }), async (req, res) => {
     const practice = await db.get('SELECT * FROM practices WHERE id = ?', req.user.practice_id);
-    res.json({ ...(await session(req.user, secret, db)), practice: staffPractice(practice, req.user) });
+    res.json({ ...(await session(req.user, secret, db, req)), practice: staffPractice(practice, req.user) });
   });
 
   r.post('/change-password', authenticate(db, secret, { allowMfaSetup: true }), async (req, res) => {
@@ -197,13 +200,22 @@ export default function authRoutes({ db, secret, config = {}, fetchImpl = global
     await endOtherSessions(req.user.id);
     await audit(db, req, 'auth.password_changed', 'users', req.user.id);
     // Other devices are signed out; this one gets a fresh session.
-    res.json({ ok: true, ...(await session(req.user, secret, db)) });
+    res.json({ ok: true, ...(await session(req.user, secret, db, req)) });
   });
+
+  // Signing out ends this session on the server, not just in the browser.
+  r.post('/logout', authenticate(db, secret, { allowMfaSetup: true }), async (req, res) => {
+    await db.run("UPDATE staff_sessions SET ended_at = ?, end_reason = ? WHERE id = ?", new Date().toISOString(), req.body?.reason === 'idle' ? 'idle' : 'logout', req.session_id);
+    await audit(db, req, req.body?.reason === 'idle' ? 'auth.logout_idle' : 'auth.logout', 'users', req.user.id);
+    res.json({ ok: true });
+  });
+  // Someone is using the screen without making requests (reading a chart): keeps the session alive.
+  r.post('/ping', authenticate(db, secret, { allowMfaSetup: true }), (_req, res) => res.json({ ok: true }));
 
   r.post('/logout-all', authenticate(db, secret, { allowMfaSetup: true }), async (req, res) => {
     await endOtherSessions(req.user.id);
     await audit(db, req, 'auth.logout_all', 'users', req.user.id);
-    res.json(await session(req.user, secret, db));
+    res.json(await session(req.user, secret, db, req));
   });
 
   // Forgot password: a one-time link by email, valid for an hour. The answer is the same whether or
@@ -257,7 +269,7 @@ export default function authRoutes({ db, secret, config = {}, fetchImpl = global
     if (step == null) throw new HttpError(400, 'That code did not match. Check your phone clock and try again.');
     await db.run('UPDATE users SET mfa_enabled = 1, mfa_last_step = ? WHERE id = ?', step, req.user.id);
     await audit(db, req, 'auth.mfa_enabled', 'users', req.user.id);
-    res.json(await session(req.user, secret, db));
+    res.json(await session(req.user, secret, db, req));
   });
 
   r.post('/mfa/disable', authed, async (req, res) => {
@@ -268,7 +280,7 @@ export default function authRoutes({ db, secret, config = {}, fetchImpl = global
     await db.run('UPDATE users SET mfa_enabled = 0, mfa_secret = NULL, mfa_last_step = NULL WHERE id = ?', req.user.id);
     await endOtherSessions(req.user.id);
     await audit(db, req, 'auth.mfa_disabled', 'users', req.user.id);
-    res.json({ ok: true, ...(await session(req.user, secret, db)) });
+    res.json({ ok: true, ...(await session(req.user, secret, db, req)) });
   });
 
   return r;

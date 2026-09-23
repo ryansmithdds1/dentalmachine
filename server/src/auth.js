@@ -88,6 +88,9 @@ export function can(user, permission) {
 export const USER_PERMISSION_SQL = `SELECT u.id, u.practice_id, u.email, u.name, u.role, u.active, u.token_version, u.custom_role_id, u.permissions_add, u.permissions_remove, u.location_ids,
   cr.permissions AS custom_role_permissions, cr.name AS custom_role_name FROM users u LEFT JOIN custom_roles cr ON cr.id = u.custom_role_id`;
 
+// Minutes past the idle timeout before the server refuses a session (the browser signs out on time).
+const SESSION_GRACE_MINUTES = 2;
+
 export function authenticate(db, secret, { allowMfaSetup = false } = {}) {
   return async (req, _res, next) => {
     const header = req.headers.authorization || '';
@@ -99,6 +102,18 @@ export function authenticate(db, secret, { allowMfaSetup = false } = {}) {
     if (!user || !user.active) return next(new HttpError(401, 'Account disabled or not found'));
     // A password change, 2FA reset or "sign out everywhere" bumps the version and ends older sessions.
     if ((payload.tv ?? 0) !== (user.token_version ?? 0)) return next(new HttpError(401, 'Your session has ended — please sign in again'));
+    // The server's own record of this sign-in: ended by signing out, or by the practice's idle timeout
+    // (HIPAA automatic logoff, enforced here as well as in the browser).
+    const s = payload.sid ? await db.get('SELECT s.id, s.last_seen_at, s.ended_at, p.idle_timeout_minutes FROM staff_sessions s JOIN practices p ON p.id = s.practice_id WHERE s.sid = ? AND s.user_id = ?', payload.sid, user.id) : null;
+    if (!s || s.ended_at) return next(new HttpError(401, 'Your session has ended — please sign in again'));
+    const idleMs = Date.now() - Date.parse(s.last_seen_at);
+    if (idleMs > ((s.idle_timeout_minutes || 15) + SESSION_GRACE_MINUTES) * 60_000) {
+      await db.run("UPDATE staff_sessions SET ended_at = ?, end_reason = 'idle' WHERE id = ?", new Date().toISOString(), s.id);
+      return next(new HttpError(401, 'Signed out after a period without activity — please sign in again', { idle: true }));
+    }
+    if (idleMs > 30_000) await db.run('UPDATE staff_sessions SET last_seen_at = ? WHERE id = ?', new Date().toISOString(), s.id);
+    req.session_id = s.id;
+    req.session_sid = payload.sid;
     // Practices can require 2FA; until it's set up, only the account/MFA endpoints are reachable.
     if (!allowMfaSetup) {
       const gate = await db.get('SELECT p.require_mfa, u.mfa_enabled FROM users u JOIN practices p ON p.id = u.practice_id WHERE u.id = ?', user.id);

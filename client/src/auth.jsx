@@ -62,7 +62,9 @@ export function AuthProvider({ children }) {
     setToken(res.token);
     await refresh();
   };
-  const logout = () => {
+  // Ends the session on the server too, so the token is useless even if it was copied.
+  const logout = (reason) => {
+    if (getToken()) api.post('/auth/logout', reason === 'idle' ? { reason } : {}).catch(() => {});
     setToken(null);
     clearOfflineDay();
     setState({ loading: false, user: null, practice: null });
