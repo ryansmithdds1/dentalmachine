@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api } from '../../api.js';
+import { api, getToken } from '../../api.js';
 import { useApi, useLookup } from '../../hooks.js';
 import { useAuth } from '../../auth.jsx';
 import { money, fmtDate, toCents, fromCents } from '../../format.js';
@@ -65,6 +65,7 @@ export default function InsuranceTab({ patient, onChange }) {
         )}
       </div>
 
+      <PortalInsuranceUpdates patient={patient} />
       <Eligibility patient={patient} policies={policies} onApplied={refresh} />
 
       {can('billing:read') && (
@@ -220,5 +221,46 @@ function PolicyForm({ patient, policy, onDone }) {
       </div>
       <div className="form-actions"><button className="primary" disabled={busy}>Save policy</button></div>
     </form>
+  );
+}
+
+// A card photo from the chart (documents are behind auth, so fetched with the token).
+function CardPhoto({ id }) {
+  const [src, setSrc] = useState(null);
+  useEffect(() => {
+    let url;
+    fetch(`/api/documents/${id}/file`, { headers: { Authorization: `Bearer ${getToken()}` } })
+      .then((r) => (r.ok ? r.blob() : null)).then((b) => b && setSrc((url = URL.createObjectURL(b)))).catch(() => {});
+    return () => url && URL.revokeObjectURL(url);
+  }, [id]);
+  return src ? <a href={src} target="_blank" rel="noreferrer"><img className="ins-card-photo" src={src} alt="Insurance card" /></a> : <div className="ins-card-photo muted">Loading…</div>;
+}
+
+// New insurance the patient sent in from the portal, with their card photos, until someone enters it.
+function PortalInsuranceUpdates({ patient }) {
+  const { can } = useAuth();
+  const { data, reload } = useApi(can('billing:read') ? `/patients/${patient.id}/insurance-updates` : null);
+  const pending = (data || []).filter((u) => u.status === 'pending');
+  if (!pending.length) return null;
+  const REL = { self: 'the patient', spouse: 'spouse', child: 'parent (patient is their child)', other: 'someone else' };
+  return (
+    <div className="card portal-ins-update">
+      <h2>New insurance from the patient portal</h2>
+      {pending.map((u) => (
+        <div key={u.id} className="inline" style={{ gap: 16, alignItems: 'flex-start', flexWrap: 'wrap', marginBottom: 10 }}>
+          <div className="inline" style={{ gap: 8 }}>{u.document_ids.map((d) => <CardPhoto key={d} id={d} />)}</div>
+          <dl className="kv" style={{ gridTemplateColumns: '130px 1fr', flex: 1, minWidth: 260 }}>
+            <dt>Sent</dt><dd>{fmtDate(u.created_at.slice(0, 10))}</dd>
+            <dt>Insurance company</dt><dd>{u.carrier_name || '—'}</dd>
+            <dt>Member ID</dt><dd>{u.member_id || '—'}</dd>
+            <dt>Group</dt><dd>{u.group_number || '—'}</dd>
+            <dt>Policyholder</dt><dd>{REL[u.relationship] || '—'}{u.subscriber_name ? ` · ${u.subscriber_name}` : ''}{u.subscriber_dob ? ` (born ${fmtDate(u.subscriber_dob)})` : ''}</dd>
+            {u.note && <><dt>Note</dt><dd>{u.note}</dd></>}
+          </dl>
+          {can('billing:write') && <button className="small" onClick={() => api.post(`/insurance-updates/${u.id}/reviewed`).then(reload)}>Entered — mark done</button>}
+        </div>
+      ))}
+      <p className="muted" style={{ fontSize: 13, margin: 0 }}>Add or edit the policy below (+ Add policy), verify eligibility, then mark this done.</p>
+    </div>
   );
 }

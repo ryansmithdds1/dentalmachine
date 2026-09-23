@@ -225,6 +225,8 @@ function Dashboard({ token, onSignOut }) {
 
         <Memberships token={token} household={me.household} onDone={(msg) => act(async () => {}, msg)} onError={setError} />
 
+        <InsuranceSection token={token} onDone={(msg) => act(async () => {}, msg)} />
+
         <section className="card">
           <h2>{t('Your details')}</h2>
           <ContactForm token={token} patient={p} onSaved={() => act(async () => {}, 'Your details were updated.')} />
@@ -405,5 +407,94 @@ function ContactForm({ token, patient, onSaved }) {
       <ErrorBox error={error} />
       <div className="form-actions full"><button className="primary">{t('Save')}</button></div>
     </form>
+  );
+}
+
+// Coverage on file for each family member, and sending in new insurance with photos of the card.
+function InsuranceSection({ token, onDone }) {
+  const t = useT();
+  const [members, setMembers] = useState(null);
+  const [form, setForm] = useState(null);
+  const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const load = useCallback(() => call('GET', '/portal/insurance', null, token).then(setMembers).catch(setError), [token]);
+  useEffect(() => { load(); }, [load]);
+  if (!members) return null;
+  const upload = async (side, file) => {
+    if (!file) return;
+    setError(null);
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/portal/insurance/cards?patient_id=${form.patient_id}&side=${side}&filename=${encodeURIComponent(file.name || 'card.jpg')}`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': file.type || 'application/octet-stream' }, body: file });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || res.statusText);
+      setForm((f) => ({ ...f, [side]: { id: data.id, preview: URL.createObjectURL(file) } }));
+    } catch (e) {
+      setError(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const submit = async (e) => {
+    e.preventDefault();
+    setError(null);
+    setBusy(true);
+    try {
+      await call('POST', '/portal/insurance/update', { ...form, document_ids: [form.front?.id, form.back?.id].filter(Boolean) }, token);
+      setForm(null);
+      await load();
+      onDone(t('Thanks — the office will update your insurance before your next visit.'));
+    } catch (err) {
+      setError(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
+  return (
+    <section className="card">
+      <h2>{t('Insurance')}</h2>
+      {members.map((m) => (
+        <div key={m.id} style={{ marginBottom: 10 }}>
+          {members.length > 1 && <strong>{m.first_name}</strong>}
+          {m.policies.length ? m.policies.map((p, i) => (
+            <div key={i} style={{ fontSize: 14 }}>{p.carrier_name} · {t('Member ID')} {p.subscriber_id}{p.group_number ? ` · ${t('Group')} ${p.group_number}` : ''} <span className="muted">({p.priority === 'primary' ? t('primary') : t('secondary')})</span></div>
+          )) : <div className="muted" style={{ fontSize: 14 }}>{t('No insurance on file.')}</div>}
+          {m.pending.length > 0 && <div className="muted" style={{ fontSize: 13 }}>{t('New insurance sent — the office is updating it.')}</div>}
+          {!form && <button className="small" style={{ marginTop: 4 }} onClick={() => setForm({ patient_id: m.id, carrier_name: '', member_id: '', group_number: '', subscriber_name: '', subscriber_dob: '', relationship: 'self', note: '' })}>{t('Update insurance')}</button>}
+        </div>
+      ))}
+      {form && (
+        <form className="form-grid" onSubmit={submit}>
+          <div className="full portal-cards">
+            {['front', 'back'].map((side) => (
+              <label key={side} className="card-photo">
+                {form[side] ? <img src={form[side].preview} alt={side === 'front' ? t('Front of card') : t('Back of card')} /> : <span>📷 {side === 'front' ? t('Photo of the front of the card') : t('Photo of the back')}</span>}
+                <input type="file" accept="image/*,application/pdf" capture="environment" disabled={busy} onChange={(e) => upload(side, e.target.files[0])} />
+              </label>
+            ))}
+          </div>
+          <label>{t('Insurance company')}<input value={form.carrier_name} onChange={set('carrier_name')} /></label>
+          <label>{t('Member ID')}<input value={form.member_id} onChange={set('member_id')} /></label>
+          <label>{t('Group number')}<input value={form.group_number} onChange={set('group_number')} /></label>
+          <label>
+            {t('Who is the policyholder?')}
+            <select value={form.relationship} onChange={set('relationship')}>
+              <option value="self">{t('The patient')}</option><option value="spouse">{t('Spouse')}</option><option value="child">{t('Parent (patient is their child)')}</option><option value="other">{t('Someone else')}</option>
+            </select>
+          </label>
+          {form.relationship !== 'self' && (
+            <>
+              <label>{t('Policyholder name')}<input value={form.subscriber_name} onChange={set('subscriber_name')} /></label>
+              <label>{t('Policyholder date of birth')}<input type="date" value={form.subscriber_dob} onChange={set('subscriber_dob')} /></label>
+            </>
+          )}
+          <label className="full">{t('Anything else we should know?')}<textarea rows={2} value={form.note} onChange={set('note')} /></label>
+          <ErrorBox error={error} />
+          <div className="form-actions full"><button type="button" onClick={() => setForm(null)}>{t('Cancel')}</button><button className="primary" disabled={busy}>{t('Send to the office')}</button></div>
+        </form>
+      )}
+      {!form && <ErrorBox error={error} />}
+    </section>
   );
 }

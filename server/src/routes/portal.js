@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import express, { Router } from 'express';
 import { createHash, randomInt, timingSafeEqual } from 'node:crypto';
 import { HttpError, rateLimit, signToken, verifyToken } from '../auth.js';
 import { hit } from '../cluster.js';
@@ -12,6 +12,8 @@ import { openSlots, validateAppt } from './schedule.js';
 import { emitAppointment } from '../webhooks.js';
 import { PdfDoc } from '../pdf.js';
 import { receiptData, receiptPdf } from '../receipts.js';
+import { sniffMime } from './imaging.js';
+import { MAX_UPLOAD_BYTES } from './documents.js';
 import { runMembershipBilling } from '../memberships.js';
 
 const CODE_TTL_MINUTES = 10;
@@ -96,7 +98,7 @@ export function portalPublicRoutes({ db, secret, messenger }) {
   return r;
 }
 
-export function portalRoutes({ db, secret, config, payments, messenger }) {
+export function portalRoutes({ db, secret, config, payments, messenger, storage }) {
   const r = Router();
   r.use(async (req, _res, next) => {
     const token = String(req.headers.authorization || '').replace(/^Bearer /, '');
@@ -274,6 +276,58 @@ export function portalRoutes({ db, secret, config, payments, messenger }) {
     doc.space(8);
     doc.text(title, { size: 13, bold: true });
   };
+  // ---- Insurance: what's on file, and sending in new coverage with photos of the card ----
+  const member = (req, id) => {
+    const m = req.portal.household.find((h) => h.id === Number(id));
+    if (!m) throw new HttpError(404, 'Family member not found');
+    return m;
+  };
+  r.get('/insurance', async (req, res) => {
+    const { household, ids } = req.portal;
+    const policies = await db.all(
+      `SELECT pi.patient_id, pi.priority, pi.subscriber_name, pi.subscriber_id, pi.group_number, ic.name AS carrier_name FROM patient_insurance pi JOIN insurance_carriers ic ON ic.id = pi.carrier_id
+       WHERE pi.active = 1 AND pi.patient_id IN (${inList(ids)}) ORDER BY pi.patient_id, CASE pi.priority WHEN 'primary' THEN 0 ELSE 1 END`, ...ids,
+    );
+    const pending = await db.all(`SELECT id, patient_id, carrier_name, member_id, created_at FROM insurance_updates WHERE status = 'pending' AND patient_id IN (${inList(ids)}) ORDER BY id DESC`, ...ids);
+    res.json(household.map((h) => ({ id: h.id, first_name: h.first_name, policies: policies.filter((p) => p.patient_id === h.id), pending: pending.filter((u) => u.patient_id === h.id) })));
+  });
+  r.post('/insurance/cards', express.raw({ type: () => true, limit: MAX_UPLOAD_BYTES }), async (req, res) => {
+    const m = member(req, req.query.patient_id);
+    const data = req.body;
+    if (!Buffer.isBuffer(data) || !data.length) throw new HttpError(400, 'Empty upload');
+    const side = req.query.side === 'back' ? 'back' : 'front';
+    const mime = sniffMime(data, String(req.query.filename || ''));
+    if (!mime || !/^(image\/|application\/pdf)/.test(mime)) throw new HttpError(415, 'Photos or PDFs only');
+    const saved = await storage.save(req.portal.practice.id, data);
+    const id = await insert(db, 'documents', {
+      practice_id: req.portal.practice.id, patient_id: m.id, category: 'insurance_card', filename: `insurance-card-${side}.${mime === 'application/pdf' ? 'pdf' : mime.split('/')[1].replace('jpeg', 'jpg')}`,
+      mime, size: data.length, storage_key: saved.storageKey, encrypted: saved.encrypted ? 1 : 0, notes: `Insurance card (${side}) sent from the patient portal`,
+    });
+    await pAudit(req, 'portal.insurance_card', 'documents', id, { patient_id: m.id, side });
+    publish(req.portal.practice.id, { type: 'documents', patient_id: m.id });
+    res.status(201).json({ id, side });
+  });
+  r.post('/insurance/update', async (req, res) => {
+    const m = member(req, req.body?.patient_id);
+    const clean = (v, n) => String(v ?? '').trim().slice(0, n) || null;
+    const row = {
+      carrier_name: clean(req.body.carrier_name, 100), member_id: clean(req.body.member_id, 60), group_number: clean(req.body.group_number, 60),
+      subscriber_name: clean(req.body.subscriber_name, 100), subscriber_dob: clean(req.body.subscriber_dob, 10), relationship: clean(req.body.relationship, 20), note: clean(req.body.note, 1000),
+    };
+    if (!row.carrier_name && !row.member_id) throw new HttpError(400, 'Enter the insurance company and member ID (or add photos of the card)');
+    if (row.subscriber_dob && !/^\d{4}-\d{2}-\d{2}$/.test(row.subscriber_dob)) throw new HttpError(400, 'Date of birth must be YYYY-MM-DD');
+    if (row.relationship && !['self', 'spouse', 'child', 'other'].includes(row.relationship)) row.relationship = 'other';
+    // Only card photos this patient just sent from the portal.
+    const docIds = [...new Set((Array.isArray(req.body.document_ids) ? req.body.document_ids : []).map(Number))].slice(0, 4);
+    const docs = docIds.length ? await db.all(`SELECT id FROM documents WHERE patient_id = ? AND category = 'insurance_card' AND uploaded_by IS NULL AND id IN (${inList(docIds)})`, m.id, ...docIds) : [];
+    const id = await insert(db, 'insurance_updates', { practice_id: req.portal.practice.id, patient_id: m.id, ...row, document_ids: JSON.stringify(docs.map((d) => d.id)) });
+    const today = (await practiceNow(db, req.portal.practice.id)).slice(0, 10);
+    await insert(db, 'tasks', { practice_id: req.portal.practice.id, patient_id: m.id, title: `Insurance update from the portal: ${m.first_name} ${m.last_name}${row.carrier_name ? ` — ${row.carrier_name}` : ''}`, due_date: today, priority: 'normal' });
+    await pAudit(req, 'portal.insurance_update', 'insurance_updates', id, { patient_id: m.id });
+    publish(req.portal.practice.id, { type: 'message', patient_id: m.id });
+    res.status(201).json({ id, status: 'pending' });
+  });
+
   r.get('/statement.pdf', async (req, res) => {
     const { patient, practice, ids, household } = req.portal;
     const today = (await practiceNow(db, practice.id)).slice(0, 10);

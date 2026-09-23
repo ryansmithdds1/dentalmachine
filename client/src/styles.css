@@ -778,3 +778,11 @@ table.elig-freq th, table.elig-freq td { padding: 3px 8px; }
 .phone-email { background: #fff; border-radius: 10px; padding: 10px; font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
 .phone-email p { margin: 6px 0 0; }
 @media (max-width: 900px) { .templates-layout { grid-template-columns: 1fr; } .phone-preview { position: static; } }
+
+.portal-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.card-photo { position: relative; border: 2px dashed var(--border, #d1d5db); border-radius: 10px; min-height: 110px; display: grid; place-items: center; text-align: center; padding: 8px; cursor: pointer; overflow: hidden; font-size: 13px; }
+.card-photo img { max-width: 100%; max-height: 140px; border-radius: 6px; }
+.card-photo input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+
+.ins-card-photo { width: 180px; height: 115px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border, #e5e7eb); display: grid; place-items: center; }
+.portal-ins-update { border-left: 4px solid #f59e0b; }

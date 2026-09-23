@@ -878,6 +878,25 @@ CREATE TABLE IF NOT EXISTS upload_links (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- New insurance sent in from the patient portal (with card photos), for the office to check and enter.
+CREATE TABLE IF NOT EXISTS insurance_updates (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  carrier_name TEXT,
+  member_id TEXT,
+  group_number TEXT,
+  subscriber_name TEXT,
+  subscriber_dob TEXT,
+  relationship TEXT,
+  note TEXT,
+  document_ids TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  reviewed_by INTEGER REFERENCES users(id),
+  reviewed_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Late fees charged on payment-plan installments (one per installment at most).
 CREATE TABLE IF NOT EXISTS payment_plan_late_fees (
   id INTEGER PRIMARY KEY,

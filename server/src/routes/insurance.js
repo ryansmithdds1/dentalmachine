@@ -270,6 +270,20 @@ export default function insuranceRoutes({ db }) {
   // code, tooth and surfaces (corrected on the chart too), the prior-authorization number, and a note to
   // the payer. What changed is kept on the claim's history. A claim the payer already has goes back out as a
   // corrected claim (below) once edited.
+  // New coverage the patient sent in from the portal, waiting for someone to enter it.
+  r.get('/patients/:id/insurance-updates', requirePermission('billing:read'), async (req, res) => {
+    const patient = await findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient');
+    const rows = await db.all("SELECT u.*, us.name AS reviewed_by_name FROM insurance_updates u LEFT JOIN users us ON us.id = u.reviewed_by WHERE u.patient_id = ? AND u.practice_id = ? AND (u.status = 'pending' OR u.reviewed_at > ?) ORDER BY u.id DESC",
+      patient.id, req.user.practice_id, new Date(Date.now() - 30 * 86400_000).toISOString().slice(0, 10));
+    res.json(rows.map((u) => ({ ...u, document_ids: JSON.parse(u.document_ids || '[]') })));
+  });
+  r.post('/insurance-updates/:uid/reviewed', requirePermission('billing:write'), async (req, res) => {
+    const u = await findOr404(db, 'insurance_updates', req.params.uid, req.user.practice_id, 'Insurance update');
+    await db.run("UPDATE insurance_updates SET status = 'reviewed', reviewed_by = ?, reviewed_at = datetime('now') WHERE id = ?", req.user.id, u.id);
+    await audit(db, req, 'insurance_update.reviewed', 'insurance_updates', u.id);
+    res.json({ ok: true });
+  });
+
   // A phone call (or portal check) with the payer about this claim: who, reference number, what they said,
   // and when to follow up next. Kept in the claim's history.
   r.post('/claims/:cid/calls', requirePermission('billing:write'), async (req, res) => {
