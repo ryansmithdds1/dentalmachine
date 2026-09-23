@@ -14,7 +14,7 @@ import { readOfflineDay } from './offline.js';
 import { ClockButton } from './components/TimeClock.jsx';
 import { useLiveEvents } from './live.js';
 import MfaSetup from './components/MfaSetup.jsx';
-import { Sun, CalendarDays, Users, MessageSquare, Inbox as InboxIcon, PhoneCall, Megaphone, Receipt, ListChecks, ChartColumn, Settings as SettingsIcon, Search, PanelLeftClose, PanelLeftOpen, LogOut, Keyboard, Monitor, Moon } from 'lucide-react';
+import { Sun, CalendarDays, Users, MessageSquare, Inbox as InboxIcon, PhoneCall, Megaphone, Receipt, ListChecks, ChartColumn, Landmark, Settings as SettingsIcon, Search, PanelLeftClose, PanelLeftOpen, LogOut, Keyboard, Monitor, Moon } from 'lucide-react';
 import { getThemePref, setThemePref, watchTheme } from './theme.js';
 
 // Pages load on demand so the first screen appears quickly.
@@ -24,6 +24,7 @@ const PatientDetail = lazy(() => import('./pages/PatientDetail.jsx'));
 const Claims = lazy(() => import('./pages/Claims.jsx'));
 const ClaimDetail = lazy(() => import('./pages/ClaimDetail.jsx'));
 const Followups = lazy(() => import('./pages/Followups.jsx'));
+const Finance = lazy(() => import('./pages/Finance.jsx'));
 const Campaigns = lazy(() => import('./pages/Campaigns.jsx'));
 const UnsubscribePage = lazy(() => import('./pages/public/UnsubscribePage.jsx'));
 const RouteSlip = lazy(() => import('./pages/RouteSlip.jsx'));
@@ -153,6 +154,7 @@ function StaffApp() {
     ['/claims', Receipt, 'Billing', can('billing:read')],
     ['/office', ListChecks, 'To-do & labs', true],
     ['/reports', ChartColumn, 'Reports', can('reports:read')],
+    ['/finance', Landmark, 'Finance', can('finance:read')],
     ['/settings', SettingsIcon, 'Settings', true],
   ];
 
@@ -319,6 +321,7 @@ function Shell({ nav }) {
             <Route path="/claims" element={<Claims />} />
             <Route path="/claims/:id" element={<ClaimDetail />} />
             <Route path="/reports" element={<Reports />} />
+            <Route path="/finance" element={<Finance />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

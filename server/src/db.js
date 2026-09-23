@@ -617,6 +617,116 @@ CREATE TABLE IF NOT EXISTS confirm_links (
 CREATE INDEX IF NOT EXISTS idx_confirm_links_token ON confirm_links(token_hash);
 CREATE INDEX IF NOT EXISTS idx_confirm_links_appt ON confirm_links(appointment_id);
 
+-- The business side: the practice's bank accounts (through Plaid) and its books (QuickBooks Online).
+-- Tokens are sealed with the server secret. Amounts in cents; bank amounts are signed, money in positive.
+CREATE TABLE IF NOT EXISTS bank_connections (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  provider TEXT NOT NULL DEFAULT 'plaid',
+  item_id TEXT,
+  access_token TEXT,
+  institution TEXT,
+  cursor TEXT,
+  status TEXT NOT NULL DEFAULT 'active',
+  error TEXT,
+  last_synced_at TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS bank_accounts (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  connection_id INTEGER NOT NULL REFERENCES bank_connections(id),
+  external_id TEXT NOT NULL,
+  name TEXT,
+  official_name TEXT,
+  mask TEXT,
+  type TEXT,
+  subtype TEXT,
+  current_balance INTEGER,
+  available_balance INTEGER,
+  deposits_here INTEGER NOT NULL DEFAULT 1,
+  active INTEGER NOT NULL DEFAULT 1,
+  updated_at TEXT,
+  UNIQUE (connection_id, external_id)
+);
+CREATE TABLE IF NOT EXISTS bank_transactions (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  account_id INTEGER NOT NULL REFERENCES bank_accounts(id),
+  external_id TEXT NOT NULL,
+  date TEXT NOT NULL,
+  amount INTEGER NOT NULL,
+  description TEXT,
+  merchant TEXT,
+  provider_category TEXT,
+  category TEXT,
+  category_source TEXT,
+  pending INTEGER NOT NULL DEFAULT 0,
+  ignored INTEGER NOT NULL DEFAULT 0,
+  note TEXT,
+  match_kind TEXT,
+  match_refs TEXT,
+  match_amount INTEGER,
+  match_fee INTEGER,
+  match_status TEXT,
+  matched_by INTEGER,
+  matched_at TEXT,
+  qbo_id TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (account_id, external_id)
+);
+CREATE INDEX IF NOT EXISTS idx_bank_tx_date ON bank_transactions(practice_id, date);
+CREATE TABLE IF NOT EXISTS finance_rules (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  pattern TEXT NOT NULL,
+  category TEXT NOT NULL,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS qbo_connections (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL UNIQUE REFERENCES practices(id),
+  realm_id TEXT NOT NULL,
+  company_name TEXT,
+  environment TEXT,
+  access_token TEXT,
+  refresh_token TEXT,
+  expires_at TEXT,
+  refresh_expires_at TEXT,
+  status TEXT NOT NULL DEFAULT 'active',
+  error TEXT,
+  settings TEXT,
+  last_synced_at TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS qbo_accounts (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  qbo_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  full_name TEXT,
+  type TEXT,
+  subtype TEXT,
+  active INTEGER NOT NULL DEFAULT 1,
+  category TEXT,
+  category_source TEXT,
+  UNIQUE (practice_id, qbo_id)
+);
+-- Monthly profit and loss from QuickBooks, one row per account per month.
+CREATE TABLE IF NOT EXISTS qbo_pl (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  month TEXT NOT NULL,
+  qbo_account_id TEXT,
+  account_name TEXT NOT NULL,
+  section TEXT NOT NULL,
+  amount INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_qbo_pl ON qbo_pl(practice_id, month);
+
 CREATE TABLE IF NOT EXISTS assistant_log (
   id INTEGER PRIMARY KEY,
   practice_id INTEGER NOT NULL REFERENCES practices(id),

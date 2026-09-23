@@ -1297,3 +1297,11 @@ button.assist-fab.busy { animation: assist-busy 1.4s ease-in-out infinite; }
 .stat-strip > div { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; }
 .stat-strip strong { font-size: 20px; }
 .stat-strip span { font-size: 12px; color: var(--muted); }
+
+/* Finance: a cost's share of collections against the typical range */
+.range-bar { position: relative; height: 10px; background: var(--bg); border-radius: 99px; overflow: hidden; }
+.range-bar .band { position: absolute; top: 0; bottom: 0; background: var(--ok-soft); border-left: 1px solid var(--ok); border-right: 1px solid var(--ok); }
+.range-bar i { position: absolute; left: 0; top: 3px; height: 4px; border-radius: 99px; background: var(--primary); }
+.range-bar i.high { background: var(--danger); }
+.text-ok { color: var(--ok); }
+.text-warn { color: var(--warn); }

@@ -66,6 +66,7 @@ export const PERMISSION_CATALOG = {
   'billing:read': 'See ledgers and claims', 'billing:write': 'Take payments, adjust, send claims',
   'reports:read': 'See all practice reports', 'reports:own': 'See their own production',
   'timeclock:manage': 'See and fix everyone’s timesheets, export payroll',
+  'finance:read': 'See bank activity, costs and profit', 'finance:write': 'Sort bank lines and match deposits',
 };
 
 // A person's permissions: their custom role's (or their built-in role's), plus or minus any set just for them.

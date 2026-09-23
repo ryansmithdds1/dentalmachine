@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { openDb } from './db.js';
 import { createApp, loadConfig } from './app.js';
 import { createMessenger, runReminders } from './messaging.js';
+import { runFinanceSync } from './routes/finance.js';
 import { initCluster, runExclusive } from './cluster.js';
 import { pollClearinghouse } from './clearinghouse.js';
 import { runRecallSequences } from './recalls.js';
@@ -122,6 +123,13 @@ if (process.env.ORTHO_BILLING !== 'off') {
     .catch(jobFailed('Ortho billing'));
   setInterval(run, 60 * 60 * 1000).unref();
   setTimeout(run, 50_000).unref();
+}
+// The business's bank lines and QuickBooks books, every four hours (Plaid's webhook also brings new lines sooner).
+if (process.env.FINANCE_SYNC !== 'off') {
+  const run = () => runExclusive('finance-sync', 30 * 60 * 1000, () => runFinanceSync(db, { plaid: app.locals.plaid, qbo: app.locals.qbo, secret }))
+    .catch(jobFailed('Finance sync'));
+  setInterval(run, 4 * 60 * 60 * 1000).unref();
+  setTimeout(run, 70_000).unref();
 }
 // After-visit patient surveys (the day after, from 10am practice time).
 {

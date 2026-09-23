@@ -80,7 +80,9 @@ test('the app page is served with a content security policy that matches vercel.
   const vercel = JSON.parse(readFileSync(new URL('../../vercel.json', import.meta.url), 'utf8'));
   const header = vercel.headers[0].headers.find((x) => x.key === 'Content-Security-Policy');
   assert.equal(header.value, CSP);
-  assert.match(CSP, /script-src 'self';/);
+  // Our own scripts only, plus Plaid's bank-connection script: nothing inline.
+  assert.match(CSP, /script-src 'self' https:\/\/cdn\.plaid\.com\/link\/v2\/stable\/link-initialize\.js;/);
+  assert.doesNotMatch(CSP, /script-src [^;]*unsafe/);
   assert.match(CSP, /frame-ancestors 'none'/);
 });
 

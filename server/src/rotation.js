@@ -40,6 +40,9 @@ export async function rotateKeys(db, { storage, secret }) {
     };
     await reseal('users', 'mfa_secret', 'mfa');
     await reseal('practices', 'sso_client_secret', 'sso');
+    await reseal('bank_connections', 'access_token', 'bank');
+    await reseal('qbo_connections', 'access_token', 'qbo');
+    await reseal('qbo_connections', 'refresh_token', 'qbo');
   }
   return out;
 }
