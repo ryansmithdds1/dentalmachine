@@ -6,7 +6,7 @@ import { useAuth } from '../../auth.jsx';
 import { fmtDate, label } from '../../format.js';
 import { ErrorBox, Modal } from '../ui.jsx';
 import { useLiveEvents } from '../../live.js';
-import { ScanLine, Radio } from 'lucide-react';
+import { ScanLine, Radio, Video } from 'lucide-react';
 import ImageViewer from '../ImageViewer.jsx';
 import ImagingStudio, { MountBoard } from '../imaging/ImagingStudio.jsx';
 import { MOUNTS, slotLabels } from '../imaging/mounts.js';
@@ -318,6 +318,7 @@ function Mounts({ patient, docs, canEdit, onStudio }) {
               {mounts.map((m) => <option key={m.id} value={m.id}>{MOUNTS[m.template]?.label} · {fmtDate(m.taken_at)}</option>)}
             </select>
           )}
+          {canEdit && <button className="small" onClick={() => onStudio({ mountId: current?.id, camera: true })}><Video size={14} /> Intraoral camera</button>}
           <button className="small primary" onClick={() => onStudio({ mountId: current?.id })}><ScanLine size={14} /> Open imaging</button>
         </div>
       </div>

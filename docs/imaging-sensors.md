@@ -40,7 +40,10 @@ The downloaded `bridge-config.json` already has the sensor section:
   To see the names, run `node dental-machine-bridge.mjs bridge-config.json --list-sensors`.
 - `exposure`: the x-ray head's usual settings. They are recorded on every image for the radiation log. Staff can
   correct a single image in the viewer.
-- `size` (optional): the sensor size, for example `"2"`, also recorded with each image.
+- `size` (optional): the sensor size (`0`, `1` or `2`). It's recorded with each image, and until the sensor is calibrated it
+  gives an approximate mm scale (shown with "≈").
+- `pixelSize` (optional): the sensor's pixel size in micrometres, from its spec sheet (for example `20`). With this,
+  measurements are in mm straight away.
 - `command` (optional): where NAPS2 is installed, if it isn't in `C:\Program Files\NAPS2`.
 
 Start the bridge with `node dental-machine-bridge.mjs bridge-config.json` (or as a Windows startup task). The window
@@ -59,6 +62,45 @@ should say `Sensor: Tuxedo sensor (<device name>)`.
 
 If the TWAIN driver opens its own capture window, set it to capture automatically (no preview or confirm step) in the
 driver's options. That way each exposure goes straight through.
+
+## Measuring in mm
+
+Images from a TWAIN driver usually don't say how big a pixel is (DICOM files from imaging software do). Measurements
+use the best scale available, and the viewer says which one it used:
+
+1. **Calibrated.** Open any x-ray from that sensor, choose **Calibrate**, and draw along something of known length. A
+   ruler or calibration target works, as does the length of a file or an implant you know. Enter the length in mm, then
+   answer **Yes** to "Use this scale for every future x-ray from this sensor?". This is the most accurate, and you only
+   do it once per sensor.
+2. **Pixel size** from `pixelSize` in the settings file.
+3. **≈ Estimated** from `size` (the typical active area of that sensor size). Good enough for a rough look; calibrate
+   before using it for anything that matters.
+
+Lengths, canal lengths (click along the canal, double-click to finish) and angles all use the scale.
+
+## Getting a clear picture from any sensor
+
+X-rays open with **Clarity**: auto levels, local contrast (CLAHE), light noise reduction and sharpening. This evens out
+differences between sensors and exposures. Press **1** for the untouched image, or use the **Caries**, **Endo** and
+**Perio** presets. The sliders fine-tune each step. **Save** keeps an image's settings; the original file never
+changes. "Open x-rays with" in the adjust panel sets the default for that computer.
+
+## Intraoral camera
+
+Almost every intraoral camera connects as a standard USB camera, so it runs in the browser with no bridge or driver
+beyond the camera's own. In a patient's **Documents & x-rays**, press **Intraoral camera**, or press **Camera** in the
+imaging studio.
+
+- Choose the camera once per computer; it's remembered.
+- Capture with the on-screen button, the **Space** key, or the camera's own button. Most handpiece buttons send a key
+  press; press **Button: …**, then the camera's button, and it's learned.
+- Enter a tooth number to file the photo against that tooth. **Mirror** and **Upper** flip the picture for mirror and
+  upper-arch shots. **Freeze** holds the picture so you can check it before capturing.
+- Photos are saved to the chart straight away, tagged "intraoral". When a **Photo series** mount is open, they fill its
+  spots in order.
+
+Cameras only work over https (or on the server computer itself), which the hosted app always uses. Cameras with a
+TWAIN-only driver can go through the bridge like a sensor, using `"preset": "twain"`.
 
 ## Using the vendor's own capture software instead
 

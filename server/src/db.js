@@ -1507,6 +1507,8 @@ const COLUMNS = [
   ['bridge_agents', 'sensor_info', 'TEXT'],
   ['bridge_commands', 'progress', 'TEXT'],
   ['bridge_commands', 'result_key', 'TEXT'],
+  ['documents', 'scale_source', 'TEXT'],
+  ['bridge_agents', 'mm_per_px', 'REAL'],
   ['practices', 'message_templates', 'TEXT'],
   ['practices', 'hygiene_goal', 'INTEGER NOT NULL DEFAULT 0'],
   ['providers', 'dea_number', 'TEXT'],

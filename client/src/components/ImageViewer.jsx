@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import { api, getToken } from '../api.js';
 import { ErrorBox } from './ui.jsx';
-import { PRESETS, COLORMAPS, NEUTRAL, withDefaults, compact, renderProcessed, dist, pathLength, angleAt } from './imaging/imageproc.js';
+import { PRESETS, COLORMAPS, NEUTRAL, withDefaults, compact, renderProcessed, dist, pathLength, angleAt, openPreset, setOpenPreset } from './imaging/imageproc.js';
 
 // Diagnostic x-ray / photo viewer. Pixels are enhanced on a copy (gamma, sharpen, auto-levels, false
 // colour, emboss) with presets for caries, endo and perio reads; the settings can be saved with the image
@@ -38,7 +38,7 @@ async function loadImage(id) {
 
 const SHORTCUTS = [
   ['+ / −', 'Zoom'], ['0', 'Fit'], ['R', 'Rotate'], ['H', 'Flip'], ['I', 'Invert'], ['M', 'Magnifier'], ['F', 'Full screen'],
-  ['1–5', 'Original · Caries · Endo · Perio · Auto'], ['P L C A W O T E K', 'Tools'], ['Enter / double-click', 'Finish a canal length'],
+  ['1–5', 'Original · Clarity · Caries · Endo · Perio'], ['P L C A W O T E K', 'Tools'], ['Enter / double-click', 'Finish a canal length'],
   ['Esc', 'Cancel the mark'], ['Ctrl+Z', 'Undo'], ['← →', 'Previous / next image'], ['?', 'These shortcuts'],
 ];
 
@@ -60,6 +60,8 @@ export default function ImageViewer({ doc, canEdit = false, height = '70vh', com
   const [mm, setMm] = useState(null);
   const [scaleSource, setScaleSource] = useState(null);
   const [exposure, setExposure] = useState(null);
+  const [agentId, setAgentId] = useState(null);
+  const [openWith, setOpenWith] = useState(openPreset);
   const [dirty, setDirty] = useState(false);
   const [draft, setDraft] = useState(null);
   const [magnify, setMagnify] = useState(false);
@@ -82,8 +84,11 @@ export default function ImageViewer({ doc, canEdit = false, height = '70vh', com
       setMm(meta.mm_per_px);
       setScaleSource(meta.scale_source);
       setExposure(meta.exposure);
-      setAdj(withDefaults(meta.adjust));
-      setSavedAdj(compact(meta.adjust));
+      setAgentId(meta.agent_id);
+      // X-rays nobody has saved settings for open with this computer's choice (Clarity unless changed).
+      const start = meta.adjust || (meta.category === 'xray' ? PRESETS.find((p) => p.id === openPreset())?.adjust : null) || null;
+      setAdj(withDefaults(start));
+      setSavedAdj(compact(start));
       setDirty(false);
       setView({ zoom: 1, x: 0, y: 0 });
     }).catch(setError);
@@ -97,7 +102,7 @@ export default function ImageViewer({ doc, canEdit = false, height = '70vh', com
       try { setProcessed(renderProcessed(img, adj, cache.current)); } catch (e) { setError(e); }
     }, 16);
     return () => clearTimeout(t);
-  }, [img, adj.brightness, adj.contrast, adj.gamma, adj.sharpen, adj.invert, adj.equalize, adj.emboss, adj.colormap]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [img, adj.brightness, adj.contrast, adj.gamma, adj.sharpen, adj.denoise, adj.clahe, adj.stretch, adj.invert, adj.equalize, adj.emboss, adj.colormap]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Image pixels → screen: centre, pan, zoom (fit × zoom), rotate, flip.
   const matrix = useCallback(() => {
@@ -108,7 +113,7 @@ export default function ImageViewer({ doc, canEdit = false, height = '70vh', com
     return new DOMMatrix().translate(c.width / 2 + view.x, c.height / 2 + view.y).rotate(adj.rotate).scale(adj.flipH ? -s : s, s).translate(-img.width / 2, -img.height / 2);
   }, [img, view, adj.rotate, adj.flipH]);
 
-  const fmtLen = (px) => (mm ? `${(px * mm).toFixed(1)} mm` : `${Math.round(px)} px`);
+  const fmtLen = (px) => (mm ? `${scaleSource === 'estimate' ? '≈' : ''}${(px * mm).toFixed(1)} mm` : `${Math.round(px)} px`);
 
   const draw = useCallback(() => {
     const c = canvas.current;
@@ -313,7 +318,16 @@ export default function ImageViewer({ doc, canEdit = false, height = '70vh', com
     if (px < 2) return;
     if (d.type === 'calibrate') {
       const v = window.prompt('How long is that line, in millimetres? (e.g. a known implant or file length)');
-      if (v && Number(v) > 0) { setMm(Number(v) / px); setScaleSource('calibrated'); setDirty(true); }
+      if (v && Number(v) > 0) {
+        const scale = Number(v) / px;
+        setMm(scale);
+        setScaleSource('calibrated');
+        setDirty(true);
+        // One calibration can serve every later x-ray from the same sensor.
+        if (agentId && canEdit && window.confirm('Use this scale for every future x-ray from this sensor?')) {
+          api.put(`/imaging/agents/${agentId}/calibration`, { mm_per_px: scale }).catch(setError);
+        }
+      }
       return;
     }
     addNote(d);
@@ -350,7 +364,8 @@ export default function ImageViewer({ doc, canEdit = false, height = '70vh', com
   }, []);
   useEffect(() => { if (autoFocus) root.current?.focus({ preventScroll: true }); }, [autoFocus, doc.id]);
 
-  const adjDirty = JSON.stringify(compact(adj)) !== JSON.stringify(savedAdj);
+  const sortedJson = (o) => JSON.stringify(o ? Object.fromEntries(Object.entries(o).sort(([x], [y]) => x.localeCompare(y))) : null);
+  const adjDirty = sortedJson(compact(adj)) !== sortedJson(savedAdj);
   const save = async () => {
     setSaving(true);
     try {
@@ -434,12 +449,18 @@ export default function ImageViewer({ doc, canEdit = false, height = '70vh', com
           <Slider label="Contrast" min={-100} max={100} step={1} value={adj.contrast} onChange={(v) => setA({ contrast: v })} />
           <Slider label="Gamma" min={0.3} max={3} step={0.05} value={adj.gamma} onChange={(v) => setA({ gamma: v })} fmt={(v) => v.toFixed(2)} />
           <Slider label="Sharpen" min={0} max={3} step={0.1} value={adj.sharpen} onChange={(v) => setA({ sharpen: v })} fmt={(v) => v.toFixed(1)} />
-          <label className="vcheck"><input type="checkbox" checked={adj.equalize} onChange={(e) => setA({ equalize: e.target.checked })} /> Auto levels</label>
+          <Slider label="Local contrast" name="clahe" min={0} max={4} step={0.25} value={adj.clahe} onChange={(v) => setA({ clahe: v })} fmt={(v) => v.toFixed(2)} />
+          <Slider label="Noise reduction" name="denoise" min={0} max={3} step={1} value={adj.denoise} onChange={(v) => setA({ denoise: v })} />
+          <label className="vcheck"><input type="checkbox" checked={adj.stretch} onChange={(e) => setA({ stretch: e.target.checked })} /> Auto levels</label>
+          <label className="vcheck"><input type="checkbox" checked={adj.equalize} onChange={(e) => setA({ equalize: e.target.checked })} /> Equalize</label>
           <label className="vcheck"><input type="checkbox" checked={adj.emboss} onChange={(e) => setA({ emboss: e.target.checked })} /> Emboss</label>
           <label className="vcheck">Colour
             <select value={adj.colormap} onChange={(e) => setA({ colormap: e.target.value })}>{Object.entries(COLORMAPS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
           </label>
           <button type="button" className="small" onClick={() => setAdj({ ...NEUTRAL })}>Reset</button>
+          <label className="vcheck" title="What x-rays open with on this computer when nobody has saved settings for them">Open x-rays with
+            <select value={openWith} onChange={(e) => { setOpenWith(e.target.value); setOpenPreset(e.target.value); }}>{PRESETS.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}</select>
+          </label>
         </div>
       )}
       <ErrorBox error={error} />
@@ -457,7 +478,9 @@ export default function ImageViewer({ doc, canEdit = false, height = '70vh', com
       </div>
       <div className="viewer-foot">
         {img ? <span>{img.width}×{img.height}px</span> : null}
-        <span>{mm ? `${(1 / mm).toFixed(1)} px/mm · ${scaleSource === 'dicom' ? 'scale from the sensor' : 'calibrated'}` : 'Not calibrated — lengths in pixels (Calibrate with a known length)'}</span>
+        <span className={scaleSource === 'estimate' ? 'viewer-warn' : undefined}>
+          {mm ? `${(1 / mm).toFixed(1)} px/mm · ${SCALE_TEXT[scaleSource] || 'calibrated'}` : 'Not calibrated — lengths in pixels (Calibrate with a known length)'}
+        </span>
         {xp && <span title={exposure.sensor ? `Sensor: ${exposure.sensor}` : undefined}>Exposure {xp}</span>}
         {adj.rotate ? <span>Rotated {adj.rotate}°</span> : null}
       </div>
@@ -469,11 +492,18 @@ function IconBtn({ on, title, onClick, children, disabled }) {
   return <button type="button" className={`vbtn${on ? ' on' : ''}`} title={title} aria-label={title} aria-pressed={on || undefined} onClick={onClick} disabled={disabled}>{children}</button>;
 }
 
-function Slider({ label, min, max, step, value, onChange, fmt = (v) => v }) {
+const SCALE_TEXT = {
+  dicom: 'scale from the sensor file',
+  sensor: "scale from the sensor's pixel size",
+  calibrated: 'calibrated',
+  estimate: 'estimated from the sensor size — calibrate once for exact mm',
+};
+
+function Slider({ label, name, min, max, step, value, onChange, fmt = (v) => v }) {
   return (
     <label className="vslider">
       <span>{label}</span>
-      <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} onDoubleClick={() => onChange(NEUTRAL[label.toLowerCase()])} />
+      <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} onDoubleClick={() => onChange(NEUTRAL[name || label.toLowerCase()])} />
       <output>{fmt(value)}</output>
     </label>
   );

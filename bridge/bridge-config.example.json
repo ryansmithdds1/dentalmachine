@@ -40,7 +40,8 @@
       "kvp": 70,
       "ma": 7
     },
-    "size": "2"
+    "size": "2",
+    "pixelSize": 20
   },
   "_sensorFolderExample": {
     "name": "Sensor",

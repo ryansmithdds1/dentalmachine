@@ -15,8 +15,8 @@ const ANNOTATION_POINTS = { line: 2, arrow: 2, measure: 2, text: 1, circle: 2, a
 const ANNOTATION_TYPES = Object.keys(ANNOTATION_POINTS);
 
 // Non-destructive viewing adjustments saved with an image (the original pixels are never changed).
-const ADJUST_RANGES = { brightness: [-100, 100], contrast: [-100, 100], gamma: [0.2, 5], sharpen: [0, 3] };
-const ADJUST_FLAGS = ['invert', 'equalize', 'emboss', 'flipH', 'flipV'];
+const ADJUST_RANGES = { brightness: [-100, 100], contrast: [-100, 100], gamma: [0.2, 5], sharpen: [0, 3], denoise: [0, 3], clahe: [0, 4] };
+const ADJUST_FLAGS = ['invert', 'equalize', 'stretch', 'emboss', 'flipH', 'flipV'];
 const COLORMAPS = ['none', 'heat', 'bone', 'spectrum'];
 export function cleanAdjust(a) {
   if (a == null) return null;
@@ -167,8 +167,9 @@ export default function documentRoutes({ db, storage, config = {} }) {
       try { spacing = (await viewable(doc)).pixelSpacing?.[0] || null; } catch { spacing = null; }
     }
     res.json({
-      id: doc.id, annotations: JSON.parse(doc.annotations || '[]'), mm_per_px: doc.mm_per_px || spacing, scale_source: doc.mm_per_px ? 'calibrated' : spacing ? 'dicom' : null,
-      adjust: parseJson(doc.adjust), exposure: parseJson(doc.exposure), retake_of: doc.retake_of || null,
+      id: doc.id, annotations: JSON.parse(doc.annotations || '[]'), mm_per_px: doc.mm_per_px || spacing, scale_source: doc.mm_per_px ? (doc.scale_source || 'calibrated') : spacing ? 'dicom' : null,
+      adjust: parseJson(doc.adjust), exposure: parseJson(doc.exposure), retake_of: doc.retake_of || null, category: doc.category,
+      agent_id: /^bridge:\d+$/.test(doc.source || '') ? Number(doc.source.slice(7)) : null,
     });
   });
 
@@ -195,7 +196,8 @@ export default function documentRoutes({ db, storage, config = {} }) {
     });
     const mm = req.body?.mm_per_px;
     if (mm !== undefined && mm !== null && !(Number(mm) > 0 && Number(mm) < 10)) throw new HttpError(400, 'mm_per_px must be between 0 and 10');
-    await db.run('UPDATE documents SET annotations = ?, mm_per_px = COALESCE(?, mm_per_px) WHERE id = ?', JSON.stringify(clean), mm == null ? null : Number(mm), doc.id);
+    if (mm == null) await db.run('UPDATE documents SET annotations = ? WHERE id = ?', JSON.stringify(clean), doc.id);
+    else await db.run("UPDATE documents SET annotations = ?, mm_per_px = ?, scale_source = 'calibrated' WHERE id = ?", JSON.stringify(clean), Number(mm), doc.id);
     await audit(db, req, 'document.annotate', 'documents', doc.id, { patient_id: doc.patient_id, count: clean.length });
     res.json({ ok: true, annotations: clean });
   });

@@ -314,7 +314,7 @@ async function scan() {
   }
 }
 
-const hello = await call('POST', '/hello', { apps: (config.apps || []).map((a) => ({ id: a.id, name: a.name })), sensor: sensor ? { name: sensor.name || 'Sensor', mode: sensor.mode || 'command', preset: sensor.preset || null, exposure: sensor.exposure || null } : null, hostname: hostname(), version: VERSION });
+const hello = await call('POST', '/hello', { apps: (config.apps || []).map((a) => ({ id: a.id, name: a.name })), sensor: sensor ? { name: sensor.name || 'Sensor', mode: sensor.mode || 'command', preset: sensor.preset || null, exposure: sensor.exposure || null, pixelSize: sensor.pixelSize || null, size: sensor.size ?? null } : null, hostname: hostname(), version: VERSION });
 log(`Connected to ${hello.practice} as "${hello.workstation}". Programs: ${(config.apps || []).map((a) => a.name).join(', ') || 'none'}. Watching: ${(config.watch || []).map((w) => w.folder).join(', ') || 'nothing'}.${sensor ? ` Sensor: ${sensor.name || 'yes'}.` : ''}`);
 setInterval(() => scan().catch((err) => log('scan failed:', err.message)), pollSeconds * 1000);
 scan().catch(() => {});

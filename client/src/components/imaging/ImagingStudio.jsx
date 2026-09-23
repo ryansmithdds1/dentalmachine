@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { X, Radio, Square, RefreshCw, Trash2, Columns2, Printer, ImageDown, Activity, ChevronLeft, ChevronRight, Plus } from 'lucide-react';
+import { X, Radio, Square, RefreshCw, Trash2, Columns2, Printer, ImageDown, Activity, ChevronLeft, ChevronRight, Plus, Video } from 'lucide-react';
 import { api, getToken } from '../../api.js';
 import { useApi } from '../../hooks.js';
 import { useLiveEvents } from '../../live.js';
@@ -7,6 +7,7 @@ import { fmtDate } from '../../format.js';
 import { ErrorBox, Modal } from '../ui.jsx';
 import ImageViewer from '../ImageViewer.jsx';
 import SensorTest from './SensorTest.jsx';
+import IntraoralCamera from './IntraoralCamera.jsx';
 import { MOUNTS, slotLabels, slotAspect, sameSpot } from './mounts.js';
 import { useThumb } from './thumbs.js';
 import { thumbStyle, withDefaults } from './imageproc.js';
@@ -33,6 +34,7 @@ export default function ImagingStudio({ patient, docs, canEdit, initial, onClose
   const [compareWith, setCompareWith] = useState(null);
   const [testing, setTesting] = useState(false);
   const [adjusts, setAdjusts] = useState({});
+  const [camera, setCamera] = useState(!!initial?.camera);
   const started = useRef(false);
 
   useLiveEvents((e) => {
@@ -172,6 +174,14 @@ export default function ImagingStudio({ patient, docs, canEdit, initial, onClose
   }, []);
 
   const choose = (id) => { setWsId(id); saveWs(id); };
+  // With a photo series open, camera shots fill its empty spots in order.
+  const photoNext = current?.template === 'photos8' ? labels.findIndex((_, i) => current.slots[i] == null) : -1;
+  const photoMount = photoNext >= 0 ? { next: labels[photoNext] } : null;
+  const onPhoto = async (doc) => {
+    if (doc && photoNext >= 0) await setSlot(photoNext, doc.id);
+    reload();
+    onDocsChanged?.();
+  };
   const capturing = capture && capture.mount_id === current?.id;
   const progress = capture?.progress;
   const status = !capture ? null
@@ -232,6 +242,9 @@ export default function ImagingStudio({ patient, docs, canEdit, initial, onClose
             )}
           </div>
         )}
+        {canEdit && (
+          <button type="button" className={`studio-btn ghost${camera ? ' on' : ''}`} onClick={() => { setCamera(!camera); setSelected(null); }} title="Intraoral camera"><Video size={15} /> Camera</button>
+        )}
         {current && filledCount > 0 && (
           <>
             <button type="button" className="studio-icon" title="Save the mount as one picture" aria-label="Save mount as image" onClick={() => exportMount(current, labels, patient, adjustOf, 'download').catch(setError)}><ImageDown size={18} /></button>
@@ -255,7 +268,7 @@ export default function ImagingStudio({ patient, docs, canEdit, initial, onClose
         </div>
       )}
 
-      <div className={`studio-body${selectedDoc ? ' with-viewer' : ''}`}>
+      <div className={`studio-body${selectedDoc || camera ? ' with-viewer' : ''}`}>
         <section className="lightbox" aria-label="Mount">
           {!current && mounts && (
             <div className="lightbox-empty">
@@ -271,11 +284,16 @@ export default function ImagingStudio({ patient, docs, canEdit, initial, onClose
                 {canEdit && !capture && <button type="button" className="studio-link" onClick={removeMount}>Delete mount</button>}
               </div>
               <MountBoard mount={current} labels={labels} selected={selected} next={nextSlot} capturing={capturing} canEdit={canEdit} sensorReady={sensorReady}
-                adjustOf={adjustOf} docById={docById} onClick={clickSlot} onRetake={(i) => aim(i, true)} onClear={(i) => setSlot(i, null)} compact={!!selectedDoc} />
+                adjustOf={adjustOf} docById={docById} onClick={(i) => { if (current.slots[i] != null) setCamera(false); clickSlot(i); }} onRetake={(i) => aim(i, true)} onClear={(i) => setSlot(i, null)} compact={!!selectedDoc || camera} />
             </>
           )}
         </section>
 
+        {camera && !selectedDoc && (
+          <section className="studio-viewer">
+            <IntraoralCamera patient={patient} photoMount={photoMount} onCaptured={onPhoto} />
+          </section>
+        )}
         {selectedDoc && (
           <section className="studio-viewer">
             <div className="studio-viewer-head">

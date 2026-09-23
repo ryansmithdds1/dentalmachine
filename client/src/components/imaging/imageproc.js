@@ -1,17 +1,26 @@
 // Diagnostic image processing for x-rays, applied to a copy of the pixels (the stored image never changes).
-// Order: histogram equalization ("Auto") → sharpen (unsharp mask) → gamma / brightness / contrast /
-// invert as one lookup table → emboss → false colour.
+// Order: noise reduction (median) → auto levels (percentile stretch) → local contrast (CLAHE) → global
+// equalization → sharpen (unsharp mask) → gamma / brightness / contrast / invert → emboss → false colour.
 
-export const NEUTRAL = { brightness: 0, contrast: 0, gamma: 1, sharpen: 0, invert: false, equalize: false, emboss: false, colormap: 'none', rotate: 0, flipH: false };
+export const NEUTRAL = { brightness: 0, contrast: 0, gamma: 1, sharpen: 0, denoise: 0, clahe: 0, stretch: false, invert: false, equalize: false, emboss: false, colormap: 'none', rotate: 0, flipH: false };
 
 // Starting points for common reads; staff fine-tune from there and can save what they like per image.
 export const PRESETS = [
-  { id: 'original', label: 'Original', key: '1', adjust: {} },
-  { id: 'caries', label: 'Caries', key: '2', hint: 'Higher contrast and sharpening for interproximal decay', adjust: { contrast: 35, gamma: 0.85, sharpen: 1.2 } },
-  { id: 'endo', label: 'Endo', key: '3', hint: 'Sharp edges for canals, files and apices', adjust: { contrast: 20, gamma: 1.15, sharpen: 2.2 } },
-  { id: 'perio', label: 'Perio', key: '4', hint: 'Brighter, softer for crestal bone levels', adjust: { brightness: 8, contrast: 12, gamma: 1.45, sharpen: 0.6 } },
-  { id: 'auto', label: 'Auto', key: '5', hint: 'Spreads the grey levels across the full range', adjust: { equalize: true, sharpen: 0.5 } },
+  { id: 'original', label: 'Original', key: '1', hint: 'Exactly as the sensor sent it', adjust: {} },
+  { id: 'clarity', label: 'Clarity', key: '2', hint: 'Auto levels, local contrast, light noise reduction and sharpening — a clear picture from any sensor', adjust: { stretch: true, denoise: 1, clahe: 2, sharpen: 0.8 } },
+  { id: 'caries', label: 'Caries', key: '3', hint: 'Stronger contrast at the enamel and dentin for interproximal decay', adjust: { stretch: true, clahe: 1.5, contrast: 20, gamma: 0.9, sharpen: 1.2 } },
+  { id: 'endo', label: 'Endo', key: '4', hint: 'Crisp edges for canals, files and apices', adjust: { stretch: true, denoise: 1, clahe: 1, gamma: 1.1, sharpen: 2 } },
+  { id: 'perio', label: 'Perio', key: '5', hint: 'Brighter, softer for crestal bone levels', adjust: { stretch: true, clahe: 1, brightness: 6, gamma: 1.35, sharpen: 0.6 } },
 ];
+
+// What an x-ray opens with when nobody has saved settings for it (per computer).
+const OPEN_KEY = 'dm_xray_open';
+export function openPreset() {
+  try { return localStorage.getItem(OPEN_KEY) || 'clarity'; } catch { return 'clarity'; }
+}
+export function setOpenPreset(id) {
+  try { localStorage.setItem(OPEN_KEY, id); } catch { /* per-computer convenience */ }
+}
 
 export const COLORMAPS = { none: 'Grey', heat: 'Heat', bone: 'Bone', spectrum: 'Spectrum' };
 
@@ -24,7 +33,7 @@ export function compact(a) {
 }
 export const isNeutralPixels = (a) => {
   const x = withDefaults(a);
-  return !x.brightness && !x.contrast && x.gamma === 1 && !x.sharpen && !x.invert && !x.equalize && !x.emboss && x.colormap === 'none';
+  return !x.brightness && !x.contrast && x.gamma === 1 && !x.sharpen && !x.denoise && !x.clahe && !x.stretch && !x.invert && !x.equalize && !x.emboss && x.colormap === 'none';
 };
 
 const clamp = (v) => (v < 0 ? 0 : v > 255 ? 255 : v);
@@ -83,6 +92,100 @@ export function isGrey(data) {
   return true;
 }
 
+// 3×3 median: removes sensor speckle without softening edges the way a blur does.
+function median3(plane, w, h) {
+  const out = new Float32Array(plane.length);
+  const v = new Float32Array(9);
+  for (let y = 0; y < h; y++) {
+    const y0 = y > 0 ? y - 1 : 0;
+    const y2 = y < h - 1 ? y + 1 : h - 1;
+    for (let x = 0; x < w; x++) {
+      const x0 = x > 0 ? x - 1 : 0;
+      const x2 = x < w - 1 ? x + 1 : w - 1;
+      let k = 0;
+      for (const yy of [y0, y, y2]) { const r = yy * w; v[k++] = plane[r + x0]; v[k++] = plane[r + x]; v[k++] = plane[r + x2]; }
+      // partial selection sort up to the middle element
+      for (let i = 0; i <= 4; i++) {
+        let m = i;
+        for (let j = i + 1; j < 9; j++) if (v[j] < v[m]) m = j;
+        const t = v[i]; v[i] = v[m]; v[m] = t;
+      }
+      out[y * w + x] = v[4];
+    }
+  }
+  return out;
+}
+
+// Linear stretch between the 0.5th and 99.5th percentiles: uses the full grey range whatever the sensor
+// or exposure delivered, without a few hot pixels washing it out.
+function stretch(plane) {
+  const hist = new Uint32Array(256);
+  for (let i = 0; i < plane.length; i++) hist[clamp(plane[i]) | 0]++;
+  const n = plane.length;
+  let lo = 0;
+  let hi = 255;
+  for (let acc = 0; lo < 255 && (acc += hist[lo]) < n * 0.005; lo++);
+  for (let acc = 0; hi > 0 && (acc += hist[hi]) < n * 0.005; hi--);
+  if (hi - lo < 8) return;
+  const f = 255 / (hi - lo);
+  for (let i = 0; i < n; i++) plane[i] = (plane[i] - lo) * f;
+}
+
+// CLAHE (contrast-limited adaptive histogram equalization): evens out contrast region by region, so
+// enamel, dentin, bone and the dark periodontal ligament space are all readable at once. The limit keeps
+// noise in flat areas from being amplified. strength 0–4.
+function clahe(plane, w, h, strength) {
+  const tiles = Math.max(2, Math.min(8, Math.round(Math.min(w, h) / 64)));
+  const tw = w / tiles;
+  const th = h / tiles;
+  const maps = [];
+  for (let ty = 0; ty < tiles; ty++) {
+    for (let tx = 0; tx < tiles; tx++) {
+      const hist = new Float32Array(256);
+      const x0 = Math.floor(tx * tw); const x1 = Math.floor((tx + 1) * tw);
+      const y0 = Math.floor(ty * th); const y1 = Math.floor((ty + 1) * th);
+      for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) hist[clamp(plane[y * w + x]) | 0]++;
+      const area = (x1 - x0) * (y1 - y0) || 1;
+      const limit = Math.max(1, ((1 + strength * 1.5) * area) / 256);
+      let excess = 0;
+      for (let i = 0; i < 256; i++) if (hist[i] > limit) { excess += hist[i] - limit; hist[i] = limit; }
+      const add = excess / 256;
+      const map = new Float32Array(256);
+      let cdf = 0;
+      for (let i = 0; i < 256; i++) { cdf += hist[i] + add; map[i] = (cdf / area) * 255; }
+      maps.push(map);
+    }
+  }
+  const mix = Math.min(1, 0.35 + strength * 0.2); // blend with the original so it never looks synthetic
+  for (let y = 0; y < h; y++) {
+    const gy = Math.min(tiles - 1, Math.max(0, y / th - 0.5));
+    const y0 = Math.floor(gy); const y1 = Math.min(tiles - 1, y0 + 1); const fy = gy - y0;
+    for (let x = 0; x < w; x++) {
+      const gx = Math.min(tiles - 1, Math.max(0, x / tw - 0.5));
+      const x0 = Math.floor(gx); const x1 = Math.min(tiles - 1, x0 + 1); const fx = gx - x0;
+      const i = y * w + x;
+      const v = clamp(plane[i]) | 0;
+      const top = maps[y0 * tiles + x0][v] * (1 - fx) + maps[y0 * tiles + x1][v] * fx;
+      const bot = maps[y1 * tiles + x0][v] * (1 - fx) + maps[y1 * tiles + x1][v] * fx;
+      plane[i] = plane[i] * (1 - mix) + (top * (1 - fy) + bot * fy) * mix;
+    }
+  }
+}
+
+function globalEqualize(plane) {
+  const hist = new Uint32Array(256);
+  for (let i = 0; i < plane.length; i++) hist[clamp(plane[i]) | 0]++;
+  const eq = new Float32Array(256);
+  let cdf = 0;
+  let min = 0;
+  for (let i = 0; i < 256; i++) {
+    cdf += hist[i];
+    if (!min && cdf) min = cdf;
+    eq[i] = plane.length === min ? i : ((cdf - min) / (plane.length - min)) * 255;
+  }
+  for (let i = 0; i < plane.length; i++) plane[i] = eq[clamp(plane[i]) | 0];
+}
+
 export function processPixels(source, adjust) {
   const a = withDefaults(adjust);
   const { width: w, height: h } = source;
@@ -90,66 +193,55 @@ export function processPixels(source, adjust) {
   const out = new ImageData(w, h);
   const dst = out.data;
   const grey = isGrey(src);
+  const n = w * h;
 
-  // Point operations as one table: equalize → gamma → brightness/contrast → invert.
-  const eq = new Float32Array(256);
-  if (a.equalize) {
-    const hist = new Uint32Array(256);
-    for (let i = 0; i < src.length; i += 4) hist[(src[i] * 77 + src[i + 1] * 150 + src[i + 2] * 29) >> 8]++;
-    let cdf = 0;
-    let min = 0;
-    const total = w * h;
-    for (let i = 0; i < 256; i++) {
-      cdf += hist[i];
-      if (!min && cdf) min = cdf;
-      eq[i] = total === min ? i : ((cdf - min) / (total - min)) * 255;
-    }
-  } else for (let i = 0; i < 256; i++) eq[i] = i;
+  // Work on luminance; colour photos keep their colour by carrying each pixel's chroma along.
+  let lum = new Float32Array(n);
+  for (let i = 0, p = 0; i < n; i++, p += 4) lum[i] = grey ? src[p] : src[p] * 0.299 + src[p + 1] * 0.587 + src[p + 2] * 0.114;
+  const original = grey ? null : Float32Array.from(lum);
+  for (let k = 0; k < Math.round(a.denoise); k++) lum = median3(lum, w, h);
+  if (a.stretch) stretch(lum);
+  if (a.clahe > 0) clahe(lum, w, h, a.clahe);
+  if (a.equalize) globalEqualize(lum);
+  if (a.sharpen > 0) {
+    const r = Math.max(1, Math.round(Math.max(w, h) / 600));
+    const blur = boxBlur(lum, w, h, r);
+    for (let i = 0; i < n; i++) lum[i] += a.sharpen * (lum[i] - blur[i]);
+  }
+
+  // Gamma → brightness/contrast → invert as one table.
   const c = a.contrast * 2.55;
   const cf = (259 * (c + 255)) / (255 * (259 - c));
   const lut = new Uint8ClampedArray(256);
   for (let i = 0; i < 256; i++) {
-    let v = 255 * Math.pow(eq[i] / 255, 1 / a.gamma);
+    let v = 255 * Math.pow(i / 255, 1 / a.gamma);
     v = cf * (v - 128) + 128 + a.brightness * 1.28;
     lut[i] = clamp(a.invert ? 255 - v : v);
   }
-
-  // Sharpen (unsharp mask) works on luminance for x-rays, on each channel for photos.
-  const channels = grey ? 1 : 3;
-  const sharp = [];
-  if (a.sharpen > 0) {
-    const r = Math.max(1, Math.round(Math.max(w, h) / 600));
-    for (let ch = 0; ch < channels; ch++) {
-      const plane = new Float32Array(w * h);
-      for (let i = 0, p = ch; i < plane.length; i++, p += 4) plane[i] = src[p];
-      const blur = boxBlur(plane, w, h, r);
-      for (let i = 0; i < plane.length; i++) plane[i] += a.sharpen * (plane[i] - blur[i]);
-      sharp.push(plane);
-    }
-  }
-  const cmap = a.colormap !== 'none' ? colormapLut(a.colormap) : null;
-  for (let i = 0, p = 0; i < w * h; i++, p += 4) {
-    for (let ch = 0; ch < 3; ch++) {
-      const s = sharp.length ? sharp[grey ? 0 : ch][i] : src[p + (grey ? 0 : ch)];
-      dst[p + ch] = lut[s < 0 ? 0 : s > 255 ? 255 : s | 0];
+  for (let i = 0, p = 0; i < n; i++, p += 4) {
+    const v = lum[i] < 0 ? 0 : lum[i] > 255 ? 255 : lum[i] | 0;
+    if (grey) {
+      dst[p] = dst[p + 1] = dst[p + 2] = lut[v];
+    } else {
+      const d = lut[v] - (a.invert ? 255 - original[i] : original[i]);
+      for (let ch = 0; ch < 3; ch++) dst[p + ch] = clamp((a.invert ? 255 - src[p + ch] : src[p + ch]) + d);
     }
     dst[p + 3] = src[p + 3];
   }
 
   if (a.emboss) {
-    // Relief: difference with the diagonal neighbour, centred on mid-grey.
-    const lum = new Uint8ClampedArray(w * h);
-    for (let i = 0, p = 0; i < lum.length; i++, p += 4) lum[i] = (dst[p] * 77 + dst[p + 1] * 150 + dst[p + 2] * 29) >> 8;
+    const l = new Uint8ClampedArray(n);
+    for (let i = 0, p = 0; i < n; i++, p += 4) l[i] = (dst[p] * 77 + dst[p + 1] * 150 + dst[p + 2] * 29) >> 8;
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
         const i = y * w + x;
         const j = Math.min(h - 1, y + 1) * w + Math.min(w - 1, x + 1);
         const k = Math.max(0, y - 1) * w + Math.max(0, x - 1);
-        const v = clamp(128 + 2 * (lum[j] - lum[k]));
-        dst[i * 4] = dst[i * 4 + 1] = dst[i * 4 + 2] = v;
+        dst[i * 4] = dst[i * 4 + 1] = dst[i * 4 + 2] = clamp(128 + 2 * (l[j] - l[k]));
       }
     }
   }
+  const cmap = a.colormap !== 'none' ? colormapLut(a.colormap) : null;
   if (cmap) {
     for (let p = 0; p < dst.length; p += 4) {
       const v = (dst[p] * 77 + dst[p + 1] * 150 + dst[p + 2] * 29) >> 8;
@@ -193,7 +285,7 @@ export function thumbStyle(adjust) {
   if (a.brightness) filters.push(`brightness(${100 + a.brightness}%)`);
   if (a.contrast) filters.push(`contrast(${100 + a.contrast * 1.5}%)`);
   if (a.invert) filters.push('invert(1)');
-  if (a.equalize) filters.push('contrast(130%)');
+  if (a.equalize || a.clahe || a.stretch) filters.push('contrast(125%)');
   const t = [];
   if (a.rotate) t.push(`rotate(${a.rotate}deg)`);
   if (a.flipH) t.push('scaleX(-1)');

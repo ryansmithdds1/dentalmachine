@@ -33,7 +33,7 @@ test('guided capture: aim at a spot, retake keeps the original, exposure is logg
   const { api, patient } = await h.practice();
   const { bridge, ws } = await workstation(api, 'Op 5', { name: 'Tuxedo sensor (Tuxedo TWAIN)', mode: 'command', preset: 'tuxedo', exposure: { kvp: 70, ma: 7, seconds: 99 } });
   // An out-of-range exposure setting is dropped rather than recorded.
-  assert.deepEqual(ws.sensor_info, { mode: 'command', preset: 'tuxedo', exposure: null });
+  assert.deepEqual(ws.sensor_info, { mode: 'command', preset: 'tuxedo', exposure: null, pixel_um: null, size: null });
   await bridge('POST', '/hello', { apps: [], sensor: { name: 'Tuxedo sensor', preset: 'tuxedo', exposure: { kvp: 70, ma: 7 } } });
 
   const cap = (await api.post(`/patients/${patient.id}/imaging/capture`, { agent_id: ws.id, template: 'bw4', slot: 2 })).data;
@@ -151,4 +151,47 @@ writeFileSync(a[a.indexOf('-o') + 1], Buffer.concat([Buffer.from([0x89,0x50,0x4e
     agent.kill();
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('mm scale for sensor images without one: calibration, pixel size, or an estimate from the sensor size', async () => {
+  const { api, patient } = await h.practice();
+  // A PNG with real dimensions (1500 × 1000), different bytes each time.
+  const sized = () => {
+    const b = Buffer.alloc(40);
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(b);
+    b.writeUInt32BE(1500, 16);
+    b.writeUInt32BE(1000, 20);
+    b.write(String(Math.random()), 24);
+    return b;
+  };
+  const shoot = async (bridge, ws) => {
+    const cap = (await api.post(`/patients/${patient.id}/imaging/capture`, { agent_id: ws.id, template: 'pa1' })).data;
+    await bridge('GET', '/commands?wait=0');
+    const out = await (await bridge('POST', `/images?filename=x.png&capture_id=${cap.id}`, sized())).json();
+    return (await api.get(`/documents/${out.id}/viewer`)).data;
+  };
+
+  const est = await workstation(api, 'Op 7', { name: 'Jazz sensor', preset: 'jazz', size: 2 });
+  let v = await shoot(est.bridge, est.ws);
+  assert.equal(v.scale_source, 'estimate');
+  assert.equal(v.mm_per_px, 36 / 1500);
+  assert.equal(v.agent_id, est.ws.id);
+
+  await est.bridge('POST', '/hello', { apps: [], sensor: { name: 'Jazz sensor', preset: 'jazz', size: 2, pixelSize: 20 } });
+  v = await shoot(est.bridge, est.ws);
+  assert.deepEqual([v.scale_source, v.mm_per_px], ['sensor', 0.02]);
+
+  assert.equal((await api.put(`/imaging/agents/${est.ws.id}/calibration`, { mm_per_px: 5 })).status, 400);
+  assert.equal((await api.put(`/imaging/agents/${est.ws.id}/calibration`, { mm_per_px: 0.0195 })).data.mm_per_px, 0.0195);
+  v = await shoot(est.bridge, est.ws);
+  assert.deepEqual([v.scale_source, v.mm_per_px], ['calibrated', 0.0195]);
+
+  // Calibrating one image by hand marks it calibrated.
+  await api.put(`/documents/${v.id}/annotations`, { annotations: [], mm_per_px: 0.021 });
+  assert.deepEqual(((r) => [r.scale_source, r.mm_per_px])((await api.get(`/documents/${v.id}/viewer`)).data), ['calibrated', 0.021]);
+
+  // Clarity settings are accepted and kept.
+  const adj = await api.put(`/documents/${v.id}/adjust`, { adjust: { stretch: true, clahe: 2, denoise: 1, sharpen: 0.8 } });
+  assert.deepEqual(adj.data.adjust, { sharpen: 0.8, denoise: 1, clahe: 2, stretch: true });
+  assert.equal((await api.put(`/documents/${v.id}/adjust`, { adjust: { clahe: 9 } })).status, 400);
 });

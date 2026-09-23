@@ -8,10 +8,14 @@ import { findOr404, insert, audit, newToken, hashToken, validTooth } from '../ut
 import { publish } from '../events.js';
 import { isDicom, readDicomTags } from '../dicom.js';
 import { dicomToImage } from '../dicomimage.js';
+import { imageSize } from '../thumbnails.js';
 import { MAX_UPLOAD_BYTES, MOUNT_TEMPLATES, cleanExposure } from './documents.js';
 
 const ONLINE_SECONDS = 90;
 const sqlAgo = (ms) => new Date(Date.now() - ms).toISOString().slice(0, 19).replace('T', ' ');
+// Typical active area (mm, long side) of intraoral sensor sizes. Only used for an estimated scale when the
+// bridge knows the sensor size but neither its pixel size nor a calibration; shown as "≈" in the viewer.
+const SENSOR_LONG_MM = { 0: 24, 1: 30, 2: 36 };
 const PROGRESS_STATES = ['ready', 'waiting', 'exposing', 'uploading', 'error'];
 const parseJson = (v) => { try { return v ? JSON.parse(v) : null; } catch { return null; } };
 const requireAdmin = (req, _res, next) => (req.user.role === 'admin' ? next() : next(new HttpError(403, 'Administrator access required')));
@@ -21,7 +25,7 @@ const requireAdmin = (req, _res, next) => (req.user.role === 'admin' ? next() : 
 export default function imagingRoutes({ db, storage }) {
   const r = Router();
   const view = (a) => ({
-    id: a.id, name: a.name, hostname: a.hostname, version: a.version, apps: JSON.parse(a.apps || '[]'), sensor: a.sensor || null, sensor_info: parseJson(a.sensor_info), last_seen_at: a.last_seen_at, active: !!a.active,
+    id: a.id, name: a.name, hostname: a.hostname, version: a.version, apps: JSON.parse(a.apps || '[]'), sensor: a.sensor || null, sensor_info: parseJson(a.sensor_info), mm_per_px: a.mm_per_px || null, last_seen_at: a.last_seen_at, active: !!a.active,
     online: !!a.last_seen_at && Date.now() - Date.parse(`${a.last_seen_at.replace(' ', 'T')}Z`) < ONLINE_SECONDS * 1000,
   });
 
@@ -106,6 +110,17 @@ export default function imagingRoutes({ db, storage }) {
     payload.target = req.body?.slot == null ? null : targetFrom(req.body, payload.total, JSON.parse(mount?.slots || '{}'));
     await db.run('UPDATE bridge_commands SET payload = ? WHERE id = ?', JSON.stringify(payload), c.id);
     res.json({ ok: true, target: payload.target });
+  });
+
+  // Sensor calibration: after measuring a known length on one of its x-rays, every later x-ray from this
+  // workstation's sensor is measured in mm with that scale (null clears it).
+  r.put('/imaging/agents/:aid/calibration', requirePermission('clinical:write'), async (req, res) => {
+    const agent = await findOr404(db, 'bridge_agents', req.params.aid, req.user.practice_id, 'Workstation');
+    const mm = req.body?.mm_per_px;
+    if (mm !== null && !(Number(mm) > 0.001 && Number(mm) < 1)) throw new HttpError(400, 'mm_per_px must be between 0.001 and 1');
+    await db.run('UPDATE bridge_agents SET mm_per_px = ? WHERE id = ?', mm === null ? null : Number(mm), agent.id);
+    await audit(db, req, 'bridge.calibrate', 'bridge_agents', agent.id, { mm_per_px: mm });
+    res.json(view(await db.get('SELECT * FROM bridge_agents WHERE id = ?', agent.id)));
   });
 
   // "Test sensor": one exposure (or a check of the capture folder) with no patient, to prove the setup works.
@@ -224,7 +239,11 @@ export function bridgeAgentRoutes({ db, storage }) {
     if (s && typeof s === 'object') {
       let exposure = null;
       try { exposure = cleanExposure(s.exposure); } catch { exposure = null; }
-      info = { mode: s.mode === 'folder' ? 'folder' : 'command', preset: s.preset ? String(s.preset).slice(0, 40) : null, exposure };
+      const pixelUm = Number(s.pixelSize);
+      info = {
+        mode: s.mode === 'folder' ? 'folder' : 'command', preset: s.preset ? String(s.preset).slice(0, 40) : null, exposure,
+        pixel_um: pixelUm >= 5 && pixelUm <= 150 ? pixelUm : null, size: SENSOR_LONG_MM[s.size] ? String(s.size) : null,
+      };
     }
     await db.run('UPDATE bridge_agents SET apps = ?, sensor = ?, sensor_info = ?, hostname = ?, version = ? WHERE id = ?', JSON.stringify(apps), sensor, info ? JSON.stringify(info) : null, String(req.body?.hostname || '').slice(0, 100) || null, String(req.body?.version || '').slice(0, 20) || null, req.agent.id);
     const practice = await db.get('SELECT name FROM practices WHERE id = ?', req.agent.practice_id);
@@ -368,8 +387,19 @@ export function bridgeAgentRoutes({ db, storage }) {
         exposure = cleanExposure({ ...defaults, sensor: agent.sensor });
       }
     }
+    // Scale for measuring in mm when the file doesn't carry one (DICOM does): the workstation's calibration,
+    // else the sensor's pixel size, else an estimate from the sensor size.
+    let scale = null;
+    if (capture && category === 'xray' && mime !== 'application/dicom') {
+      const info = parseJson(agent.sensor_info) || {};
+      const dims = imageSize(data);
+      if (agent.mm_per_px) scale = [agent.mm_per_px, 'calibrated'];
+      else if (info.pixel_um) scale = [info.pixel_um / 1000, 'sensor'];
+      else if (info.size && dims?.width) scale = [SENSOR_LONG_MM[info.size] / Math.max(dims.width, dims.height), 'estimate'];
+    }
     const { storageKey, encrypted } = await storage.save(agent.practice_id, data);
     const id = await insert(db, 'documents', {
+      ...(scale ? { mm_per_px: scale[0], scale_source: scale[1] } : {}),
       practice_id: agent.practice_id, patient_id: patientId, category, filename, mime, size: data.length, storage_key: storageKey, encrypted: encrypted ? 1 : 0,
       tooth, notes: `Imported from ${agent.name}${tags?.modality ? ` (${tags.modality})` : ''}`, source: `bridge:${agent.id}`, source_hash: hash,
       taken_at: tags?.studyDate || (capture ? new Date().toISOString().slice(0, 10) : null), exposure: exposure ? JSON.stringify(exposure) : null,
