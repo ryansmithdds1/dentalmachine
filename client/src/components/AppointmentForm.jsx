@@ -35,17 +35,18 @@ export default function AppointmentForm({ appointment, defaults = {}, patient: i
   const [form, setForm] = useState({
     date: appointment?.start_time.slice(0, 10) || defaults.date,
     time: startTime,
-    duration: appointment ? diffMinutes(startTime, appointment.end_time.slice(11, 16)) : defaults.end ? diffMinutes(startTime, defaults.end) : 60,
+    duration: appointment ? diffMinutes(startTime, appointment.end_time.slice(11, 16)) : defaults.end ? diffMinutes(startTime, defaults.end) : defaults.duration || 60,
     appointment_type_id: appointment?.appointment_type_id || '',
     asap: !!appointment?.asap,
     provider_id: appointment?.provider_id || defaults.provider_id || '',
     operatory_id: appointment?.operatory_id || defaults.operatory_id || '',
     status: appointment?.status || 'scheduled',
-    reason: appointment?.reason || '',
+    reason: appointment?.reason || defaults.reason || '',
     notes: appointment?.notes || '',
   });
   const [planned, setPlanned] = useState([]);
-  const [selectedProcs, setSelectedProcs] = useState([]);
+  // Booking a treatment plan phase arrives with its procedures already picked.
+  const [selectedProcs, setSelectedProcs] = useState(defaults.procedure_ids || []);
   const [slots, setSlots] = useState(null);
   const [override, setOverride] = useState(null);
   const [repeat, setRepeat] = useState({ rule: '', count: 6 });

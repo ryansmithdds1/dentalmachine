@@ -246,7 +246,7 @@ export default function CalendarGrid({
                         tabIndex={0} role="button"
                         aria-label={`${a.first_name} ${a.last_name}, ${label12(s)} to ${label12(e)}, ${a.status}`}>
                         <div className="cal-appt-line">
-                          <strong>{a.medical_alerts ? '⚠ ' : ''}{a.first_name} {a.last_name}</strong>
+                          <strong>{a.premed_required ? '💊 ' : ''}{a.medical_alerts ? '⚠ ' : ''}{a.first_name} {a.last_name}</strong>
                           {STATUS_ICON[a.status] && <span className="cal-status" title={a.status}>{STATUS_ICON[a.status]}</span>}
                           {a.asap ? <span className="cal-asap" title="Wants an earlier time">ASAP</span> : null}
                           {a.series_id ? <span className="cal-repeat" title="Recurring visit">↻</span> : null}

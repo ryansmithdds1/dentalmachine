@@ -10,7 +10,7 @@ export default function officeRoutes({ db }) {
   const r = Router();
 
   // ---- Lab cases ----
-  const LAB_FIELDS = ['patient_id', 'provider_id', 'appointment_id', 'lab_name', 'description', 'tooth', 'shade', 'status', 'sent_date', 'due_date', 'received_date', 'cost', 'notes'];
+  const LAB_FIELDS = ['patient_id', 'provider_id', 'appointment_id', 'lab_id', 'procedure_id', 'lab_name', 'description', 'tooth', 'shade', 'status', 'sent_date', 'due_date', 'received_date', 'cost', 'notes'];
   const validateLab = async (req, row) => {
     requireOneOf(row.status, LAB_STATUSES, 'status');
     for (const k of ['sent_date', 'due_date', 'received_date']) if (row[k] && !DATE.test(row[k])) throw new HttpError(400, `${k} must be YYYY-MM-DD`);
@@ -18,6 +18,18 @@ export default function officeRoutes({ db }) {
     if (row.provider_id) await findOr404(db, 'providers', row.provider_id, req.user.practice_id, 'Provider');
     if (row.appointment_id) await findOr404(db, 'appointments', row.appointment_id, req.user.practice_id, 'Appointment');
     if (row.cost != null) row.cost = toCents(row.cost, 'cost');
+    if (row.lab_id) {
+      const lab = await findOr404(db, 'labs', row.lab_id, req.user.practice_id, 'Lab');
+      row.lab_name ??= lab.name;
+      // Due back after the lab's usual turnaround.
+      if (!row.due_date && lab.turnaround_days && row.sent_date) row.due_date = new Date(Date.parse(`${row.sent_date}T12:00:00Z`) + lab.turnaround_days * 86400000).toISOString().slice(0, 10);
+    }
+    if (row.procedure_id) {
+      const p = await findOr404(db, 'procedures', row.procedure_id, req.user.practice_id, 'Procedure');
+      if (row.patient_id && p.patient_id !== Number(row.patient_id)) throw new HttpError(400, 'Procedure belongs to another patient');
+      row.tooth ??= p.tooth;
+      row.description ??= `${p.code} ${p.description}`;
+    }
     if (row.status === 'received' && !row.received_date) row.received_date = (await practiceNow(db, req.user.practice_id)).slice(0, 10);
   };
   const LAB_SELECT = `SELECT l.*, p.first_name, p.last_name, pv.name AS provider_name, a.start_time AS appointment_time
@@ -42,10 +54,11 @@ export default function officeRoutes({ db }) {
 
   r.post('/lab-cases', requirePermission('clinical:write'), async (req, res) => {
     const row = pick(req.body, LAB_FIELDS);
-    requireFields(row, ['patient_id', 'lab_name', 'description']);
+    requireFields(row, ['patient_id']);
     row.status ??= 'sent';
     row.sent_date ??= (await practiceNow(db, req.user.practice_id)).slice(0, 10);
     await validateLab(req, row);
+    requireFields(row, ['lab_name', 'description']);
     const id = await insert(db, 'lab_cases', { ...row, practice_id: req.user.practice_id });
     await audit(db, req, 'lab_case.create', 'lab_cases', id);
     res.status(201).json(await db.get(`${LAB_SELECT} WHERE l.id = ?`, id));

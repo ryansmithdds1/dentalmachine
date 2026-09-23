@@ -74,13 +74,26 @@ export function addMonths(dateStr, months) {
   return isoDate(d);
 }
 
-// Valid tooth identifiers: permanent 1-32 (Universal), primary A-T.
+// Valid tooth identifiers: permanent 1-32 (Universal), primary A-T, and supernumerary teeth
+// (51-82 next to a permanent tooth, AS-TS next to a primary one).
 export function validTooth(tooth) {
   if (tooth == null) return true;
   const t = String(tooth).toUpperCase();
-  if (/^[A-T]$/.test(t)) return true;
+  if (/^[A-T]S?$/.test(t)) return true;
   const n = Number(t);
-  return Number.isInteger(n) && n >= 1 && n <= 32;
+  return Number.isInteger(n) && ((n >= 1 && n <= 32) || (n >= 51 && n <= 82));
+}
+
+// Treatment area for codes charted by quadrant or arch.
+export const QUADRANTS = ['UR', 'UL', 'LL', 'LR'];
+export const ARCHES = ['U', 'L'];
+const QUADRANT_CODES = /^D(434[12]|42[0-6]\d)$/;
+const ARCH_CODES = /^D(51[1-4]0|52[1-2][1-4]|54[1-2][1-2]|57[3-6]\d|5863|5865)$/;
+export function codeArea(code) {
+  if (code.area) return code.area;
+  if (QUADRANT_CODES.test(code.code)) return 'quadrant';
+  if (ARCH_CODES.test(code.code)) return 'arch';
+  return code.requires_tooth ? 'tooth' : 'mouth';
 }
 
 export function normalizeSurfaces(surfaces) {

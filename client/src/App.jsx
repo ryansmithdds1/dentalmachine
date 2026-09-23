@@ -20,6 +20,7 @@ const Followups = lazy(() => import('./pages/Followups.jsx'));
 const RouteSlip = lazy(() => import('./pages/RouteSlip.jsx'));
 const TreatmentPlanPrint = lazy(() => import('./pages/PrintDocs.jsx').then((m) => ({ default: m.TreatmentPlanPrint })));
 const PrescriptionPrint = lazy(() => import('./pages/PrintDocs.jsx').then((m) => ({ default: m.PrescriptionPrint })));
+const LabSlipPrint = lazy(() => import('./pages/PrintDocs.jsx').then((m) => ({ default: m.LabSlipPrint })));
 const CaseAcceptance = lazy(() => import('./pages/public/CaseAcceptance.jsx'));
 const Portal = lazy(() => import('./pages/public/Portal.jsx'));
 const Reports = lazy(() => import('./pages/Reports.jsx'));
@@ -102,6 +103,7 @@ function StaffApp() {
       <Route path="/appointments/:id/route-slip" element={<RouteSlip />} />
       <Route path="/treatment-plans/:id/print" element={<TreatmentPlanPrint />} />
       <Route path="/prescriptions/:id/print" element={<PrescriptionPrint />} />
+      <Route path="/lab-cases/:id/slip" element={<LabSlipPrint />} />
       <Route path="*" element={<Shell nav={nav} />} />
     </Routes>
   );

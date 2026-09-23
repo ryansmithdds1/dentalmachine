@@ -78,7 +78,7 @@ export default function Office() {
                     <tr key={l.id} className="clickable" onClick={() => can('clinical:write') && setModal({ type: 'lab', item: l })}>
                       <td><Link to={`/patients/${l.patient_id}`} onClick={(e) => e.stopPropagation()}>{l.first_name} {l.last_name}</Link></td>
                       <td>{l.description}{l.tooth ? ` #${l.tooth}` : ''}{l.shade ? <span className="muted"> · {l.shade}</span> : ''}{l.cost ? <div className="muted">{money(l.cost)}</div> : null}</td>
-                      <td>{l.lab_name}</td>
+                      <td>{l.lab_name}<div><a href={`/lab-cases/${l.id}/slip`} target="_blank" rel="noreferrer" style={{ fontSize: 12 }}>Slip</a></div></td>
                       <td style={{ color: l.overdue ? 'var(--danger)' : undefined }}>
                         {fmtDate(l.due_date)}
                         {l.at_risk && <div className="badge danger" title="The seat appointment is on or before the lab's due date">Seat at risk</div>}

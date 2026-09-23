@@ -1,42 +1,16 @@
 import { useState } from 'react';
 import { api } from '../../api.js';
-import { useApi, useLookup } from '../../hooks.js';
+import { useApi } from '../../hooks.js';
 import { useAuth } from '../../auth.jsx';
 import { fmtDateTime } from '../../format.js';
-import { ErrorBox, useSubmit } from '../ui.jsx';
-
-const TEMPLATES = {
-  'Recall exam': 'S: Pt presents for periodic exam and prophy. No complaints.\nO: Soft tissue WNL. Light plaque/calculus. \nA: \nP: Adult prophy completed. OHI reviewed. RTC 6 months.',
-  'Restorative': 'Tooth #__ surfaces __. Anesthetic: __ carpules __. Isolation: rubber dam. Caries removed, __ placed and cured. Occlusion checked and adjusted. Pt tolerated well.',
-  'Emergency / limited': 'CC: \nHx: \nClinical findings: \nRadiographs: \nDx: \nTx rendered: \nPlan: ',
-};
+import { ErrorBox } from '../ui.jsx';
+import NoteComposer from '../NoteComposer.jsx';
 
 export default function NotesTab({ patient }) {
   const { user, can } = useAuth();
   const { data: notes, reload } = useApi(`/patients/${patient.id}/notes`);
-  const providers = useLookup('/providers?active=true');
-  const [body, setBody] = useState('');
-  const [providerId, setProviderId] = useState('');
-  const [signNow, setSignNow] = useState(false);
   const [editing, setEditing] = useState(null);
   const [addendum, setAddendum] = useState(null);
-  const { submit, busy, error } = useSubmit(async () => {
-    const note = await api.post(`/patients/${patient.id}/notes`, { body, provider_id: providerId ? Number(providerId) : null });
-    // The note is saved even if signing is refused (e.g. it's another provider's): clear the draft first
-    // so a retry can't save it twice.
-    setBody('');
-    reload();
-    if (signNow) {
-      await api.post(`/notes/${note.id}/sign`).catch((e) => {
-        throw new Error(`Note saved but not signed: ${e.message}`);
-      });
-      reload();
-    }
-  });
-  const useTemplate = (t) => {
-    if (body.trim() && body !== TEMPLATES[t] && !window.confirm('Replace what you have typed with this template?')) return;
-    setBody(TEMPLATES[t]);
-  };
   const [actionErr, setActionErr] = useState(null);
   const act = async (fn) => {
     setActionErr(null);
@@ -53,24 +27,7 @@ export default function NotesTab({ patient }) {
       {can('clinical:write') && (
         <div className="card">
           <h2>New note</h2>
-          <ErrorBox error={error} />
-          <div className="inline" style={{ marginBottom: 8, flexWrap: 'wrap' }}>
-            {Object.keys(TEMPLATES).map((t) => <button key={t} className="small" onClick={() => useTemplate(t)}>{t}</button>)}
-          </div>
-          <textarea rows={10} value={body} onChange={(e) => setBody(e.target.value)} placeholder="Clinical note…" />
-          <div className="form-grid" style={{ marginTop: 10 }}>
-            <label>
-              Provider
-              <select value={providerId} onChange={(e) => setProviderId(e.target.value)}>
-                <option value="">—</option>
-                {providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </select>
-            </label>
-            {can('clinical:sign') && <label className="checkbox" style={{ alignSelf: 'end' }}><input type="checkbox" checked={signNow} onChange={(e) => setSignNow(e.target.checked)} /> Sign now</label>}
-          </div>
-          <div className="form-actions">
-            <button className="primary" disabled={busy || !body.trim()} onClick={submit}>Save note</button>
-          </div>
+          <NoteComposer patient={patient} providerId={patient.primary_provider_id} onSaved={reload} />
         </div>
       )}
       <div>

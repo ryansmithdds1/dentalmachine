@@ -70,6 +70,8 @@ export default function PatientDetail() {
               </div>
               <div className="inline" style={{ marginTop: 6, flexWrap: 'wrap' }}>
                 {p.office_alert && <button className="office-chip" onClick={() => setPopup(p.office_alert)}>📌 {p.office_alert}</button>}
+                {!!p.premed_required && <span className="alert-chip strong" title="Antibiotic premedication before treatment">💊 PREMED</span>}
+                {p.asa_class && p.asa_class !== 'I' && <span className="alert-chip" title="ASA physical status">ASA {p.asa_class}</span>}
                 {p.medical_alerts && <span className="alert-chip">⚠ {p.medical_alerts}</span>}
                 {p.allergies && <span className="alert-chip">Allergy: {p.allergies}</span>}
                 {p.guarantor && <button className="link" style={{ fontSize: 12 }} onClick={() => setTab('family')}>Guarantor: {p.guarantor.first_name} {p.guarantor.last_name}</button>}
@@ -165,6 +167,7 @@ function Overview({ p, reload }) {
             📋 The patient submitted a new medical history. <button className="small primary" onClick={() => setHistoryReview(true)}>Review changes</button>
           </div>
         )}
+        <MedicalSummary p={p} reload={reload} />
         <dl className="kv">
           <dt>Alerts</dt><dd>{p.medical_alerts || 'None'}</dd>
           <dt>Allergies</dt><dd>{p.allergies || <span className="muted">Not recorded — ask the patient</span>}</dd>
@@ -218,7 +221,7 @@ function Overview({ p, reload }) {
           {p.open_lab_cases.length === 0 && <div className="muted" style={{ marginTop: 6 }}>No open lab cases.</div>}
           {p.open_lab_cases.map((l) => (
             <div key={l.id} className="inline" style={{ justifyContent: 'space-between', marginTop: 8 }}>
-              <span>{l.description} · {l.lab_name}</span>
+              <span>{l.description} · {l.lab_name} <a href={`/lab-cases/${l.id}/slip`} target="_blank" rel="noreferrer" style={{ fontSize: 12 }}>slip</a></span>
               <span className="inline">
                 <span className={`badge ${l.status === 'received' ? 'ok' : 'warn'}`}>{LAB_STATUSES.find((s) => s[0] === l.status)?.[1]}</span>
                 {l.due_date && <span className="muted">due {fmtDate(l.due_date)}</span>}
@@ -246,6 +249,102 @@ function Overview({ p, reload }) {
       </div>
     </div>
     </>
+  );
+}
+
+export const MEDICAL_CONDITIONS = [
+  'Heart disease', 'Heart murmur', 'Artificial heart valve', 'Prosthetic joint', 'High blood pressure', 'Stroke', 'Diabetes', 'Asthma', 'COPD',
+  'Bleeding disorder', 'Anticoagulant therapy', 'Hepatitis', 'HIV', 'Kidney disease', 'Liver disease', 'Seizures', 'Cancer / chemotherapy',
+  'Radiation to head or neck', 'Bisphosphonates', 'Osteoporosis', 'Pregnant', 'Thyroid disorder', 'Tobacco use', 'Sleep apnea',
+];
+const ASA = [['I', 'Healthy'], ['II', 'Mild systemic disease'], ['III', 'Severe systemic disease'], ['IV', 'Severe disease, constant threat to life'], ['V', 'Moribund'], ['VI', 'Brain-dead organ donor']];
+const parseList = (v) => { try { return JSON.parse(v || '[]'); } catch { return []; } };
+
+// Conditions checklist, ASA class, premedication and vitals.
+function MedicalSummary({ p, reload }) {
+  const { can } = useAuth();
+  const { data: vitals, reload: reloadVitals } = useApi(`/patients/${p.id}/vitals`);
+  const [editing, setEditing] = useState(false);
+  const [vForm, setVForm] = useState(null);
+  const [warning, setWarning] = useState(null);
+  const conditions = parseList(p.medical_conditions);
+  const latest = vitals?.[0];
+  const { submit, busy, error } = useSubmit(async () => {
+    const v = await api.post(`/patients/${p.id}/vitals`, vForm);
+    setWarning(v.warning);
+    setVForm(null);
+    reloadVitals();
+  });
+  return (
+    <div style={{ marginBottom: 10 }}>
+      <div className="inline" style={{ flexWrap: 'wrap', gap: 6, marginBottom: 6 }}>
+        {p.asa_class && <span className="badge info" title={ASA.find((a) => a[0] === p.asa_class)?.[1]}>ASA {p.asa_class}</span>}
+        {!!p.premed_required && <span className="badge danger">Premedication required</span>}
+        {conditions.map((c) => <span key={c} className="badge warn">{c}</span>)}
+        {!p.asa_class && !conditions.length && <span className="muted" style={{ fontSize: 13 }}>No conditions checked.</span>}
+        {can('clinical:write') && <button className="small" onClick={() => setEditing(true)}>Edit health history</button>}
+      </div>
+      <div className="inline" style={{ flexWrap: 'wrap', gap: 8, fontSize: 13 }}>
+        <strong>Vitals:</strong>
+        {latest ? <span>BP {latest.bp_systolic ? `${latest.bp_systolic}/${latest.bp_diastolic}` : '—'} · pulse {latest.pulse || '—'} <span className="muted">({fmtDate(latest.recorded_at.slice(0, 10))})</span></span> : <span className="muted">none recorded</span>}
+        {can('clinical:write') && !vForm && <button className="small" onClick={() => setVForm({ bp_systolic: '', bp_diastolic: '', pulse: '' })}>Record vitals</button>}
+      </div>
+      {warning && <div className="error" style={{ marginTop: 6 }}>{warning}</div>}
+      {vForm && (
+        <form className="inline" style={{ gap: 6, marginTop: 6, flexWrap: 'wrap' }} onSubmit={(e) => { e.preventDefault(); submit(); }}>
+          <ErrorBox error={error} />
+          <input type="number" placeholder="Systolic" style={{ width: 90 }} value={vForm.bp_systolic} onChange={(e) => setVForm({ ...vForm, bp_systolic: e.target.value })} aria-label="Systolic" />
+          /
+          <input type="number" placeholder="Diastolic" style={{ width: 90 }} value={vForm.bp_diastolic} onChange={(e) => setVForm({ ...vForm, bp_diastolic: e.target.value })} aria-label="Diastolic" />
+          <input type="number" placeholder="Pulse" style={{ width: 80 }} value={vForm.pulse} onChange={(e) => setVForm({ ...vForm, pulse: e.target.value })} aria-label="Pulse" />
+          <button className="small primary" disabled={busy}>Save</button>
+          <button type="button" className="small" onClick={() => setVForm(null)}>Cancel</button>
+        </form>
+      )}
+      {vitals?.length > 1 && (
+        <details style={{ fontSize: 12, marginTop: 4 }}>
+          <summary className="muted">Vitals history</summary>
+          {vitals.map((v) => <div key={v.id}>{fmtDate(v.recorded_at.slice(0, 10))}: BP {v.bp_systolic ? `${v.bp_systolic}/${v.bp_diastolic}` : '—'}, pulse {v.pulse || '—'} {v.recorded_by_name ? <span className="muted">· {v.recorded_by_name}</span> : null}</div>)}
+        </details>
+      )}
+      {editing && <HealthHistoryEditor p={p} conditions={conditions} onDone={() => { setEditing(false); reload(); }} />}
+    </div>
+  );
+}
+
+function HealthHistoryEditor({ p, conditions, onDone }) {
+  const [checked, setChecked] = useState(conditions);
+  const [asa, setAsa] = useState(p.asa_class || '');
+  const [premed, setPremed] = useState(!!p.premed_required);
+  const { submit, busy, error } = useSubmit(async () => {
+    await api.put(`/patients/${p.id}`, { medical_conditions: checked, asa_class: asa || null, premed_required: premed });
+    onDone();
+  });
+  const others = checked.filter((c) => !MEDICAL_CONDITIONS.includes(c));
+  return (
+    <Modal title="Health history" wide onClose={onDone}>
+      <form onSubmit={(e) => { e.preventDefault(); submit(); }}>
+        <ErrorBox error={error} />
+        <div className="checklist">
+          {[...MEDICAL_CONDITIONS, ...others].map((c) => (
+            <label key={c} className="checkbox">
+              <input type="checkbox" checked={checked.includes(c)} onChange={(e) => setChecked(e.target.checked ? [...checked, c] : checked.filter((x) => x !== c))} /> {c}
+            </label>
+          ))}
+        </div>
+        <div className="form-grid" style={{ marginTop: 12 }}>
+          <label>
+            ASA physical status
+            <select value={asa} onChange={(e) => setAsa(e.target.value)}>
+              <option value="">Not assessed</option>
+              {ASA.map(([v, d]) => <option key={v} value={v}>ASA {v} — {d}</option>)}
+            </select>
+          </label>
+          <label className="checkbox" style={{ alignSelf: 'end' }}><input type="checkbox" checked={premed} onChange={(e) => setPremed(e.target.checked)} /> Antibiotic premedication required</label>
+        </div>
+        <div className="form-actions"><button className="primary" disabled={busy}>Save</button></div>
+      </form>
+    </Modal>
   );
 }
 

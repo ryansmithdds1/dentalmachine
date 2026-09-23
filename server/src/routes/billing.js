@@ -59,7 +59,7 @@ export default function billingRoutes({ db, payments = { enabled: false } }) {
   });
 
   // ---- Adjustment types ----
-  const DEFAULT_TYPES = [['Courtesy discount', 'credit'], ['Senior discount', 'credit'], ['Professional courtesy', 'credit'], ['Small balance write-off', 'credit'], ['Bad debt write-off', 'credit'], ['Insurance write-off', 'credit'], ['NSF / returned check fee', 'debit'], ['Finance charge', 'debit'], ['Other', 'credit']];
+  const DEFAULT_TYPES = [['Courtesy discount', 'credit'], ['Senior discount', 'credit'], ['Professional courtesy', 'credit'], ['Small balance write-off', 'credit'], ['Bad debt write-off', 'credit'], ['Insurance write-off', 'credit'], ['Treatment plan discount', 'credit'], ['NSF / returned check fee', 'debit'], ['Finance charge', 'debit'], ['Other', 'credit']];
   const adjustmentTypes = async (pid) => {
     let rows = await db.all('SELECT * FROM adjustment_types WHERE practice_id = ? ORDER BY name', pid);
     if (!rows.length) {

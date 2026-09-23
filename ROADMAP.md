@@ -141,19 +141,19 @@ The "OD / Curve" column shows which competitor has the feature: ✓ = has it, ~ 
 
 | # | Feature | Why | OD / Curve | Pri | Size |
 |---|---|---|---|---|---|
-| 48 | **Primary and mixed dentition** on the chart (A–T), with supernumerary teeth. | Every pediatric and family patient. | ✓ / ✓ | P1 | M |
-| 49 | **Graphical restorations:** crown, RCT, implant, bridge (pontic/abutment), veneer, sealant, extraction/missing graphics; quadrant and arch procedures (SRP D4341/4342, dentures). | Charting is the heart of the clinical side; SRP per quadrant is daily. | ✓ / ✓ | P1 | L |
-| 50 | **Full perio chart:** recession, CAL (computed), mobility, furcation, plaque, suppuration, gingival margin; auto-advance entry; site-by-site exam comparison and graphs; touch-friendly bleeding entry. | Hygienists need a complete perio chart; perio claims need it as an attachment. | ✓ / ✓ | P1 | M |
-| 51 | **Treatment plan editor.** Add or remove procedures, reorder, phases, alternative plans ("Option A implant / Option B bridge"), per-line fee override and discount, schedule straight from a phase. | Case acceptance workflow. | ✓ / ✓ | P1 | M |
-| 52 | **Auto notes / procedure notes.** Completing a procedure pre-fills a note from a template with prompts (anesthetic, shade, materials); editable template library. | Documentation speed and compliance. | ✓ / ✓ | P1 | M |
+| 48 | ✅ **Primary and mixed dentition** on the chart (A–T), with supernumerary teeth. | Every pediatric and family patient. | ✓ / ✓ | P1 | M |
+| 49 | ✅ **Graphical restorations:** crown, RCT, implant, bridge (pontic/abutment), veneer, sealant, extraction/missing graphics; quadrant and arch procedures (SRP D4341/4342, dentures). | Charting is the heart of the clinical side; SRP per quadrant is daily. | ✓ / ✓ | P1 | L |
+| 50 | ✅ **Full perio chart:** recession, CAL (computed), mobility, furcation, plaque, suppuration, gingival margin; auto-advance entry; site-by-site exam comparison and graphs; touch-friendly bleeding entry. | Hygienists need a complete perio chart; perio claims need it as an attachment. | ✓ / ✓ | P1 | M |
+| 51 | ✅ **Treatment plan editor.** Add or remove procedures, reorder, phases, alternative plans ("Option A implant / Option B bridge"), per-line fee override and discount, schedule straight from a phase. | Case acceptance workflow. | ✓ / ✓ | P1 | M |
+| 52 | ✅ **Auto notes / procedure notes.** Completing a procedure pre-fills a note from a template with prompts (anesthetic, shade, materials); editable template library. | Documentation speed and compliance. | ✓ / ✓ | P1 | M |
 | 53 | ✅ **Addenda on signed notes.** | Legal requirement. | ✓ / ✓ | P0 | S |
-| 54 | **Structured medical history.** Coded allergies and medications, vitals and blood pressure, ASA class, premedication flag driving alerts, history versions with side-by-side review. | Safety. | ✓ / ✓ | P2 | M |
+| 54 | ✅ **Structured medical history.** _(Done: condition checklist, vitals/BP with warnings, ASA, premed alerts on chart and schedule, history review. Allergies and medications stay free text.)_ Coded allergies and medications, vitals and blood pressure, ASA class, premedication flag driving alerts, history versions with side-by-side review. | Safety. | ✓ / ✓ | P2 | M |
 | 55 | **Image viewer.** Zoom, pan, brightness and contrast, rotate, measure, annotate; FMX mount templates; side-by-side comparison; DICOM rendering (dcmjs / cornerstone). | Curve ships integrated imaging; this is a visible gap. | ✓ / ✓ | P1 | L |
 | 56 | **Direct sensor capture** (TWAIN bridge) as well as imaging-program bridges. | Offices without DEXIS or similar software. | ✓ / ✓ | P3 | L |
 | 57 | **Procedure-specific informed consents** with signature, filed as a document. | Risk management. | ✓ / ✓ | P1 | M |
-| 58 | **Lab directory and lab slips.** Link to a procedure, printable Rx slip, photo attachments. | Lab workflow. | ✓ / ~ | P3 | S |
+| 58 | ✅ **Lab directory and lab slips.** _(Photo attachments go on the patient's documents.)_ Link to a procedure, printable Rx slip, photo attachments. | Lab workflow. | ✓ / ~ | P3 | S |
 | 59 | **Ortho module.** Ortho chart, contract billing (down payment plus monthly auto-billing), bracket and wire log, ortho lifetime max. | GP offices doing ortho or aligners. | ✓ / ~ | P3 | L |
-| 60 | **Full CDT code set import** with treatment area, time units and auto-condition (extraction → missing). | Completeness. | ✓ / ✓ | P2 | S |
+| 60 | ✅ **Full CDT code set import** with treatment area, time units and auto-condition (extraction → missing). | Completeness. | ✓ / ✓ | P2 | S |
 | 61 | **Voice perio entry.** | Hygienist productivity; Curve and newer PMSs advertise it. | ~ / ✓ | P3 | M |
 
 ### 2.5 Patient engagement and marketing
@@ -213,24 +213,24 @@ Works well: drag, resize and create; undo; live updates; conflict checks; open-t
 5. **P2** Unlinking a member moves or warns about their payment plans and cards.
 
 ### Chart
-1. **P1** Chart larger and touch-first: bigger teeth, and a searchable procedure picker with favourites / "quick buttons" (Open Dental's most used feature).
-2. **P1** Complete, edit or delete procedures from the chart; condition notes and editing.
-3. **P1** Distinct colours per status (existing, treatment planned, completed today, existing-other) with a full legend; tooth-specific surface labels.
-4. **P2** "Chart as of date" timeline slider.
-5. **P2** Tooth history panel (everything that ever happened to #30).
+1. ✅ **P1** Chart larger and touch-first: bigger teeth, and a searchable procedure picker with favourites / "quick buttons" (Open Dental's most used feature).
+2. ✅ **P1** Complete, edit or delete procedures from the chart; condition notes and editing.
+3. ✅ **P1** Distinct colours per status (existing, treatment planned, completed today, existing-other) with a full legend; tooth-specific surface labels.
+4. ✅ **P2** "Chart as of date" timeline slider.
+5. ✅ **P2** Tooth history panel (everything that ever happened to #30).
 
 ### Perio
-Beyond item 50: editable exams, provider and notes, missing teeth greyed out, and a printable perio chart suitable as a claim attachment.
+✅ Beyond item 50: editable exams, provider and notes, missing teeth greyed out, and a printable perio chart suitable as a claim attachment.
 
 ### Treatment plans and case acceptance
-1. **P1** Build a plan by selecting planned procedures on the chart ("add to plan").
+1. ✅ **P1** Build a plan by selecting planned procedures on the chart ("add to plan").
 2. **P1** Signed-plan snapshot and PDF (see Part 1).
 3. **P2** Show insurance-remaining-this-year vs next year, and suggest splitting across benefit years.
 4. **P2** Financing options on the plan (in-house plan, CareCredit/Sunbit link).
 5. ✅ **P2** Don't offer "Accepted verbally" on a plan that was declined.
 
 ### Clinical notes
-1. **P1** Editable template library, merge fields and prompts (pairs with item 52).
+1. ✅ **P1** Editable template library, merge fields and prompts (pairs with item 52).
 2. **P2** Link notes to an appointment; search and filter notes.
 3. **P2** Signature shows the signer's name, credentials and time on printouts.
 

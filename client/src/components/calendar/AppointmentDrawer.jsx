@@ -38,6 +38,7 @@ export default function AppointmentDrawer({ appt: a, can, onClose, onStatus, onE
         <button className="small" onClick={onClose} aria-label="Close">✕</button>
       </div>
       <div className="drawer-body">
+        {!!a.premed_required && <div className="error"><strong>💊 Premedication required</strong> — confirm it was taken before treatment.</div>}
         {a.medical_alerts && <div className="error">⚠ {a.medical_alerts}</div>}
         <div className="inline" style={{ flexWrap: 'wrap', marginBottom: 12 }}>
           <Badge value={a.status} />

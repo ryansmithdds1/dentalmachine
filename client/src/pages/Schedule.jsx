@@ -482,7 +482,7 @@ function Agenda({ from, to, appts, blockouts, providerFilter, onOpen, today }) {
               <button key={a.id} className={`agenda-item status-${a.status}`} style={{ '--c': a.type_color || a.provider_color }} onClick={() => onOpen(a)}>
                 <div className="agenda-time"><strong>{fmtTime(a.start_time)}</strong><span className="muted">{fmtTime(a.end_time)}</span></div>
                 <div className="agenda-body">
-                  <strong>{a.medical_alerts ? '⚠ ' : ''}{a.first_name} {a.last_name}</strong>
+                  <strong>{a.premed_required ? '💊 ' : ''}{a.medical_alerts ? '⚠ ' : ''}{a.first_name} {a.last_name}</strong>
                   <span className="muted">{a.type_name || a.reason} · {a.provider_name}{a.operatory_name ? ` · ${a.operatory_name}` : ''}</span>
                 </div>
                 <span className={`badge ${a.status}`}>{a.status.replace('_', ' ')}</span>

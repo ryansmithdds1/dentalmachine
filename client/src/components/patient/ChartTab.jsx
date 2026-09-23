@@ -1,157 +1,392 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { api } from '../../api.js';
 import { useApi, useLookup } from '../../hooks.js';
 import { useAuth } from '../../auth.jsx';
-import { money, fmtDate, label } from '../../format.js';
-import Odontogram, { CONDITION_COLORS } from '../Odontogram.jsx';
-import { Badge, ErrorBox, useSubmit } from '../ui.jsx';
+import { money, fmtDate, label, age, toCents, fromCents } from '../../format.js';
+import Odontogram, { CONDITION_COLORS, codeArea, surfacesFor, QUADRANT_LABELS, baseTooth } from '../Odontogram.jsx';
+import NoteComposer from '../NoteComposer.jsx';
+import { Badge, ErrorBox, Modal, useSubmit } from '../ui.jsx';
 
-const SURFACES = ['M', 'O', 'D', 'B', 'L', 'I', 'F'];
+const QUADS = ['UR', 'UL', 'LL', 'LR'];
+const ARCHES = ['U', 'L'];
+
+// Primary teeth for young children, both sets while they're mixed.
+const defaultDentition = (dob) => {
+  const a = age(dob);
+  if (a === '' || a == null || a >= 13) return 'permanent';
+  return a < 6 ? 'primary' : 'mixed';
+};
 
 export default function ChartTab({ patient, onChange }) {
   const { can } = useAuth();
-  const { data, reload } = useApi(`/patients/${patient.id}/chart`);
-  const codes = useLookup('/procedure-codes?active=true');
-  const providers = useLookup('/providers?active=true');
+  const [asOf, setAsOf] = useState('');
+  const { data, reload } = useApi(`/patients/${patient.id}/chart${asOf ? `?as_of=${asOf}` : ''}`);
+  const { data: plans, reload: reloadPlans } = useApi(`/patients/${patient.id}/treatment-plans`);
+  const [dentition, setDentition] = useState(() => defaultDentition(patient.dob));
   const [tooth, setTooth] = useState(null);
-  const [surfaces, setSurfaces] = useState('');
-  const [mode, setMode] = useState('procedure');
-  const [cond, setCond] = useState('caries');
-  const [codeId, setCodeId] = useState('');
-  const [providerId, setProviderId] = useState('');
-  const [complete, setComplete] = useState(false);
+  const [modal, setModal] = useState(null);
+  const [err, setErr] = useState(null);
+  const write = can('clinical:write') && !asOf;
 
-  const toggleSurface = (s) => setSurfaces(surfaces.includes(s) ? surfaces.replace(s, '') : surfaces + s);
-  const refresh = () => { reload(); onChange?.(); setSurfaces(''); };
-
-  const { submit, busy, error } = useSubmit(async () => {
-    if (mode === 'condition') {
-      await api.post(`/patients/${patient.id}/conditions`, { tooth, surfaces, condition: cond });
-    } else {
-      await api.post(`/patients/${patient.id}/procedures`, {
-        code_id: Number(codeId), tooth: tooth || null, surfaces: surfaces || null,
-        provider_id: providerId ? Number(providerId) : patient.primary_provider_id, complete,
-      });
+  const refresh = () => { reload(); reloadPlans(); onChange?.(); };
+  const act = async (fn) => {
+    setErr(null);
+    try {
+      await fn();
+      refresh();
+    } catch (e) {
+      setErr(e);
     }
-    refresh();
-  });
-
-  const resolve = async (c) => {
-    await api.put(`/conditions/${c.id}`, { resolved: true });
-    reload();
   };
 
   if (!data) return <div className="empty">Loading chart…</div>;
-  const code = codes.find((c) => String(c.id) === String(codeId));
-  const toothConditions = data.conditions.filter((c) => !tooth || c.tooth === tooth);
-  const toothProcs = data.procedures.filter((p) => !tooth || p.tooth === tooth);
+  const openPlans = (plans || []).filter((p) => ['proposed', 'accepted'].includes(p.status));
+  const conditions = data.conditions.filter((c) => !tooth || c.tooth === tooth);
+  const procs = data.procedures.filter((p) => !tooth || p.tooth === tooth);
+
+  const complete = (p) => act(async () => {
+    await api.post(`/procedures/${p.id}/complete`, {});
+    setModal({ kind: 'note', ids: [p.id], provider: p.provider_id });
+  });
 
   return (
     <div className="grid" style={{ gridTemplateColumns: 'minmax(0, 2fr) minmax(300px, 1fr)' }}>
       <div className="card" style={{ overflowX: 'auto' }}>
-        <Odontogram conditions={data.conditions} procedures={data.procedures} selected={tooth} onSelect={setTooth} />
+        <div className="chart-toolbar no-print">
+          <div className="tabs">
+            {['permanent', 'mixed', 'primary'].map((d) => <button key={d} className={dentition === d ? 'active' : ''} onClick={() => setDentition(d)}>{label(d)}</button>)}
+          </div>
+          <label className="inline" style={{ fontSize: 13 }}>
+            Chart as of
+            <input type="date" value={asOf} max={new Date().toISOString().slice(0, 10)} onChange={(e) => { setAsOf(e.target.value); setTooth(null); }} style={{ width: 150 }} />
+          </label>
+          {asOf && <button className="small" onClick={() => setAsOf('')}>Back to today</button>}
+          <SupernumeraryPicker onPick={setTooth} />
+          <button className="small" onClick={() => window.print()} style={{ marginLeft: 'auto' }}>Print</button>
+        </div>
+        {asOf && <div className="public-notice" style={{ marginBottom: 8 }}>Showing the chart as it was on {fmtDate(asOf)}: conditions recorded and work completed by then. Planned treatment isn’t shown.</div>}
+        <Odontogram conditions={data.conditions} procedures={data.procedures} selected={tooth} onSelect={setTooth} dentition={dentition} />
       </div>
 
-      {can('clinical:write') && (
-        <div className="card">
-          <h2>{tooth ? `Tooth #${tooth}` : 'No tooth selected'}</h2>
-          <ErrorBox error={error} />
-          <div className="tabs" style={{ marginBottom: 12 }}>
-            <button className={mode === 'procedure' ? 'active' : ''} onClick={() => setMode('procedure')}>Procedure</button>
-            <button className={mode === 'condition' ? 'active' : ''} onClick={() => setMode('condition')} disabled={!tooth}>Condition</button>
-          </div>
-          <label>Surfaces</label>
-          <div className="inline" style={{ margin: '4px 0 12px' }}>
-            {SURFACES.map((s) => (
-              <button key={s} type="button" className={`small${surfaces.includes(s) ? ' primary' : ''}`} onClick={() => toggleSurface(s)} disabled={!tooth}>{s}</button>
-            ))}
-          </div>
-          {mode === 'condition' ? (
-            <label>
-              Condition
-              <select value={cond} onChange={(e) => setCond(e.target.value)}>
-                {Object.keys(CONDITION_COLORS).map((c) => <option key={c} value={c}>{label(c)}</option>)}
-              </select>
-            </label>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <label>
-                Procedure
-                <select value={codeId} onChange={(e) => setCodeId(e.target.value)}>
-                  <option value="">Select a code…</option>
-                  {codes.map((c) => <option key={c.id} value={c.id}>{c.code} – {c.description} ({money(c.fee)})</option>)}
-                </select>
-              </label>
-              <label>
-                Provider
-                <select value={providerId} onChange={(e) => setProviderId(e.target.value)}>
-                  <option value="">Patient&apos;s primary provider</option>
-                  {providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                </select>
-              </label>
-              <label className="checkbox"><input type="checkbox" checked={complete} onChange={(e) => setComplete(e.target.checked)} /> Mark completed today (posts charge)</label>
-              {code?.requires_tooth === 1 && !tooth && <div className="muted">Select a tooth on the chart.</div>}
-            </div>
-          )}
-          <div className="form-actions">
-            <button className="primary" disabled={busy || (mode === 'procedure' && !codeId) || (mode === 'condition' && !tooth)} onClick={submit}>
-              {mode === 'condition' ? 'Add condition' : complete ? 'Chart as completed' : 'Add to plan'}
-            </button>
-          </div>
-        </div>
+      {write ? (
+        <EntryPanel patient={patient} tooth={tooth} plans={openPlans} onDone={(res) => {
+          refresh();
+          if (res?.completed) setModal({ kind: 'note', ids: [res.completed.id], provider: res.completed.provider_id });
+        }} />
+      ) : (
+        <div className="card"><h2>{tooth ? `Tooth #${tooth}` : 'Chart'}</h2><p className="muted">{asOf ? 'Past charts are read-only.' : 'View only.'}</p></div>
       )}
 
       <div className="card" style={{ gridColumn: '1 / -1' }}>
-        <h2>{tooth ? `History for #${tooth}` : 'Charted findings & procedures'}</h2>
-        <div className="grid grid-2">
+        <div className="inline" style={{ justifyContent: 'space-between' }}>
+          <h2>{tooth ? `History for #${tooth}` : 'Charted findings & procedures'}</h2>
+          {tooth && <button className="small" onClick={() => setTooth(null)}>Show all teeth</button>}
+        </div>
+        <ErrorBox error={err} />
+        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 380px), 1fr))' }}>
           <div>
             <h3>Conditions</h3>
             <table>
               <tbody>
-                {toothConditions.map((c) => (
+                {conditions.map((c) => (
                   <tr key={c.id} style={{ opacity: c.resolved ? 0.5 : 1 }}>
                     <td>#{c.tooth} {c.surfaces}</td>
-                    <td><span className="badge" style={{ background: `${CONDITION_COLORS[c.condition]}22`, color: CONDITION_COLORS[c.condition] }}>{label(c.condition)}</span></td>
-                    <td className="muted">{fmtDate(c.recorded_at)}</td>
-                    <td>{!c.resolved && can('clinical:write') && <button className="small" onClick={() => resolve(c)}>Resolve</button>}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {!toothConditions.length && <div className="muted">None recorded.</div>}
-          </div>
-          <div>
-            <h3>Procedures</h3>
-            <table>
-              <tbody>
-                {toothProcs.map((p) => (
-                  <tr key={p.id}>
-                    <td>{p.code}</td>
-                    <td>{p.description}<div className="muted">{p.tooth ? `#${p.tooth} ` : ''}{p.surfaces || ''} {p.provider_name ? `· ${p.provider_name}` : ''}</div></td>
-                    <td><Badge value={p.status} /></td>
-                    <td className="muted">{fmtDate(p.completed_at || p.created_at)}</td>
                     <td>
-                      {p.status === 'completed' && can('billing:write') && (
-                        <button className="small" title="Charted in error? Reverses the charge and puts it back to planned" onClick={async () => {
-                          const reason = window.prompt(`Undo completion of ${p.code} ${p.tooth ? `#${p.tooth}` : ''}? The charge is reversed on the ledger.\n\nReason:`);
-                          if (!reason?.trim()) return;
-                          try {
-                            await api.post(`/procedures/${p.id}/uncomplete`, { reason });
-                            refresh();
-                          } catch (e) {
-                            window.alert(e.message);
-                          }
-                        }}>Undo</button>
+                      <span className="badge" style={{ background: `${CONDITION_COLORS[c.condition]}22`, color: CONDITION_COLORS[c.condition] }}>{label(c.condition)}</span>
+                      {c.notes && <div className="muted" style={{ fontSize: 12 }}>{c.notes}</div>}
+                    </td>
+                    <td className="muted">{fmtDate(c.recorded_at)}{c.resolved ? ` · resolved ${fmtDate(c.resolved_at)}` : ''}</td>
+                    <td>
+                      {write && (
+                        <div className="row-actions">
+                          <button className="small" onClick={() => {
+                            const notes = window.prompt(`Note for ${label(c.condition)} on #${c.tooth}:`, c.notes || '');
+                            if (notes != null) act(() => api.put(`/conditions/${c.id}`, { notes }));
+                          }}>Note</button>
+                          {c.resolved
+                            ? <button className="small" onClick={() => act(() => api.put(`/conditions/${c.id}`, { resolved: false }))}>Reopen</button>
+                            : <button className="small" onClick={() => act(() => api.put(`/conditions/${c.id}`, { resolved: true }))}>Resolve</button>}
+                        </div>
                       )}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
-            {!toothProcs.length && <div className="muted">None recorded.</div>}
+            {!conditions.length && <div className="muted">None recorded.</div>}
+          </div>
+          <div>
+            <h3>Procedures</h3>
+            <table>
+              <tbody>
+                {procs.map((p) => (
+                  <tr key={p.id}>
+                    <td>{p.code}</td>
+                    <td>
+                      {p.description}
+                      <div className="muted">
+                        {p.tooth ? `#${p.tooth} ` : ''}{p.surfaces || ''}{p.area ? QUADRANT_LABELS[p.area] : ''} {p.provider_name ? `· ${p.provider_name.replace(/,.*$/, '')}` : ''}
+                        {p.plan_name ? ` · ${p.plan_name}${p.plan_option ? ` (${p.plan_option})` : ''}` : ''}
+                      </div>
+                    </td>
+                    <td><Badge value={p.status} /></td>
+                    <td className="num">{money(p.fee)}<div className="muted" style={{ fontSize: 11 }}>{fmtDate(p.completed_at || p.created_at)}</div></td>
+                    <td>
+                      {write && (
+                        <div className="row-actions">
+                          {p.status === 'planned' && (
+                            <>
+                              <button className="small primary" onClick={() => complete(p)}>Complete</button>
+                              <button className="small" onClick={() => setModal({ kind: 'edit', proc: p })}>Edit</button>
+                              {!p.treatment_plan_id && openPlans.length > 0 && (
+                                <select className="small" value="" aria-label="Add to plan" style={{ width: 'auto' }} onChange={(e) => e.target.value && act(() => api.post(`/treatment-plans/${e.target.value}/procedures`, { procedure_ids: [p.id] }))}>
+                                  <option value="">Add to plan…</option>
+                                  {openPlans.map((tp) => <option key={tp.id} value={tp.id}>{tp.name}{tp.option_label ? ` (${tp.option_label})` : ''}</option>)}
+                                </select>
+                              )}
+                              <button className="small danger" onClick={() => window.confirm(`Remove ${p.code}${p.tooth ? ` #${p.tooth}` : ''} from the chart?`) && act(() => api.post(`/procedures/${p.id}/cancel`))}>Delete</button>
+                            </>
+                          )}
+                          {p.status === 'completed' && (
+                            <>
+                              <button className="small" onClick={() => setModal({ kind: 'note', ids: [p.id], provider: p.provider_id })}>Note</button>
+                              {can('billing:write') && (
+                                <button className="small" title="Charted in error? Reverses the charge and puts it back to planned" onClick={() => {
+                                  const reason = window.prompt(`Undo completion of ${p.code} ${p.tooth ? `#${p.tooth}` : ''}? The charge is reversed on the ledger.\n\nReason:`);
+                                  if (reason?.trim()) act(() => api.post(`/procedures/${p.id}/uncomplete`, { reason }));
+                                }}>Undo</button>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {!procs.length && <div className="muted">None recorded.</div>}
           </div>
         </div>
       </div>
+
+      {modal?.kind === 'note' && (
+        <Modal title="Clinical note" wide onClose={() => setModal(null)}>
+          <NoteComposer patient={patient} procedureIds={modal.ids} providerId={modal.provider} autoDraft onSaved={() => setModal(null)} />
+        </Modal>
+      )}
+      {modal?.kind === 'edit' && (
+        <Modal title={`Edit ${modal.proc.code}`} onClose={() => setModal(null)}>
+          <EditProcedure proc={modal.proc} onDone={() => { setModal(null); refresh(); }} />
+        </Modal>
+      )}
     </div>
+  );
+}
+
+function SupernumeraryPicker({ onPick }) {
+  const [v, setV] = useState('');
+  const ok = /^(5[1-9]|[67]\d|8[0-2]|[A-T]S)$/i.test(v.trim());
+  return (
+    <form className="inline" onSubmit={(e) => { e.preventDefault(); if (ok) { onPick(v.trim().toUpperCase()); setV(''); } }} style={{ gap: 4 }}>
+      <input value={v} onChange={(e) => setV(e.target.value)} placeholder="Supernumerary #" title="51-82 beside a permanent tooth (51 = beside #1), AS-TS beside a primary tooth" style={{ width: 130 }} />
+      <button className="small" disabled={!ok}>Select</button>
+    </form>
+  );
+}
+
+// Search codes by number or words; favourites (the practice's most used) one tap away.
+export function CodePicker({ value, onChange, codes }) {
+  const favorites = useLookup('/procedure-codes/favorites');
+  const [q, setQ] = useState('');
+  const [open, setOpen] = useState(false);
+  const [hl, setHl] = useState(0);
+  const results = useMemo(() => {
+    const terms = q.toLowerCase().split(/\s+/).filter(Boolean);
+    if (!terms.length) return [];
+    return codes.filter((c) => terms.every((t) => c.code.toLowerCase().includes(t) || c.description.toLowerCase().includes(t))).slice(0, 30);
+  }, [q, codes]);
+  const pick = (c) => { onChange(c); setQ(''); setOpen(false); };
+  return (
+    <div>
+      {favorites.length > 0 && (
+        <div className="fav-codes">
+          {favorites.map((c) => (
+            <button type="button" key={c.id} className={`small${value?.id === c.id ? ' primary' : ''}`} title={c.description} onClick={() => pick(c)}>{c.code}</button>
+          ))}
+        </div>
+      )}
+      <div className="code-picker">
+        <input
+          value={q} placeholder={value ? `${value.code} – ${value.description}` : 'Search code or description (e.g. "crown", D2740)'}
+          onChange={(e) => { setQ(e.target.value); setOpen(true); setHl(0); }}
+          onFocus={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 150)}
+          onKeyDown={(e) => {
+            if (e.key === 'ArrowDown') { e.preventDefault(); setHl(Math.min(hl + 1, results.length - 1)); }
+            if (e.key === 'ArrowUp') { e.preventDefault(); setHl(Math.max(hl - 1, 0)); }
+            if (e.key === 'Enter' && results[hl]) { e.preventDefault(); pick(results[hl]); }
+          }}
+          aria-label="Procedure code"
+        />
+        {open && results.length > 0 && (
+          <div className="results">
+            {results.map((c, i) => (
+              <button type="button" key={c.id} className={i === hl ? 'hl' : ''} onMouseDown={(e) => e.preventDefault()} onClick={() => pick(c)}>
+                <strong>{c.code}</strong> {c.description} <span className="muted">{money(c.fee)}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      {value && <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>{value.code} – {value.description} · {money(value.fee)}</div>}
+    </div>
+  );
+}
+
+function EntryPanel({ patient, tooth, plans, onDone }) {
+  const codes = useLookup('/procedure-codes?active=true');
+  const providers = useLookup('/providers?active=true');
+  const [mode, setMode] = useState('procedure');
+  const [surfaces, setSurfaces] = useState('');
+  const [code, setCode] = useState(null);
+  const [area, setArea] = useState('');
+  const [cond, setCond] = useState('caries');
+  const [condNotes, setCondNotes] = useState('');
+  const [providerId, setProviderId] = useState('');
+  const [status, setStatus] = useState('planned');
+  const [planId, setPlanId] = useState('');
+  const kind = codeArea(code);
+  const toggle = (s) => setSurfaces(surfaces.includes(s) ? surfaces.replace(s, '') : surfaces + s);
+  const surfaceList = surfacesFor(tooth);
+
+  const { submit, busy, error } = useSubmit(async () => {
+    if (mode === 'condition') {
+      await api.post(`/patients/${patient.id}/conditions`, { tooth, surfaces, condition: cond, notes: condNotes || null });
+      setCondNotes('');
+      setSurfaces('');
+      onDone();
+      return;
+    }
+    const p = await api.post(`/patients/${patient.id}/procedures`, {
+      code_id: code.id, tooth: kind === 'tooth' ? tooth : null, surfaces: kind === 'tooth' ? surfaces || null : null,
+      area: ['quadrant', 'arch'].includes(kind) ? area : null,
+      provider_id: providerId ? Number(providerId) : patient.primary_provider_id, complete: status === 'completed',
+      treatment_plan_id: status === 'planned' && planId ? Number(planId) : null,
+    });
+    setSurfaces('');
+    onDone(status === 'completed' ? { completed: p } : null);
+  });
+
+  const needsTooth = mode === 'procedure' && kind === 'tooth' && code?.requires_tooth && !tooth;
+  const needsArea = mode === 'procedure' && ['quadrant', 'arch'].includes(kind) && !area;
+  return (
+    <div className="card">
+      <h2>{tooth ? `Tooth #${tooth}${baseTooth(tooth) !== tooth ? ' (supernumerary)' : ''}` : 'No tooth selected'}</h2>
+      <ErrorBox error={error} />
+      <div className="tabs" style={{ marginBottom: 12 }}>
+        <button className={mode === 'procedure' ? 'active' : ''} onClick={() => setMode('procedure')}>Procedure</button>
+        <button className={mode === 'condition' ? 'active' : ''} onClick={() => setMode('condition')} disabled={!tooth}>Condition</button>
+      </div>
+      {mode === 'procedure' && <CodePicker value={code} onChange={(c) => { setCode(c); setArea(''); }} codes={codes} />}
+      {(mode === 'condition' || kind === 'tooth') && (
+        <>
+          <label style={{ marginTop: 10 }}>Surfaces</label>
+          <div className="inline" style={{ margin: '4px 0 12px' }}>
+            {surfaceList.map((s) => (
+              <button key={s} type="button" className={`${surfaces.includes(s) ? 'primary' : ''}`} style={{ minWidth: 40 }} onClick={() => toggle(s)} disabled={!tooth}>{s}</button>
+            ))}
+          </div>
+        </>
+      )}
+      {mode === 'procedure' && ['quadrant', 'arch'].includes(kind) && (
+        <>
+          <label style={{ marginTop: 10 }}>{kind === 'quadrant' ? 'Quadrant' : 'Arch'}</label>
+          <div className="inline" style={{ margin: '4px 0 12px', flexWrap: 'wrap' }}>
+            {(kind === 'quadrant' ? QUADS : ARCHES).map((a) => (
+              <button key={a} type="button" className={area === a ? 'primary' : ''} onClick={() => setArea(a)} title={QUADRANT_LABELS[a]}>{a}</button>
+            ))}
+          </div>
+        </>
+      )}
+      {mode === 'condition' ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <label>
+            Condition
+            <select value={cond} onChange={(e) => setCond(e.target.value)}>
+              {Object.keys(CONDITION_COLORS).map((c) => <option key={c} value={c}>{label(c)}</option>)}
+            </select>
+          </label>
+          <label>Notes<input value={condNotes} onChange={(e) => setCondNotes(e.target.value)} placeholder="e.g. existing PFM, margin open distal" /></label>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 10 }}>
+          <label>
+            Provider
+            <select value={providerId} onChange={(e) => setProviderId(e.target.value)}>
+              <option value="">Patient&apos;s primary provider</option>
+              {providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          </label>
+          <div className="tabs">
+            <button type="button" className={status === 'planned' ? 'active' : ''} onClick={() => setStatus('planned')}>Treatment plan</button>
+            <button type="button" className={status === 'completed' ? 'active' : ''} onClick={() => setStatus('completed')}>Completed today</button>
+          </div>
+          {status === 'planned' && plans.length > 0 && (
+            <label>
+              Add to plan
+              <select value={planId} onChange={(e) => setPlanId(e.target.value)}>
+                <option value="">Not on a plan yet</option>
+                {plans.map((tp) => <option key={tp.id} value={tp.id}>{tp.name}{tp.option_label ? ` (${tp.option_label})` : ''}</option>)}
+              </select>
+            </label>
+          )}
+          {status === 'completed' && <div className="muted" style={{ fontSize: 12 }}>Posts the charge now and offers a note from your templates.</div>}
+          {needsTooth && <div className="muted">Select a tooth on the chart.</div>}
+          {needsArea && <div className="muted">Choose the {kind === 'quadrant' ? 'quadrant' : 'arch'}.</div>}
+        </div>
+      )}
+      <div className="form-actions">
+        <button className="primary" disabled={busy || (mode === 'procedure' && (!code || needsTooth || needsArea)) || (mode === 'condition' && !tooth)} onClick={submit}>
+          {mode === 'condition' ? 'Add condition' : status === 'completed' ? 'Chart as completed' : 'Add to treatment plan'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function EditProcedure({ proc, onDone }) {
+  const providers = useLookup('/providers?active=true');
+  const [form, setForm] = useState({ tooth: proc.tooth || '', surfaces: proc.surfaces || '', area: proc.area || '', fee: fromCents(proc.fee), provider_id: proc.provider_id || '' });
+  const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
+  const { submit, busy, error } = useSubmit(async () => {
+    await api.put(`/procedures/${proc.id}`, {
+      ...(proc.area ? { area: form.area } : { tooth: form.tooth || null, surfaces: form.surfaces || null }),
+      fee: toCents(form.fee), provider_id: form.provider_id ? Number(form.provider_id) : null,
+    });
+    onDone();
+  });
+  return (
+    <form onSubmit={(e) => { e.preventDefault(); submit(); }}>
+      <ErrorBox error={error} />
+      <div className="form-grid">
+        {proc.area ? (
+          <label>Area<select value={form.area} onChange={set('area')}>{(proc.area.length === 2 ? QUADS : ARCHES).map((a) => <option key={a} value={a}>{QUADRANT_LABELS[a]}</option>)}</select></label>
+        ) : (
+          <>
+            <label>Tooth<input value={form.tooth} onChange={set('tooth')} /></label>
+            <label>Surfaces<input value={form.surfaces} onChange={set('surfaces')} /></label>
+          </>
+        )}
+        <label>Fee ($)<input type="number" step="0.01" min="0" value={form.fee} onChange={set('fee')} /></label>
+        <label>
+          Provider
+          <select value={form.provider_id} onChange={set('provider_id')}>
+            <option value="">—</option>
+            {providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        </label>
+      </div>
+      <div className="form-actions"><button className="primary" disabled={busy}>Save</button></div>
+    </form>
   );
 }

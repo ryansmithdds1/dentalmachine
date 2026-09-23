@@ -19,7 +19,7 @@ const RESOURCES = {
   operatories: { title: 'Operatories', singular: 'operatory', path: '/operatories', columns: ['name'], fields: [['name', 'Name', 'text'], ['active', 'Active', 'checkbox']] },
   codes: {
     title: 'Fee schedule', singular: 'procedure code', path: '/procedure-codes', columns: ['code', 'description', 'category', 'fee'],
-    fields: [['code', 'Code', 'text'], ['description', 'Description', 'text'], ['category', 'Category', 'select', CATEGORIES], ['fee', 'Fee ($)', 'money'], ['requires_tooth', 'Requires tooth', 'checkbox'], ['requires_surface', 'Requires surfaces', 'checkbox'], ['active', 'Active', 'checkbox']],
+    fields: [['code', 'Code', 'text'], ['description', 'Description', 'text'], ['category', 'Category', 'select', CATEGORIES], ['fee', 'Fee ($)', 'money'], ['area', 'Charted by (blank = automatic)', 'select', ['tooth', 'quadrant', 'arch', 'mouth']], ['time_units', 'Time units (10 min each)', 'number'], ['requires_tooth', 'Requires tooth', 'checkbox'], ['requires_surface', 'Requires surfaces', 'checkbox'], ['active', 'Active', 'checkbox']],
   },
   types: {
     title: 'Appointment types', singular: 'appointment type', path: '/appointment-types', columns: ['name', 'duration', 'color', 'procedure_codes', 'online_bookable'],
@@ -38,6 +38,7 @@ export default function Settings() {
   const groups = [
     ['You', [['account', 'My account', true]]],
     ['Practice', [['practice', 'Practice & security', admin], ['users', 'Users & roles', admin], ['providers', 'Providers', true], ['operatories', 'Operatories', true], ['types', 'Appointment types', true]]],
+    ['Clinical', [['templates', 'Note templates', can('clinical:write')], ['labs', 'Labs', can('clinical:read')]]],
     ['Billing', [['codes', 'Fee schedule', true], ['ppo', 'PPO fee schedules', can('billing:read')], ['carriers', 'Insurance carriers', can('billing:read')]]],
     ['Patients', [['messaging', 'Messages & reviews', admin]]],
     ['Connections', [['integrations', 'Integrations', admin], ['imaging', 'Imaging bridges', admin]]],
@@ -69,6 +70,9 @@ export default function Settings() {
       {tab === 'users' && <Users />}
       {RESOURCES[tab] && <ResourceTable key={tab} spec={RESOURCES[tab]} canWrite={RESOURCES[tab].writePerm ? can(RESOURCES[tab].writePerm) : admin} />}
       {tab === 'providers' && <TimeOff canWrite={can('schedule:write')} />}
+      {tab === 'codes' && admin && <CodeImport />}
+      {tab === 'templates' && <NoteTemplates />}
+      {tab === 'labs' && <Labs canWrite={can('clinical:write')} />}
       {tab === 'ppo' && <FeeSchedules admin={admin} />}
       {tab === 'messaging' && <Messaging />}
       {tab === 'imaging' && <ImagingBridges />}
@@ -77,6 +81,151 @@ export default function Settings() {
         </div>
       </div>
     </>
+  );
+}
+
+// Bring in a fee schedule or code list (e.g. exported from the old system or from the ADA's CDT file).
+function CodeImport() {
+  const [csv, setCsv] = useState('');
+  const [result, setResult] = useState(null);
+  const { submit, busy, error } = useSubmit(async () => {
+    setResult(await api.post('/procedure-codes/import', { csv }));
+    invalidateLookup('/procedure-codes?active=true');
+    setCsv('');
+  });
+  return (
+    <div className="card">
+      <h2>Import codes & fees</h2>
+      <p className="muted" style={{ marginTop: 0 }}>
+        CSV with columns <code>code, description, category, fee, area, time_units</code> (a header row is fine). Existing codes are updated; blank cells are left alone.
+        Area is tooth, quadrant, arch or mouth; each time unit is 10 minutes.
+      </p>
+      <ErrorBox error={error} />
+      <input type="file" accept=".csv,text/csv" onChange={async (e) => { const f = e.target.files?.[0]; if (f) setCsv(await f.text()); }} />
+      <textarea rows={4} value={csv} onChange={(e) => setCsv(e.target.value)} placeholder={'D2740,Crown - porcelain/ceramic,restorative,1350.00,tooth,6'} style={{ marginTop: 8 }} />
+      <div className="form-actions"><button className="primary" disabled={busy || !csv.trim()} onClick={submit}>Import</button></div>
+      {result && (
+        <div className={result.errors.length ? 'public-notice' : 'public-notice ok'}>
+          {result.created} added, {result.updated} updated.{result.errors.length ? ` ${result.errors.length} rows skipped:` : ''}
+          {result.errors.length > 0 && <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>{result.errors.map((e) => <li key={e}>{e}</li>)}</ul>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function NoteTemplates() {
+  const { data: list, reload } = useApi('/note-templates');
+  const [editing, setEditing] = useState(null);
+  const [err, setErr] = useState(null);
+  const done = () => { setEditing(null); reload(); invalidateLookup('/note-templates'); };
+  return (
+    <div className="card" style={{ padding: 0 }}>
+      <div className="inline" style={{ padding: '14px 16px', justifyContent: 'space-between' }}>
+        <div>
+          <h2 style={{ margin: 0 }}>Clinical note templates</h2>
+          <div className="muted" style={{ fontSize: 13 }}>Offered when the listed procedures are completed. <code>{'{patient}'}</code> <code>{'{procedures}'}</code> <code>{'{teeth}'}</code> <code>{'{bp}'}</code> <code>{'{allergies}'}</code> fill in; <code>[[Anesthetic: Lidocaine|Articaine]]</code> asks the writer to pick.</div>
+        </div>
+        <button className="primary" onClick={() => setEditing({ name: '', codes: '', body: '', active: 1 })}>+ Template</button>
+      </div>
+      <ErrorBox error={err} />
+      <table>
+        <thead><tr><th>Name</th><th>Codes</th><th>Questions</th><th /></tr></thead>
+        <tbody>
+          {list?.map((t) => (
+            <tr key={t.id} style={{ opacity: t.active ? 1 : 0.5 }}>
+              <td>{t.name}</td><td>{t.codes || <span className="muted">any (pick manually)</span>}</td><td>{t.prompts.map((p) => p.label).join(', ') || '—'}</td>
+              <td className="row-actions">
+                <button className="small" onClick={() => setEditing(t)}>Edit</button>
+                <button className="small danger" onClick={async () => { if (!window.confirm(`Delete “${t.name}”?`)) return; try { await api.del(`/note-templates/${t.id}`); done(); } catch (e) { setErr(e); } }}>Delete</button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {editing && (
+        <Modal title={editing.id ? 'Edit template' : 'New template'} wide onClose={() => setEditing(null)}>
+          <TemplateForm tpl={editing} onDone={done} />
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function TemplateForm({ tpl, onDone }) {
+  const [form, setForm] = useState({ name: tpl.name, codes: tpl.codes || '', body: tpl.body, active: !!tpl.active });
+  const { submit, busy, error } = useSubmit(async () => {
+    if (tpl.id) await api.put(`/note-templates/${tpl.id}`, form);
+    else await api.post('/note-templates', form);
+    onDone();
+  });
+  return (
+    <form onSubmit={(e) => { e.preventDefault(); submit(); }}>
+      <ErrorBox error={error} />
+      <div className="form-grid">
+        <label>Name<input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
+        <label>For codes (prefixes OK, e.g. D23 D27)<input value={form.codes} onChange={(e) => setForm({ ...form, codes: e.target.value })} /></label>
+        <label className="full">Template<textarea required rows={10} value={form.body} onChange={(e) => setForm({ ...form, body: e.target.value })} /></label>
+        <label className="checkbox"><input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} /> Active</label>
+      </div>
+      <div className="form-actions"><button className="primary" disabled={busy}>Save</button></div>
+    </form>
+  );
+}
+
+function Labs({ canWrite }) {
+  const { data: labs, reload } = useApi('/labs');
+  const [editing, setEditing] = useState(null);
+  return (
+    <div className="card" style={{ padding: 0 }}>
+      <div className="inline" style={{ padding: '14px 16px', justifyContent: 'space-between' }}>
+        <div><h2 style={{ margin: 0 }}>Dental labs</h2><div className="muted" style={{ fontSize: 13 }}>Pick a lab on a case and its due date follows the usual turnaround; the slip prints with its details.</div></div>
+        {canWrite && <button className="primary" onClick={() => setEditing({ active: 1 })}>+ Lab</button>}
+      </div>
+      <table>
+        <thead><tr><th>Lab</th><th>Phone</th><th>Email</th><th>Turnaround</th><th>Open cases</th><th /></tr></thead>
+        <tbody>
+          {labs?.map((l) => (
+            <tr key={l.id} style={{ opacity: l.active ? 1 : 0.5 }}>
+              <td>{l.name}{l.account_number ? <div className="muted">Acct {l.account_number}</div> : null}</td><td>{l.phone || '—'}</td><td>{l.email || '—'}</td>
+              <td>{l.turnaround_days ? `${l.turnaround_days} days` : '—'}</td><td>{l.open_cases}</td>
+              <td>{canWrite && <button className="small" onClick={() => setEditing(l)}>Edit</button>}</td>
+            </tr>
+          ))}
+          {labs?.length === 0 && <tr><td colSpan={6} className="muted">No labs yet.</td></tr>}
+        </tbody>
+      </table>
+      {editing && (
+        <Modal title={editing.id ? editing.name : 'New lab'} onClose={() => setEditing(null)}>
+          <LabForm lab={editing} onDone={() => { setEditing(null); reload(); invalidateLookup('/labs'); }} />
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function LabForm({ lab, onDone }) {
+  const [form, setForm] = useState({ name: lab.name || '', phone: lab.phone || '', email: lab.email || '', address: lab.address || '', turnaround_days: lab.turnaround_days ?? '', account_number: lab.account_number || '', active: !!lab.active });
+  const set = (k) => (e) => setForm({ ...form, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value });
+  const { submit, busy, error } = useSubmit(async () => {
+    if (lab.id) await api.put(`/labs/${lab.id}`, form);
+    else await api.post('/labs', form);
+    onDone();
+  });
+  return (
+    <form onSubmit={(e) => { e.preventDefault(); submit(); }}>
+      <ErrorBox error={error} />
+      <div className="form-grid">
+        <label>Name<input required value={form.name} onChange={set('name')} /></label>
+        <label>Phone<input value={form.phone} onChange={set('phone')} /></label>
+        <label>Email<input type="email" value={form.email} onChange={set('email')} /></label>
+        <label>Usual turnaround (days)<input type="number" min="0" value={form.turnaround_days} onChange={set('turnaround_days')} /></label>
+        <label className="full">Address<input value={form.address} onChange={set('address')} /></label>
+        <label>Account #<input value={form.account_number} onChange={set('account_number')} /></label>
+        <label className="checkbox"><input type="checkbox" checked={form.active} onChange={set('active')} /> Active</label>
+      </div>
+      <div className="form-actions"><button className="primary" disabled={busy}>Save</button></div>
+    </form>
   );
 }
 

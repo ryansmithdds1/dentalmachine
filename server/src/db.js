@@ -658,6 +658,42 @@ CREATE TABLE IF NOT EXISTS portal_codes (
 );
 CREATE INDEX IF NOT EXISTS idx_portal_codes ON portal_codes(practice_id, contact);
 
+-- Note templates: text with merge fields ({tooth}, {code}...) and prompts ([[Anesthetic: Lidocaine|Articaine]]),
+-- offered when the listed procedures are completed.
+CREATE TABLE IF NOT EXISTS note_templates (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  name TEXT NOT NULL,
+  body TEXT NOT NULL,
+  codes TEXT,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS vitals (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  bp_systolic INTEGER,
+  bp_diastolic INTEGER,
+  pulse INTEGER,
+  notes TEXT,
+  recorded_by INTEGER REFERENCES users(id),
+  recorded_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS labs (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  name TEXT NOT NULL,
+  phone TEXT,
+  email TEXT,
+  address TEXT,
+  turnaround_days INTEGER,
+  account_number TEXT,
+  active INTEGER NOT NULL DEFAULT 1
+);
+
 -- One insurance check or EFT and the claims it paid (from an ERA, or posted by hand from a paper EOB).
 CREATE TABLE IF NOT EXISTS insurance_checks (
   id INTEGER PRIMARY KEY,
@@ -861,6 +897,20 @@ const COLUMNS = [
   ['preauths', 'expires_at', 'TEXT'],
   ['preauths', 'reference_number', 'TEXT'],
   ['era_imports', 'provider_adjustments', 'TEXT'],
+  ['tooth_conditions', 'resolved_at', 'TEXT'],
+  ['practices', 'templates_seeded', 'INTEGER NOT NULL DEFAULT 0'],
+  ['patients', 'medical_conditions', 'TEXT'],
+  ['procedure_codes', 'area', 'TEXT'],
+  ['procedure_codes', 'time_units', 'INTEGER'],
+  ['procedures', 'area', 'TEXT'],
+  ['procedures', 'phase', 'INTEGER NOT NULL DEFAULT 1'],
+  ['treatment_plans', 'option_group', 'TEXT'],
+  ['treatment_plans', 'option_label', 'TEXT'],
+  ['treatment_plans', 'discount_pct', 'INTEGER NOT NULL DEFAULT 0'],
+  ['patients', 'asa_class', 'TEXT'],
+  ['patients', 'premed_required', 'INTEGER NOT NULL DEFAULT 0'],
+  ['lab_cases', 'lab_id', 'INTEGER'],
+  ['lab_cases', 'procedure_id', 'INTEGER'],
   ['patient_insurance', 'effective_date', 'TEXT'],
   ['patient_forms', 'review_status', 'TEXT'],
   ['treatment_plans', 'signed_snapshot', 'TEXT'],

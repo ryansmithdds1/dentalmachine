@@ -6,12 +6,27 @@ import { patientBalance, primaryPolicy } from '../services.js';
 const FIELDS = [
   'first_name', 'last_name', 'preferred_name', 'dob', 'gender', 'email', 'phone', 'address', 'city', 'state', 'zip',
   'emergency_contact', 'medical_alerts', 'allergies', 'medications', 'notes', 'primary_provider_id', 'status', 'sms_opt_in', 'email_opt_in', 'guarantor_id', 'referral_source', 'office_alert',
+  'asa_class', 'premed_required', 'medical_conditions',
+];
+
+export const MEDICAL_CONDITIONS = [
+  'Heart disease', 'Heart murmur', 'Artificial heart valve', 'Prosthetic joint', 'High blood pressure', 'Stroke', 'Diabetes', 'Asthma', 'COPD',
+  'Bleeding disorder', 'Anticoagulant therapy', 'Hepatitis', 'HIV', 'Kidney disease', 'Liver disease', 'Seizures', 'Cancer / chemotherapy',
+  'Radiation to head or neck', 'Bisphosphonates', 'Osteoporosis', 'Pregnant', 'Thyroid disorder', 'Tobacco use', 'Sleep apnea',
 ];
 
 function validate(row) {
   requireOneOf(row.status, ['active', 'inactive', 'archived'], 'status');
   if (row.dob && !/^\d{4}-\d{2}-\d{2}$/.test(row.dob)) throw new HttpError(400, 'dob must be YYYY-MM-DD');
   if (row.email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(row.email)) throw new HttpError(400, 'Invalid email');
+  requireOneOf(row.asa_class || undefined, ['I', 'II', 'III', 'IV', 'V', 'VI'], 'asa_class');
+  if (row.asa_class === '') row.asa_class = null;
+  if (row.premed_required != null) row.premed_required = row.premed_required ? 1 : 0;
+  if (row.medical_conditions != null) {
+    const list = Array.isArray(row.medical_conditions) ? row.medical_conditions : (() => { try { return JSON.parse(row.medical_conditions); } catch { return null; } })();
+    if (!Array.isArray(list)) throw new HttpError(400, 'medical_conditions must be a list');
+    row.medical_conditions = JSON.stringify([...new Set(list.map((c) => String(c).trim().slice(0, 80)).filter(Boolean))].slice(0, 60));
+  }
 }
 
 export default function patientRoutes({ db }) {

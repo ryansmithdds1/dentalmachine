@@ -167,9 +167,13 @@ export default function settingsRoutes({ db, secret, config = {} }) {
 
   resource(r, db, {
     path: 'procedure-codes', table: 'procedure_codes', required: ['code', 'description', 'category'], order: 'code',
-    fields: ['code', 'description', 'category', 'fee', 'requires_tooth', 'requires_surface', 'active'],
+    fields: ['code', 'description', 'category', 'fee', 'requires_tooth', 'requires_surface', 'active', 'area', 'time_units'],
     validate: (row) => {
       requireOneOf(row.category, CATEGORIES, 'category');
+      if (row.area === '') row.area = null;
+      requireOneOf(row.area ?? undefined, ['tooth', 'quadrant', 'arch', 'mouth'], 'area');
+      if (row.time_units === '') row.time_units = null;
+      if (row.time_units != null && (!Number.isInteger(Number(row.time_units)) || Number(row.time_units) < 0 || Number(row.time_units) > 96)) throw new HttpError(400, 'time_units must be 0-96');
       if (row.code) row.code = row.code.toUpperCase();
       if (row.fee != null) row.fee = toCents(row.fee, 'fee');
     },

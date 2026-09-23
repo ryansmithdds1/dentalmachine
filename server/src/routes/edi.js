@@ -51,7 +51,7 @@ export default function ediRoutes({ db, config, clearinghouse: ch }) {
       patient: await db.get('SELECT * FROM patients WHERE id = ?', claim.patient_id),
       carrier: await db.get('SELECT * FROM insurance_carriers WHERE id = ?', policy.carrier_id),
       items: await db.all(
-        `SELECT ci.fee, ci.procedure_id, pr.code, pr.tooth, pr.surfaces, pr.completed_at, pv.name AS provider_name, pv.npi AS provider_npi
+        `SELECT ci.fee, ci.procedure_id, pr.code, pr.tooth, pr.surfaces, pr.area, pr.completed_at, pv.name AS provider_name, pv.npi AS provider_npi
          FROM claim_items ci JOIN procedures pr ON pr.id = ci.procedure_id LEFT JOIN providers pv ON pv.id = pr.provider_id WHERE ci.claim_id = ?`, claim.id,
       ),
     };

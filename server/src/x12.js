@@ -42,6 +42,8 @@ function transaction(type, version, segments, stControl = '0001') {
 
 // ---- 837D ----
 // claims: [{ claim, patient, policy, carrier, items: [{code, fee, tooth, surfaces, completed_at, provider_name, provider_npi}] }]
+const ORAL_CAVITY = { U: '01', L: '02', UR: '10', UL: '20', LL: '30', LR: '40' };
+
 export function build837D({ practice, claims, senderId, receiverId, control = 1, now = new Date(), taxonomy = '1223G0001X' }) {
   const segs = [
     `BHT*0019*00*${control}*${d8(now.toISOString())}*${now.toISOString().slice(11, 16).replace(':', '')}*CH`,
@@ -109,7 +111,8 @@ export function build837D({ practice, claims, senderId, receiverId, control = 1,
       if (other.paid_date) segs.push(`DTP*573*D8*${d8(other.paid_date)}`);
     }
     items.forEach((item, i) => {
-      segs.push(`LX*${i + 1}`, `SV3*AD:${clean(item.code, 5)}*${money(item.fee)}****1`);
+      // SV304: the oral cavity area for quadrant and arch procedures.
+      segs.push(`LX*${i + 1}`, `SV3*AD:${clean(item.code, 5)}*${money(item.fee)}**${ORAL_CAVITY[item.area] || ''}**1`);
       if (item.tooth) segs.push(`TOO*JP*${clean(item.tooth, 2)}${item.surfaces ? `*${item.surfaces.split('').join(':')}` : ''}`);
       if (item.completed_at) segs.push(`DTP*472*D8*${d8(item.completed_at)}`);
       // Line adjudication by the primary payer (loop 2430).

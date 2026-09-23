@@ -57,7 +57,7 @@ export async function completeProcedure(db, user, procedure, { providerId, appoi
       patient_id: procedure.patient_id,
       type: 'charge',
       amount: procedure.fee,
-      description: `${procedure.code} ${procedure.description}${procedure.tooth ? ` #${procedure.tooth}` : ''}${procedure.surfaces ? ` ${procedure.surfaces}` : ''}`,
+      description: `${procedure.code} ${procedure.description}${procedure.tooth ? ` #${procedure.tooth}` : ''}${procedure.surfaces ? ` ${procedure.surfaces}` : ''}${procedure.area ? ` ${procedure.area}` : ''}`,
       procedure_id: procedure.id,
       provider_id: provider,
       entry_date: today,
@@ -80,6 +80,20 @@ export async function completeProcedure(db, user, procedure, { providerId, appoi
         await db.run("UPDATE recalls SET due_date = ?, status = 'due' WHERE id = ?", due, existing.id);
       } else {
         await insert(db, 'recalls', { practice_id: procedure.practice_id, patient_id: procedure.patient_id, type: recallType, interval_months: interval, due_date: due });
+      }
+    }
+
+    // A treatment plan discount comes off the patient's share of this procedure.
+    const plan = procedure.treatment_plan_id ? await db.get('SELECT name, discount_pct FROM treatment_plans WHERE id = ?', procedure.treatment_plan_id) : null;
+    if (plan?.discount_pct > 0) {
+      const est = await estimateCoverage(db, await primaryPolicy(db, procedure.practice_id, procedure.patient_id), [procedure]);
+      const off = Math.round((est.items[0].patient * plan.discount_pct) / 100);
+      if (off > 0) {
+        await insert(db, 'ledger_entries', {
+          practice_id: procedure.practice_id, patient_id: procedure.patient_id, type: 'adjustment', adjustment_type: 'Treatment plan discount', amount: -off,
+          description: `${plan.discount_pct}% treatment plan discount — ${procedure.code}${procedure.tooth ? ` #${procedure.tooth}` : ''}`,
+          procedure_id: procedure.id, provider_id: provider, entry_date: today, created_by: user.id,
+        });
       }
     }
 
@@ -268,7 +282,7 @@ export async function reverseEntry(db, entry, { userId, reason, date }) {
     practice_id: entry.practice_id, patient_id: entry.patient_id, type: entry.type, amount: -entry.amount,
     description: `Void: ${entry.description}`.slice(0, 300), method: entry.method, reference: entry.reference,
     procedure_id: entry.procedure_id, claim_id: entry.claim_id, provider_id: entry.provider_id, payment_plan_id: entry.payment_plan_id,
-    entry_date: date, created_by: userId ?? null, reverses_id: entry.id,
+    adjustment_type: entry.adjustment_type ?? null, entry_date: date, created_by: userId ?? null, reverses_id: entry.id,
   });
 }
 
@@ -286,6 +300,9 @@ export async function voidLedgerEntry(db, entry, { userId, reason }) {
       if (claim) throw new HttpError(409, `The procedure is on claim #${claim.id} — void that claim first`);
       await db.run("UPDATE procedures SET status = 'planned', completed_at = NULL WHERE id = ? AND status = 'completed'", entry.procedure_id);
       await db.run('DELETE FROM tooth_conditions WHERE procedure_id = ?', entry.procedure_id);
+      // The plan discount given for it goes too.
+      const discounts = await db.all("SELECT * FROM ledger_entries WHERE procedure_id = ? AND adjustment_type = 'Treatment plan discount' AND voided_at IS NULL AND reverses_id IS NULL", entry.procedure_id);
+      for (const d of discounts) await reverseEntry(db, d, { userId, reason: 'Procedure charge voided', date });
     }
     return reverseEntry(db, entry, { userId, reason: String(reason).trim().slice(0, 300), date });
   });

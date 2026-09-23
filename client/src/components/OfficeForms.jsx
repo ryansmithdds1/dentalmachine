@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { useLookup } from '../hooks.js';
 import { fromCents, toCents } from '../format.js';
@@ -8,18 +8,39 @@ export const LAB_STATUSES = [['sent', 'Sent to lab'], ['received', 'Received'], 
 
 export function LabCaseForm({ labCase, patient: fixedPatient, onDone }) {
   const providers = useLookup('/providers?active=true');
+  const labs = useLookup('/labs');
+  const [procs, setProcs] = useState([]);
   const [patient, setPatient] = useState(fixedPatient || (labCase ? { id: labCase.patient_id, first_name: labCase.first_name, last_name: labCase.last_name } : null));
   const [form, setForm] = useState({
+    lab_id: labCase?.lab_id || '', procedure_id: labCase?.procedure_id || '',
     lab_name: labCase?.lab_name || '', description: labCase?.description || '', tooth: labCase?.tooth || '', shade: labCase?.shade || '',
     provider_id: labCase?.provider_id || '', status: labCase?.status || 'sent', sent_date: labCase?.sent_date || new Date().toISOString().slice(0, 10),
     due_date: labCase?.due_date || '', cost: labCase?.cost != null ? fromCents(labCase.cost) : '', notes: labCase?.notes || '',
   });
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
+  // Lab work on this patient's chart (crowns, bridges, dentures) to link the case to.
+  useEffect(() => {
+    if (!patient?.id) return;
+    api.get(`/patients/${patient.id}/procedures`).then((rows) => setProcs(rows.filter((p) => /^D(2[5-7]|29[5-6]|5|6[2-7])/.test(p.code) && p.status !== 'cancelled'))).catch(() => setProcs([]));
+  }, [patient?.id]);
+  const pickLab = (e) => {
+    const lab = labs.find((l) => String(l.id) === e.target.value);
+    const due = lab?.turnaround_days && form.sent_date && !form.due_date
+      ? new Date(Date.parse(`${form.sent_date}T12:00:00Z`) + lab.turnaround_days * 86400000).toISOString().slice(0, 10) : form.due_date;
+    setForm({ ...form, lab_id: e.target.value, lab_name: lab ? lab.name : form.lab_name, due_date: due });
+  };
+  const pickProc = (e) => {
+    const p = procs.find((x) => String(x.id) === e.target.value);
+    setForm({ ...form, procedure_id: e.target.value, ...(p ? { description: form.description || `${p.code} ${p.description}`, tooth: form.tooth || p.tooth || '', provider_id: form.provider_id || p.provider_id || '' } : {}) });
+  };
   const { submit, busy, error } = useSubmit(async () => {
     if (!patient) throw new Error('Choose a patient');
-    const body = { ...form, patient_id: patient.id, provider_id: form.provider_id ? Number(form.provider_id) : null, cost: form.cost === '' ? null : toCents(form.cost) };
-    if (labCase) await api.put(`/lab-cases/${labCase.id}`, body);
-    else await api.post('/lab-cases', body);
+    const body = {
+      ...form, patient_id: patient.id, provider_id: form.provider_id ? Number(form.provider_id) : null, cost: form.cost === '' ? null : toCents(form.cost),
+      lab_id: form.lab_id ? Number(form.lab_id) : null, procedure_id: form.procedure_id ? Number(form.procedure_id) : null,
+    };
+    const saved = labCase ? await api.put(`/lab-cases/${labCase.id}`, body) : await api.post('/lab-cases', body);
+    if (!labCase && window.confirm('Case logged. Print the lab slip now?')) window.open(`/lab-cases/${saved.id}/slip`, '_blank');
     onDone();
   });
   return (
@@ -27,7 +48,25 @@ export function LabCaseForm({ labCase, patient: fixedPatient, onDone }) {
       <ErrorBox error={error} />
       <div className="form-grid">
         {!fixedPatient && <label className="full">Patient{labCase ? <strong style={{ color: 'var(--text)' }}>{patient.first_name} {patient.last_name}</strong> : <PatientPicker value={patient} onChange={setPatient} />}</label>}
-        <label>Lab<input required value={form.lab_name} onChange={set('lab_name')} placeholder="e.g. Glidewell" /></label>
+        {labs.length > 0 && (
+          <label>
+            Lab
+            <select value={form.lab_id} onChange={pickLab}>
+              <option value="">Other (type below)</option>
+              {labs.filter((l) => l.active || String(l.id) === String(form.lab_id)).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+            </select>
+          </label>
+        )}
+        {!form.lab_id && <label>{labs.length ? 'Lab name' : 'Lab'}<input required value={form.lab_name} onChange={set('lab_name')} placeholder="e.g. Glidewell" /></label>}
+        {procs.length > 0 && (
+          <label>
+            For procedure
+            <select value={form.procedure_id} onChange={pickProc}>
+              <option value="">—</option>
+              {procs.map((p) => <option key={p.id} value={p.id}>{p.code} {p.tooth ? `#${p.tooth}` : ''} {p.description.slice(0, 40)}</option>)}
+            </select>
+          </label>
+        )}
         <label>Case<input required value={form.description} onChange={set('description')} placeholder="e.g. Zirconia crown" /></label>
         <label>Tooth<input value={form.tooth} onChange={set('tooth')} /></label>
         <label>Shade<input value={form.shade} onChange={set('shade')} /></label>
