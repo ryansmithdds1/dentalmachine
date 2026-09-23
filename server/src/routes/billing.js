@@ -8,7 +8,7 @@ export const PAYMENT_METHODS = ['cash', 'check', 'credit_card', 'debit_card', 'a
 
 export default function billingRoutes({ db }) {
   const r = Router();
-  const patientOr404 = async req => await findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient');
+  const patientOr404 = async (req) => await findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient');
 
   r.get('/patients/:id/ledger', requirePermission('billing:read'), async (req, res) => {
     const patient = await patientOr404(req);

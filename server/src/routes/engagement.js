@@ -11,8 +11,8 @@ const requireAdmin = (req, _res, next) => (req.user.role === 'admin' ? next() : 
 // Staff-side patient engagement: messaging, reminders, online booking queue, intake form links.
 export default function engagementRoutes({ db, messenger, config }) {
   const r = Router();
-  const patientOr404 = async req => await findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient');
-  const practiceName = async pid => (await db.get('SELECT name FROM practices WHERE id = ?', pid)).name;
+  const patientOr404 = async (req) => await findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient');
+  const practiceName = async (pid) => (await db.get('SELECT name FROM practices WHERE id = ?', pid)).name;
 
   // ---- Messages ----
   r.get('/messaging/status', (_req, res) => res.json({ ...messenger.status, app_url: config.appUrl }));
@@ -87,7 +87,7 @@ export default function engagementRoutes({ db, messenger, config }) {
       `SELECT b.*, pv.name AS provider_name FROM booking_requests b LEFT JOIN providers pv ON pv.id = b.provider_id
        WHERE b.practice_id = ? AND (? = 'all' OR b.status = ?) ORDER BY b.requested_start`,
       req.user.practice_id, status, status,
-    )), async b => ({
+    )), async (b) => ({
       ...b,
 
       // Help the front desk spot an existing chart before creating a duplicate.

@@ -157,12 +157,12 @@ export default function casePresentationRoutes({ db, messenger, config, erx }) {
 export function publicCasePresentation({ db }) {
   const r = Router();
   const limiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 30 });
-  const byToken = async token => {
+  const byToken = async (token) => {
     const plan = await db.get('SELECT * FROM treatment_plans WHERE sign_token_hash = ?', hashToken(token));
     if (!plan) throw new HttpError(404, 'This link is no longer valid');
     return plan;
   };
-  const publicView = async plan => {
+  const publicView = async (plan) => {
     const v = await planView(db, plan);
     const patient = await db.get('SELECT first_name FROM patients WHERE id = ?', plan.patient_id);
     const practice = await db.get('SELECT name, phone, address, city, state, zip FROM practices WHERE id = ?', plan.practice_id);

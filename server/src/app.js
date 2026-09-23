@@ -25,6 +25,7 @@ import casePresentationRoutes, { publicCasePresentation } from './routes/casepre
 import growthRoutes from './routes/growth.js';
 import imagingRoutes, { bridgeAgentRoutes } from './routes/imaging.js';
 import { portalPublicRoutes, portalRoutes } from './routes/portal.js';
+import systemRoutes from './routes/system.js';
 import { createMessenger } from './messaging.js';
 import { createStorage } from './storage.js';
 import { createClearinghouse, clearinghouseConfig } from './clearinghouse.js';
@@ -114,6 +115,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(casePresentationRoutes({ db, messenger, config, erx }));
   api.use(growthRoutes({ db, messenger, config, mailer }));
   api.use(imagingRoutes({ db }));
+  api.use(systemRoutes({ db, config, messenger, storage, payments, clearinghouse, erx, mailer }));
   app.use('/api', api);
   app.use('/api', (_req, _res, next) => next(new HttpError(404, 'Not found')));
 

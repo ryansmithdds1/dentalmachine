@@ -18,12 +18,7 @@ const SELECT = `SELECT a.*, p.first_name, p.last_name, p.preferred_name, p.phone
   LEFT JOIN operatories o ON o.id = a.operatory_id
   LEFT JOIN appointment_types t ON t.id = a.appointment_type_id`;
 
-async function findConflicts(
-  db,
-  practiceId,
-  { start_time, end_time, provider_id, operatory_id, patient_id },
-  excludeId = 0
-) {
+async function findConflicts(db, practiceId, { start_time, end_time, provider_id, operatory_id, patient_id }, excludeId = 0) {
   return await db.all(
     `SELECT a.id, a.start_time, a.end_time, a.provider_id, a.operatory_id, a.patient_id FROM appointments a
      WHERE a.practice_id = ? AND a.id != ? AND a.status NOT IN ${INACTIVE}
@@ -83,13 +78,7 @@ const fromMin = (n) => `${String(Math.floor(n / 60)).padStart(2, '0')}:${String(
 export const addMinutes = (dateTime, minutes) => `${dateTime.slice(0, 10)} ${fromMin(toMin(dateTime.slice(11, 16)) + minutes)}`;
 
 // Free start times for a provider on a day, on a grid (minutes) within office hours, avoiding appointments and blockouts.
-export async function openSlots(
-  db,
-  practiceId,
-  providerId,
-  date,
-  { duration = 60, step = 10, after = null, open = null, close = null } = {}
-) {
+export async function openSlots(db, practiceId, providerId, date, { duration = 60, step = 10, after = null, open = null, close = null } = {}) {
   const practice = await db.get('SELECT office_hours FROM practices WHERE id = ?', practiceId);
   const provider = await db.get('SELECT working_hours FROM providers WHERE id = ?', providerId);
   const ranges = open && close ? [[open, close]] : providerHoursFor(practice, provider, date);

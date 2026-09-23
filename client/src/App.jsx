@@ -3,45 +3,50 @@ import { useAuth } from './auth.jsx';
 import { label } from './format.js';
 import Login from './pages/Login.jsx';
 import Dashboard from './pages/Dashboard.jsx';
-import Schedule from './pages/Schedule.jsx';
-import Patients from './pages/Patients.jsx';
-import PatientDetail from './pages/PatientDetail.jsx';
-import Claims from './pages/Claims.jsx';
-import ClaimDetail from './pages/ClaimDetail.jsx';
-import Followups from './pages/Followups.jsx';
-import RouteSlip from './pages/RouteSlip.jsx';
-import { TreatmentPlanPrint, PrescriptionPrint } from './pages/PrintDocs.jsx';
 import CommandPalette from './components/CommandPalette.jsx';
 import IdleLogout from './components/IdleLogout.jsx';
-import CaseAcceptance from './pages/public/CaseAcceptance.jsx';
-import Portal from './pages/public/Portal.jsx';
-import Reports from './pages/Reports.jsx';
-import Settings from './pages/Settings.jsx';
-import Statement from './pages/Statement.jsx';
-import Requests from './pages/Requests.jsx';
-import Inbox from './pages/Inbox.jsx';
-import Office from './pages/Office.jsx';
-import { useEffect, useState } from 'react';
+import { Suspense, lazy, useEffect, useState } from 'react';
 import { api } from './api.js';
 import { useLiveEvents } from './live.js';
 import MfaSetup from './components/MfaSetup.jsx';
-import BookingPage from './pages/public/BookingPage.jsx';
-import ConfirmPage from './pages/public/ConfirmPage.jsx';
-import IntakePage from './pages/public/IntakePage.jsx';
-import PayResult from './pages/public/PayResult.jsx';
+
+// Pages load on demand so the first screen appears quickly.
+const Schedule = lazy(() => import('./pages/Schedule.jsx'));
+const Patients = lazy(() => import('./pages/Patients.jsx'));
+const PatientDetail = lazy(() => import('./pages/PatientDetail.jsx'));
+const Claims = lazy(() => import('./pages/Claims.jsx'));
+const ClaimDetail = lazy(() => import('./pages/ClaimDetail.jsx'));
+const Followups = lazy(() => import('./pages/Followups.jsx'));
+const RouteSlip = lazy(() => import('./pages/RouteSlip.jsx'));
+const TreatmentPlanPrint = lazy(() => import('./pages/PrintDocs.jsx').then((m) => ({ default: m.TreatmentPlanPrint })));
+const PrescriptionPrint = lazy(() => import('./pages/PrintDocs.jsx').then((m) => ({ default: m.PrescriptionPrint })));
+const CaseAcceptance = lazy(() => import('./pages/public/CaseAcceptance.jsx'));
+const Portal = lazy(() => import('./pages/public/Portal.jsx'));
+const Reports = lazy(() => import('./pages/Reports.jsx'));
+const Settings = lazy(() => import('./pages/Settings.jsx'));
+const Statement = lazy(() => import('./pages/Statement.jsx'));
+const Requests = lazy(() => import('./pages/Requests.jsx'));
+const Inbox = lazy(() => import('./pages/Inbox.jsx'));
+const Office = lazy(() => import('./pages/Office.jsx'));
+const BookingPage = lazy(() => import('./pages/public/BookingPage.jsx'));
+const ConfirmPage = lazy(() => import('./pages/public/ConfirmPage.jsx'));
+const IntakePage = lazy(() => import('./pages/public/IntakePage.jsx'));
+const PayResult = lazy(() => import('./pages/public/PayResult.jsx'));
 
 // Patient-facing pages work without a staff login.
 export default function App() {
   return (
-    <Routes>
-      <Route path="/book/:slug" element={<BookingPage />} />
-      <Route path="/c/:token" element={<ConfirmPage />} />
-      <Route path="/f/:token" element={<IntakePage />} />
-      <Route path="/pay/:result" element={<PayResult />} />
-      <Route path="/tp/:token" element={<CaseAcceptance />} />
-      <Route path="/portal/:key" element={<Portal />} />
-      <Route path="*" element={<StaffApp />} />
-    </Routes>
+    <Suspense fallback={<div className="empty">Loading…</div>}>
+      <Routes>
+        <Route path="/book/:slug" element={<BookingPage />} />
+        <Route path="/c/:token" element={<ConfirmPage />} />
+        <Route path="/f/:token" element={<IntakePage />} />
+        <Route path="/pay/:result" element={<PayResult />} />
+        <Route path="/tp/:token" element={<CaseAcceptance />} />
+        <Route path="/portal/:key" element={<Portal />} />
+        <Route path="*" element={<StaffApp />} />
+      </Routes>
+    </Suspense>
   );
 }
 
@@ -134,23 +139,25 @@ function Shell({ nav }) {
         </div>
       </aside>
       <main className="main">
-        <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/schedule" element={<Schedule />} />
-          <Route path="/patients" element={<Patients />} />
-          <Route path="/patients/:id" element={<PatientDetail />} />
-          <Route path="/patients/:id/statement" element={<Statement />} />
-          <Route path="/followups" element={<Followups />} />
-          <Route path="/recalls" element={<Navigate to="/followups" replace />} />
-          <Route path="/requests" element={<Requests />} />
-          <Route path="/messages" element={<Inbox />} />
-          <Route path="/office" element={<Office />} />
-          <Route path="/claims" element={<Claims />} />
-          <Route path="/claims/:id" element={<ClaimDetail />} />
-          <Route path="/reports" element={<Reports />} />
-          <Route path="/settings" element={<Settings />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+        <Suspense fallback={<div className="empty">Loading…</div>}>
+          <Routes>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/schedule" element={<Schedule />} />
+            <Route path="/patients" element={<Patients />} />
+            <Route path="/patients/:id" element={<PatientDetail />} />
+            <Route path="/patients/:id/statement" element={<Statement />} />
+            <Route path="/followups" element={<Followups />} />
+            <Route path="/recalls" element={<Navigate to="/followups" replace />} />
+            <Route path="/requests" element={<Requests />} />
+            <Route path="/messages" element={<Inbox />} />
+            <Route path="/office" element={<Office />} />
+            <Route path="/claims" element={<Claims />} />
+            <Route path="/claims/:id" element={<ClaimDetail />} />
+            <Route path="/reports" element={<Reports />} />
+            <Route path="/settings" element={<Settings />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </Suspense>
       </main>
     </div>
   );

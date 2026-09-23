@@ -20,7 +20,7 @@ function normalizeToothFields(row) {
 
 export default function clinicalRoutes({ db }) {
   const r = Router();
-  const patientOr404 = async req => await findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient');
+  const patientOr404 = async (req) => await findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient');
 
   // ---- Odontogram ----
   r.get('/patients/:id/chart', requirePermission('clinical:read'), async (req, res) => {
@@ -137,7 +137,7 @@ export default function clinicalRoutes({ db }) {
   });
 
   // ---- Treatment plans ----
-  const planWithDetails = async plan => {
+  const planWithDetails = async (plan) => {
     const procedures = await db.all("SELECT * FROM procedures WHERE treatment_plan_id = ? AND status != 'cancelled' ORDER BY priority, id", plan.id);
     const planned = procedures.filter((p) => p.status === 'planned');
     return { ...plan, procedures, estimate: await estimateCoverage(db, await primaryPolicy(db, plan.practice_id, plan.patient_id), planned) };

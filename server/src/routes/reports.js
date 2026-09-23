@@ -92,7 +92,7 @@ export default function reportRoutes({ db }) {
     const buckets = ['current', 'd31_60', 'd61_90', 'd90_plus'];
     const totals = Object.fromEntries(buckets.map((b) => [b, 0]));
     const todayMs = Date.parse(`${today}T00:00:00Z`);
-    const rows = await mapSeq(patients, async p => {
+    const rows = await mapSeq(patients, async (p) => {
       const charges = await db.all("SELECT amount, entry_date FROM ledger_entries WHERE patient_id = ? AND practice_id = ? AND amount > 0 ORDER BY entry_date DESC, id DESC", p.id, pid);
       const row = { ...p, ...Object.fromEntries(buckets.map((b) => [b, 0])) };
       let remaining = p.balance;

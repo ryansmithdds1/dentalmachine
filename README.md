@@ -8,24 +8,28 @@ Cloud practice management software for dental offices: scheduling, patient recor
 | --- | --- |
 | **Scheduling** | A fast calendar with day view (by chair or by provider), week view, and a list view that phones use automatically.<br>• **Mouse:** drag an appointment to move it, including to another chair, provider or day. Drag its bottom edge to change its length, or drag across empty time to book or block it.<br>• **Phone:** tap *Move*, then tap the new time.<br>• **Speed:** changes show instantly, roll back if the server rejects them, and every move has Undo. Every open screen updates live, including when a patient confirms by text or link. Neighbouring days are loaded in the background so moving between dates is instant.<br>• **On the grid:** office hours, blocked time (lunch, meetings, holidays; can repeat weekly), a current-time line, appointment types with colours and preset procedures, scheduled production against the daily goal, confirmation status, medical-alert flags and an ASAP list.<br>• **Rules:** no double-booking of a provider, chair or patient. Booking into blocked time asks for confirmation. Keyboard shortcuts: ←/→ change day, T today, D/W/A switch view, N new appointment. |
 | **Today (morning huddle)** | One screen for the day: scheduled production against goal, and every patient on the schedule with what the team needs to know. Flags cover new patients, birthdays, unconfirmed visits, insurance to verify, medical history due for review, forms not returned, lab cases not back, recall due, diagnosed-but-unscheduled treatment and balances to collect. Filter by flag, print the huddle, or print a **route slip** that travels with the patient. |
+| **Recurring visits & provider hours** | Book a visit that repeats every 1–4 weeks or every 1, 3 or 6 months. Times that are already taken are skipped and listed. Moving or cancelling a visit asks whether to change just that visit or that visit and the ones after it. Each provider can have their own weekly hours: their column is shaded outside them, online booking and open-time search respect them, and staff are asked before booking outside them. |
 | **Patients** | Demographics, medical alerts, allergies and medications, referral source, and a **pop-up office alert** ("prefers text", "collect balance first") shown once when the chart opens. A "medical history reviewed" stamp flags charts due for an annual update. Patients are archived rather than deleted, so records are kept. |
 | **Quick search** | Press **Ctrl K** (or **/**) anywhere to find a patient by name, phone, DOB or ID, open a claim, or jump to any page. |
 | **Family accounts** | A guarantor (head of household) with linked family members. The family view shows each member's balance, next visit and recall. Family statements go to the guarantor. You can change the guarantor, and new members copy the household's contact details. |
-| **Payment plans** | Weekly, every-two-weeks or monthly installments with a down payment. Shows the installment schedule and tracks past-due amounts. Payments can be applied to a plan, which closes itself when paid off. A practice-wide list shows plans that are past due. |
+| **Payment plans & autopay** | Weekly, every-two-weeks or monthly installments with a down payment. Shows the installment schedule and tracks past-due amounts, and a plan closes itself when paid off. **Autopay:** the patient saves a card on Stripe's secure page (a link is texted or emailed, or opened at the front desk), and installments are charged automatically when due. Autopay never charges more than the household owes. A declined card creates a task and a note to the patient; after three declines in a row autopay pauses. |
 | **Clinical charting** | Interactive tooth chart with five surfaces per tooth (Universal numbering 1–32, primary teeth A–T). Records conditions (caries, missing, crown, RCT, implant and more), planned work and completed work. |
 | **Perio charting** | Six probing depths per tooth, with bleeding on probing. Depths of 4mm and 5mm+ are highlighted. A summary shows bleeding %, pocket counts and the change since the last exam. Exam history is kept. |
 | **Treatment plans & case acceptance** | Multi-procedure plans with an insurance vs. patient estimate for each line. Estimates apply the PPO fee schedule, deductible, coverage tier and remaining annual maximum. **Present & e-sign:** text or email the patient a plain-language plan with their cost, or hand them a tablet; they accept with a typed name and drawn signature. Plans also print, and can be sent for **pre-authorization**. |
-| **Prescriptions** | One-click favourites for common dental drugs, allergy check at the moment of prescribing (with a documented override), and a printable Rx with the prescriber's NPI, licence and DEA. |
+| **Prescriptions & e-prescribing** | One-click favourites for common dental drugs, a preferred pharmacy for each patient, and printed or electronic prescriptions. E-prescribing runs through **DoseSpot** (Surescripts-certified, DEA-audited for controlled substances), opened from the chart with single sign-on. Controlled substances follow the DEA rules: a DEA number, signed by the prescriber's own login with a fresh two-factor code that can't be reused, and no refills on Schedule II. Allergy screening catches drug classes, not just exact names: a codeine allergy flags hydrocodone, and a penicillin allergy flags cephalexin. |
+| **Imaging bridges** | A small agent on each operatory PC opens the patient in DEXIS, Sidexis, Carestream, Apteryx, VixWin and similar programs straight from the chart. New x-rays and photos in the program's export folder are filed in the patient's documents automatically, matched by the DICOM patient ID, the chart number in the file name, or the patient just opened on that computer. |
+| **Patient portal** | Patients sign in with a one-time code sent to the email or mobile number on file. A guarantor sees their whole household in one place: balance and online payment, payment plans, upcoming visits (confirm, or cancel more than 24 hours ahead), forms to fill out, treatment plans to review and e-sign, and contact details and reminder preferences. |
 | **Clinical notes** | Note templates. Signed notes can't be edited; corrections go in a new note. Signing requires a clinical role. |
 | **Ledger & billing** | Completing a procedure posts the charge automatically. Handles payments, adjustments and refunds, shows a running balance, and prints patient statements. |
 | **Insurance** | Carriers and primary/secondary policies. Claims are built from completed procedures and move through draft → submitted → paid, partially paid or denied (or void). EOB entry posts the insurance payment and write-off to the ledger, and the deductible met updates automatically. |
+| **Clearinghouse connection** | Claims go straight to your clearinghouse over SFTP (DentalXChange, Change Healthcare/Optum, Availity, Vyne, Claim.MD and others). 999 and 277CA acknowledgments, 277 claim status and 835 ERAs are picked up automatically, filed under the right claim and posted. Rejected claims come back to *Ready to send* with the reason. **Check status with payer** (276/277) and eligibility (270/271) run in real time over CAQH CORE. Each claim shows a timeline of its electronic journey. A built-in sandbox clearinghouse lets you demo the whole loop. |
 | **Electronic insurance (EDI)** | • **Claims:** sent as ANSI X12 5010 **837D** batches, with checks before sending (NPI, tax ID, payer ID, DOB and so on).<br>• **Eligibility:** **270/271** checks show active coverage, annual maximum and amount remaining, deductible and coverage percentages. Verified benefits can be applied to the policy.<br>• **Remittance:** importing an **835 ERA** posts payments, contractual write-offs and denials to the matching claims automatically, with plain-English reason codes. The same file can't be posted twice. |
 | **Two-way texting** | An inbox for patient replies, with unread badges that update live and quick replies. **C** confirms the next appointment, **STOP**/**START** manage opt-out. Incoming texts are verified with Twilio's signature. |
 | **Lab cases & tasks** | Lab cases are tracked by due date, with an alert when the seat appointment is before the case is due back. There's also a team to-do list with priorities, assignees and a patient link. |
 | **PPO fee schedules** | Contracted fees per carrier (start from a percentage of office fees, then edit each code). Estimates, claims and EOB entry use them, so write-offs are expected rather than a surprise. |
 | **Insurance follow-up** | Outstanding claims aged 0–30 / 31–60 / 61–90 / 90+ days with the payer's phone number, plus a pre-authorization tracker (837D predeterminations, approved/denied answers). |
 | **Follow-up lists** | Three call lists, like Dentrix's Continuing Care and Unscheduled lists: **recall** (with a bulk text/email campaign), **unscheduled treatment** (diagnosed work with no appointment, largest value first) and **broken appointments**. Every call is logged with an outcome so the team sees who was reached. |
-| **Statements** | Batch statement runs to guarantors over a minimum balance, skipping accounts statemented recently. Emails the ones with an address and prints the rest. |
+| **Statements** | Batch statement runs to guarantors over a minimum balance, skipping accounts statemented recently. Statements are emailed with a link to pay in the portal. Accounts without email are printed and mailed by **Lob** (a print-and-mail service), or left for the office to print. Every delivery is recorded. |
 | **Practice KPIs** | Production, collections and collection rate, case acceptance, hygiene reappointment, no-show rate, patients current on recall, new patients by referral source and production by provider — each against an industry benchmark. |
 | **Reports** | Production and collections by day, provider, category and procedure, A/R aging (0–30 / 31–60 / 61–90 / 90+) and the day sheet. |
 | **Reviews & templates** | After a completed visit, patients can get one text asking for a Google review (at most every six months). Reminder, booking, recall and review texts are editable templates with a live preview. |
@@ -35,6 +39,7 @@ Cloud practice management software for dental offices: scheduling, patient recor
 | **Documents & X-rays** | Upload images, PDFs and DICOM files to the patient record, tag them by type and tooth, and view or download them. Files are encrypted when stored (AES-256-GCM). |
 | **Card payments (text-to-pay)** | Sends the patient a secure Stripe Checkout link. When they pay, the payment posts to the ledger automatically. |
 | **Day sheet** | End-of-day close-out: production, payments and the deposit broken down by payment method. Printable. |
+| **Single sign-on** | Staff can sign in with their work Google Workspace, Microsoft 365 (Entra ID) or other OpenID Connect account (Okta, Auth0, Keycloak and so on). An optional setting switches off passwords for everyone except administrators. |
 | **Admin** | Users and roles, providers (NPI, licence, DEA and schedule colour), operatories, fee schedule, practice details and time zone, a full audit log, and a one-click **export of all practice data** (JSON). |
 
 ### Security and HIPAA-related safeguards
@@ -43,6 +48,9 @@ Cloud practice management software for dental offices: scheduling, patient recor
 - **Audit log.** Records every view of a patient record or chart, every change, every login and every failed login, with user, time and IP.
 - **Automatic sign-out.** Staff are signed out after a practice-set idle time (5 minutes to 4 hours, default 15), with a one-minute warning. Activity in any tab counts.
 - **Two-factor login.** Staff can use authenticator-app codes (TOTP), and a practice can require them for everyone. Admins can reset 2FA for a staff member who loses their phone.
+- **Separate sessions.** Staff and patient-portal sessions use separate token audiences, so neither is accepted in place of the other. Imaging bridges use their own revocable keys, of which only a hash is stored.
+- **Single sign-on.** OpenID Connect with PKCE. The ID token's signature is checked against the provider's published keys, and each user is pinned to their identity-provider account after first sign-in. The client secret is stored encrypted and never returned by the API.
+- **Controlled substances.** Signing needs the prescriber's own login and a fresh two-factor code, and every signature is audited.
 - **Patient links.** Confirmation, intake and payment links carry random tokens; only a hash of each token is stored. Intake links are single-use and expire after 14 days. Public endpoints are rate-limited, and the booking form has a hidden field to catch bots.
 - **Passwords and sessions.** Passwords are hashed with scrypt (minimum 10 characters). Sessions use HMAC-signed tokens that expire after 12 hours. Logins are rate-limited.
 - **HTTP protections.** API responses carry `Cache-Control: no-store`, HSTS, `X-Frame-Options: DENY` and `nosniff`.
@@ -50,9 +58,10 @@ Cloud practice management software for dental offices: scheduling, patient recor
 > Running this software is not by itself HIPAA compliance. Before you store real patient data you still need: a Business Associate Agreement (BAA) with your hosting provider, TLS termination, an encrypted and backed-up database volume, and your own policies and risk assessment.
 
 ## Tech stack
-- **Server:** Node.js 22+, Express 5, SQLite through Node's built-in `node:sqlite` (no native modules to compile)
+- **Server:** Node.js 22+ and Express 5. The database is **PostgreSQL** (recommended for production) or **SQLite** through Node's built-in `node:sqlite` (zero setup, single server). The same code runs on both, and every test runs on both.
+- **Scale-out:** several API servers behind a load balancer share live updates, rate limits and background-job locks through **Redis**. Documents can live in S3-compatible object storage (AWS S3, Cloudflare R2, Backblaze B2, MinIO), encrypted before upload.
 - **Client:** React 19, React Router and Vite, with no UI framework dependencies
-- **Tests:** `node:test` integration tests that exercise the real HTTP API
+- **Tests:** `node:test` integration tests that exercise the real HTTP API. Some tests run real subprocesses: two API servers sharing one Redis, the imaging-bridge agent, and an SFTP server. Others use fake Stripe and OpenID Connect endpoints. CI runs the whole suite on SQLite and on PostgreSQL.
 
 ## Getting started
 
@@ -67,18 +76,33 @@ Demo login: `admin@demo.dentalmachine.app` / `demo-password-123`. The seed scrip
 To start from scratch, open the app and click **Create an account**. This creates a new practice with a starter fee schedule and three operatories.
 
 ```bash
-npm test          # API integration tests
+npm test          # API integration tests (SQLite)
+TEST_DATABASE_URL=postgres://localhost/dm_test TEST_REDIS_URL=redis://localhost:6379 npm test   # also on PostgreSQL + Redis
 npm run build     # production build of the web app
 ```
 
+To try every integration without any accounts, set `EDI_MODE=sandbox ERX=sandbox PAYMENTS=sandbox MAIL_DRIVER=log` before `npm run dev`. That gives you a simulated clearinghouse and payer, pharmacy network, card processor and mail service. **Settings → Integrations** shows what is connected.
+
 ## Deploying
 
-The Docker image serves both the API and the web app on one port:
+The Docker image serves both the API and the web app on one port. For a **single server** with SQLite:
 
 ```bash
 docker build -t dentalmachine .
 docker run -p 4000:4000 -e JWT_SECRET="$(openssl rand -hex 48)" -v dm-data:/data dentalmachine
 ```
+
+For **production**, use PostgreSQL, Redis and several app servers (`docker-compose.yml` has this set up):
+
+```bash
+JWT_SECRET=... DOCUMENT_ENCRYPTION_KEY=... docker compose up --build --scale app=2
+```
+
+| Platform setting | Environment variables |
+| --- | --- |
+| PostgreSQL | `DATABASE_URL=postgres://…` (tables are created and migrated on start; `PG_POOL_SIZE`, default 10) |
+| Several servers | `REDIS_URL` (and optionally `REDIS_PREFIX`). Reminders, clearinghouse polling and autopay then run on one server at a time automatically. |
+| Shared document storage | `S3_BUCKET`, `S3_REGION`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, plus `S3_ENDPOINT` for R2/B2/MinIO. Required when you run more than one server. |
 
 ### Integrations (all optional)
 
@@ -90,11 +114,23 @@ docker run -p 4000:4000 -e JWT_SECRET="$(openssl rand -hex 48)" -v dm-data:/data
 | Card payments (Stripe) | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`. In Stripe, point a webhook at `https://<your host>/api/webhooks/stripe` for the `checkout.session.completed` and `checkout.session.expired` events. |
 | Document encryption | `DOCUMENT_ENCRYPTION_KEY`: a long random string. Keep it safe; encrypted files can't be read without it. |
 | Document storage location | `UPLOAD_DIR` (default `./data/uploads`) |
-| Reminder job | Runs every 10 minutes. Set `REMINDERS=off` on every server except one if you run more than one. |
+| Reminder job | Runs every 10 minutes (`REMINDERS=off` disables it). With Redis, only one server sends each batch. |
 | Incoming texts | Set `TWILIO_AUTH_TOKEN` and point your Twilio number's *A message comes in* webhook at `https://<your host>/api/webhooks/twilio/sms`. Enter the number under Settings → Practice. |
-| Electronic insurance (EDI) | `EDI_MODE=manual` (the default): claim and eligibility files are generated for you to upload to your clearinghouse portal, and you import the responses (271/835). `EDI_MODE=sandbox`: simulated eligibility responses for demos and training. Optional `EDI_SUBMITTER_ID` and `EDI_RECEIVER_ID` come from your clearinghouse enrolment. |
+| Clearinghouse | `CLEARINGHOUSE=sftp` with `CH_SFTP_HOST`, `CH_SFTP_USERNAME`, `CH_SFTP_PASSWORD` or `CH_SFTP_PRIVATE_KEY`, and `CH_SFTP_UPLOAD_DIR` / `CH_SFTP_DOWNLOAD_DIR` / `CH_SFTP_ARCHIVE_DIR`. These values come from your clearinghouse's SFTP enrolment. Responses are checked every `CH_POLL_MINUTES` (default 15). For real-time eligibility and claim status, set `CH_REALTIME_URL`, `CH_REALTIME_USERNAME` and `CH_REALTIME_PASSWORD` (the clearinghouse's CAQH CORE endpoint). `EDI_SUBMITTER_ID` and `EDI_RECEIVER_ID` also come from enrolment. `CLEARINGHOUSE=manual` (the default) downloads files for you to upload; `sandbox` simulates the clearinghouse and payer. |
+| E-prescribing | `ERX=dosespot` with `ERX_DOSESPOT_CLINIC_ID` and `ERX_DOSESPOT_CLINIC_KEY` from DoseSpot, and optionally `ERX_DOSESPOT_URL` for production. Put each prescriber's DoseSpot user ID under Settings → Providers. DoseSpot handles prescriber identity proofing and EPCS enrolment. `ERX=sandbox` simulates a pharmacy network. |
+| Card-on-file autopay | Uses the Stripe keys above. Also subscribe the Stripe webhook to `checkout.session.completed` for setup-mode sessions (saved cards). `PAYMENTS=sandbox` gives test cards without Stripe; `AUTOPAY=off` disables the hourly job. |
+| Mailed statements | `MAIL_DRIVER=lob` and `LOB_API_KEY` (`test_` keys never mail anything). `MAIL_DRIVER=log` records letters without sending them. |
+| Single sign-on | Set up per practice in **Settings → Practice**. Register `https://<your host>/api/auth/sso/callback` as the redirect URI with your identity provider. |
+| Imaging bridges | Set up per workstation in **Settings → Imaging bridges** (see below). |
 
-Without Twilio or SendGrid configured, messages are recorded in the log but not actually sent. The **Settings → Practice** page shows which integrations are connected.
+Without Twilio or SendGrid configured, messages are recorded in the log but not actually sent. **Settings → Integrations** shows which integrations are connected.
+
+### Imaging bridge (operatory PCs)
+
+1. In **Settings → Imaging bridges**, add the workstation and download its `bridge-config.json`. The key is shown only once.
+2. On that PC, install Node.js 18 or newer. Save `bridge/dental-machine-bridge.mjs` (also downloadable from that page) next to the config file.
+3. In the config file, set your imaging program's path and command-line options (your imaging vendor's bridge guide lists them), and the export folders to watch. See `bridge/bridge-config.example.json`. Programs that read the patient from a file are supported through `writeFile`.
+4. Run `node dental-machine-bridge.mjs bridge-config.json`, for example as a startup task.
 
 It runs on any container host (Fly.io, Render, Railway, AWS ECS, Google Cloud Run with a mounted volume, and so on). Put it behind HTTPS and keep `/data` on persistent, encrypted storage with backups. See `.env.example` for the configuration options.
 
@@ -125,14 +161,22 @@ All endpoints are under `/api` and need `Authorization: Bearer <token>`, except 
 | PPO & pre-auth | `GET/POST /fee-schedules`, `PUT /fee-schedules/:id`, `GET/POST /preauths`, `PUT /preauths/:id`, `POST /preauths/:id/837`, `GET /reports/outstanding-claims` |
 | Case acceptance & Rx | `GET /treatment-plans/:id`, `POST /treatment-plans/:id/present`, `GET /rx/favorites`, `GET/POST /patients/:id/prescriptions`, `GET /prescriptions/:id` |
 | Growth | `GET /analytics?from&to`, `GET /statements/candidates`, `POST /statements/run`, `GET /statements/runs`, `POST /recalls/campaign`, `GET /message-templates/defaults`, `GET /export` |
+| Scheduling extras | `POST /appointments` with `repeat: { every, unit: 'week'\|'month', count }`, `PUT /appointments/:id` and `PATCH /appointments/:id/status` with `scope: 'following'`; providers accept `working_hours` |
+| Clearinghouse | `POST /claims/submit`, `GET /clearinghouse`, `POST /clearinghouse/poll`, `POST /clearinghouse/responses`, `POST /claims/:id/status-check`, `GET /claims/:id/events` |
+| E-prescribing | `GET /erx`, `GET /pharmacies`, `PUT /patients/:id/pharmacy`, `GET /erx/launch`, `POST /patients/:id/prescriptions` with `send`, `schedule` and `otp` |
+| Imaging | `GET/POST /imaging/agents`, `DELETE /imaging/agents/:id`, `POST /patients/:id/imaging/launch`, `GET /imaging/commands/:id`, `GET /imaging/agent-download`. The agent itself uses `/api/bridge/hello\|commands\|images` with its own key. |
+| Cards & autopay | `GET/POST /patients/:id/payment-methods`, `POST /patients/:id/card-setup`, `DELETE /payment-methods/:id`, `POST /payment-plans/:id/charge-now`; `PUT /payment-plans/:id` accepts `autopay_method_id` |
+| Portal (patient session) | `/api/public/portal/:practice/code\|verify`, then `/api/portal/me`, `/contact`, `/appointments/:id/confirm\|cancel`, `/forms/:id/open`, `/treatment-plans/:id/open`, `/pay` |
+| Sign-on & system | `GET /auth/sso/lookup\|start\|callback`, `GET/PUT /practice/sso`, `GET /integrations` |
 | Public (no login) | `GET /public/practices/:slug`, `GET /public/practices/:slug/availability`, `POST /public/practices/:slug/booking-requests`, `GET/POST /public/confirm/:token`, `GET/POST /public/forms/:token`, `GET/POST /public/tp/:token` |
 
 ## Roadmap ideas
-- Direct connection to a specific clearinghouse (DentalXChange, Change Healthcare, Vyne and so on) for automatic claim submission and real-time eligibility. The EDI files are already generated; this adds the connection.
-- Imaging bridges (Dexis, Sidexis, Carestream) and EPCS e-prescribing through a certified partner (DoseSpot and similar)
-- Recurring appointment series and provider-specific working hours
-- Printed statements through a mail vendor, and automatic card-on-file charges for payment plans
-- Patient portal with online forms history, balance and payments
-- Postgres support and multi-server live updates (Redis) for larger groups, and SSO for staff logins
+- Direct REST integrations with individual clearinghouses and payers that don't offer SFTP or CAQH CORE
+- A second e-prescribing partner (DrFirst, Veradigm) behind the same interface as DoseSpot
+- A Windows installer and auto-update for the imaging bridge, and TWAIN/sensor capture directly in the browser
+- Secure two-way messaging inside the patient portal
+- Read replicas and reporting on a separate database for large groups
+
+Before going live, some work sits outside the code: a BAA with your hosting provider, clearinghouse and payer enrolment (EDI, ERA and EFT), DoseSpot onboarding including EPCS identity proofing for each prescriber, a Stripe account, and a Lob account for mailing.
 
 The CDT codes in the starter fee schedule are for convenience only. Practices need their own ADA CDT licence and should set fees for their market.

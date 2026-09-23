@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { api, getToken } from '../api.js';
 import { useApi, invalidateLookup } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
@@ -34,26 +35,35 @@ const RESOURCES = {
 export default function Settings() {
   const { user, can } = useAuth();
   const admin = user.role === 'admin';
-  const tabs = [
-    ['account', 'My account', true],
-    ['practice', 'Practice', admin],
-    ['users', 'Users', admin],
-    ['providers', 'Providers', true],
-    ['operatories', 'Operatories', true],
-    ['codes', 'Fee schedule', true],
-    ['types', 'Appointment types', true],
-    ['carriers', 'Insurance carriers', can('billing:read')],
-    ['ppo', 'PPO fee schedules', can('billing:read')],
-    ['messaging', 'Messages & reviews', admin],
-    ['imaging', 'Imaging bridges', admin],
-    ['audit', 'Audit log', admin],
-  ].filter((t) => t[2]);
-  const [tab, setTab] = useState(admin ? 'practice' : 'account');
+  const groups = [
+    ['You', [['account', 'My account', true]]],
+    ['Practice', [['practice', 'Practice & security', admin], ['users', 'Users & roles', admin], ['providers', 'Providers', true], ['operatories', 'Operatories', true], ['types', 'Appointment types', true]]],
+    ['Billing', [['codes', 'Fee schedule', true], ['ppo', 'PPO fee schedules', can('billing:read')], ['carriers', 'Insurance carriers', can('billing:read')]]],
+    ['Patients', [['messaging', 'Messages & reviews', admin]]],
+    ['Connections', [['integrations', 'Integrations', admin], ['imaging', 'Imaging bridges', admin]]],
+    ['Compliance', [['audit', 'Audit log', admin]]],
+  ].map(([g, items]) => [g, items.filter((t) => t[2])]).filter(([, items]) => items.length);
+  const all = groups.flatMap(([, items]) => items);
+  const [params, setParams] = useSearchParams();
+  const tab = all.some((t) => t[0] === params.get('tab')) ? params.get('tab') : admin ? 'practice' : 'account';
+  const setTab = (k) => setParams({ tab: k }, { replace: true });
 
   return (
     <>
       <div className="page-header"><h1>Settings</h1></div>
-      <div className="tabs">{tabs.map(([k, t]) => <button key={k} className={tab === k ? 'active' : ''} onClick={() => setTab(k)}>{t}</button>)}</div>
+      <div className="settings-layout">
+        <nav className="settings-nav" aria-label="Settings sections">
+          {groups.map(([g, items]) => (
+            <div key={g} className="settings-group">
+              <div className="settings-group-title">{g}</div>
+              {items.map(([k, t]) => <button key={k} className={tab === k ? 'active' : ''} onClick={() => setTab(k)}>{t}</button>)}
+            </div>
+          ))}
+        </nav>
+        <select className="settings-select" value={tab} onChange={(e) => setTab(e.target.value)} aria-label="Settings section">
+          {groups.map(([g, items]) => <optgroup key={g} label={g}>{items.map(([k, t]) => <option key={k} value={k}>{t}</option>)}</optgroup>)}
+        </select>
+        <div className="settings-body">
       {tab === 'account' && <Account />}
       {tab === 'practice' && <Practice />}
       {tab === 'users' && <Users />}
@@ -61,7 +71,10 @@ export default function Settings() {
       {tab === 'ppo' && <FeeSchedules admin={admin} />}
       {tab === 'messaging' && <Messaging />}
       {tab === 'imaging' && <ImagingBridges />}
+      {tab === 'integrations' && <Integrations />}
       {tab === 'audit' && <AuditLog />}
+        </div>
+      </div>
     </>
   );
 }
@@ -200,7 +213,7 @@ function Practice() {
             <input type="number" min="0" step="100" value={current.hygiene_goal != null ? current.hygiene_goal / 100 : ''} onChange={(e) => change('hygiene_goal', Math.round(Number(e.target.value) * 100))} />
           </label>
         </div>
-        <MessagingStatus />
+        <p className="muted" style={{ fontSize: 13, marginTop: 12 }}>Texting, email, card payments and other connections: <Link to="/settings?tab=integrations">Settings → Integrations</Link>.</p>
       </div>
       <div className="card">
         <h2>Security & data</h2>
@@ -408,22 +421,6 @@ function AuditLog() {
         </table>
       </div>
     </div>
-  );
-}
-
-function MessagingStatus() {
-  const { data } = useApi('/messaging/status');
-  const { data: pay } = useApi('/payments/config');
-  if (!data) return null;
-  const row = (name, on, hint) => (
-    <li>{name}: {on ? <span className="badge ok">Connected</span> : <span className="badge warn">Not configured</span>} {!on && <span className="muted">{hint}</span>}</li>
-  );
-  return (
-    <ul style={{ marginTop: 14, lineHeight: 1.9, paddingLeft: 18 }}>
-      {row('Text messages', data.sms !== 'log', 'Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN and TWILIO_FROM on the server. Messages are logged but not sent.')}
-      {row('Email', data.email !== 'log', 'Set SENDGRID_API_KEY and EMAIL_FROM on the server. Messages are logged but not sent.')}
-      {row('Card payments', pay?.enabled, 'Set STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET on the server.')}
-    </ul>
   );
 }
 
@@ -756,5 +753,49 @@ function SingleSignOn() {
       <ErrorBox error={error} />
       <div className="form-actions">{saved && <span className="badge ok">Saved</span>}<button className="primary" disabled={busy} onClick={submit}>Save sign-in settings</button></div>
     </div>
+  );
+}
+
+// Everything this deployment connects to, with what each does and how to turn it on.
+function Integrations() {
+  const { data: d } = useApi('/integrations');
+  if (!d) return <div className="empty">Loading…</div>;
+  const on = (label) => ['ok', label];
+  const sandbox = (label = 'Sandbox') => ['info', label];
+  const off = (label = 'Not set up') => ['warn', label];
+  const items = [
+    ['💬', 'Text messages', d.sms === 'log' ? off('Logged only') : on('Twilio'), 'Reminders, two-way texting, recall and review requests.', 'TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM'],
+    ['✉️', 'Email', d.email === 'log' ? off('Logged only') : on('SendGrid'), 'Reminders, statements, forms and portal sign-in codes.', 'SENDGRID_API_KEY, EMAIL_FROM'],
+    ['💳', 'Card payments & autopay', d.payments === 'stripe' ? on('Stripe') : d.payments === 'sandbox' ? sandbox('Sandbox (test cards)') : off(), 'Text-to-pay, portal payments, cards on file and payment-plan autopay.', 'STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET'],
+    ['🧾', 'Clearinghouse', d.clearinghouse.mode === 'sftp' ? on(d.clearinghouse.name) : d.clearinghouse.mode === 'sandbox' ? sandbox() : off('Manual upload'), `Claims sent automatically; acknowledgments, claim status and ERAs posted for you.${d.clearinghouse.realtime ? ' Real-time eligibility and claim status are on.' : ''}`, 'CLEARINGHOUSE=sftp, CH_SFTP_*, CH_REALTIME_URL'],
+    ['℞', 'E-prescribing', d.erx.mode === 'dosespot' ? on('DoseSpot') : d.erx.mode === 'sandbox' ? sandbox() : off('Printed Rx only'), 'Send prescriptions to the pharmacy, including controlled substances (EPCS).', 'ERX=dosespot, ERX_DOSESPOT_CLINIC_ID, ERX_DOSESPOT_CLINIC_KEY'],
+    ['📮', 'Mailed statements', d.mail.mode === 'lob' ? on('Lob') : d.mail.mode === 'log' ? sandbox('Logged only') : off('Printed at the office'), 'Statements for accounts without email are printed and mailed for you.', 'MAIL_DRIVER=lob, LOB_API_KEY'],
+    ['🩻', 'Imaging bridges', d.imaging.workstations ? (d.imaging.online ? on(`${d.imaging.online} of ${d.imaging.workstations} online`) : off(`${d.imaging.workstations} offline`)) : off(), 'Open DEXIS/Sidexis/etc. from the chart; captured images file themselves.', null, 'imaging'],
+    ['🔐', 'Single sign-on', d.sso.provider ? on(`${{ google: 'Google', microsoft: 'Microsoft', oidc: 'OpenID Connect' }[d.sso.provider]}${d.sso.required ? ' (required)' : ''}`) : off('Passwords'), 'Staff sign in with their work Google or Microsoft account.', null, 'practice'],
+    ['🌐', 'Patient portal', d.portal.enabled ? on('On') : off('Off'), <>Patients see visits, pay, and complete forms at <a href={d.portal.url} target="_blank" rel="noreferrer">{d.portal.url}</a>.</>, null, 'practice'],
+    ['📅', 'Online booking', d.booking.enabled ? on('On') : off('Off'), d.booking.url ? <>Booking page: <a href={d.booking.url} target="_blank" rel="noreferrer">{d.booking.url}</a></> : 'Choose a booking page address to turn it on.', null, 'practice'],
+  ];
+  return (
+    <>
+      <div className="integration-grid">
+        {items.map(([icon, name, [tone, status], what, env, tab]) => (
+          <div key={name} className="card integration">
+            <div className="integration-head"><span className="integration-icon">{icon}</span><strong>{name}</strong><span className={`badge nocap ${tone}`}>{status}</span></div>
+            <div className="muted" style={{ fontSize: 13 }}>{what}</div>
+            {env && tone !== 'ok' && <div className="integration-env">Server settings: <code>{env}</code></div>}
+            {tab && <Link to={`/settings?tab=${tab}`} className="integration-link">Configure →</Link>}
+          </div>
+        ))}
+      </div>
+      <div className="card">
+        <h2>Platform</h2>
+        <dl className="kv">
+          <dt>Database</dt><dd>{d.platform.database === 'postgres' ? 'PostgreSQL' : 'SQLite (single server)'}</dd>
+          <dt>Servers</dt><dd>{d.platform.cluster === 'redis' ? 'Several, coordinated through Redis' : 'Single server'}</dd>
+          <dt>Documents</dt><dd>{d.platform.storage === 's3' ? 'S3-compatible object storage' : 'Server disk'}{d.platform.encrypted ? ', encrypted (AES-256-GCM)' : ' — not encrypted: set DOCUMENT_ENCRYPTION_KEY'}</dd>
+          <dt>Web address</dt><dd>{d.app_url}</dd>
+        </dl>
+      </div>
+    </>
   );
 }

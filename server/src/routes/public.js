@@ -23,16 +23,16 @@ export default function publicRoutes({ db }) {
   const reader = rateLimit({ windowMs: 60 * 1000, max: 120 });
   const logPublic = async (req, practiceId, action, entity, entityId, details) => await audit(db, { ip: req.ip, user: { practice_id: practiceId, id: null } }, action, entity, entityId, details);
 
-  const bookablePractice = async slug => {
+  const bookablePractice = async (slug) => {
     const p = await db.get('SELECT * FROM practices WHERE slug = ? AND online_booking = 1', String(slug));
     if (!p) throw new HttpError(404, 'Online booking is not available for this practice');
     return p;
   };
-  const reasonsFor = async practiceId => {
+  const reasonsFor = async (practiceId) => {
     const types = await db.all('SELECT id, name, duration, provider_type FROM appointment_types WHERE practice_id = ? AND active = 1 AND online_bookable = 1 ORDER BY sort, name', practiceId);
     return types.length ? types.map((t) => ({ label: t.name, duration: t.duration, type_id: t.id, provider_type: t.provider_type })) : FALLBACK_REASONS;
   };
-  const publicProviders = async practiceId => await db.all('SELECT id, name, type FROM providers WHERE practice_id = ? AND active = 1 ORDER BY type, name', practiceId);
+  const publicProviders = async (practiceId) => await db.all('SELECT id, name, type FROM providers WHERE practice_id = ? AND active = 1 ORDER BY type, name', practiceId);
 
   // ---- Online booking ----
   r.get('/practices/:slug', reader, async (req, res) => {
@@ -59,7 +59,7 @@ export default function publicRoutes({ db }) {
       .filter((pv) => req.query.provider_id || !reason.provider_type || pv.type === reason.provider_type || !all.some((x) => x.type === reason.provider_type));
     const slotsOn = async (d) => (await mapSeq(
       providers,
-      async pv => (await openSlots(db, p.id, pv.id, d, { duration, step: 30, after: now })).map((s) => ({ start: s, provider_id: pv.id, provider_name: pv.name }))
+      async (pv) => (await openSlots(db, p.id, pv.id, d, { duration, step: 30, after: now })).map((s) => ({ start: s, provider_id: pv.id, provider_name: pv.name }))
     )).flat()
       .sort((x, y) => x.start.localeCompare(y.start));
     const slots = await slotsOn(date);
@@ -102,7 +102,7 @@ export default function publicRoutes({ db }) {
   });
 
   // ---- Appointment confirmation links ----
-  const apptForToken = async token => {
+  const apptForToken = async (token) => {
     const a = await db.get(
       `SELECT a.*, p.first_name, pr.name AS practice_name, pr.phone AS practice_phone, pr.address, pr.city, pr.state, pr.zip,
          pv.name AS provider_name
@@ -139,7 +139,7 @@ export default function publicRoutes({ db }) {
   });
 
   // ---- Intake forms ----
-  const formForToken = async token => {
+  const formForToken = async (token) => {
     const f = await db.get(
       `SELECT fr.*, p.first_name, p.last_name, p.dob, p.phone, p.email, p.address, p.city, p.state, p.zip, p.emergency_contact,
          p.allergies, p.medications, pr.name AS practice_name

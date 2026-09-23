@@ -11,17 +11,14 @@ export default function ppoRoutes({ db, config }) {
   const r = Router();
 
   // ---- Fee schedules ----
-  const withItems = async fs => ({
+  const withItems = async (fs) => ({
     ...fs,
     items: await db.all('SELECT code, fee FROM fee_schedule_items WHERE fee_schedule_id = ? ORDER BY code', fs.id),
     carriers: await db.all('SELECT id, name FROM insurance_carriers WHERE fee_schedule_id = ?', fs.id)
   });
 
   r.get('/fee-schedules', requirePermission('billing:read'), async (req, res) => {
-    res.json(await mapSeq(
-      (await db.all('SELECT * FROM fee_schedules WHERE practice_id = ? ORDER BY name', req.user.practice_id)),
-      withItems
-    ));
+    res.json(await mapSeq((await db.all('SELECT * FROM fee_schedules WHERE practice_id = ? ORDER BY name', req.user.practice_id)), withItems));
   });
 
   r.post('/fee-schedules', requireAdmin, async (req, res) => {
@@ -69,7 +66,7 @@ export default function ppoRoutes({ db, config }) {
   const PRE_SELECT = `SELECT pa.*, p.first_name, p.last_name, c.name AS carrier_name, tp.name AS plan_name
     FROM preauths pa JOIN patients p ON p.id = pa.patient_id JOIN patient_insurance pi ON pi.id = pa.patient_insurance_id
     JOIN insurance_carriers c ON c.id = pi.carrier_id LEFT JOIN treatment_plans tp ON tp.id = pa.treatment_plan_id`;
-  const view = async row => row && ({ ...row, procedure_ids: JSON.parse(row.procedure_ids), procedures: await db.all(`SELECT id, code, description, tooth, surfaces, fee FROM procedures WHERE id IN (${JSON.parse(row.procedure_ids).map(Number).join(',') || 0})`) });
+  const view = async (row) => row && ({ ...row, procedure_ids: JSON.parse(row.procedure_ids), procedures: await db.all(`SELECT id, code, description, tooth, surfaces, fee FROM procedures WHERE id IN (${JSON.parse(row.procedure_ids).map(Number).join(',') || 0})`) });
 
   r.get('/preauths', requirePermission('billing:read'), async (req, res) => {
     const where = ['pa.practice_id = ?'];
@@ -82,10 +79,7 @@ export default function ppoRoutes({ db, config }) {
       where.push('pa.status = ?');
       params.push(req.query.status);
     }
-    res.json(await mapSeq(
-      (await db.all(`${PRE_SELECT} WHERE ${where.join(' AND ')} ORDER BY pa.id DESC`, ...params)),
-      view
-    ));
+    res.json(await mapSeq((await db.all(`${PRE_SELECT} WHERE ${where.join(' AND ')} ORDER BY pa.id DESC`, ...params)), view));
   });
 
   r.post('/preauths', requirePermission('billing:write'), async (req, res) => {
@@ -99,10 +93,7 @@ export default function ppoRoutes({ db, config }) {
       planId = plan.id;
       procs = await db.all("SELECT * FROM procedures WHERE treatment_plan_id = ? AND status = 'planned'", plan.id);
     } else {
-      procs = await mapSeq(
-        (req.body?.procedure_ids || []),
-        async id => await findOr404(db, 'procedures', id, pid, 'Procedure')
-      );
+      procs = await mapSeq((req.body?.procedure_ids || []), async (id) => await findOr404(db, 'procedures', id, pid, 'Procedure'));
     }
     if (!procs.length) throw new HttpError(400, 'No planned procedures to send');
     if (procs.some((p) => p.patient_id !== policy.patient_id)) throw new HttpError(400, 'Procedures belong to another patient');

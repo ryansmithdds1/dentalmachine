@@ -70,7 +70,7 @@ await db.tx(async () => {
     for (const i of carrierIdx) await db.run('UPDATE insurance_carriers SET fee_schedule_id = ? WHERE id = ?', fsId, carriers[i]);
   }
 
-  const code = async c => await db.get('SELECT * FROM procedure_codes WHERE practice_id = ? AND code = ?', practiceId, c);
+  const code = async (c) => await db.get('SELECT * FROM procedure_codes WHERE practice_id = ? AND code = ?', practiceId, c);
   const addProc = async (patientId, c, extra = {}) => {
     const pc = await code(c);
     return await insert(db, 'procedures', {
@@ -157,7 +157,7 @@ await db.tx(async () => {
       });
       await mapSeq(
         est.items,
-        async it => await insert(db, 'claim_items', { claim_id: claimId, procedure_id: it.procedure_id, fee: it.fee, estimated_amount: it.insurance })
+        async (it) => await insert(db, 'claim_items', { claim_id: claimId, procedure_id: it.procedure_id, fee: it.fee, estimated_amount: it.insurance })
       );
       if (paid) {
         await insert(db, 'ledger_entries', {
@@ -183,7 +183,7 @@ await db.tx(async () => {
 
   // Upcoming schedule: today and the next several weekdays, built from appointment types.
   await db.run('UPDATE practices SET daily_goal = ?, hygiene_goal = ?, review_url = ?, review_requests = 1 WHERE id = ?', 600000, 180000, 'https://g.page/r/bright-smiles-austin/review', practiceId);
-  const typeId = async name => await db.get('SELECT * FROM appointment_types WHERE practice_id = ? AND name = ?', practiceId, name);
+  const typeId = async (name) => await db.get('SELECT * FROM appointment_types WHERE practice_id = ? AND name = ?', practiceId, name);
   const hhmm = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
   const plan = [
     ['Recall exam & cleaning', hyg, 2, []], ['Filling', drChen, 0, [['D2392', '19', 'MO'], ['D2391', '30', 'O']]], ['Crown prep', drRivera, 1, [['D2740', '3'], ['D2950', '3']]],

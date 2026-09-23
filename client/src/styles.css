@@ -508,3 +508,28 @@ button.active, .seg button.active { background: var(--primary-soft); color: var(
 .portal-activity .num { white-space: nowrap; font-variant-numeric: tabular-nums; }
 .portal-activity .paid { color: var(--ok); }
 .sso-button { justify-content: center; gap: 10px; font-weight: 600; }
+
+/* Settings layout */
+.settings-layout { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 20px; align-items: start; }
+.settings-nav { position: sticky; top: 16px; display: flex; flex-direction: column; gap: 14px; }
+.settings-group { display: flex; flex-direction: column; gap: 2px; }
+.settings-group-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); padding: 0 10px 4px; }
+.settings-nav button { border: none; background: none; text-align: left; padding: 7px 10px; border-radius: 8px; color: var(--text); justify-content: flex-start; }
+.settings-nav button:hover { background: #eef2f6; }
+.settings-nav button.active { background: var(--primary-soft); color: var(--primary); font-weight: 600; }
+.settings-select { display: none; }
+.settings-body { min-width: 0; }
+.integration-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; margin-bottom: 16px; }
+.integration-grid .card { margin: 0; }
+.integration { display: flex; flex-direction: column; gap: 8px; }
+.integration-head { display: flex; align-items: center; gap: 8px; }
+.integration-head .badge { margin-left: auto; }
+.integration-icon { font-size: 18px; }
+.integration-env { font-size: 12px; color: var(--muted); }
+.integration-env code { font-size: 11px; word-break: break-word; }
+.integration-link { font-size: 13px; margin-top: auto; }
+@media (max-width: 800px) {
+  .settings-layout { grid-template-columns: 1fr; }
+  .settings-nav { display: none; }
+  .settings-select { display: block; margin-bottom: 12px; }
+}

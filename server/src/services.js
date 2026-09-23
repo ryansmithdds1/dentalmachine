@@ -43,14 +43,14 @@ export async function estimateCoverage(db, policy, procedures) {
   }
   // In-network (PPO) carriers pay from their fee schedule; the difference is written off.
   const scheduleId = policy.fee_schedule_id ?? (await db.get('SELECT fee_schedule_id FROM insurance_carriers WHERE id = ?', policy.carrier_id))?.fee_schedule_id;
-  const allowedFor = async p => {
+  const allowedFor = async (p) => {
     if (!scheduleId) return p.fee;
     const row = await db.get('SELECT fee FROM fee_schedule_items WHERE fee_schedule_id = ? AND code = ?', scheduleId, p.code);
     return row ? Math.min(row.fee, p.fee) : p.fee;
   };
   let remainingMax = Math.max(0, policy.annual_max - (await benefitsUsed(db, policy)));
   let remainingDeductible = Math.max(0, policy.deductible - policy.deductible_met);
-  const items = await mapSeq(procedures, async p => {
+  const items = await mapSeq(procedures, async (p) => {
     const tier = coverageTier(p.category);
     const pct = policy[`pct_${tier}`] ?? 0;
     const contracted = await allowedFor(p);

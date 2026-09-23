@@ -122,7 +122,7 @@ export default function insuranceRoutes({ db }) {
     const { patient_insurance_id, procedure_ids } = req.body || {};
     const policy = await findOr404(db, 'patient_insurance', patient_insurance_id, pid, 'Policy');
     if (!Array.isArray(procedure_ids) || !procedure_ids.length) throw new HttpError(400, 'procedure_ids is required');
-    const procs = await mapSeq(procedure_ids, async id => {
+    const procs = await mapSeq(procedure_ids, async (id) => {
       const p = await findOr404(db, 'procedures', id, pid, 'Procedure');
       if (p.patient_id !== policy.patient_id) throw new HttpError(400, `Procedure ${p.id} belongs to another patient`);
       if (p.status !== 'completed') throw new HttpError(400, `Procedure ${p.id} is not completed`);
@@ -137,7 +137,7 @@ export default function insuranceRoutes({ db }) {
         practice_id: pid, patient_id: policy.patient_id, patient_insurance_id: policy.id,
         total_fee: est.total_fee, estimated_amount: est.total_insurance, deductible_applied: est.total_deductible, write_off_estimate: est.total_write_off,
       });
-      await mapSeq(est.items, async item => await insert(db, 'claim_items', {
+      await mapSeq(est.items, async (item) => await insert(db, 'claim_items', {
         claim_id: claimId, procedure_id: item.procedure_id, fee: item.fee, estimated_amount: item.insurance, write_off: item.write_off,
       }));
       return claimId;
@@ -183,7 +183,7 @@ export default function insuranceRoutes({ db }) {
     const policy = policyId
       ? await db.get('SELECT pi.*, c.name AS carrier_name FROM patient_insurance pi JOIN insurance_carriers c ON c.id = pi.carrier_id WHERE pi.id = ? AND pi.practice_id = ? AND pi.patient_id = ?', Number(policyId), req.user.practice_id, patient.id)
       : null;
-    const procs = await mapSeq((req.body?.procedure_ids || []), async id => {
+    const procs = await mapSeq((req.body?.procedure_ids || []), async (id) => {
       const p = await findOr404(db, 'procedures', id, req.user.practice_id, 'Procedure');
       if (p.patient_id !== patient.id) throw new HttpError(400, `Procedure ${p.id} belongs to another patient`);
       return p;

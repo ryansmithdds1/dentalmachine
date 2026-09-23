@@ -28,7 +28,7 @@ export default function frontDeskRoutes({ db }) {
     );
     const mmdd = date.slice(5);
     const soon = [0, 1, 2, 3, 4, 5, 6].map((n) => addDays(date, n).slice(5));
-    const rows = await mapSeq(appts, async a => {
+    const rows = await mapSeq(appts, async (a) => {
       const balance = (await db.get('SELECT COALESCE(SUM(amount),0) AS n FROM ledger_entries WHERE patient_id = ?', a.patient_id)).n;
       const gid = a.guarantor_id || a.patient_id;
       const familyBalance = (await db.get('SELECT COALESCE(SUM(l.amount),0) AS n FROM ledger_entries l JOIN patients p ON p.id = l.patient_id WHERE p.id = ? OR p.guarantor_id = ?', gid, gid)).n;
@@ -113,7 +113,7 @@ export default function frontDeskRoutes({ db }) {
          AND (tp.id IS NULL OR tp.status IN ('proposed','accepted'))
          AND NOT EXISTS (SELECT 1 FROM appointments a WHERE a.patient_id = p.id AND a.start_time > ? AND a.status NOT IN ('cancelled','no_show','completed'))
        GROUP BY p.id ORDER BY accepted DESC, amount DESC`, pid, await practiceNow(db, pid),
-    )), async x => ({
+    )), async (x) => ({
       ...x,
       last_contact: await lastContact(x.patient_id, 'unscheduled')
     }));
@@ -132,7 +132,7 @@ export default function frontDeskRoutes({ db }) {
          AND NOT EXISTS (SELECT 1 FROM appointments b WHERE b.patient_id = a.patient_id AND b.start_time > ? AND b.status NOT IN ('cancelled','no_show','completed'))
          AND a.id = (SELECT MAX(c.id) FROM appointments c WHERE c.patient_id = a.patient_id AND c.status IN ('no_show','cancelled'))
        ORDER BY a.start_time DESC`, pid, `${since} 00:00`, now,
-    )), async x => ({
+    )), async (x) => ({
       ...x,
       last_contact: await lastContact(x.patient_id, 'broken')
     }));

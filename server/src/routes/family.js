@@ -51,7 +51,7 @@ export default function familyRoutes({ db }) {
   const r = Router();
   const patientOr404 = async (req, id = req.params.id) => await findOr404(db, 'patients', id, req.user.practice_id, 'Patient');
   // The guarantor is responsible for the family's bills; a patient with no guarantor is their own.
-  const guarantorOf = async p => (p.guarantor_id ? await db.get('SELECT * FROM patients WHERE id = ?', p.guarantor_id) : p);
+  const guarantorOf = async (p) => (p.guarantor_id ? await db.get('SELECT * FROM patients WHERE id = ?', p.guarantor_id) : p);
 
   // ---- Family file ----
   r.get('/patients/:id/family', requirePermission('patients:read'), async (req, res) => {
@@ -126,7 +126,7 @@ export default function familyRoutes({ db }) {
     const plans = await mapSeq((await db.all(
       `SELECT pp.*, p.first_name, p.last_name, p.phone FROM payment_plans pp JOIN patients p ON p.id = pp.patient_id
        WHERE pp.practice_id = ? AND (? = 'all' OR pp.status = ?) ORDER BY pp.created_at DESC`, pid, status, status,
-    )), async p => await planStatus(db, p, today));
+    )), async (p) => await planStatus(db, p, today));
     res.json(req.query.overdue === 'true' ? plans.filter((p) => p.past_due > 0) : plans);
   });
 
@@ -135,7 +135,7 @@ export default function familyRoutes({ db }) {
     const today = (await practiceNow(db, req.user.practice_id)).slice(0, 10);
     res.json(await mapSeq(
       (await db.all('SELECT * FROM payment_plans WHERE practice_id = ? AND patient_id = ? ORDER BY id DESC', req.user.practice_id, g.id)),
-      async p => await planStatus(db, p, today)
+      async (p) => await planStatus(db, p, today)
     ));
   });
 
