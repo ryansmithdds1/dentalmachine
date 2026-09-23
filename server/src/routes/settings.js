@@ -37,7 +37,19 @@ export default function settingsRoutes({ db }) {
 
   r.get('/practice', (req, res) => res.json(db.get('SELECT * FROM practices WHERE id = ?', req.user.practice_id)));
   r.put('/practice', requireAdmin, (req, res) => {
-    const row = pick(req.body, ['name', 'address', 'city', 'state', 'zip', 'phone', 'email', 'tax_id', 'npi', 'timezone']);
+    const row = pick(req.body, ['name', 'address', 'city', 'state', 'zip', 'phone', 'email', 'tax_id', 'npi', 'timezone', 'slug', 'online_booking', 'reminder_hours', 'require_mfa']);
+    if (row.slug != null) {
+      row.slug = String(row.slug).toLowerCase();
+      if (!/^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])$/.test(row.slug)) throw new HttpError(400, 'Booking URL name must be 3-40 lowercase letters, numbers or dashes');
+      if (db.get('SELECT id FROM practices WHERE slug = ? AND id != ?', row.slug, req.user.practice_id)) throw new HttpError(409, 'That booking URL name is taken');
+    }
+    if (row.online_booking && !(row.slug ?? db.get('SELECT slug FROM practices WHERE id = ?', req.user.practice_id).slug)) {
+      throw new HttpError(400, 'Choose a booking URL name before enabling online booking');
+    }
+    if (row.reminder_hours != null) {
+      row.reminder_hours = Number(row.reminder_hours);
+      if (!Number.isInteger(row.reminder_hours) || row.reminder_hours < 0 || row.reminder_hours > 168) throw new HttpError(400, 'Reminder lead time must be 0-168 hours');
+    }
     if (row.timezone) {
       try {
         new Intl.DateTimeFormat('en-US', { timeZone: row.timezone });
@@ -52,7 +64,7 @@ export default function settingsRoutes({ db }) {
   });
 
   // ---- Users ----
-  const USER_COLS = 'id, practice_id, email, name, role, active, last_login_at, created_at';
+  const USER_COLS = 'id, practice_id, email, name, role, active, mfa_enabled, last_login_at, created_at';
   r.get('/users', (req, res) => res.json(db.all(`SELECT ${USER_COLS} FROM users WHERE practice_id = ? ORDER BY name`, req.user.practice_id)));
 
   r.post('/users', requireAdmin, (req, res) => {
@@ -77,6 +89,8 @@ export default function settingsRoutes({ db }) {
       validatePassword(req.body.password);
       row.password_hash = hashPassword(req.body.password);
     }
+    // Lost phone: an admin can clear a colleague's 2FA so they can enrol again.
+    if (req.body.reset_mfa) Object.assign(row, { mfa_enabled: 0, mfa_secret: null, mfa_last_step: null });
     update(db, 'users', existing.id, req.user.practice_id, row);
     audit(db, req, 'user.update', 'users', existing.id, { fields: Object.keys(row).filter((k) => k !== 'password_hash') });
     res.json(db.get(`SELECT ${USER_COLS} FROM users WHERE id = ?`, existing.id));

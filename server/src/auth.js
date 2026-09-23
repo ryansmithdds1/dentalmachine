@@ -63,7 +63,7 @@ export function can(user, permission) {
   return (PERMISSIONS[user.role] || []).includes(permission);
 }
 
-export function authenticate(db, secret) {
+export function authenticate(db, secret, { allowMfaSetup = false } = {}) {
   return (req, _res, next) => {
     const header = req.headers.authorization || '';
     const token = header.startsWith('Bearer ') ? header.slice(7) : null;
@@ -71,6 +71,11 @@ export function authenticate(db, secret) {
     if (!payload) return next(new HttpError(401, 'Authentication required'));
     const user = db.get('SELECT id, practice_id, email, name, role, active FROM users WHERE id = ?', payload.sub);
     if (!user || !user.active) return next(new HttpError(401, 'Account disabled or not found'));
+    // Practices can require 2FA; until it's set up, only the account/MFA endpoints are reachable.
+    if (!allowMfaSetup) {
+      const gate = db.get('SELECT p.require_mfa, u.mfa_enabled FROM users u JOIN practices p ON p.id = u.practice_id WHERE u.id = ?', user.id);
+      if (gate.require_mfa && !gate.mfa_enabled) return next(new HttpError(403, 'Two-factor authentication setup required', { mfa_setup_required: true }));
+    }
     req.user = user;
     next();
   };

@@ -11,12 +11,33 @@ import billingRoutes from './routes/billing.js';
 import insuranceRoutes from './routes/insurance.js';
 import settingsRoutes from './routes/settings.js';
 import reportRoutes from './routes/reports.js';
+import engagementRoutes from './routes/engagement.js';
+import publicRoutes from './routes/public.js';
+import documentRoutes from './routes/documents.js';
+import paymentRoutes, { stripeWebhook } from './routes/payments.js';
+import { createMessenger } from './messaging.js';
+import { createStorage } from './storage.js';
 
-export function createApp({ db, secret }) {
+// Runtime configuration, from the environment unless overridden (tests pass their own).
+export function loadConfig(env = process.env) {
+  return {
+    appUrl: (env.APP_URL || `http://localhost:${env.PORT || 4000}`).replace(/\/$/, ''),
+    uploadDir: env.UPLOAD_DIR || './data/uploads',
+    documentKey: env.DOCUMENT_ENCRYPTION_KEY || null,
+    stripeSecretKey: env.STRIPE_SECRET_KEY || null,
+    stripeWebhookSecret: env.STRIPE_WEBHOOK_SECRET || null,
+  };
+}
+
+export function createApp({ db, secret, config: overrides = {}, fetchImpl = globalThis.fetch, messenger, storage }) {
   if (!secret) throw new Error('JWT secret is required');
+  const config = { ...loadConfig(), ...overrides };
+  messenger ??= createMessenger({ fetchImpl });
+  storage ??= createStorage({ dir: config.uploadDir, key: config.documentKey });
   const app = express();
   app.set('trust proxy', 1);
   app.disable('x-powered-by');
+  app.use(stripeWebhook({ db, config })); // needs the raw body, so before express.json
   app.use(express.json({ limit: '1mb' }));
   app.use((_req, res, next) => {
     res.set({
@@ -30,6 +51,10 @@ export function createApp({ db, secret }) {
 
   app.get('/api/health', (_req, res) => res.json({ ok: true }));
   app.use('/api/auth', authRoutes({ db, secret }));
+  app.use('/api/public', (_req, res, next) => {
+    res.set('Cache-Control', 'no-store');
+    next();
+  }, publicRoutes({ db }));
 
   const api = express.Router();
   api.use(authenticate(db, secret));
@@ -44,6 +69,9 @@ export function createApp({ db, secret }) {
   api.use(insuranceRoutes({ db }));
   api.use(settingsRoutes({ db }));
   api.use(reportRoutes({ db }));
+  api.use(engagementRoutes({ db, messenger, config }));
+  api.use(documentRoutes({ db, storage }));
+  api.use(paymentRoutes({ db, config, fetchImpl, messenger }));
   app.use('/api', api);
   app.use('/api', (_req, _res, next) => next(new HttpError(404, 'Not found')));
 
@@ -60,6 +88,7 @@ export function createApp({ db, secret }) {
       return res.status(err.status).json({ error: err.message, details: err.details });
     }
     if (err?.type === 'entity.parse.failed') return res.status(400).json({ error: 'Invalid JSON' });
+    if (err?.type === 'entity.too.large') return res.status(413).json({ error: 'Upload is too large' });
     if (String(err?.message).includes('FOREIGN KEY')) return res.status(400).json({ error: 'Referenced record does not exist' });
     if (String(err?.message).includes('UNIQUE')) return res.status(409).json({ error: 'Record already exists' });
     if (String(err?.message).includes('CHECK constraint')) return res.status(400).json({ error: 'Invalid value' });

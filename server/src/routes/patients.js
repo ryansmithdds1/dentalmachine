@@ -5,7 +5,7 @@ import { patientBalance, primaryPolicy } from '../services.js';
 
 const FIELDS = [
   'first_name', 'last_name', 'preferred_name', 'dob', 'gender', 'email', 'phone', 'address', 'city', 'state', 'zip',
-  'emergency_contact', 'medical_alerts', 'allergies', 'medications', 'notes', 'primary_provider_id', 'status',
+  'emergency_contact', 'medical_alerts', 'allergies', 'medications', 'notes', 'primary_provider_id', 'status', 'sms_opt_in', 'email_opt_in',
 ];
 
 function validate(row) {

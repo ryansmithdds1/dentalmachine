@@ -2,8 +2,8 @@ import { Router } from 'express';
 import { requirePermission, HttpError } from '../auth.js';
 import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, normalizeDateTime, practiceNow } from '../util.js';
 
-const STATUSES = ['scheduled', 'confirmed', 'checked_in', 'in_chair', 'completed', 'cancelled', 'no_show'];
-const INACTIVE = "('cancelled','no_show')";
+export const STATUSES = ['scheduled', 'confirmed', 'checked_in', 'in_chair', 'completed', 'cancelled', 'no_show'];
+export const INACTIVE = "('cancelled','no_show')";
 
 const SELECT = `SELECT a.*, p.first_name, p.last_name, p.preferred_name, p.phone, p.medical_alerts,
   pr.name AS provider_name, pr.color AS provider_color, o.name AS operatory_name
@@ -22,7 +22,7 @@ function findConflicts(db, practiceId, { start_time, end_time, provider_id, oper
   );
 }
 
-function validateAppt(db, practiceId, row) {
+export function validateAppt(db, practiceId, row) {
   row.start_time = normalizeDateTime(row.start_time, 'start_time');
   row.end_time = normalizeDateTime(row.end_time, 'end_time');
   if (row.end_time <= row.start_time) throw new HttpError(400, 'end_time must be after start_time');
@@ -41,6 +41,28 @@ function validateAppt(db, practiceId, row) {
     }
     throw new HttpError(409, `Scheduling conflict: ${[...kinds].join(', ')} already booked`, { conflicts });
   }
+}
+
+const toMin = (hhmm) => {
+  const [h, m] = hhmm.split(':').map(Number);
+  return h * 60 + m;
+};
+const fromMin = (n) => `${String(Math.floor(n / 60)).padStart(2, '0')}:${String(n % 60).padStart(2, '0')}`;
+
+// Free start times for a provider on a day, on a grid (minutes) within opening hours.
+export function openSlots(db, practiceId, providerId, date, { duration = 60, open = '08:00', close = '17:00', step = 10, after = null } = {}) {
+  const busy = db.all(
+    `SELECT start_time, end_time FROM appointments WHERE practice_id = ? AND provider_id = ? AND status NOT IN ${INACTIVE}
+     AND start_time >= ? AND start_time < ? ORDER BY start_time`,
+    practiceId, providerId, `${date} 00:00`, `${date} 24:00`,
+  ).map((a) => [toMin(a.start_time.slice(11)), toMin(a.end_time.slice(11))]);
+  const slots = [];
+  for (let t = toMin(open); t + duration <= toMin(close); t += step) {
+    const slot = `${date} ${fromMin(t)}`;
+    if (after && slot <= after) continue;
+    if (!busy.some(([s, e]) => t < e && t + duration > s)) slots.push(slot);
+  }
+  return slots;
 }
 
 export default function scheduleRoutes({ db }) {
@@ -91,6 +113,8 @@ export default function scheduleRoutes({ db }) {
     if (!['cancelled', 'no_show'].includes(merged.status)) validateAppt(db, req.user.practice_id, merged);
     else requireOneOf(merged.status, STATUSES, 'status');
     const row = pick(merged, FIELDS);
+    // A moved appointment needs a fresh reminder and confirmation.
+    if (row.start_time !== existing.start_time) Object.assign(row, { reminder_sent_at: null, confirmed_at: null });
     update(db, 'appointments', existing.id, req.user.practice_id, row);
     audit(db, req, 'appointment.update', 'appointments', existing.id, { fields: Object.keys(changes) });
     res.json(db.get(`${SELECT} WHERE a.id = ?`, existing.id));
@@ -105,7 +129,10 @@ export default function scheduleRoutes({ db }) {
     if (['cancelled', 'no_show'].includes(existing.status) && !['cancelled', 'no_show'].includes(status)) {
       validateAppt(db, req.user.practice_id, { ...existing, status });
     }
-    db.run('UPDATE appointments SET status = ? WHERE id = ?', status, existing.id);
+    db.run(
+      "UPDATE appointments SET status = ?, confirmed_at = CASE WHEN ? = 'confirmed' THEN COALESCE(confirmed_at, datetime('now')) ELSE confirmed_at END WHERE id = ?",
+      status, status, existing.id,
+    );
     if (status === 'cancelled' || status === 'no_show') {
       db.run("UPDATE procedures SET appointment_id = NULL WHERE appointment_id = ? AND status = 'planned'", existing.id);
     }
@@ -122,15 +149,7 @@ export default function scheduleRoutes({ db }) {
     const duration = Math.max(10, Number(req.query.duration) || 60);
     const open = req.query.open || '08:00';
     const close = req.query.close || '17:00';
-    const busy = db.all(
-      `SELECT start_time, end_time FROM appointments WHERE practice_id = ? AND provider_id = ? AND status NOT IN ${INACTIVE}
-       AND start_time >= ? AND start_time < ? ORDER BY start_time`,
-      pid, Number(provider_id), `${date} 00:00`, `${date} 24:00`,
-    ).map((a) => [toMin(a.start_time.slice(11)), toMin(a.end_time.slice(11))]);
-    const slots = [];
-    for (let t = toMin(open); t + duration <= toMin(close); t += 10) {
-      if (!busy.some(([s, e]) => t < e && t + duration > s)) slots.push(`${date} ${fromMin(t)}`);
-    }
+    const slots = openSlots(db, pid, Number(provider_id), date, { duration, open, close });
     res.json({ date, provider_id: Number(provider_id), duration, slots });
   });
 
@@ -159,8 +178,3 @@ export default function scheduleRoutes({ db }) {
   return r;
 }
 
-const toMin = (hhmm) => {
-  const [h, m] = hhmm.split(':').map(Number);
-  return h * 60 + m;
-};
-const fromMin = (n) => `${String(Math.floor(n / 60)).padStart(2, '0')}:${String(n % 60).padStart(2, '0')}`;

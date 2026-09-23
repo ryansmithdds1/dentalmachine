@@ -110,5 +110,40 @@ export default function reportRoutes({ db }) {
     res.json({ as_of: today, totals: { ...totals, total: rows.reduce((s, r) => s + r.balance, 0) }, rows });
   });
 
+  // End-of-day "day sheet": what was produced, collected (by payment method, for the deposit) and how the schedule went.
+  r.get('/reports/daysheet', requirePermission('reports:read'), (req, res) => {
+    const pid = req.user.practice_id;
+    const date = req.query.date || practiceNow(db, pid).slice(0, 10);
+    if (!DATE.test(date)) throw new HttpError(400, 'date must be YYYY-MM-DD');
+    const entries = db.all(
+      `SELECT l.*, p.first_name, p.last_name, pv.name AS provider_name, u.name AS created_by_name
+       FROM ledger_entries l JOIN patients p ON p.id = l.patient_id LEFT JOIN providers pv ON pv.id = l.provider_id
+       LEFT JOIN users u ON u.id = l.created_by WHERE l.practice_id = ? AND l.entry_date = ? ORDER BY l.type, l.id`, pid, date,
+    );
+    const sum = (fn) => entries.filter(fn).reduce((s, e) => s + e.amount, 0);
+    const byMethod = {};
+    for (const e of entries.filter((x) => ['payment', 'insurance_payment'].includes(x.type))) {
+      const key = e.type === 'insurance_payment' ? `insurance_${e.method || 'check'}` : e.method || 'other';
+      byMethod[key] = (byMethod[key] || 0) - e.amount;
+    }
+    const appts = db.all(
+      `SELECT status, COUNT(*) AS n FROM appointments WHERE practice_id = ? AND start_time >= ? AND start_time < ? GROUP BY status`,
+      pid, `${date} 00:00`, `${date} 24:00`,
+    );
+    res.json({
+      date,
+      totals: {
+        production: sum((e) => e.type === 'charge'),
+        patient_payments: -sum((e) => e.type === 'payment'),
+        insurance_payments: -sum((e) => e.type === 'insurance_payment'),
+        adjustments: sum((e) => e.type === 'adjustment'),
+        refunds: sum((e) => e.type === 'refund'),
+      },
+      deposit: byMethod,
+      appointments: Object.fromEntries(appts.map((a) => [a.status, a.n])),
+      entries,
+    });
+  });
+
   return r;
 }

@@ -258,7 +258,134 @@ CREATE TABLE IF NOT EXISTS audit_log (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_audit ON audit_log(practice_id, created_at);
+
+CREATE TABLE IF NOT EXISTS messages (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER REFERENCES patients(id),
+  appointment_id INTEGER REFERENCES appointments(id),
+  channel TEXT NOT NULL CHECK (channel IN ('sms','email')),
+  kind TEXT NOT NULL DEFAULT 'custom',
+  to_address TEXT NOT NULL,
+  subject TEXT,
+  body TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued','sent','failed')),
+  provider_id TEXT,
+  error TEXT,
+  created_by INTEGER REFERENCES users(id),
+  sent_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_messages_patient ON messages(practice_id, patient_id);
+
+CREATE TABLE IF NOT EXISTS booking_requests (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  first_name TEXT NOT NULL,
+  last_name TEXT NOT NULL,
+  dob TEXT,
+  phone TEXT,
+  email TEXT,
+  reason TEXT,
+  provider_id INTEGER REFERENCES providers(id),
+  requested_start TEXT NOT NULL,
+  duration INTEGER NOT NULL DEFAULT 60,
+  new_patient INTEGER NOT NULL DEFAULT 1,
+  notes TEXT,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','accepted','declined')),
+  patient_id INTEGER REFERENCES patients(id),
+  appointment_id INTEGER REFERENCES appointments(id),
+  handled_by INTEGER REFERENCES users(id),
+  handled_at TEXT,
+  ip TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS form_requests (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  kind TEXT NOT NULL DEFAULT 'medical_history',
+  token_hash TEXT NOT NULL UNIQUE,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','completed','expired')),
+  expires_at TEXT NOT NULL,
+  created_by INTEGER REFERENCES users(id),
+  completed_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS patient_forms (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  request_id INTEGER REFERENCES form_requests(id),
+  kind TEXT NOT NULL,
+  data TEXT NOT NULL,
+  signature_name TEXT NOT NULL,
+  signature_image TEXT,
+  signed_at TEXT NOT NULL DEFAULT (datetime('now')),
+  ip TEXT,
+  user_agent TEXT
+);
+
+CREATE TABLE IF NOT EXISTS documents (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  category TEXT NOT NULL DEFAULT 'document' CHECK (category IN ('xray','photo','document','consent','insurance_card','referral','other')),
+  filename TEXT NOT NULL,
+  mime TEXT NOT NULL,
+  size INTEGER NOT NULL,
+  storage_key TEXT NOT NULL,
+  encrypted INTEGER NOT NULL DEFAULT 0,
+  tooth TEXT,
+  notes TEXT,
+  uploaded_by INTEGER REFERENCES users(id),
+  deleted_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_documents_patient ON documents(practice_id, patient_id);
+
+CREATE TABLE IF NOT EXISTS payment_requests (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  amount INTEGER NOT NULL,
+  provider TEXT NOT NULL DEFAULT 'stripe',
+  session_id TEXT UNIQUE,
+  url TEXT,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','paid','expired','cancelled')),
+  ledger_entry_id INTEGER REFERENCES ledger_entries(id),
+  created_by INTEGER REFERENCES users(id),
+  paid_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `;
+
+// Columns added after the first release. SQLite has no ADD COLUMN IF NOT EXISTS, so check first.
+const COLUMNS = [
+  ['practices', 'slug', 'TEXT'],
+  ['practices', 'online_booking', 'INTEGER NOT NULL DEFAULT 0'],
+  ['practices', 'reminder_hours', 'INTEGER NOT NULL DEFAULT 48'],
+  ['practices', 'require_mfa', 'INTEGER NOT NULL DEFAULT 0'],
+  ['users', 'mfa_secret', 'TEXT'],
+  ['users', 'mfa_enabled', 'INTEGER NOT NULL DEFAULT 0'],
+  ['users', 'mfa_last_step', 'INTEGER'],
+  ['patients', 'sms_opt_in', 'INTEGER NOT NULL DEFAULT 1'],
+  ['patients', 'email_opt_in', 'INTEGER NOT NULL DEFAULT 1'],
+  ['appointments', 'confirm_token_hash', 'TEXT'],
+  ['appointments', 'reminder_sent_at', 'TEXT'],
+  ['appointments', 'confirmed_at', 'TEXT'],
+];
+
+function migrate(db) {
+  for (const [table, column, def] of COLUMNS) {
+    const exists = db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === column);
+    if (!exists) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${def}`);
+  }
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_practice_slug ON practices(slug)');
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_appt_token ON appointments(confirm_token_hash)');
+}
 
 export function openDb(path = process.env.DATABASE_PATH || './data/dentalmachine.db') {
   if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
@@ -266,6 +393,7 @@ export function openDb(path = process.env.DATABASE_PATH || './data/dentalmachine
   db.exec('PRAGMA foreign_keys = ON;');
   if (path !== ':memory:') db.exec('PRAGMA journal_mode = WAL;');
   db.exec(SCHEMA);
+  migrate(db);
   return wrap(db);
 }
 

@@ -1,3 +1,4 @@
+import { randomBytes, createHash } from 'node:crypto';
 import { HttpError } from './auth.js';
 
 // Picks allowed fields from a body, trimming strings and turning '' into null.
@@ -108,4 +109,19 @@ export function normalizeDateTime(value, name) {
   const m = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})/.exec(String(value ?? ''));
   if (!m) throw new HttpError(400, `${name} must be 'YYYY-MM-DD HH:MM'`);
   return `${m[1]} ${m[2]}`;
+}
+
+// Opaque URL tokens: only the SHA-256 hash is stored, so a DB leak doesn't expose live links.
+export function newToken() {
+  const token = randomBytes(24).toString('base64url');
+  return { token, hash: hashToken(token) };
+}
+export const hashToken = (token) => createHash('sha256').update(String(token)).digest('hex');
+
+// "Tue, Sep 22 at 9:00 AM" from a practice-local 'YYYY-MM-DD HH:MM'.
+export function friendlyDateTime(value) {
+  const d = new Date(`${value.slice(0, 10)}T12:00:00Z`);
+  const day = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' });
+  const [h, m] = value.slice(11, 16).split(':').map(Number);
+  return `${day} at ${((h + 11) % 12) + 1}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`;
 }
