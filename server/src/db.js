@@ -2088,6 +2088,7 @@ const COLUMNS = [
   ['insurance_carriers', 'timely_filing_days', 'INTEGER'],
   // Digital lab Rx: the prescription, its files from the chart, and the lab's private link and updates.
   ['booking_requests', 'source', 'TEXT'],
+  ['practices', 'onboarding_dismissed', 'INTEGER NOT NULL DEFAULT 0'],
   ['appointments', 'checked_in_via', 'TEXT'],
   ['appointments', 'ready_texted_at', 'TEXT'],
   ['lab_cases', 'rx', 'TEXT'],

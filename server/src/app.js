@@ -36,6 +36,8 @@ import patientCareRoutes, { learnPublicRoutes } from './routes/patientcare.js';
 import checkinRoutes, { checkinPublicRoutes } from './routes/checkin.js';
 import lenderRoutes, { lenderWebhooks } from './routes/lenders.js';
 import reputationRoutes, { reputationPublicRoutes } from './routes/reputation.js';
+import statusRoutes from './routes/status.js';
+import onboardingRoutes from './routes/onboarding.js';
 import { createGoogleBusiness } from './reviews.js';
 import { createXrayAi, registerXrayAi } from './xrayai.js';
 import { registerFill } from './fill.js';
@@ -192,6 +194,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   app.use(readAudit(db));
 
   app.get('/api/health', (_req, res) => res.json({ ok: true }));
+  app.use('/api/public', statusRoutes({ db, storage, messenger }));
   app.use('/api/auth', authRoutes({ db, secret, config, fetchImpl, messenger }));
   app.use('/api/public', (_req, res, next) => {
     res.set('Cache-Control', 'no-store');
@@ -252,6 +255,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(checkinRoutes({ db, messenger }));
   api.use(lenderRoutes({ db, messenger }));
   api.use(reputationRoutes({ db, config, secret, gbp }));
+  api.use(onboardingRoutes({ db, messenger, payments }));
   api.use(attachmentRoutes({ db, storage, sender: attachmentSender ?? createAttachmentSender(attachmentConfig(process.env, config.ediMode), fetchImpl) }));
   api.use(billingRoutes({ db, payments, config, messenger }));
   api.use(insuranceRoutes({ db }));

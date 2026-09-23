@@ -75,9 +75,25 @@ export async function hit(key, windowMs, by = 1) {
 // clearinghouse polling). Returns null when the job is already running somewhere.
 const running = new Set();
 const RELEASE = "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end";
-export async function runExclusive(name, ttlMs, fn) {
+// When each background job last ran on this server, and how it went (for the status page).
+const lastRuns = new Map();
+export const jobRuns = () => [...lastRuns.entries()].map(([name, r]) => ({ name, ...r }));
+const track = async (name, fn) => {
+  const started = new Date().toISOString();
+  try {
+    const out = await fn();
+    lastRuns.set(name, { started, finished: new Date().toISOString(), ok: true });
+    return out;
+  } catch (err) {
+    lastRuns.set(name, { started, finished: new Date().toISOString(), ok: false });
+    throw err;
+  }
+};
+
+export async function runExclusive(name, ttlMs, job) {
   if (running.has(name)) return null;
   running.add(name);
+  const fn = () => track(name, job);
   try {
     if (!redis) return await fn();
     const key = `${PREFIX}:lock:${name}`;

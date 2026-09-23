@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import Onboarding from '../components/Onboarding.jsx';
 import { Link, useNavigate } from 'react-router-dom';
 import { useApi } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
@@ -64,6 +65,7 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {user.role === 'admin' && <Onboarding />}
       {h && (
         <div className="grid grid-4">
           <Stat label="Scheduled production" value={money(h.production).replace('.00', '')}

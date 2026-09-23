@@ -25,6 +25,11 @@ copy. Nothing here is legal advice.
 | **The assistant** (Anthropic's Claude API) | `ANTHROPIC_API_KEY` | What staff say to it, and what it looks up to answer: patient names, dates of birth, appointments, balances, notes and perio readings being entered | Anthropic signs BAAs for its API; ask for one (and zero data retention) before using the assistant with real patients. Leave the key unset (or `ASSISTANT=off`) until then. |
 | **Bank data** (Plaid) and **books** (QuickBooks Online) | `PLAID_*`, `QBO_*` | The practice's own bank lines and accounting data. Nothing about patients is sent: deposits pushed to QuickBooks are totals with a generic memo. | No PHI, so no BAA is needed; both are covered by their own terms (Plaid end-user privacy policy, Intuit's developer terms). Keep deposit memos free of patient names if you edit them. |
 | **Speech recognition in the browser** (voice input to the assistant) | the staff member's browser | The spoken words | Chrome's built-in recognition sends audio to Google's servers unless it runs on the device. The app asks for on-device recognition where the browser supports it, but can't guarantee it. Until a BAA-covered speech service is added, type instead of speaking for anything identifying, or use a browser with on-device recognition. |
+| **AI features** (scribe, x-ray reading with `XRAY_AI=claude`, benefit and EOB reading, claim narratives and appeals, Ask your data, the AI receptionist, call summaries, review replies) | `ANTHROPIC_API_KEY` | The facts for the one task: a visit's conversation and chart summary, an x-ray, a benefit summary or EOB, a claim's chart facts, the numbers a question needs, a phone conversation | Covered by the same Anthropic BAA as the assistant. The scribe's conversation isn't stored. |
+| **X-ray AI vendor** (Pearl, Overjet, VideaHealth) | `XRAY_AI=vendor`, `XRAY_AI_*` | X-ray images | These FDA-cleared services sign BAAs as standard. |
+| **Phone calls** (Twilio Voice: the office line, recordings, the AI receptionist, confirmation calls) | `TWILIO_*` | Callers' numbers, what's said, recordings | Covered by Twilio's BAA for its HIPAA-eligible products. Recordings are copied into the practice's encrypted storage. Check your state's call-recording consent rules before turning recording on. |
+| **Call transcription** (Deepgram) | `TRANSCRIBE=deepgram`, `DEEPGRAM_API_KEY` | Call recordings | Deepgram signs BAAs on its enterprise plans; get one before transcribing real calls. |
+| **Dental labs** (digital Rx links) | the practice | The patient's name, age and sex, the prescription and the files the dentist attaches | The lab is the practice's own business associate (as with paper slips) — keep its BAA on file. |
 | **Claim attachments** (NEA/Vyne, DentalXChange) | `ATTACHMENTS_*` | X-rays and narratives sent with claims | Standard BAA. |
 | **Payment terminals / card processing** (Stripe) | `STRIPE_*` | Name, amount, card | Processing a payment is generally exempt from the BAA requirement (HIPAA §1179), and Stripe does not sign BAAs. Keep clinical detail out of payment descriptions. The app sends the patient's name and email, amounts and plain descriptions ("account payment"; for an online-booking deposit, the visit type, such as "New patient exam"). |
 
@@ -34,6 +39,9 @@ copy. Nothing here is legal advice.
 | --- | --- |
 | **Single sign-on** (Google, Microsoft, Okta) | Sees staff identities only, never patient data. |
 | **Your own imaging software** on office PCs | Runs inside the practice. The imaging bridge connects it to the app. |
+| **Google Business Profile** (reviews and the Book button) | Reviews are public; replies are written never to confirm someone is a patient. No PHI is sent. |
+| **Financing lenders** (CareCredit, Sunbit, Cherry…) | The patient applies directly with the lender; the app sends the patient a link and records the lender's decision. Lender callbacks carry an amount and status. |
+| **MCP / API clients** the practice connects (Claude Desktop, its own tools) | The practice chooses them and the data they may read (the key's access); treat them as the practice's own vendors. |
 | **Domain and DNS** | Doesn't carry the data. (The TLS certificate and CDN in front of the app is part of hosting.) |
 
 ## Before going live

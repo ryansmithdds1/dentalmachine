@@ -15,7 +15,7 @@ import { readOfflineDay } from './offline.js';
 import { ClockButton } from './components/TimeClock.jsx';
 import { useLiveEvents } from './live.js';
 import MfaSetup from './components/MfaSetup.jsx';
-import { Sun, CalendarDays, Users, MessageSquare, Inbox as InboxIcon, PhoneCall, Megaphone, Receipt, ListChecks, ChartColumn, Landmark, Settings as SettingsIcon, Search, PanelLeftClose, PanelLeftOpen, LogOut, Keyboard, Monitor, Moon, Sparkles, Phone, Building2, Star } from 'lucide-react';
+import { Sun, CalendarDays, Users, MessageSquare, Inbox as InboxIcon, PhoneCall, Megaphone, Receipt, ListChecks, ChartColumn, Landmark, Settings as SettingsIcon, Search, PanelLeftClose, PanelLeftOpen, LogOut, Keyboard, Monitor, Moon, Sparkles, Phone, Building2, Star, HelpCircle } from 'lucide-react';
 import { getThemePref, setThemePref, watchTheme } from './theme.js';
 
 // Pages load on demand so the first screen appears quickly.
@@ -64,6 +64,8 @@ const PayResult = lazy(() => import('./pages/public/PayResult.jsx'));
 const LabCasePage = lazy(() => import('./pages/public/LabCasePage.jsx'));
 const LearnPage = lazy(() => import('./pages/public/LearnPage.jsx'));
 const CheckinPage = lazy(() => import('./pages/public/CheckinPage.jsx'));
+const StatusPage = lazy(() => import('./pages/public/StatusPage.jsx'));
+const Help = lazy(() => import('./pages/Help.jsx'));
 
 // Patient-facing pages work without a staff login.
 export default function App() {
@@ -75,6 +77,7 @@ export default function App() {
         <Route path="/lab/:token" element={<LabCasePage />} />
         <Route path="/learn/:practice/:slug" element={<LearnPage />} />
         <Route path="/checkin/:practice" element={<CheckinPage />} />
+        <Route path="/status" element={<StatusPage />} />
         <Route path="/f/:token" element={<IntakePage />} />
         <Route path="/r/:token" element={<ReviewPage />} />
         <Route path="/s/:token" element={<SurveyPage />} />
@@ -171,6 +174,7 @@ function StaffApp() {
     ['/finance', Landmark, 'Finance', can('finance:read')],
     ['/group', Building2, 'Group', user.role === 'admin' || !!practice?.org_role],
     ['/settings', SettingsIcon, 'Settings', true],
+    ['/help', HelpCircle, 'Help', true],
   ];
 
   return (
@@ -342,6 +346,7 @@ function Shell({ nav }) {
             <Route path="/calls" element={<Calls />} />
             <Route path="/group" element={<Group />} />
             <Route path="/reputation" element={<Reputation />} />
+            <Route path="/help" element={<Help />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

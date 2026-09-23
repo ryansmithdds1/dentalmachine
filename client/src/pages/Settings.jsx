@@ -1546,6 +1546,7 @@ function Integrations() {
         ))}
       </div>
       <CardReaderSettings />
+      <XrayAiSetting />
       <div className="card">
         <h2>Platform</h2>
         <dl className="kv">
@@ -1647,5 +1648,28 @@ function PhonePreview({ from, label, body, emailOnly, subject }) {
       </div>
       <div className="muted" style={{ fontSize: 12, textAlign: 'center', marginTop: 6 }}>{label} · {body.length} characters{!emailOnly && body.length > 160 ? ` · sent as ${Math.ceil(body.length / 153)} texts` : ''}</div>
     </aside>
+  );
+}
+
+// AI x-ray reading: whether new x-rays are read automatically as they arrive.
+function XrayAiSetting() {
+  const { data: ai } = useApi('/xray-ai');
+  const { data: practice, reload } = useApi('/practice');
+  const [err, setErr] = useState(null);
+  if (!ai || !practice) return null;
+  return (
+    <div className="card">
+      <h2>AI x-ray reading</h2>
+      <ErrorBox error={err} />
+      {ai.enabled ? (
+        <>
+          <div className="muted" style={{ fontSize: 13 }}>Engine: {ai.label || ai.mode}{ai.cleared ? ' (FDA-cleared)' : ' — decision support, not FDA-cleared: the dentist confirms every finding'}.</div>
+          <label className="checkbox" style={{ marginTop: 8 }}>
+            <input type="checkbox" checked={!!practice.xray_ai_auto} onChange={async (e) => { setErr(null); try { await api.put('/practice', { xray_ai_auto: e.target.checked }); reload(); } catch (x) { setErr(x); } }} />
+            Read new x-rays automatically when they’re captured or uploaded
+          </label>
+        </>
+      ) : <div className="muted" style={{ fontSize: 13 }}>Off on this server. Set XRAY_AI=vendor (with XRAY_AI_URL, XRAY_AI_KEY) for an FDA-cleared service, or XRAY_AI=claude.</div>}
+    </div>
   );
 }
