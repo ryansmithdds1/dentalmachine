@@ -1,3 +1,4 @@
+import { autoReceipt } from './receipts.js';
 import { randomBytes } from 'node:crypto';
 import { HttpError } from './auth.js';
 import { insert, practiceNow } from './util.js';
@@ -148,7 +149,7 @@ async function autopayPlan(db, payments, messenger, plan, today) {
     return { plan_id: plan.id, ok: true, amount, already_posted: true };
   }
   if (out.ok) {
-    await insert(db, 'ledger_entries', {
+    const entryId = await insert(db, 'ledger_entries', {
       practice_id: plan.practice_id, patient_id: plan.patient_id, type: 'payment', amount: -amount,
       description: `Autopay — payment plan (${plan.brand || 'card'} •••• ${plan.last4})`, method: 'credit_card', reference: out.reference,
       payment_plan_id: plan.id, entry_date: today,
@@ -156,6 +157,7 @@ async function autopayPlan(db, payments, messenger, plan, today) {
     await db.run('UPDATE payment_plans SET autopay_failures = 0, autopay_message = ? WHERE id = ?', `Charged $${(amount / 100).toFixed(2)} on ${today}`, plan.id);
     const after = await planStatus(db, await db.get('SELECT * FROM payment_plans WHERE id = ?', plan.id), today);
     if (after.remaining <= 0) await db.run("UPDATE payment_plans SET status = 'completed' WHERE id = ?", plan.id);
+    await autoReceipt(db, messenger, entryId);
     return { plan_id: plan.id, ok: true, amount };
   } else {
     const failures = (plan.autopay_failures || 0) + 1;

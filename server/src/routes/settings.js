@@ -96,7 +96,7 @@ export default function settingsRoutes({ db, secret, config = {} }) {
   r.get('/message-templates/defaults', (_req, res) => res.json(DEFAULT_TEMPLATES));
   r.get('/message-templates/meta', (_req, res) => res.json(TEMPLATE_META));
   r.put('/practice', requireAdmin, async (req, res) => {
-    const row = pick(req.body, ['name', 'address', 'city', 'state', 'zip', 'phone', 'email', 'tax_id', 'npi', 'timezone', 'slug', 'online_booking', 'reminder_hours', 'require_mfa', 'office_hours', 'daily_goal', 'sms_number', 'review_url', 'review_requests', 'review_threshold', 'instant_booking', 'idle_timeout_minutes', 'message_templates', 'hygiene_goal', 'portal_enabled', 'lock_date', 'adjustment_approval_limit', 'reminder_steps', 'recall_steps', 'recall_auto', 'finance_charge_bps', 'finance_charge_min', 'late_fee', 'collection_agency', 'financing']);
+    const row = pick(req.body, ['name', 'address', 'city', 'state', 'zip', 'phone', 'email', 'tax_id', 'npi', 'timezone', 'slug', 'online_booking', 'reminder_hours', 'require_mfa', 'office_hours', 'daily_goal', 'sms_number', 'review_url', 'review_requests', 'review_threshold', 'instant_booking', 'idle_timeout_minutes', 'message_templates', 'hygiene_goal', 'portal_enabled', 'lock_date', 'adjustment_approval_limit', 'reminder_steps', 'recall_steps', 'recall_auto', 'finance_charge_bps', 'finance_charge_min', 'late_fee', 'collection_agency', 'financing', 'auto_receipts']);
     if (row.financing !== undefined) row.financing = cleanFinancing(row.financing);
     if (row.message_templates != null) row.message_templates = validateTemplates(row.message_templates);
     if (row.review_url && !/^https:\/\/\S+$/.test(row.review_url)) throw new HttpError(400, 'Review link must start with https://');
@@ -141,6 +141,7 @@ export default function settingsRoutes({ db, secret, config = {} }) {
     }
     if (row.recall_steps !== undefined && row.recall_steps !== null) row.recall_steps = JSON.stringify(validateRecallSteps(typeof row.recall_steps === 'string' ? JSON.parse(row.recall_steps) : row.recall_steps));
     if (row.recall_auto != null) row.recall_auto = row.recall_auto ? 1 : 0;
+    if (row.auto_receipts != null) row.auto_receipts = row.auto_receipts ? 1 : 0;
     if (row.reminder_hours != null) {
       row.reminder_hours = Number(row.reminder_hours);
       if (!Number.isInteger(row.reminder_hours) || row.reminder_hours < 0 || row.reminder_hours > 168) throw new HttpError(400, 'Reminder lead time must be 0-168 hours');

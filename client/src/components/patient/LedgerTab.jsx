@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { api } from '../../api.js';
+import { api, openFile } from '../../api.js';
 import { useApi } from '../../hooks.js';
 import { useAuth } from '../../auth.jsx';
 import { money, fmtDate, label, toCents } from '../../format.js';
@@ -98,7 +98,8 @@ export default function LedgerTab({ patient, onChange }) {
                   <td className="num">{e.amount < 0 ? money(-e.amount) : ''}</td>
                   <td className="num">{money(e.running_balance)}</td>
                   {can('billing:write') && (
-                    <td className="num">
+                    <td className="num" style={{ whiteSpace: 'nowrap' }}>
+                      {e.type === 'payment' && e.amount < 0 && <button className="small" style={{ marginRight: 4 }} onClick={() => setModal({ receipt: e })}>Receipt</button>}
                       {!e.voided_at && !e.reverses_id && !e.claim_id && <button className="small" title={e.type === 'charge' ? 'Void this charge and put the procedure back to planned' : 'Void this entry'} onClick={() => setModal({ void: e })}>Void</button>}
                     </td>
                   )}
@@ -129,6 +130,7 @@ export default function LedgerTab({ patient, onChange }) {
           </table>
         </div>
       )}
+      {modal?.receipt && <Modal title={`Receipt #${modal.receipt.id}`} onClose={() => setModal(null)}><ReceiptActions patient={patient} entry={modal.receipt} /></Modal>}
       {modal === 'paylink' && <Modal title="Send card payment link" onClose={() => setModal(null)}><PayLinkForm patient={patient} balance={data.patient_portion} fullBalance={data.balance} onDone={() => { setModal(null); reloadRequests(); }} /></Modal>}
       {modal === 'adjustment' && <Modal title="Ledger adjustment" onClose={() => setModal(null)}><AdjustmentForm patient={patient} lockDate={data.lock_date} onDone={done} /></Modal>}
       {modal === 'transfer' && <Modal title="Transfer within the family" onClose={() => setModal(null)}><TransferForm patient={patient} balance={data.balance} onDone={done} /></Modal>}
@@ -201,9 +203,16 @@ function DateField({ value, onChange, lockDate }) {
 function PaymentForm({ patient, balance, lockDate, onDone }) {
   const { data: plans } = useApi(`/patients/${patient.id}/payment-plans`);
   const active = (plans || []).filter((p) => p.status === 'active');
-  const [form, setForm] = useState({ amount: balance > 0 ? (balance / 100).toFixed(2) : '', method: 'credit_card', reference: '', payment_plan_id: '', entry_date: '' });
+  const [form, setForm] = useState({ amount: balance > 0 ? (balance / 100).toFixed(2) : '', method: 'credit_card', reference: '', payment_plan_id: '', entry_date: '', receipt: patient.email && patient.email_opt_in ? 'email' : '' });
   const { submit, busy, error } = useSubmit(async () => {
-    await api.post(`/patients/${patient.id}/payments`, { ...form, entry_date: form.entry_date || undefined, amount: toCents(form.amount), payment_plan_id: form.payment_plan_id ? Number(form.payment_plan_id) : null });
+    const receiptTab = form.receipt === 'print' ? window.open('', '_blank') : null;
+    try {
+      const out = await api.post(`/patients/${patient.id}/payments`, { ...form, receipt: ['email', 'sms'].includes(form.receipt) ? form.receipt : null, entry_date: form.entry_date || undefined, amount: toCents(form.amount), payment_plan_id: form.payment_plan_id ? Number(form.payment_plan_id) : null });
+      if (receiptTab) await openFile(`/payments/${out.entry.id}/receipt.pdf`, receiptTab);
+    } catch (e) {
+      receiptTab?.close();
+      throw e;
+    }
     onDone();
   });
   return (
@@ -219,6 +228,15 @@ function PaymentForm({ patient, balance, lockDate, onDone }) {
         </label>
         <label>Reference (check #, last 4, auth code)<input value={form.reference} onChange={(e) => setForm({ ...form, reference: e.target.value })} /></label>
         <DateField value={form.entry_date} lockDate={lockDate} onChange={(v) => setForm({ ...form, entry_date: v })} />
+        <label>
+          Receipt
+          <select value={form.receipt} onChange={(e) => setForm({ ...form, receipt: e.target.value })}>
+            <option value="">No receipt</option>
+            <option value="print">Print</option>
+            <option value="email" disabled={!patient.email}>Email {patient.email ? `(${patient.email})` : '(no email)'}</option>
+            <option value="sms" disabled={!patient.phone}>Text {patient.phone ? `(${patient.phone})` : '(no phone)'}</option>
+          </select>
+        </label>
         {active.length > 0 && (
           <label className="full">
             Apply to payment plan
@@ -330,5 +348,30 @@ function AdjustmentForm({ patient, lockDate, onDone }) {
       </div>
       <div className="form-actions"><button className="primary" disabled={busy}>Post adjustment</button></div>
     </form>
+  );
+}
+
+function ReceiptActions({ patient, entry }) {
+  const [sent, setSent] = useState(null);
+  const [err, setErr] = useState(null);
+  const send = async (channel) => {
+    setErr(null);
+    try {
+      setSent(await api.post(`/payments/${entry.id}/receipt`, { channel }));
+    } catch (e) {
+      setErr(e);
+    }
+  };
+  return (
+    <div>
+      <p><strong>{money(-entry.amount)}</strong> · {label(entry.method || 'other')} · {fmtDate(entry.entry_date)}{entry.voided_at && <span className="badge warn" style={{ marginLeft: 6 }}>Voided</span>}</p>
+      <ErrorBox error={err} />
+      {sent && <p className={sent.status === 'sent' ? 'muted' : 'text-danger'}>{sent.status === 'sent' ? `✓ Sent to ${sent.to_address}` : `Not sent (${sent.status}${sent.error ? `: ${sent.error}` : ''})`}</p>}
+      <div className="form-actions">
+        <button onClick={() => openFile(`/payments/${entry.id}/receipt.pdf`).catch(setErr)}>Print / PDF</button>
+        <button disabled={!patient.email} onClick={() => send('email')}>Email{patient.email ? ` ${patient.email}` : ''}</button>
+        <button disabled={!patient.phone} onClick={() => send('sms')}>Text{patient.phone ? ` ${patient.phone}` : ''}</button>
+      </div>
+    </div>
   );
 }

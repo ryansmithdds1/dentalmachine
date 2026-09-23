@@ -6,10 +6,11 @@ import { planStatus } from './family.js';
 import { allocate } from '../allocation.js';
 import { accountAging } from '../aging.js';
 import { portalKey } from './portal.js';
+import { receiptData, receiptPdf, sendReceipt } from '../receipts.js';
 
 export const PAYMENT_METHODS = ['cash', 'check', 'credit_card', 'debit_card', 'ach', 'care_credit', 'other'];
 
-export default function billingRoutes({ db, payments = { enabled: false }, config = {} }) {
+export default function billingRoutes({ db, payments = { enabled: false }, config = {}, messenger = null }) {
   const r = Router();
   const patientOr404 = async (req) => await findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient');
 
@@ -59,7 +60,24 @@ export default function billingRoutes({ db, payments = { enabled: false }, confi
     });
     await audit(db, req, 'ledger.payment', 'ledger_entries', id, { amount });
     if (plan && (await planStatus(db, plan, '9999-12-31')).remaining === 0) await db.run("UPDATE payment_plans SET status = 'completed' WHERE id = ?", plan.id);
-    res.status(201).json({ entry: await db.get('SELECT * FROM ledger_entries WHERE id = ?', id), balance: await patientBalance(db, req.user.practice_id, patient.id) });
+    const receipt = ['email', 'sms'].includes(req.body?.receipt) ? await sendReceipt(db, messenger, { entryId: id, practiceId: req.user.practice_id, channel: req.body.receipt, userId: req.user.id }) : null;
+    res.status(201).json({ entry: await db.get('SELECT * FROM ledger_entries WHERE id = ?', id), balance: await patientBalance(db, req.user.practice_id, patient.id), receipt });
+  });
+
+  // ---- Receipts ----
+  r.get('/payments/:lid/receipt.pdf', requirePermission('billing:read'), async (req, res) => {
+    const data = await receiptData(db, Number(req.params.lid), req.user.practice_id);
+    if (!data) throw new HttpError(404, 'Payment not found');
+    await audit(db, req, 'receipt.print', 'ledger_entries', data.entry.id);
+    res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': `inline; filename="receipt-${data.entry.id}.pdf"` }).send(receiptPdf(data));
+  });
+  r.post('/payments/:lid/receipt', requirePermission('billing:write'), async (req, res) => {
+    const channel = req.body?.channel;
+    requireOneOf(channel, ['email', 'sms'], 'channel');
+    if (!(await receiptData(db, Number(req.params.lid), req.user.practice_id))) throw new HttpError(404, 'Payment not found');
+    const msg = await sendReceipt(db, messenger, { entryId: Number(req.params.lid), practiceId: req.user.practice_id, channel, userId: req.user.id });
+    if (!msg) throw new HttpError(400, channel === 'sms' ? 'No mobile number that accepts texts on this account' : 'No email address that accepts email on this account');
+    res.status(201).json(msg);
   });
 
   // ---- Adjustment types ----

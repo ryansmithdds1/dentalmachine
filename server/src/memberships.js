@@ -1,3 +1,4 @@
+import { autoReceipt } from './receipts.js';
 import { HttpError } from './auth.js';
 import { insert, practiceNow } from './util.js';
 import { preferredChannel, sendMessage } from './messaging.js';
@@ -129,13 +130,14 @@ async function billPeriod(db, payments, m, today, messenger) {
       });
       if (out.ambiguous) return { ...result, pending: true, reason: out.reason };
       if (out.ok) {
-        await db.tx(async () => {
-          if (await db.get("SELECT id FROM ledger_entries WHERE membership_id = ? AND type = 'payment' AND reference = ?", m.id, out.reference)) return;
-          await insert(db, 'ledger_entries', {
+        const entryId = await db.tx(async () => {
+          if (await db.get("SELECT id FROM ledger_entries WHERE membership_id = ? AND type = 'payment' AND reference = ?", m.id, out.reference)) return null;
+          return insert(db, 'ledger_entries', {
             practice_id: m.practice_id, patient_id: m.patient_id, type: 'payment', amount: -m.price, method: 'credit_card', reference: out.reference,
             description: `Membership autopay (${method.brand || 'card'} •••• ${method.last4})`, entry_date: today, membership_id: m.id,
           });
         });
+        if (entryId) await autoReceipt(db, messenger, entryId);
         result.charged = true;
       } else {
         await db.run("UPDATE memberships SET status = 'past_due', billing_failures = billing_failures + 1, billing_message = ? WHERE id = ?", `${out.reason} (${today})`, m.id);

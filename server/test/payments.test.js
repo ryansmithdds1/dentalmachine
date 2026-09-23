@@ -173,3 +173,49 @@ test('Stripe: card-on-file link, webhook saves the card, off-session autopay cha
   assert.deepEqual([pi.params.amount, pi.params.customer, pi.params.payment_method, pi.params.off_session, pi.params.confirm], ['20000', 'cus_1', 'pm_1', 'true', 'true']);
   assert.match(pi.headers['Idempotency-Key'], new RegExp(`^autopay-${plan.id}-`));
 });
+
+test('receipts: printed, emailed or texted for any payment; automatic for autopay when turned on', async () => {
+  const { api, patient } = await h.practice();
+  const other = await h.practice();
+  const before = h.sent.length;
+  const paid = (await api.post(`/patients/${patient.id}/payments`, { amount: 5000, method: 'check', reference: '1042', receipt: 'email' })).data;
+  assert.equal(paid.receipt.status, 'sent');
+  assert.equal(paid.receipt.kind, 'receipt');
+  const mail = h.sent.at(-1);
+  assert.equal(mail.to, 'jane@example.com');
+  assert.match(mail.subject, /receipt/i);
+  assert.match(mail.body, /\$50\.00/);
+  assert.match(mail.body, new RegExp(`#${paid.entry.id}`));
+
+  const res = await api.get(`/payments/${paid.entry.id}/receipt.pdf`);
+  assert.equal(res.status, 200);
+  assert.match(String(res.data).slice(0, 8), /^%PDF/);
+  assert.equal((await other.api.get(`/payments/${paid.entry.id}/receipt.pdf`)).status, 404, 'not another practice');
+
+  const text = await api.post(`/payments/${paid.entry.id}/receipt`, { channel: 'sms' });
+  assert.equal(text.status, 201);
+  assert.equal(h.sent.at(-1).to, '(512) 555-0100');
+  assert.equal((await api.post(`/payments/${paid.entry.id}/receipt`, { channel: 'fax' })).status, 400);
+  // No receipt unless asked for.
+  const n = h.sent.length;
+  assert.equal((await api.post(`/patients/${patient.id}/payments`, { amount: 100, method: 'cash' })).data.receipt, null);
+  assert.equal(h.sent.length, n);
+  // A charge isn't a payment.
+  const charge = (await api.get(`/patients/${patient.id}/ledger`)).data.entries.find((e) => e.type !== 'payment');
+  if (charge) assert.equal((await api.get(`/payments/${charge.id}/receipt.pdf`)).status, 404);
+
+  // Autopay emails a receipt; turning automatic receipts off stops it.
+  const plan = await planDue(api, patient);
+  const card = (await api.post(`/patients/${patient.id}/payment-methods`, { number: '4242 4242 4242 4242' })).data;
+  await api.put(`/payment-plans/${plan.id}`, { autopay_method_id: card.id });
+  const m1 = h.sent.length;
+  assert.equal((await api.post(`/payment-plans/${plan.id}/charge-now`)).data.ok, true);
+  assert.ok(h.sent.slice(m1).some((m) => m.to === 'jane@example.com' && /receipt/i.test(m.subject)), 'autopay receipt emailed');
+  await api.put('/practice', { auto_receipts: false });
+  const plan2 = await planDue(api, patient);
+  await api.put(`/payment-plans/${plan2.id}`, { autopay_method_id: card.id });
+  const m2 = h.sent.length;
+  assert.equal((await api.post(`/payment-plans/${plan2.id}/charge-now`)).data.ok, true);
+  assert.equal(h.sent.slice(m2).filter((m) => /receipt/i.test(m.subject || '')).length, 0);
+  assert.ok(h.sent.length > before);
+});

@@ -81,6 +81,24 @@ export async function download(path, fallbackName = 'download') {
   saveBlob(await res.blob(), name);
 }
 
+// Opens a file from the API (a PDF to print) in a new tab. The tab opens first so popup blockers allow it.
+export async function openFile(path, w = window.open('', '_blank')) {
+  try {
+    const token = getToken();
+    const res = await fetch(`/api${path}`, { headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...locationHeader() } });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new ApiError(res.status, data.error || res.statusText, data.details);
+    }
+    const url = URL.createObjectURL(await res.blob());
+    if (w) w.location.href = url;
+    else window.location.href = url;
+  } catch (e) {
+    w?.close();
+    throw e;
+  }
+}
+
 export function saveBlob(blob, name) {
   const url = URL.createObjectURL(blob);
   Object.assign(document.createElement('a'), { href: url, download: name }).click();

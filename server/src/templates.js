@@ -38,6 +38,11 @@ export const TEMPLATE_META = {
     text: 'Hi {first_name}, you can pay your {practice} balance of {amount} securely online: {link}',
     es: 'Hola {first_name}, puede pagar su saldo de {amount} con {practice} en línea de forma segura: {link}',
   },
+  receipt: {
+    label: 'Payment receipt', help: 'Sent when staff choose to send a receipt, and for online and automatic payments when automatic receipts are on.', vars: ['first_name', 'practice', 'amount', 'date', 'method', 'balance', 'receipt', 'phone'], required: ['amount'],
+    text: 'Hi {first_name}, thank you — {practice} received your payment of {amount} on {date} ({method}). Your balance is now {balance}. Receipt {receipt}.',
+    es: 'Hola {first_name}, gracias — {practice} recibió su pago de {amount} el {date} ({method}). Su saldo ahora es {balance}. Recibo {receipt}.',
+  },
   card_setup: {
     label: 'Save a card', help: 'Link to save a card for a payment plan or membership.', vars: ['first_name', 'practice', 'link', 'phone'], required: ['link'],
     text: 'Hi {first_name}, {practice} can charge your payments automatically. Add your card securely here: {link}',
@@ -123,6 +128,6 @@ const SUBJECTS_ES = {
   reminder: 'Su cita en {practice}', booking_confirmation: 'Su cita en {practice}', review: 'Gracias por visitar {practice}',
   recall: 'Ya le toca su próxima visita en {practice}', card_declined: 'Su pago no se procesó — {practice}', forms: 'Por favor complete sus formularios para {practice}',
   booking_declined: 'Su solicitud de cita en {practice}', card_setup: 'Guarde una tarjeta para sus pagos — {practice}', payment_link: 'Solicitud de pago de {practice}',
-  treatment_plan: 'Su plan de tratamiento de {practice}', survey: '¿Cómo lo hicimos? — {practice}',
+  treatment_plan: 'Su plan de tratamiento de {practice}', receipt: 'Su recibo de {practice}', survey: '¿Cómo lo hicimos? — {practice}',
 };
 export const subjectFor = (lang, key, english, practice) => (lang === 'es' && SUBJECTS_ES[key] ? SUBJECTS_ES[key].replace('{practice}', practice) : english);

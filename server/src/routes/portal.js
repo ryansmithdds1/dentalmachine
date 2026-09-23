@@ -11,6 +11,7 @@ import { patientLang } from '../templates.js';
 import { openSlots, validateAppt } from './schedule.js';
 import { emitAppointment } from '../webhooks.js';
 import { PdfDoc } from '../pdf.js';
+import { receiptData, receiptPdf } from '../receipts.js';
 import { runMembershipBilling } from '../memberships.js';
 
 const CODE_TTL_MINUTES = 10;
@@ -307,16 +308,10 @@ export function portalRoutes({ db, secret, config, payments, messenger }) {
   });
   r.get('/receipts/:lid.pdf', async (req, res) => {
     const { practice, ids } = req.portal;
-    const l = await db.get(`SELECT l.*, p.first_name, p.last_name FROM ledger_entries l JOIN patients p ON p.id = l.patient_id WHERE l.id = ? AND l.type = 'payment' AND l.patient_id IN (${inList(ids)})`, Number(req.params.lid), ...ids);
-    if (!l) throw new HttpError(404, 'Payment not found');
-    const doc = new PdfDoc({ footer: `${practice.name} · receipt #${l.id}` });
-    head(doc, practice, `Payment receipt #${l.id}`);
-    const at = [0, 0.35];
-    for (const [k, v] of [['Date', l.entry_date], ['Received from', `${l.first_name} ${l.last_name}`], ['Amount', money(-l.amount)], ['Method', String(l.method || 'other').replace('_', ' ')], ['For', l.description]]) doc.row([k, v], { at });
-    doc.space(12);
-    doc.text('Thank you.', { size: 10.5 });
-    await pAudit(req, 'portal.receipt', 'ledger_entries', l.id);
-    pdfOut(res, doc, `receipt-${l.id}.pdf`);
+    const data = await receiptData(db, Number(req.params.lid), practice.id);
+    if (!data || !ids.includes(data.entry.patient_id)) throw new HttpError(404, 'Payment not found');
+    await pAudit(req, 'portal.receipt', 'ledger_entries', data.entry.id);
+    res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': `attachment; filename="receipt-${data.entry.id}.pdf"` }).send(receiptPdf(data));
   });
 
   // Membership plans: join with the card on file (charged now), or ask the office if there's no card yet.

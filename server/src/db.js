@@ -1508,6 +1508,7 @@ const COLUMNS = [
   ['booking_requests', 'referral_source', 'TEXT'],
   ['patients', 'family_relationship', 'TEXT'],
   ['practices', 'financing', 'TEXT'],
+  ['practices', 'auto_receipts', 'INTEGER NOT NULL DEFAULT 1'],
   ['documents', 'tags', 'TEXT'],
   ['patients', 'second_responsible_id', 'INTEGER REFERENCES patients(id)'],
   ['appointment_types', 'pattern', 'TEXT'],

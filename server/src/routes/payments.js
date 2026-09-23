@@ -5,6 +5,7 @@ import { requirePermission, HttpError } from '../auth.js';
 import { findOr404, insert, audit, toCents, practiceNow } from '../util.js';
 import { patientBalance, pendingInsurance } from '../services.js';
 import { runAutopay } from '../payments.js';
+import { autoReceipt } from '../receipts.js';
 import { finishBooking } from '../onlinebooking.js';
 import { sendMessage, preferredChannel, sendAppointmentReminder } from '../messaging.js';
 
@@ -188,11 +189,11 @@ export function stripeWebhook({ db, config, payments, messenger }) {
     } else if (event.type === 'checkout.session.completed' || event.type === 'checkout.session.async_payment_succeeded') {
       const session = event.data.object;
       if (session.payment_status === 'paid') {
-        await db.tx(async () => {
+        const posted = await db.tx(async () => {
           // Mark it paid first, conditionally: of two deliveries of the same event (Stripe retries, and
           // sends completed + async_payment_succeeded), only the one that flips the status posts it.
           const flipped = await db.run("UPDATE payment_requests SET status = 'paid', paid_at = datetime('now') WHERE session_id = ? AND status <> 'paid'", session.id);
-          if (!flipped.changes) return; // unknown session or already applied
+          if (!flipped.changes) return null; // unknown session or already applied
           const pr = await db.get('SELECT * FROM payment_requests WHERE session_id = ?', session.id);
           const entryId = await insert(db, 'ledger_entries', {
             practice_id: pr.practice_id, patient_id: pr.patient_id, type: 'payment', amount: -session.amount_total,
@@ -201,7 +202,9 @@ export function stripeWebhook({ db, config, payments, messenger }) {
           });
           await db.run('UPDATE payment_requests SET ledger_entry_id = ? WHERE id = ?', entryId, pr.id);
           await audit(db, { ip: req.ip, user: { practice_id: pr.practice_id, id: null } }, 'payment.online', 'ledger_entries', entryId, { amount: session.amount_total });
+          return entryId;
         });
+        if (posted) await autoReceipt(db, messenger, posted);
       }
     } else if (event.type === 'checkout.session.expired') {
       await db.run("UPDATE payment_requests SET status = 'expired' WHERE session_id = ? AND status = 'pending'", event.data.object.id);

@@ -53,7 +53,7 @@ const RESOURCES = {
 // Fields of the simple list sections (providers, carriers…) are added from their definitions.
 const KEYWORDS = {
   account: 'password two-factor 2fa authenticator mfa my account sign in',
-  practice: 'practice name phone email address city state zip group npi tax id tin timezone time zone office hours opening hours booking page address slug online booking instant booking reminders portal production goal hygiene goal texting number twilio sms two-factor mfa require sign-out idle timeout inactivity write-off approval limit adjustment lock date books closed month-end close export data single sign-on sso oidc google microsoft financing carecredit sunbit cherry payment plans lender interest',
+  practice: 'practice name phone email address city state zip group npi tax id tin timezone time zone office hours opening hours booking page address slug online booking instant booking reminders portal production goal hygiene goal texting number twilio sms two-factor mfa require sign-out idle timeout inactivity write-off approval limit adjustment lock date books closed month-end close export data single sign-on sso oidc google microsoft financing carecredit sunbit cherry payment plans lender interest receipts automatic receipt',
   users: 'users staff login roles permissions invite access front desk hygienist dentist billing admin',
   locations: 'offices locations multi-location branches',
   providers: 'time off vacation special hours schedule exceptions',
@@ -434,6 +434,7 @@ function Practice() {
           {!!current.online_booking && <label className="checkbox full" style={{ marginLeft: 22 }}><input type="checkbox" checked={!!current.instant_booking} onChange={(e) => change('instant_booking', e.target.checked)} /> Book them straight onto the schedule (instead of waiting for the office to accept). Deposits, if set on an appointment type, are taken first.</label>}
           <label className="checkbox full"><input type="checkbox" checked={current.portal_enabled !== 0} onChange={(e) => change('portal_enabled', e.target.checked)} /> Patient portal (visits, balance and online payment, forms, treatment plans)</label>
           {current.portal_enabled !== 0 && <span className="muted full" style={{ fontSize: 12, marginTop: -6 }}>Portal address: {window.location.origin}/portal/{current.slug || current.id} — it&apos;s also printed on statements.</span>}
+          <label className="checkbox full"><input type="checkbox" checked={current.auto_receipts !== 0} onChange={(e) => change('auto_receipts', e.target.checked)} /> Email a receipt for online and automatic card payments (staff choose for payments taken at the desk)</label>
           <label>
             Daily production goal ($)
             <input type="number" min="0" step="100" value={current.daily_goal != null ? current.daily_goal / 100 : ''} onChange={(e) => change('daily_goal', Math.round(Number(e.target.value) * 100))} />

@@ -284,6 +284,7 @@ test('text-to-pay: Stripe checkout link, then signed webhook posts the payment o
   assert.equal((await post(event, `t=${t},v1=deadbeef`)).status, 400);
   assert.equal((await post(event, sign(event))).status, 200);
   assert.equal((await post(event, sign(event))).status, 200, 'retries are acknowledged');
+  assert.equal(sent.filter((m) => /receipt/i.test(m.subject || '')).length, 1, 'one emailed receipt, not one per delivery');
 
   const ledger = (await api.get(`/patients/${patient.id}/ledger`)).data;
   assert.equal(ledger.balance, 0);
