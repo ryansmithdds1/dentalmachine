@@ -53,10 +53,19 @@ export default function AppointmentForm({ appointment, defaults = {}, patient: i
   const [override, setOverride] = useState(null);
   const [repeat, setRepeat] = useState({ rule: '', count: 6, end: 'count', until: '' });
   const [scope, setScope] = useState('this');
+  // How long a type takes with a provider (the type can set its own length per provider).
+  const lengthFor = (t, providerId) => {
+    try { return JSON.parse(t.provider_durations || '{}')[providerId] || t.duration; } catch { return t.duration; }
+  };
   const chooseType = (id) => {
     const t = types.find((x) => String(x.id) === String(id));
     // A dragged selection keeps its length; otherwise the type sets it.
-    setForm((f) => ({ ...f, appointment_type_id: id, ...(t && !(defaults.end && !appointment) ? { duration: t.duration } : {}), ...(t && !f.reason ? { reason: '' } : {}) }));
+    setForm((f) => ({ ...f, appointment_type_id: id, ...(t && !(defaults.end && !appointment) ? { duration: lengthFor(t, f.provider_id) } : {}), ...(t && !f.reason ? { reason: '' } : {}) }));
+  };
+  const chooseProvider = (e) => {
+    const providerId = e.target.value;
+    const t = types.find((x) => String(x.id) === String(form.appointment_type_id));
+    setForm((f) => ({ ...f, provider_id: providerId, ...(t && !appointment && !defaults.end ? { duration: lengthFor(t, providerId) } : {}) }));
   };
 
   useEffect(() => {
@@ -138,7 +147,7 @@ export default function AppointmentForm({ appointment, defaults = {}, patient: i
         </label>
         <label>
           Provider
-          <select required value={form.provider_id} onChange={set('provider_id')}>
+          <select required value={form.provider_id} onChange={chooseProvider}>
             {providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
         </label>

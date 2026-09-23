@@ -36,7 +36,8 @@ const RESOURCES = {
   types: {
     title: 'Appointment types', singular: 'appointment type', path: '/appointment-types', columns: ['name', 'duration', 'color', 'procedure_codes', 'online_bookable'],
     fields: [['name', 'Name', 'text'], ['name_es', 'Name in Spanish (online booking)', 'text'], ['duration', 'Length (minutes)', 'number'], ['color', 'Calendar color', 'color'], ['procedure_codes', 'Procedures added when booked (e.g. D0120, D1110)', 'codes'],
-      ['provider_type', 'Usually booked with', 'select', ['dentist', 'hygienist', 'specialist']], ['online_bookable', 'Patients can book online', 'checkbox'], ['is_video', 'Always a video visit', 'checkbox'], ['deposit', 'Deposit to book online ($, needs Stripe)', 'money'], ['sort', 'Sort order', 'number'], ['active', 'Active', 'checkbox']],
+      ['provider_type', 'Usually booked with', 'select', ['dentist', 'hygienist', 'specialist']], ['online_bookable', 'Patients can book online', 'checkbox'], ['is_video', 'Always a video visit', 'checkbox'], ['deposit', 'Deposit to book online ($, needs Stripe)', 'money'], ['sort', 'Sort order', 'number'], ['active', 'Active', 'checkbox'],
+      ['pattern', 'Time pattern', 'pattern'], ['provider_durations', 'Length for each provider (blank = the usual length)', 'durations']],
   },
   referrals: {
     title: 'Referral contacts', singular: 'referral contact', path: '/referral-contacts', columns: ['name', 'practice_name', 'specialty', 'phone', 'referred_in', 'referred_out'], writePerm: 'patients:write',
@@ -704,6 +705,15 @@ function ResourceTable({ spec, canWrite }) {
   );
 }
 
+// A time pattern drawn as a strip: dark for provider time, hatched for assistant time.
+function PatternBar({ pattern }) {
+  return (
+    <div className="pattern-bar" aria-hidden="true">
+      {[...pattern].map((c, i) => <i key={i} className={c === 'X' ? 'x' : 'a'} title={`${i * 10}–${i * 10 + 10} min: ${c === 'X' ? 'provider' : 'assistant'}`} />)}
+    </div>
+  );
+}
+
 function ResourceForm({ spec, row, onDone }) {
   const providerList = useLookup('/providers?active=true');
   const locationList = useLookup(spec.fields.some((f) => f[2] === 'location') ? '/locations' : null);
@@ -716,6 +726,7 @@ function ResourceForm({ spec, row, onDone }) {
     if (type === 'color') return [name, row[name] || '#3b82f6'];
     if (type === 'codes') return [name, row[name] ? JSON.parse(row[name]).join(', ') : ''];
     if (type === 'hours') return [name, row[name] ? JSON.parse(row[name]) : null];
+    if (type === 'durations') return [name, row[name] ? JSON.parse(row[name]) : {}];
     return [name, row[name] ?? ''];
   })));
   const { submit, busy, error } = useSubmit(async () => {
@@ -743,6 +754,26 @@ function ResourceForm({ spec, row, onDone }) {
               </label>
               {form[name] && <OfficeHours value={form[name]} onChange={set} note={options?.note || "Outside these hours the provider's column is shaded, online booking won't offer them, and staff are asked before booking."} />}
               {form[name] && options?.alt !== false && <AltWeeks value={form[name]} onChange={set} />}
+            </div>
+          );
+          if (type === 'pattern') return (
+            <label key={name} className="full">
+              {text} <span className="muted" style={{ fontSize: 12 }}>— one letter per 10 minutes: X provider, / assistant only (e.g. //XXXX// for a crown prep). The provider can be booked elsewhere during / time.</span>
+              <input value={form[name]} placeholder="blank = provider the whole time" onChange={(e) => set(e.target.value.toUpperCase().replace(/[^X/]/g, ''))} />
+              {form[name] && <PatternBar pattern={form[name]} />}
+            </label>
+          );
+          if (type === 'durations') return (
+            <div key={name} className="full">
+              <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>{text}</div>
+              <div className="inline" style={{ flexWrap: 'wrap', gap: 10 }}>
+                {providerList.map((p) => (
+                  <label key={p.id} className="inline" style={{ gap: 6, flexDirection: 'row', alignItems: 'center' }}>
+                    <span style={{ fontSize: 13 }}>{p.name}</span>
+                    <input type="number" min="5" step="5" style={{ width: 80 }} aria-label={`Minutes with ${p.name}`} value={form[name]?.[p.id] ?? ''} onChange={(e) => { const next = { ...form[name] }; if (e.target.value) next[p.id] = Number(e.target.value); else delete next[p.id]; set(next); }} />
+                  </label>
+                ))}
+              </div>
             </div>
           );
           if (type === 'feeschedule') return <label key={name}>{text}<select value={form[name] || ''} onChange={(e) => set(e.target.value ? Number(e.target.value) : null)}><option value="">Standard fees</option>{officeSchedules.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}</select></label>;

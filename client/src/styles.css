@@ -697,3 +697,11 @@ p a, .muted a, li a, .public-notice a { text-decoration: underline; }
 .timeline .claim-diff li { padding-left: 0; list-style: disc; } .timeline .claim-diff li::before { display: none; }
 .settings-search { width: 100%; }
 .flash { animation: flash 1.8s ease-out; border-radius: 6px; } @keyframes flash { 0%, 40% { background: #fef3c7; box-shadow: 0 0 0 4px #fef3c7; } 100% { background: transparent; box-shadow: none; } }
+.pattern-bar { display: flex; gap: 2px; margin-top: 6px; }
+.pattern-bar i { width: 14px; height: 12px; border-radius: 2px; }
+.pattern-bar i.x { background: var(--primary); }
+.pattern-bar i.a { background: repeating-linear-gradient(45deg, #cbd5e1 0 3px, #f1f5f9 3px 6px); }
+.cal-pattern { position: absolute; top: 0; right: 0; bottom: 0; width: 6px; display: flex; flex-direction: column; overflow: hidden; border-radius: 0 6px 6px 0; pointer-events: none; }
+.cal-pattern i { display: block; flex: none; }
+.cal-pattern i.x { background: var(--p, var(--primary)); opacity: .55; }
+.cal-pattern i.a { background: repeating-linear-gradient(45deg, rgba(100,116,139,.45) 0 2px, transparent 2px 4px); }

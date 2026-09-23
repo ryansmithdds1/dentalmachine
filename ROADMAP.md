@@ -191,7 +191,7 @@ Works well: drag, resize and create; undo; live updates; conflict checks; open-t
 1. ✅ **P1** Week view with provider or chair columns (or a condensed multi-column week).
 2. ✅ **P1** Configurable time grid: 5, 10 or 15 minutes.
 3. ✅ **P1** Chair settings: default provider, hygiene flag, display order.
-4. **P2** Appointment types with provider/assistant time patterns (e.g. `X//XX//`) and per-provider durations.
+4. ✅ **P2** Appointment types with provider/assistant time patterns (e.g. `X//XX//`) and per-provider durations. _(Done: a type's pattern is fitted to each visit's length and kept on it; the provider can be booked elsewhere during assistant time only; the calendar hatches assistant time; per-provider lengths apply in the booking form and online booking.)_
 5. ✅ **P2** Blockouts: linked repeats (edit or delete the series), date ranges (holiday week), drag and resize, and rules like "only crown seats here" instead of hard blocks.
 6. ✅ **P2** Per-appointment history (moved, rescheduled, who changed it) in the drawer.
 7. ✅ **P2** Recurring series: "every 2nd Tuesday", an end date, and adding visits to an existing series.

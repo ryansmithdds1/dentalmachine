@@ -9,6 +9,7 @@ import { PROVIDERS, sealSecret } from '../sso.js';
 import { validateTemplates, DEFAULT_TEMPLATES, TEMPLATE_META } from '../templates.js';
 import { recordFeeChange } from '../fees.js';
 import { cleanRoomUrl } from '../video.js';
+import { cleanPattern, parseDurations } from '../patterns.js';
 
 const ROLES = ['admin', 'dentist', 'hygienist', 'assistant', 'front_desk', 'billing'];
 const CATEGORIES = ['diagnostic', 'preventive', 'restorative', 'endodontics', 'periodontics', 'prosthodontics', 'oral_surgery', 'orthodontics', 'implants', 'adjunctive'];
@@ -311,8 +312,14 @@ export default function settingsRoutes({ db, secret, config = {} }) {
 
   resource(r, db, {
     path: 'appointment-types', table: 'appointment_types', required: ['name', 'duration'], order: 'sort, name',
-    fields: ['name', 'name_es', 'duration', 'color', 'procedure_codes', 'provider_type', 'online_bookable', 'deposit', 'active', 'sort', 'is_video'],
+    fields: ['name', 'name_es', 'duration', 'color', 'procedure_codes', 'provider_type', 'online_bookable', 'deposit', 'active', 'sort', 'is_video', 'pattern', 'provider_durations'],
     validate: (row) => {
+      if (row.pattern !== undefined) row.pattern = cleanPattern(row.pattern);
+      if (row.provider_durations !== undefined) {
+        const map = parseDurations(row.provider_durations);
+        for (const m of Object.values(map)) if (m % 5) throw new HttpError(400, 'Provider lengths must be in steps of 5 minutes');
+        row.provider_durations = Object.keys(map).length ? JSON.stringify(map) : null;
+      }
       if (row.deposit != null) {
         row.deposit = Math.round(Number(row.deposit) || 0);
         if (row.deposit < 0 || (row.deposit > 0 && row.deposit < 100) || row.deposit > 100000) throw new HttpError(400, 'Deposit must be $1–$1,000 (or 0 for none)');

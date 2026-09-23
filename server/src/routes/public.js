@@ -10,6 +10,7 @@ import { sendAppointmentReminder } from '../messaging.js';
 import { openSlots } from './schedule.js';
 import { publish } from '../events.js';
 import { officeHours } from '../hours.js';
+import { parseDurations } from '../patterns.js';
 
 // Used only for practices that haven't marked any appointment types as bookable online.
 const FALLBACK_REASONS = [
@@ -46,9 +47,9 @@ export default function publicRoutes({ db, storage, payments, messenger, config 
     return p;
   };
   const reasonsFor = async (practiceId) => {
-    const types = await db.all('SELECT id, name, name_es, duration, provider_type, deposit FROM appointment_types WHERE practice_id = ? AND active = 1 AND online_bookable = 1 ORDER BY sort, name', practiceId);
+    const types = await db.all('SELECT id, name, name_es, duration, provider_type, deposit, provider_durations FROM appointment_types WHERE practice_id = ? AND active = 1 AND online_bookable = 1 ORDER BY sort, name', practiceId);
     // Deposits are only asked for when card payments are set up.
-    return types.length ? types.map((t) => ({ label: t.name, label_es: t.name_es || null, duration: t.duration, type_id: t.id, provider_type: t.provider_type, deposit: payments?.mode === 'stripe' ? t.deposit || 0 : 0 })) : FALLBACK_REASONS;
+    return types.length ? types.map((t) => ({ label: t.name, label_es: t.name_es || null, duration: t.duration, durations: parseDurations(t.provider_durations), type_id: t.id, provider_type: t.provider_type, deposit: payments?.mode === 'stripe' ? t.deposit || 0 : 0 })) : FALLBACK_REASONS;
   };
   const publicLocations = async (practiceId) => await db.all('SELECT id, name, address, city, state, zip, phone, office_hours FROM locations WHERE practice_id = ? AND active = 1 ORDER BY sort, id', practiceId);
   // Which office a patient is booking at (multi-location practices); null for a single office.
@@ -91,7 +92,7 @@ export default function publicRoutes({ db, storage, payments, messenger, config 
       .filter((pv) => req.query.provider_id || !reason.provider_type || pv.type === reason.provider_type || !all.some((x) => x.type === reason.provider_type));
     const slotsOn = async (d) => (await mapSeq(
       providers,
-      async (pv) => (await openSlots(db, p.id, pv.id, d, { duration, step: 30, after: now, typeId: reason.type_id, locationId: location?.id })).map((s) => ({ start: s, provider_id: pv.id, provider_name: pv.name }))
+      async (pv) => (await openSlots(db, p.id, pv.id, d, { duration: reason.durations?.[pv.id] || duration, step: 30, after: now, typeId: reason.type_id, locationId: location?.id })).map((s) => ({ start: s, provider_id: pv.id, provider_name: pv.name }))
     )).flat()
       .sort((x, y) => x.start.localeCompare(y.start));
     const slots = await slotsOn(date);
@@ -122,14 +123,15 @@ export default function publicRoutes({ db, storage, payments, messenger, config 
     const providerId = Number(b.provider_id);
     if (!(await publicProviders(p.id)).some((pv) => pv.id === providerId)) throw new HttpError(400, 'Choose a provider');
     const location = await bookingLocation(p.id, b.location_id);
-    const free = await openSlots(db, p.id, providerId, start.slice(0, 10), { duration: reason.duration, step: 30, typeId: reason.type_id, locationId: location?.id });
+    const visitLength = reason.durations?.[providerId] || reason.duration;
+    const free = await openSlots(db, p.id, providerId, start.slice(0, 10), { duration: visitLength, step: 30, typeId: reason.type_id, locationId: location?.id });
     if (!free.includes(start)) throw new HttpError(409, 'That time was just taken. Please pick another.');
     const deposit = reason.deposit > 0 ? reason.deposit : 0;
     const clip = (v, n) => (v ? String(v).trim().slice(0, n) || null : null);
     const id = await insert(db, 'booking_requests', {
       practice_id: p.id, first_name: first.slice(0, 80), last_name: last.slice(0, 80), dob: b.dob || null,
       phone: clip(b.phone, 30), email: clip(b.email, 200),
-      reason: reason.label, duration: reason.duration, provider_id: providerId, requested_start: start,
+      reason: reason.label, duration: visitLength, provider_id: providerId, requested_start: start,
       new_patient: b.new_patient === false ? 0 : 1, notes: clip(b.notes, 1000), ip: req.ip, language: b.language === 'es' ? 'es' : null, location_id: location?.id ?? null,
       insurance_carrier: clip(b.insurance_carrier, 100), insurance_member_id: clip(b.insurance_member_id, 40), insurance_subscriber: clip(b.insurance_subscriber, 120),
       ...(deposit ? { deposit_amount: deposit, deposit_status: 'awaiting', hold_until: new Date(Date.now() + 35 * 60_000).toISOString() } : {}),

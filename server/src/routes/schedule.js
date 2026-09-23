@@ -8,6 +8,7 @@ import { completeProcedure } from '../services.js';
 import { recallTypes, typesForCode } from '../recalls.js';
 import { officeFee } from '../fees.js';
 import { videoRoomFor } from '../video.js';
+import { cleanPattern, fitPattern, providerOverlap, typeDuration } from '../patterns.js';
 
 export const STATUSES = ['scheduled', 'confirmed', 'checked_in', 'in_chair', 'completed', 'cancelled', 'no_show'];
 export const INACTIVE = "('cancelled','no_show')";
@@ -26,7 +27,7 @@ const SELECT = `SELECT a.*, p.first_name, p.last_name, p.preferred_name, p.phone
 
 async function findConflicts(db, practiceId, { start_time, end_time, provider_id, operatory_id, patient_id }, excludeId = 0) {
   return await db.all(
-    `SELECT a.id, a.start_time, a.end_time, a.provider_id, a.operatory_id, a.patient_id FROM appointments a
+    `SELECT a.id, a.start_time, a.end_time, a.provider_id, a.operatory_id, a.patient_id, a.pattern FROM appointments a
      WHERE a.practice_id = ? AND a.id != ? AND a.status NOT IN ${INACTIVE}
        AND a.start_time < ? AND a.end_time > ?
        AND (a.provider_id = ? OR (a.operatory_id IS NOT NULL AND a.operatory_id = ?) OR a.patient_id = ?)`,
@@ -64,7 +65,11 @@ export async function validateAppt(db, practiceId, row, { overrideBlockout = fal
   if (row.operatory_id) row.location_id = (await findOr404(db, 'operatories', row.operatory_id, practiceId, 'Operatory')).location_id ?? row.location_id ?? null;
   const location = row.location_id ? await findOr404(db, 'locations', row.location_id, practiceId, 'Location') : null;
   if (row.appointment_type_id) await findOr404(db, 'appointment_types', row.appointment_type_id, practiceId, 'Appointment type');
-  const conflicts = await findConflicts(db, practiceId, row, row.id);
+  // A provider can be in two places only when one visit is in assistant time ("/") while the other needs them.
+  if (row.pattern) row.pattern = fitPattern(cleanPattern(row.pattern), (Date.parse(row.end_time.replace(' ', 'T')) - Date.parse(row.start_time.replace(' ', 'T'))) / 60000);
+  const conflicts = (await findConflicts(db, practiceId, row, row.id)).filter((c) => c.patient_id === Number(row.patient_id)
+    || (row.operatory_id && c.operatory_id === Number(row.operatory_id))
+    || (c.provider_id === Number(row.provider_id) && providerOverlap(c, row)));
   if (conflicts.length) {
     const kinds = new Set();
     for (const c of conflicts) {
@@ -218,7 +223,7 @@ const datesBetween = (from, to) => {
 
 export default function scheduleRoutes({ db }) {
   const r = Router();
-  const FIELDS = ['patient_id', 'provider_id', 'operatory_id', 'location_id', 'start_time', 'end_time', 'status', 'reason', 'notes', 'appointment_type_id', 'asap'];
+  const FIELDS = ['patient_id', 'provider_id', 'operatory_id', 'location_id', 'start_time', 'end_time', 'status', 'reason', 'notes', 'appointment_type_id', 'asap', 'pattern'];
   const seriesInfo = async (appt) => {
     const s = await db.get('SELECT id, every, unit, count, monthly_by, until_date FROM appointment_series WHERE id = ?', appt.series_id);
     const visits = await db.all('SELECT id, start_time, status FROM appointments WHERE series_id = ? ORDER BY start_time', appt.series_id);
@@ -268,7 +273,9 @@ export default function scheduleRoutes({ db }) {
   r.post('/appointments', requirePermission('schedule:write'), async (req, res) => {
     const row = pick(req.body, FIELDS);
     const type = row.appointment_type_id ? await findOr404(db, 'appointment_types', row.appointment_type_id, req.user.practice_id, 'Appointment type') : null;
-    if (type && row.start_time && !row.end_time) row.end_time = addMinutes(normalizeDateTime(row.start_time, 'start_time'), type.duration);
+    if (type && row.start_time && !row.end_time) row.end_time = addMinutes(normalizeDateTime(row.start_time, 'start_time'), typeDuration(type, row.provider_id));
+    // The type's time pattern, fitted to this visit's length (unless one was given).
+    if (type?.pattern && row.pattern === undefined) row.pattern = type.pattern;
     if (type && !row.reason) row.reason = type.name;
     if (!row.location_id && req.location_id) row.location_id = req.location_id;
     // A video visit (asked for, or the visit type is one) gets its meeting link now.

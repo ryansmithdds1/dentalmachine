@@ -248,6 +248,12 @@ export default function CalendarGrid({
                         onKeyDown={(ev) => ev.key === 'Enter' && onOpen(a)}
                         tabIndex={0} role="button"
                         aria-label={`${a.first_name} ${a.last_name}, ${label12(s)} to ${label12(e)}, ${a.status}`}>
+                        {a.pattern && a.pattern.includes('/') && (
+                          // Assistant time (the provider is free then) hatched along the right edge.
+                          <div className="cal-pattern" aria-hidden="true">
+                            {[...a.pattern].map((c, i) => <i key={i} className={c === 'X' ? 'x' : 'a'} style={{ height: `${Math.min(100, (10 / Math.max(10, e - s)) * 100)}%` }} />)}
+                          </div>
+                        )}
                         <div className="cal-appt-line">
                           <strong>{a.premed_required ? '💊 ' : ''}{a.medical_alerts ? '⚠ ' : ''}{a.first_name} {a.last_name}</strong>
                           {STATUS_ICON[a.status] && <span className="cal-status" title={a.status}>{STATUS_ICON[a.status]}</span>}
