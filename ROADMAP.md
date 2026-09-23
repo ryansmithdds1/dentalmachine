@@ -164,7 +164,7 @@ The "OD / Curve" column shows which competitor has the feature: ✓ = has it, ~ 
 | 63 | ✅ **Editable message templates** for every automated message, with merge fields and a preview. | Offices want their own voice. | ✓ / ✓ | P2 | S |
 | 64 | ✅ **Review routing.** Ask for satisfaction first, send happy patients to Google and route unhappy ones to the office. | Reputation. | ~ / ✓ | P2 | S |
 | 65 | ✅ _(Done: move a visit to another open time, secure messages with the office (in the staff inbox), statement and receipt PDFs, and membership sign-up; booking and forms were already there.)_ **Portal additions:** reschedule, request an appointment, secure messages, forms, statements/receipts download, and membership sign-up. | Patient self-service. | ✓ / ✓ | P2 | M |
-| 66 | **Teledentistry** video visits (links only, via a partner). | Emergencies and consults. | ~ / ✓ | P3 | M |
+| 66 | ✅ _(Done: a visit or visit type can be by video; it gets the provider's own room (Doxy.me, Zoom…) or a fresh private Jitsi room, which goes in the reminder, on the confirm page and in the schedule drawer. VIDEO_BASE_URL for a self-hosted Jitsi.)_ **Teledentistry** video visits (links only, via a partner). | Emergencies and consults. | ~ / ✓ | P3 | M |
 | 67 | ✅ _(Done: Campaigns → Surveys: NPS, star, yes/no and written questions (with Spanish wording), sent the day after visits or to recent patients, answered on a one-time link, with NPS score, averages and comments.)_ **Patient surveys / NPS.** | Quality tracking. | ~ / ✓ | P3 | S |
 
 ### 2.6 Reporting

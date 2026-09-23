@@ -280,4 +280,6 @@ export default {
   'Not likely': 'Nada probable',
   'Very likely': 'Muy probable',
   'Your answers go only to {practice}.': 'Sus respuestas solo las verá {practice}.',
+  'This is a video visit. Join from your phone or computer at the time of your appointment.': 'Esta es una visita por video. Entre desde su teléfono o computadora a la hora de su cita.',
+  'Join video visit': 'Entrar a la visita por video',
 };

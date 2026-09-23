@@ -20,7 +20,7 @@ const CATEGORIES = ['diagnostic', 'preventive', 'restorative', 'endodontics', 'p
 const RESOURCES = {
   providers: {
     title: 'Providers', singular: 'provider', path: '/providers', columns: ['name', 'type', 'npi', 'color', 'working_hours'],
-    fields: [['name', 'Name', 'text'], ['type', 'Type', 'select', ['dentist', 'hygienist', 'specialist']], ['npi', 'NPI (10 digits)', 'text'], ['license_number', 'License #', 'text'], ['dea_number', 'DEA # (controlled substances)', 'text'], ['erx_user_id', 'e-Rx user ID (DoseSpot)', 'text'], ['color', 'Schedule color', 'color'], ['fee_schedule_id', 'Own fees (office fee schedule)', 'feeschedule'], ['daily_goal', 'Daily production goal ($, blank = none)', 'money'], ['active', 'Active', 'checkbox'], ['working_hours', 'Working hours', 'hours']],
+    fields: [['name', 'Name', 'text'], ['type', 'Type', 'select', ['dentist', 'hygienist', 'specialist']], ['npi', 'NPI (10 digits)', 'text'], ['license_number', 'License #', 'text'], ['dea_number', 'DEA # (controlled substances)', 'text'], ['erx_user_id', 'e-Rx user ID (DoseSpot)', 'text'], ['color', 'Schedule color', 'color'], ['fee_schedule_id', 'Own fees (office fee schedule)', 'feeschedule'], ['video_room_url', 'Video room link (Doxy.me, Zoom…; blank = a new private room each visit)', 'text'], ['daily_goal', 'Daily production goal ($, blank = none)', 'money'], ['active', 'Active', 'checkbox'], ['working_hours', 'Working hours', 'hours']],
   },
   locations: {
     title: 'Offices', singular: 'office', path: '/locations', columns: ['name', 'city', 'phone', 'office_hours'],
@@ -36,7 +36,7 @@ const RESOURCES = {
   types: {
     title: 'Appointment types', singular: 'appointment type', path: '/appointment-types', columns: ['name', 'duration', 'color', 'procedure_codes', 'online_bookable'],
     fields: [['name', 'Name', 'text'], ['name_es', 'Name in Spanish (online booking)', 'text'], ['duration', 'Length (minutes)', 'number'], ['color', 'Calendar color', 'color'], ['procedure_codes', 'Procedures added when booked (e.g. D0120, D1110)', 'codes'],
-      ['provider_type', 'Usually booked with', 'select', ['dentist', 'hygienist', 'specialist']], ['online_bookable', 'Patients can book online', 'checkbox'], ['deposit', 'Deposit to book online ($, needs Stripe)', 'money'], ['sort', 'Sort order', 'number'], ['active', 'Active', 'checkbox']],
+      ['provider_type', 'Usually booked with', 'select', ['dentist', 'hygienist', 'specialist']], ['online_bookable', 'Patients can book online', 'checkbox'], ['is_video', 'Always a video visit', 'checkbox'], ['deposit', 'Deposit to book online ($, needs Stripe)', 'money'], ['sort', 'Sort order', 'number'], ['active', 'Active', 'checkbox']],
   },
   referrals: {
     title: 'Referral contacts', singular: 'referral contact', path: '/referral-contacts', columns: ['name', 'practice_name', 'specialty', 'phone', 'referred_in', 'referred_out'], writePerm: 'patients:write',

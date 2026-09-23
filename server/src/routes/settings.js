@@ -8,6 +8,7 @@ import { validateRecallSteps, recallTypes } from '../recalls.js';
 import { PROVIDERS, sealSecret } from '../sso.js';
 import { validateTemplates, DEFAULT_TEMPLATES, TEMPLATE_META } from '../templates.js';
 import { recordFeeChange } from '../fees.js';
+import { cleanRoomUrl } from '../video.js';
 
 const ROLES = ['admin', 'dentist', 'hygienist', 'assistant', 'front_desk', 'billing'];
 const CATEGORIES = ['diagnostic', 'preventive', 'restorative', 'endodontics', 'periodontics', 'prosthodontics', 'oral_surgery', 'orthodontics', 'implants', 'adjunctive'];
@@ -238,13 +239,14 @@ export default function settingsRoutes({ db, secret, config = {} }) {
 
   resource(r, db, {
     path: 'providers', table: 'providers', required: ['name'],
-    fields: ['name', 'type', 'npi', 'license_number', 'dea_number', 'erx_user_id', 'color', 'active', 'user_id', 'working_hours', 'daily_goal', 'fee_schedule_id'],
+    fields: ['name', 'type', 'npi', 'license_number', 'dea_number', 'erx_user_id', 'color', 'active', 'user_id', 'working_hours', 'daily_goal', 'fee_schedule_id', 'video_room_url'],
     validate: async (row, req) => {
       if (row.working_hours != null) row.working_hours = JSON.stringify(validateWorkingHours(typeof row.working_hours === 'string' ? JSON.parse(row.working_hours) : row.working_hours));
       requireOneOf(row.type, ['dentist', 'hygienist', 'specialist'], 'type');
       if (row.npi && !/^\d{10}$/.test(row.npi)) throw new HttpError(400, 'NPI must be 10 digits');
       if (row.user_id) await findOr404(db, 'users', row.user_id, req.user.practice_id, 'User');
       await checkOfficeSchedule(row, req);
+      if ('video_room_url' in row) row.video_room_url = cleanRoomUrl(row.video_room_url);
     },
   });
 
@@ -309,7 +311,7 @@ export default function settingsRoutes({ db, secret, config = {} }) {
 
   resource(r, db, {
     path: 'appointment-types', table: 'appointment_types', required: ['name', 'duration'], order: 'sort, name',
-    fields: ['name', 'name_es', 'duration', 'color', 'procedure_codes', 'provider_type', 'online_bookable', 'deposit', 'active', 'sort'],
+    fields: ['name', 'name_es', 'duration', 'color', 'procedure_codes', 'provider_type', 'online_bookable', 'deposit', 'active', 'sort', 'is_video'],
     validate: (row) => {
       if (row.deposit != null) {
         row.deposit = Math.round(Number(row.deposit) || 0);

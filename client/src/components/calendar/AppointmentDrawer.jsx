@@ -45,6 +45,7 @@ export default function AppointmentDrawer({ appt: a, can, onClose, onStatus, onE
         <button className="small" onClick={onClose} aria-label="Close">✕</button>
       </div>
       <div className="drawer-body">
+        {a.video_url && <div className="public-notice ok" style={{ marginBottom: 8 }}>📹 Video visit · <a href={a.video_url} target="_blank" rel="noreferrer">Join the call</a></div>}
         {!!a.premed_required && <div className="error"><strong>💊 Premedication required</strong> — confirm it was taken before treatment.</div>}
         {a.medical_alerts && <div className="error">⚠ {a.medical_alerts}</div>}
         <div className="inline" style={{ flexWrap: 'wrap', marginBottom: 12 }}>

@@ -168,7 +168,7 @@ export default function publicRoutes({ db, storage, payments, messenger, config 
     return a;
   };
   const apptView = (a) => ({
-    first_name: a.first_name, start_time: a.start_time, end_time: a.end_time, status: a.status, provider_name: a.provider_name, language: patientLang(a),
+    first_name: a.first_name, start_time: a.start_time, end_time: a.end_time, status: a.status, provider_name: a.provider_name, language: patientLang(a), video_url: a.video_url || null,
     practice: { name: a.practice_name, phone: a.practice_phone, address: a.address, city: a.city, state: a.state, zip: a.zip },
   });
 

@@ -97,9 +97,10 @@ export async function sendAppointmentReminder(db, messenger, { appointmentId, ap
   const body = kind === 'booking_confirmation'
     ? renderTemplate(templates.booking_confirmation, vars)
     : `${renderTemplate(templates.reminder, vars)}${target.channel === 'sms' ? fixedText(lang).sms_reply : ''}`;
+  const withVideo = a.video_url ? `${body} ${lang === 'es' ? 'Es una visita por video; entre aquí a la hora:' : 'This is a video visit — join here at the time:'} ${a.video_url}` : body;
   const msg = await sendMessage(db, messenger, {
     practiceId: a.practice_id, patientId: a.patient_id, appointmentId: a.id, userId, kind,
-    channel: target.channel, to: target.to, subject: subjectFor(lang, 'reminder', `Your appointment at ${a.practice_name}`, a.practice_name), body,
+    channel: target.channel, to: target.to, subject: subjectFor(lang, 'reminder', `Your appointment at ${a.practice_name}`, a.practice_name), body: withVideo,
   });
   if (msg.status === 'sent' && kind === 'reminder') await db.run("UPDATE appointments SET reminder_sent_at = datetime('now') WHERE id = ?", a.id);
   return msg;

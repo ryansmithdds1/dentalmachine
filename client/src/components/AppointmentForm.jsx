@@ -39,6 +39,7 @@ export default function AppointmentForm({ appointment, defaults = {}, patient: i
     duration: appointment ? diffMinutes(startTime, appointment.end_time.slice(11, 16)) : defaults.end ? diffMinutes(startTime, defaults.end) : defaults.duration || 60,
     appointment_type_id: appointment?.appointment_type_id || defaults.appointment_type_id || '',
     asap: !!appointment?.asap,
+    video: !!appointment?.video_url,
     provider_id: appointment?.provider_id || defaults.provider_id || '',
     operatory_id: appointment?.operatory_id || defaults.operatory_id || '',
     status: appointment?.status || 'scheduled',
@@ -73,6 +74,7 @@ export default function AppointmentForm({ appointment, defaults = {}, patient: i
     const body = {
       appointment_type_id: form.appointment_type_id ? Number(form.appointment_type_id) : null,
       asap: form.asap,
+      video: form.video,
       ...(forceBlockout ? { override_blockout: true } : {}),
       patient_id: patient.id,
       provider_id: Number(form.provider_id),
@@ -155,6 +157,7 @@ export default function AppointmentForm({ appointment, defaults = {}, patient: i
         </label>
         <label className="full">Reason<input value={form.reason} onChange={set('reason')} placeholder="e.g. Recall exam & cleaning" /></label>
         <label className="full">Notes<textarea rows={2} value={form.notes} onChange={set('notes')} /></label>
+        <label className="checkbox full"><input type="checkbox" checked={form.video} onChange={(e) => setForm({ ...form, video: e.target.checked })} /> Video visit (the patient gets a link to join)</label>
         <label className="checkbox full"><input type="checkbox" checked={form.asap} onChange={(e) => setForm({ ...form, asap: e.target.checked })} /> Add to ASAP list (patient wants an earlier opening)</label>
         {!appointment && (
           <div className="full repeat-row">

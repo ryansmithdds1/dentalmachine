@@ -7,6 +7,7 @@ import { emitAppointment } from '../webhooks.js';
 import { completeProcedure } from '../services.js';
 import { recallTypes, typesForCode } from '../recalls.js';
 import { officeFee } from '../fees.js';
+import { videoRoomFor } from '../video.js';
 
 export const STATUSES = ['scheduled', 'confirmed', 'checked_in', 'in_chair', 'completed', 'cancelled', 'no_show'];
 export const INACTIVE = "('cancelled','no_show')";
@@ -270,6 +271,8 @@ export default function scheduleRoutes({ db }) {
     if (type && row.start_time && !row.end_time) row.end_time = addMinutes(normalizeDateTime(row.start_time, 'start_time'), type.duration);
     if (type && !row.reason) row.reason = type.name;
     if (!row.location_id && req.location_id) row.location_id = req.location_id;
+    // A video visit (asked for, or the visit type is one) gets its meeting link now.
+    if (req.body.video || type?.is_video) row.video_url = videoRoomFor(await db.get('SELECT * FROM providers WHERE id = ? AND practice_id = ?', Number(row.provider_id), req.user.practice_id));
     requireFields(row, ['patient_id', 'provider_id', 'start_time', 'end_time']);
     const repeat = parseRepeat(req.body.repeat, row.start_time && normalizeDateTime(row.start_time, 'start_time'));
     await validateAppt(db, req.user.practice_id, row, { overrideBlockout: !!req.body.override_blockout });
@@ -360,6 +363,9 @@ export default function scheduleRoutes({ db }) {
     if (!['cancelled', 'no_show'].includes(merged.status)) await validateAppt(db, req.user.practice_id, merged, { overrideBlockout: !!req.body.override_blockout });
     else requireOneOf(merged.status, STATUSES, 'status');
     const row = pick(merged, FIELDS);
+    if (req.body.video !== undefined) {
+      row.video_url = req.body.video ? existing.video_url || videoRoomFor(await db.get('SELECT * FROM providers WHERE id = ?', Number(row.provider_id))) : null;
+    }
     const inactive = ['cancelled', 'no_show'];
     // A moved appointment needs a fresh reminder and confirmation.
     if (row.start_time !== existing.start_time) {

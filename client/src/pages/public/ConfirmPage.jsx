@@ -42,7 +42,13 @@ export default function ConfirmPage() {
         <div className="muted">{t('Your appointment')}</div>
         <div style={{ fontSize: 22, fontWeight: 700, margin: '6px 0' }}>{date}</div>
         <div style={{ fontSize: 18 }}>{t('{time} with {provider}', { time: fmtTimeL(lang, appt.start_time), provider: appt.provider_name })}</div>
-        {p.address && <div className="muted" style={{ marginTop: 10 }}>{p.address}, {[p.city, p.state, p.zip].filter(Boolean).join(', ')}</div>}
+        {appt.video_url && ['scheduled', 'confirmed'].includes(appt.status) && (
+          <div style={{ marginTop: 12 }}>
+            <div>📹 {t('This is a video visit. Join from your phone or computer at the time of your appointment.')}</div>
+            <a className="button primary" style={{ marginTop: 8, display: 'inline-block' }} href={appt.video_url} target="_blank" rel="noreferrer">{t('Join video visit')}</a>
+          </div>
+        )}
+        {!appt.video_url && p.address && <div className="muted" style={{ marginTop: 10 }}>{p.address}, {[p.city, p.state, p.zip].filter(Boolean).join(', ')}</div>}
       </div>
 
       <div style={{ marginTop: 20 }}>
