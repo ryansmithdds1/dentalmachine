@@ -50,6 +50,7 @@ export default function Dashboard() {
 
   return (
     <>
+      {can('reports:own') && !can('reports:read') && <MyProduction />}
       <div className="page-header">
         <div>
           <h1>{date === today ? `${greeting}, ${user.name.split(' ')[0]}` : 'Huddle'}</h1>
@@ -129,5 +130,19 @@ export default function Dashboard() {
         )}
       </div>
     </>
+  );
+}
+
+// For people who may see only their own numbers.
+function MyProduction() {
+  const { data } = useApi('/reports/my-production');
+  if (!data) return null;
+  if (!data.providers.length) return <div className="muted" style={{ marginBottom: 8 }}>Ask an administrator to link your login to your provider record to see your production.</div>;
+  return (
+    <div className="grid grid-4" style={{ gap: 12, marginBottom: 12 }}>
+      {[['Your production today', data.today], ['This month', data.month], ['This year', data.year]].map(([l, v]) => (
+        <div key={l} className="card stat" style={{ margin: 0 }}><div className="label">{l}</div><div className="value">{money(v)}</div></div>
+      ))}
+    </div>
   );
 }

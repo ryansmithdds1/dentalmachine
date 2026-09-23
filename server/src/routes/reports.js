@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { requirePermission, HttpError } from '../auth.js';
+import { requirePermission, HttpError, can } from '../auth.js';
 import { practiceNow, utcRange, mapSeq } from '../util.js';
 import { allocationsForRange } from '../allocation.js';
 import { pendingInsurance } from '../services.js';
@@ -52,6 +52,20 @@ export default function reportRoutes({ db }) {
       });
     }
     res.json(out);
+  });
+
+  // A clinician's own numbers (for people allowed to see only their own production): today, this
+  // month and this year, by the provider records linked to their login.
+  r.get('/reports/my-production', async (req, res) => {
+    if (!can(req.user, 'reports:own') && !can(req.user, 'reports:read')) throw new HttpError(403, 'Missing permission: reports:own');
+    const pid = req.user.practice_id;
+    const providers = await db.all('SELECT id, name FROM providers WHERE practice_id = ? AND user_id = ?', pid, req.user.id);
+    const today = (await practiceNow(db, pid)).slice(0, 10);
+    const sum = async (from) => (providers.length ? (await db.get(
+      `SELECT COALESCE(SUM(amount), 0) AS n FROM ledger_entries WHERE practice_id = ? AND type = 'charge' AND voided_at IS NULL AND reverses_id IS NULL
+         AND provider_id IN (${providers.map(() => '?').join(',')}) AND entry_date BETWEEN ? AND ?`, pid, ...providers.map((p) => p.id), from, today,
+    )).n : 0);
+    res.json({ providers, today: await sum(today), month: await sum(`${today.slice(0, 7)}-01`), year: await sum(`${today.slice(0, 4)}-01-01`) });
   });
 
   r.get('/reports/production', requirePermission('reports:read'), async (req, res) => {

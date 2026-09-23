@@ -102,7 +102,7 @@ The "OD / Curve" column shows which competitor has the feature: ✓ = has it, ~ 
 |---|---|---|---|---|---|
 | 17 | ✅ **Data conversion importer.** Open Dental (MySQL dump / CSV), Dentrix, Eaglesoft and Curve CSV: patients, families, insurance, ledger balances, appointments, recalls, treatment plans, documents. *(CSV import of everything but documents is done, with preview, re-runs and undo; bulk document import is still to do.)* | **No office switches without their data.** Probably the single most important item for adoption. | ✓ / ✓ | P1 | L |
 | 18 | **Multi-location (clinics).** Location entity; users across locations; per-location chairs, hours, fees and reports; consolidated reporting. | DSOs and growing practices; Curve Enterprise's main selling point. | ✓ / ✓ | P2 | L |
-| 19 | **Custom roles and per-user permission overrides.** For example, a hygienist who can see their own production. | Every office has a different org chart. | ✓ / ✓ | P2 | M |
+| 19 | ✅ **Custom roles and per-user permission overrides.** For example, a hygienist who can see their own production. | Every office has a different org chart. | ✓ / ✓ | P2 | M |
 | 20 | ✅ **Report exports** to CSV/Excel and PDF, on every report. | Accountants and consultants ask on day one. | ✓ / ✓ | P1 | S |
 | 21 | **Report filters** by provider, location, payer and date on every report; **saved and scheduled reports** emailed on a schedule. | Owners want the Monday-morning email. | ✓ / ✓ | P2 | M |
 | 22 | **Custom query / report builder** (read-only SQL for admins, or a guided builder). | Open Dental's "User Query" is heavily used. | ✓ / ~ | P3 | M |

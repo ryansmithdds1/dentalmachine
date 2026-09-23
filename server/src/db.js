@@ -660,6 +660,14 @@ CREATE TABLE IF NOT EXISTS portal_codes (
 CREATE INDEX IF NOT EXISTS idx_portal_codes ON portal_codes(practice_id, contact);
 
 -- Patients without an appointment who want one (or an earlier one), and when they can come.
+-- Practice-defined roles: a name and a set of permissions (see PERMISSION_CATALOG).
+CREATE TABLE IF NOT EXISTS custom_roles (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  name TEXT NOT NULL,
+  permissions TEXT NOT NULL DEFAULT '[]',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 -- Claim attachments and the control numbers that tie them to the claim (837 PWK).
 CREATE TABLE IF NOT EXISTS claim_attachments (
   id INTEGER PRIMARY KEY,
@@ -1159,6 +1167,9 @@ const COLUMNS = [
   ['practices', 'review_threshold', 'INTEGER NOT NULL DEFAULT 4'],
   ['practices', 'instant_booking', 'INTEGER NOT NULL DEFAULT 0'],
   ['documents', 'annotations', 'TEXT'],
+  ['users', 'custom_role_id', 'INTEGER REFERENCES custom_roles(id)'],
+  ['users', 'permissions_add', 'TEXT'],
+  ['users', 'permissions_remove', 'TEXT'],
   ['documents', 'mm_per_px', 'REAL'],
   ['appointment_types', 'deposit', 'INTEGER NOT NULL DEFAULT 0'],
   ['booking_requests', 'insurance_carrier', 'TEXT'],

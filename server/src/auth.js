@@ -58,11 +58,34 @@ export const PERMISSIONS = {
   billing: ['patients:read', 'schedule:read', 'clinical:read', 'billing:read', 'billing:write', 'reports:read'],
 };
 
+// Everything a role can be given. Settings, users and practice-wide admin stay with administrators.
+export const PERMISSION_CATALOG = {
+  'patients:read': 'See patients', 'patients:write': 'Add and edit patients',
+  'schedule:read': 'See the schedule', 'schedule:write': 'Book and move appointments',
+  'clinical:read': 'See charts, notes and x-rays', 'clinical:write': 'Chart, write notes, upload images', 'clinical:sign': 'Sign clinical notes',
+  'billing:read': 'See ledgers and claims', 'billing:write': 'Take payments, adjust, send claims',
+  'reports:read': 'See all practice reports', 'reports:own': 'See their own production',
+};
+
+// A person's permissions: their custom role's (or their built-in role's), plus or minus any set just for them.
+export function effectivePermissions(user) {
+  if (!user) return [];
+  if (user.role === 'admin') return ['*'];
+  const parse = (v) => { try { return JSON.parse(v || '[]'); } catch { return []; } };
+  const base = user.custom_role_permissions != null ? parse(user.custom_role_permissions) : PERMISSIONS[user.role] || [];
+  const add = parse(user.permissions_add);
+  const remove = new Set(parse(user.permissions_remove));
+  return [...new Set([...base, ...add])].filter((p) => !remove.has(p) && p in PERMISSION_CATALOG);
+}
+
 export function can(user, permission) {
   if (!user) return false;
   if (user.role === 'admin') return true;
-  return (PERMISSIONS[user.role] || []).includes(permission);
+  return (user.perms || effectivePermissions(user)).includes(permission);
 }
+
+export const USER_PERMISSION_SQL = `SELECT u.id, u.practice_id, u.email, u.name, u.role, u.active, u.token_version, u.custom_role_id, u.permissions_add, u.permissions_remove,
+  cr.permissions AS custom_role_permissions, cr.name AS custom_role_name FROM users u LEFT JOIN custom_roles cr ON cr.id = u.custom_role_id`;
 
 export function authenticate(db, secret, { allowMfaSetup = false } = {}) {
   return async (req, _res, next) => {
@@ -71,7 +94,7 @@ export function authenticate(db, secret, { allowMfaSetup = false } = {}) {
     const payload = token && verifyToken(token, secret);
     // Only staff sessions reach staff routes (patient-portal tokens are signed with the same key).
     if (!payload || payload.aud !== 'staff') return next(new HttpError(401, 'Authentication required'));
-    const user = await db.get('SELECT id, practice_id, email, name, role, active, token_version FROM users WHERE id = ?', payload.sub);
+    const user = await db.get(`${USER_PERMISSION_SQL} WHERE u.id = ?`, payload.sub);
     if (!user || !user.active) return next(new HttpError(401, 'Account disabled or not found'));
     // A password change, 2FA reset or "sign out everywhere" bumps the version and ends older sessions.
     if ((payload.tv ?? 0) !== (user.token_version ?? 0)) return next(new HttpError(401, 'Your session has ended — please sign in again'));
@@ -80,6 +103,7 @@ export function authenticate(db, secret, { allowMfaSetup = false } = {}) {
       const gate = await db.get('SELECT p.require_mfa, u.mfa_enabled FROM users u JOIN practices p ON p.id = u.practice_id WHERE u.id = ?', user.id);
       if (gate.require_mfa && !gate.mfa_enabled) return next(new HttpError(403, 'Two-factor authentication setup required', { mfa_setup_required: true }));
     }
+    user.perms = effectivePermissions(user);
     req.user = user;
     next();
   };

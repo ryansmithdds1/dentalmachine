@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { randomBytes } from 'node:crypto';
-import { hashPassword, verifyPassword, signToken, verifyToken, authenticate, rateLimit, HttpError, PERMISSIONS } from '../auth.js';
+import { hashPassword, verifyPassword, signToken, verifyToken, authenticate, rateLimit, HttpError, effectivePermissions, USER_PERMISSION_SQL } from '../auth.js';
 import { pick, requireFields, insert, audit, newToken, hashToken, staffPractice } from '../util.js';
 import { seedPracticeDefaults } from '../defaults.js';
 import { generateSecret, verifyTotp, otpauthUrl } from '../totp.js';
@@ -20,7 +20,7 @@ async function session(user, secret, db) {
   return {
     token: signToken({ sub: id, pid: practice_id, role, aud: 'staff', tv }, secret),
     user: {
-      id, practice_id, email, name, role, permissions: role === 'admin' ? ['*'] : PERMISSIONS[role] || [],
+      id, practice_id, email, name, role, permissions: effectivePermissions(await db.get(`${USER_PERMISSION_SQL} WHERE u.id = ?`, id)),
       mfa_enabled: mfaEnabled, mfa_setup_required: requireMfa && !mfaEnabled,
     },
   };

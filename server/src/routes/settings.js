@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { HttpError, hashPassword } from '../auth.js';
+import { HttpError, hashPassword, PERMISSION_CATALOG, PERMISSIONS } from '../auth.js';
 import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, toCents, practiceNow, staffPractice, toCsv } from '../util.js';
 import { validatePassword } from './auth.js';
 import { validateHours, validateWorkingHours } from '../hours.js';
@@ -130,7 +130,20 @@ export default function settingsRoutes({ db, secret, config = {} }) {
   });
 
   // ---- Users ----
-  const USER_COLS = 'id, practice_id, email, name, role, active, mfa_enabled, last_login_at, created_at';
+  const USER_COLS = 'id, practice_id, email, name, role, active, mfa_enabled, last_login_at, created_at, custom_role_id, permissions_add, permissions_remove';
+  // Custom role and per-person permission overrides, checked against the catalog and this practice.
+  const permFields = async (req, row) => {
+    const out = {};
+    if (req.body.custom_role_id !== undefined) out.custom_role_id = req.body.custom_role_id ? (await findOr404(db, 'custom_roles', req.body.custom_role_id, req.user.practice_id, 'Role')).id : null;
+    for (const k of ['permissions_add', 'permissions_remove']) {
+      if (req.body[k] === undefined) continue;
+      const list = Array.isArray(req.body[k]) ? req.body[k] : [];
+      const bad = list.find((p) => !(p in PERMISSION_CATALOG));
+      if (bad) throw new HttpError(400, `Unknown permission ${bad}`);
+      out[k] = list.length ? JSON.stringify([...new Set(list)]) : null;
+    }
+    return Object.assign(row, out);
+  };
   // Everyone can see who's on the team (to assign tasks); account details are for administrators.
   r.get('/users', async (req, res) => res.json(await db.all(
     `SELECT ${req.user.role === 'admin' ? USER_COLS : 'id, name, role, active'} FROM users WHERE practice_id = ? ORDER BY name`, req.user.practice_id,
@@ -142,6 +155,7 @@ export default function settingsRoutes({ db, secret, config = {} }) {
     requireOneOf(row.role, ROLES, 'role');
     validatePassword(req.body.password);
     if (await db.get('SELECT id FROM users WHERE lower(email) = lower(?)', row.email)) throw new HttpError(409, 'Email already in use');
+    await permFields(req, row);
     const id = await insert(db, 'users', { ...row, practice_id: req.user.practice_id, password_hash: hashPassword(req.body.password) });
     await audit(db, req, 'user.create', 'users', id, { role: row.role });
     res.status(201).json(await db.get(`SELECT ${USER_COLS} FROM users WHERE id = ?`, id));
@@ -160,13 +174,51 @@ export default function settingsRoutes({ db, secret, config = {} }) {
     }
     // Lost phone: an admin can clear a colleague's 2FA so they can enrol again.
     if (req.body.reset_mfa) Object.assign(row, { mfa_enabled: 0, mfa_secret: null, mfa_last_step: null });
+    await permFields(req, row);
+    const permsChanged = ['custom_role_id', 'permissions_add', 'permissions_remove'].some((k) => k in row && row[k] !== existing[k]);
     await update(db, 'users', existing.id, req.user.practice_id, row);
     // A new password, 2FA reset, role change or deactivation ends that person's open sessions.
-    if (row.password_hash || req.body.reset_mfa || row.active === 0 || row.active === false || (row.role && row.role !== existing.role)) {
+    if (permsChanged || row.password_hash || req.body.reset_mfa || row.active === 0 || row.active === false || (row.role && row.role !== existing.role)) {
       await db.run('UPDATE users SET token_version = token_version + 1, failed_logins = 0, locked_until = NULL WHERE id = ?', existing.id);
     }
     await audit(db, req, 'user.update', 'users', existing.id, { fields: Object.keys(row).filter((k) => k !== 'password_hash') });
     res.json(await db.get(`SELECT ${USER_COLS} FROM users WHERE id = ?`, existing.id));
+  });
+
+  // ---- Custom roles ----
+  r.get('/permissions', (_req, res) => res.json({ catalog: PERMISSION_CATALOG, roles: PERMISSIONS }));
+  const roleView = (x) => ({ ...x, permissions: JSON.parse(x.permissions || '[]') });
+  const cleanRole = (b) => {
+    const name = String(b?.name || '').trim().slice(0, 60);
+    if (!name) throw new HttpError(400, 'Name the role');
+    const perms = Array.isArray(b.permissions) ? [...new Set(b.permissions)] : [];
+    const bad = perms.find((p) => !(p in PERMISSION_CATALOG));
+    if (bad) throw new HttpError(400, `Unknown permission ${bad}`);
+    return { name, permissions: JSON.stringify(perms) };
+  };
+  r.get('/roles', requireAdmin, async (req, res) => {
+    res.json((await db.all('SELECT r.*, (SELECT COUNT(*) FROM users u WHERE u.custom_role_id = r.id AND u.active = 1) AS users FROM custom_roles r WHERE r.practice_id = ? ORDER BY r.name', req.user.practice_id)).map(roleView));
+  });
+  r.post('/roles', requireAdmin, async (req, res) => {
+    const id = await insert(db, 'custom_roles', { ...cleanRole(req.body), practice_id: req.user.practice_id });
+    await audit(db, req, 'role.create', 'custom_roles', id);
+    res.status(201).json(roleView(await db.get('SELECT * FROM custom_roles WHERE id = ?', id)));
+  });
+  r.put('/roles/:rid', requireAdmin, async (req, res) => {
+    const role = await findOr404(db, 'custom_roles', req.params.rid, req.user.practice_id, 'Role');
+    const row = cleanRole(req.body);
+    await db.run('UPDATE custom_roles SET name = ?, permissions = ? WHERE id = ?', row.name, row.permissions, role.id);
+    // Everyone with the role gets the change at their next request; their sessions restart.
+    if (row.permissions !== role.permissions) await db.run('UPDATE users SET token_version = token_version + 1 WHERE custom_role_id = ?', role.id);
+    await audit(db, req, 'role.update', 'custom_roles', role.id);
+    res.json(roleView(await db.get('SELECT * FROM custom_roles WHERE id = ?', role.id)));
+  });
+  r.delete('/roles/:rid', requireAdmin, async (req, res) => {
+    const role = await findOr404(db, 'custom_roles', req.params.rid, req.user.practice_id, 'Role');
+    if ((await db.get('SELECT COUNT(*) AS n FROM users WHERE custom_role_id = ?', role.id)).n) throw new HttpError(409, 'Move the people in this role to another role first');
+    await db.run('DELETE FROM custom_roles WHERE id = ?', role.id);
+    await audit(db, req, 'role.delete', 'custom_roles', role.id);
+    res.json({ ok: true });
   });
 
   resource(r, db, {

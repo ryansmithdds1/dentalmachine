@@ -430,8 +430,18 @@ function Practice() {
 function Users() {
   const { user: me } = useAuth();
   const { data: users, reload } = useApi('/users');
+  const { data: roles, reload: reloadRoles } = useApi('/roles');
+  const { data: perms } = useApi('/permissions');
   const [modal, setModal] = useState(null);
+  const [roleEdit, setRoleEdit] = useState(null);
+  const roleName = (u) => roles?.find((r) => r.id === u.custom_role_id)?.name || label(u.role);
+  const overrides = (u) => {
+    const add = JSON.parse(u.permissions_add || '[]');
+    const rem = JSON.parse(u.permissions_remove || '[]');
+    return add.length || rem.length ? ` (${[...add.map((p) => `+${perms?.catalog[p] || p}`), ...rem.map((p) => `−${perms?.catalog[p] || p}`)].join(', ')})` : '';
+  };
   return (
+    <>
     <div className="card" style={{ padding: 0 }}>
       <div className="page-header" style={{ padding: '14px 16px', marginBottom: 0 }}>
         <h2 style={{ margin: 0 }}>Users</h2>
@@ -444,7 +454,7 @@ function Users() {
             <tr key={u.id}>
               <td>{u.name}{u.id === me.id && <span className="muted"> (you)</span>}</td>
               <td>{u.email}</td>
-              <td>{label(u.role)}</td>
+              <td>{roleName(u)}<span className="muted" style={{ fontSize: 12 }}>{overrides(u)}</span></td>
               <td><span className={`badge ${u.active ? 'ok' : 'danger'}`}>{u.active ? 'Active' : 'Disabled'}</span></td>
               <td>{u.mfa_enabled ? <span className="badge ok">On</span> : <span className="muted">Off</span>}</td>
               <td>{u.last_login_at ? fmtDateTime(u.last_login_at) : 'Never'}</td>
@@ -455,17 +465,75 @@ function Users() {
       </table>
       {modal && (
         <Modal title={modal.user ? `Edit ${modal.user.name}` : 'New user'} onClose={() => setModal(null)}>
-          <UserForm user={modal.user} onDone={() => { setModal(null); reload(); }} />
+          <UserForm user={modal.user} roles={roles || []} perms={perms} onDone={() => { setModal(null); reload(); }} />
         </Modal>
       )}
     </div>
+    <div className="card" style={{ padding: 0 }}>
+      <div className="page-header" style={{ padding: '14px 16px', marginBottom: 0 }}>
+        <div>
+          <h2 style={{ margin: 0 }}>Roles</h2>
+          <div className="muted" style={{ fontSize: 13 }}>Built-in roles cover most offices. Make your own when someone’s job doesn’t fit — a treatment coordinator, an office manager who shouldn’t see charts.</div>
+        </div>
+        <button onClick={() => setRoleEdit({ name: '', permissions: [] })}>+ Role</button>
+      </div>
+      {perms && (
+        <div style={{ overflowX: 'auto' }}>
+          <table>
+            <thead><tr><th>Role</th>{Object.values(perms.catalog).map((l) => <th key={l} style={{ fontSize: 11, whiteSpace: 'normal', minWidth: 70 }}>{l}</th>)}<th /></tr></thead>
+            <tbody>
+              {Object.entries(perms.roles).map(([k, list]) => (
+                <tr key={k}><td>{label(k)} <span className="muted" style={{ fontSize: 11 }}>built-in</span></td>{Object.keys(perms.catalog).map((p) => <td key={p} style={{ textAlign: 'center' }}>{list.includes(p) ? '✓' : ''}</td>)}<td /></tr>
+              ))}
+              {(roles || []).map((r) => (
+                <tr key={r.id}><td><strong>{r.name}</strong> <span className="muted" style={{ fontSize: 11 }}>{r.users} people</span></td>{Object.keys(perms.catalog).map((p) => <td key={p} style={{ textAlign: 'center' }}>{r.permissions.includes(p) ? '✓' : ''}</td>)}<td><button className="small" onClick={() => setRoleEdit(r)}>Edit</button></td></tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {roleEdit && <RoleForm role={roleEdit} catalog={perms.catalog} onDone={() => { setRoleEdit(null); reloadRoles(); reload(); }} onClose={() => setRoleEdit(null)} />}
+    </div>
+    </>
   );
 }
 
-function UserForm({ user, onDone }) {
-  const [form, setForm] = useState({ name: user?.name || '', email: user?.email || '', role: user?.role || 'front_desk', active: user ? !!user.active : true, password: '' });
+function RoleForm({ role, catalog, onDone, onClose }) {
+  const [r, setR] = useState({ name: role.name, permissions: role.permissions });
+  const save = useSubmit(async () => { if (role.id) await api.put(`/roles/${role.id}`, r); else await api.post('/roles', r); onDone(); });
+  const del = useSubmit(async () => { await api.del(`/roles/${role.id}`); onDone(); });
+  return (
+    <Modal title={role.id ? `Edit ${role.name}` : 'New role'} onClose={onClose}>
+      <ErrorBox error={save.error || del.error} />
+      <label>Name<input value={r.name} onChange={(e) => setR({ ...r, name: e.target.value })} /></label>
+      <div style={{ marginTop: 10 }}>
+        {Object.entries(catalog).map(([k, l]) => (
+          <label key={k} className="checkbox" style={{ margin: '4px 0' }}>
+            <input type="checkbox" checked={r.permissions.includes(k)} onChange={(e) => setR({ ...r, permissions: e.target.checked ? [...r.permissions, k] : r.permissions.filter((x) => x !== k) })} /> {l}
+          </label>
+        ))}
+      </div>
+      <div className="muted" style={{ fontSize: 12 }}>Settings and user accounts are always administrator-only.</div>
+      <div className="form-actions">
+        {role.id && <button type="button" className="danger" onClick={del.submit}>Delete</button>}
+        <button type="button" onClick={onClose}>Cancel</button>
+        <button className="primary" disabled={save.busy || !r.name} onClick={save.submit}>Save</button>
+      </div>
+    </Modal>
+  );
+}
+
+function UserForm({ user, roles = [], perms, onDone }) {
+  const [form, setForm] = useState({
+    name: user?.name || '', email: user?.email || '', role: user?.role || 'front_desk', active: user ? !!user.active : true, password: '',
+    custom_role_id: user?.custom_role_id || '', permissions_add: JSON.parse(user?.permissions_add || '[]'), permissions_remove: JSON.parse(user?.permissions_remove || '[]'),
+  });
+  const base = form.custom_role_id ? roles.find((r) => r.id === Number(form.custom_role_id))?.permissions || [] : perms?.roles[form.role] || [];
+  // Each permission: from the role, added just for this person, or taken away from them.
+  const state = (p) => (form.permissions_add.includes(p) ? 'add' : form.permissions_remove.includes(p) ? 'remove' : 'role');
+  const setState = (p, v) => setForm({ ...form, permissions_add: form.permissions_add.filter((x) => x !== p).concat(v === 'add' ? [p] : []), permissions_remove: form.permissions_remove.filter((x) => x !== p).concat(v === 'remove' ? [p] : []) });
   const { submit, busy, error } = useSubmit(async () => {
-    const body = { ...form };
+    const body = { ...form, custom_role_id: form.custom_role_id ? Number(form.custom_role_id) : null };
     if (!body.password) delete body.password;
     if (user) await api.put(`/users/${user.id}`, body);
     else await api.post('/users', body);
@@ -481,7 +549,36 @@ function UserForm({ user, onDone }) {
         <label>{user ? 'Reset password (optional)' : 'Temporary password'}<input type="password" minLength={10} required={!user} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></label>
         {user && <label className="checkbox"><input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} /> Active</label>}
         {user?.mfa_enabled ? <label className="checkbox"><input type="checkbox" checked={!!form.reset_mfa} onChange={(e) => setForm({ ...form, reset_mfa: e.target.checked })} /> Reset 2FA (lost phone)</label> : null}
+        {form.role !== 'admin' && roles.length > 0 && (
+          <label>Custom role (instead of the built-in one)
+            <select value={form.custom_role_id} onChange={(e) => setForm({ ...form, custom_role_id: e.target.value })}>
+              <option value="">— use {label(form.role)} —</option>
+              {roles.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+            </select>
+          </label>
+        )}
       </div>
+      {form.role !== 'admin' && perms && (
+        <details style={{ marginTop: 10 }}>
+          <summary>Permissions for this person</summary>
+          <table className="compact-table" style={{ marginTop: 6 }}>
+            <tbody>
+              {Object.entries(perms.catalog).map(([p, l]) => (
+                <tr key={p}>
+                  <td>{l}</td>
+                  <td>
+                    <select value={state(p)} onChange={(e) => setState(p, e.target.value)}>
+                      <option value="role">{base.includes(p) ? 'Yes (from role)' : 'No (from role)'}</option>
+                      <option value="add">Yes, for this person</option>
+                      <option value="remove">No, for this person</option>
+                    </select>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </details>
+      )}
       <div className="form-actions"><button className="primary" disabled={busy}>Save</button></div>
     </form>
   );
