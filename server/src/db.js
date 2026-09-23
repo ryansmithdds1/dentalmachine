@@ -586,6 +586,36 @@ CREATE TABLE IF NOT EXISTS edi_sandbox_mailbox (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS bridge_agents (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  name TEXT NOT NULL,
+  token_hash TEXT NOT NULL UNIQUE,
+  apps TEXT NOT NULL DEFAULT '[]',
+  hostname TEXT,
+  version TEXT,
+  last_seen_at TEXT,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS bridge_commands (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  agent_id INTEGER NOT NULL REFERENCES bridge_agents(id),
+  patient_id INTEGER REFERENCES patients(id),
+  type TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  result TEXT,
+  created_by INTEGER REFERENCES users(id),
+  delivered_at TEXT,
+  completed_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_bridge_commands ON bridge_commands(agent_id, status);
+
 CREATE TABLE IF NOT EXISTS tasks (
   id INTEGER PRIMARY KEY,
   practice_id INTEGER NOT NULL REFERENCES practices(id),
@@ -664,6 +694,9 @@ const COLUMNS = [
   ['prescriptions', 'signed_by', 'INTEGER'],
   ['prescriptions', 'signed_two_factor', 'INTEGER NOT NULL DEFAULT 0'],
   ['prescriptions', 'transmitted_at', 'TEXT'],
+  ['documents', 'source_hash', 'TEXT'],
+  ['documents', 'source', 'TEXT'],
+  ['documents', 'taken_at', 'TEXT'],
   ['appointments', 'series_id', 'INTEGER REFERENCES appointment_series(id)'],
 ];
 

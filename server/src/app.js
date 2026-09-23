@@ -23,6 +23,7 @@ import ppoRoutes from './routes/ppo.js';
 import frontDeskRoutes from './routes/frontdesk.js';
 import casePresentationRoutes, { publicCasePresentation } from './routes/casepres.js';
 import growthRoutes from './routes/growth.js';
+import imagingRoutes, { bridgeAgentRoutes } from './routes/imaging.js';
 import { createMessenger } from './messaging.js';
 import { createStorage } from './storage.js';
 import { createClearinghouse, clearinghouseConfig } from './clearinghouse.js';
@@ -74,6 +75,11 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
     next();
   }, publicRoutes({ db }), publicCasePresentation({ db }));
 
+  app.use('/api/bridge', (_req, res, next) => {
+    res.set('Cache-Control', 'no-store');
+    next();
+  }, bridgeAgentRoutes({ db, storage }));
+
   const api = express.Router();
   api.use(authenticate(db, secret));
   api.use((_req, res, next) => {
@@ -98,6 +104,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(frontDeskRoutes({ db }));
   api.use(casePresentationRoutes({ db, messenger, config, erx }));
   api.use(growthRoutes({ db, messenger, config }));
+  api.use(imagingRoutes({ db }));
   app.use('/api', api);
   app.use('/api', (_req, _res, next) => next(new HttpError(404, 'Not found')));
 

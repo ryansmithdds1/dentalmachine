@@ -13,7 +13,7 @@ export default function documentRoutes({ db, storage }) {
   r.get('/patients/:id/documents', requirePermission('clinical:read'), async (req, res) => {
     const patient = await findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient');
     res.json(await db.all(
-      `SELECT d.id, d.category, d.filename, d.mime, d.size, d.tooth, d.notes, d.created_at, u.name AS uploaded_by_name
+      `SELECT d.id, d.category, d.filename, d.mime, d.size, d.tooth, d.notes, d.source, d.taken_at, d.created_at, u.name AS uploaded_by_name
        FROM documents d LEFT JOIN users u ON u.id = d.uploaded_by
        WHERE d.practice_id = ? AND d.patient_id = ? AND d.deleted_at IS NULL ORDER BY d.id DESC`,
       req.user.practice_id, patient.id,

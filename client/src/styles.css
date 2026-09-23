@@ -478,3 +478,9 @@ button.active, .seg button.active { background: var(--primary-soft); color: var(
 .epcs-sign input { max-width: 180px; font-size: 18px; letter-spacing: 0.2em; text-align: center; }
 .rx-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
 .rx-actions .badge { white-space: nowrap; }
+
+/* Imaging bridge */
+.imaging-bar { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; padding: 12px 16px; }
+.imaging-bar .error { width: 100%; margin: 0; }
+.imaging-status { width: 100%; font-size: 13px; }
+.imaging-ws { flex-direction: row !important; align-items: center; gap: 8px; }

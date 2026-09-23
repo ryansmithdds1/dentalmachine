@@ -1,0 +1,23 @@
+{
+  "server": "https://app.yourpractice.com",
+  "token": "dmb_paste-the-key-from-Settings-Imaging-bridges",
+  "apps": [
+    {
+      "id": "dexis",
+      "name": "DEXIS",
+      "command": "C:\\DEXIS\\DEXIS.exe",
+      "args": ["/P{patientId}", "/N{lastName}, {firstName}", "/B{dobMDY}"]
+    },
+    {
+      "id": "sidexis",
+      "name": "Sidexis",
+      "writeFile": { "path": "C:\\Sidexis\\Bridge\\patient.txt", "content": "{patientId}\r\n{lastName}\r\n{firstName}\r\n{dobYMD}\r\n{gender}\r\n" },
+      "command": "C:\\Program Files\\Dentsply Sirona\\SIDEXIS 4\\sidexis4.exe"
+    }
+  ],
+  "watch": [
+    { "folder": "C:\\DEXIS\\Export", "category": "xray", "moveTo": "C:\\DEXIS\\Export\\sent" },
+    { "folder": "C:\\Users\\Public\\Pictures\\Intraoral camera", "category": "photo" }
+  ],
+  "scanSeconds": 5
+}

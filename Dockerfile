@@ -16,6 +16,7 @@ COPY server/package.json server/
 COPY client/package.json client/
 RUN npm ci --omit=dev --workspace server && npm cache clean --force
 COPY server/src server/src
+COPY bridge bridge
 COPY --from=build /app/client/dist client/dist
 RUN mkdir -p /data && chown node:node /data
 USER node

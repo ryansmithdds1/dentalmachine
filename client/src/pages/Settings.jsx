@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { api, getToken } from '../api.js';
 import { useApi, invalidateLookup } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
-import { money, fmtDateTime, label, toCents, fromCents } from '../format.js';
+import { money, fmtDateTime, fmtUtcDateTime, label, toCents, fromCents } from '../format.js';
 import { ErrorBox, Modal, useSubmit } from '../components/ui.jsx';
 import MfaSetup from '../components/MfaSetup.jsx';
 
@@ -45,6 +45,7 @@ export default function Settings() {
     ['carriers', 'Insurance carriers', can('billing:read')],
     ['ppo', 'PPO fee schedules', can('billing:read')],
     ['messaging', 'Messages & reviews', admin],
+    ['imaging', 'Imaging bridges', admin],
     ['audit', 'Audit log', admin],
   ].filter((t) => t[2]);
   const [tab, setTab] = useState(admin ? 'practice' : 'account');
@@ -59,6 +60,7 @@ export default function Settings() {
       {RESOURCES[tab] && <ResourceTable key={tab} spec={RESOURCES[tab]} canWrite={RESOURCES[tab].writePerm ? can(RESOURCES[tab].writePerm) : admin} />}
       {tab === 'ppo' && <FeeSchedules admin={admin} />}
       {tab === 'messaging' && <Messaging />}
+      {tab === 'imaging' && <ImagingBridges />}
       {tab === 'audit' && <AuditLog />}
     </>
   );
@@ -629,4 +631,73 @@ function summarizeHours(hours) {
   if (!days.length) return 'Not scheduled';
   const spans = new Set(days.map((d) => hours[d].map((r) => r.join('–')).join(', ')));
   return `${days.map((d) => DAYS[d].slice(0, 3)).join(', ')}${spans.size === 1 ? ` ${[...spans][0]}` : ''}`;
+}
+
+// Workstations running the imaging bridge (opens DEXIS/Sidexis/etc. and imports captured images).
+function ImagingBridges() {
+  const { practice } = useAuth();
+  const { data: agents, reload } = useApi('/imaging/agents');
+  const [name, setName] = useState('');
+  const [created, setCreated] = useState(null);
+  const add = useSubmit(async () => {
+    setCreated(await api.post('/imaging/agents', { name }));
+    setName('');
+    reload();
+  });
+  const config = created && JSON.stringify({
+    server: window.location.origin, token: created.token,
+    apps: [{ id: 'dexis', name: 'DEXIS', command: 'C:\\DEXIS\\DEXIS.exe', args: ['/P{patientId}'] }],
+    watch: [{ folder: 'C:\\DEXIS\\Export', category: 'xray' }],
+  }, null, 2);
+  const download = async (path, filename, text) => {
+    const blob = text ? new Blob([text], { type: 'application/json' }) : await (await fetch(`/api${path}`, { headers: { Authorization: `Bearer ${getToken()}` } })).blob();
+    Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: filename }).click();
+  };
+  return (
+    <>
+      <div className="card">
+        <h2>Imaging bridges</h2>
+        <p className="muted" style={{ fontSize: 13 }}>
+          Install the bridge on each operatory computer that runs imaging software (DEXIS, Sidexis, Carestream, Apteryx, VixWin…). Staff can then open the
+          patient in the imaging program straight from the chart, and new x-rays and photos are filed in the patient&apos;s Documents automatically.
+        </p>
+        <ol className="muted" style={{ fontSize: 13, paddingLeft: 18 }}>
+          <li>Add the workstation below and download its settings file.</li>
+          <li>On that computer, install Node.js (18 or newer) and save the <button className="link" onClick={() => download('/imaging/agent-download', 'dental-machine-bridge.mjs')}>bridge program</button> next to the settings file.</li>
+          <li>Edit the settings file with your imaging program&apos;s path and export folder (your imaging vendor&apos;s bridge guide lists the command-line options), then run <code>node dental-machine-bridge.mjs bridge-config.json</code> — or set it to start with Windows.</li>
+        </ol>
+        <form className="inline" onSubmit={(e) => { e.preventDefault(); add.submit(); }} style={{ gap: 8 }}>
+          <input placeholder='Workstation name, e.g. "Op 2"' value={name} onChange={(e) => setName(e.target.value)} style={{ maxWidth: 320 }} />
+          <button className="primary" disabled={!name.trim() || add.busy}>Add workstation</button>
+        </form>
+        <ErrorBox error={add.error} />
+        {created && (
+          <div className="public-notice ok" style={{ marginTop: 12 }}>
+            <strong>{created.name} added.</strong> Its key is shown only once — download the settings file now.
+            <div style={{ marginTop: 8 }}><button className="small primary" onClick={() => download(null, 'bridge-config.json', config)}>Download bridge-config.json</button></div>
+          </div>
+        )}
+      </div>
+      <div className="card" style={{ padding: 0 }}>
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>Workstation</th><th>Status</th><th>Computer</th><th>Imaging programs</th><th>Last seen</th><th /></tr></thead>
+            <tbody>
+              {agents?.map((a) => (
+                <tr key={a.id}>
+                  <td><strong>{a.name}</strong></td>
+                  <td><span className={`live-dot${a.online ? ' on' : ''}`}>{a.online ? 'Online' : 'Offline'}</span></td>
+                  <td>{a.hostname || '—'}{a.version ? <span className="muted"> · v{a.version}</span> : ''}</td>
+                  <td>{a.apps.map((x) => x.name).join(', ') || <span className="muted">—</span>}</td>
+                  <td>{a.last_seen_at ? fmtUtcDateTime(a.last_seen_at, practice?.timezone) : 'Never'}</td>
+                  <td><button className="small danger" onClick={() => confirm(`Remove ${a.name}? Its bridge will stop working.`) && api.del(`/imaging/agents/${a.id}`).then(reload)}>Remove</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {agents?.length === 0 && <div className="empty">No workstations yet.</div>}
+        </div>
+      </div>
+    </>
+  );
 }

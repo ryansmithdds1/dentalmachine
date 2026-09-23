@@ -4,6 +4,7 @@ import { useApi } from '../../hooks.js';
 import { useAuth } from '../../auth.jsx';
 import { fmtDate, label } from '../../format.js';
 import { ErrorBox, Modal } from '../ui.jsx';
+import { useLiveEvents } from '../../live.js';
 
 const CATEGORIES = ['xray', 'photo', 'document', 'consent', 'insurance_card', 'referral', 'other'];
 const catLabel = (c) => (c === 'xray' ? 'X-ray' : label(c));
@@ -37,6 +38,8 @@ function Thumb({ doc, onOpen }) {
 export default function DocumentsTab({ patient }) {
   const { can } = useAuth();
   const { data: docs, reload } = useApi(`/patients/${patient.id}/documents`);
+  // Images captured through an imaging bridge appear without a refresh.
+  useLiveEvents((e) => e.type === 'documents' && e.patient_id === patient.id && reload());
   const [category, setCategory] = useState('xray');
   const [tooth, setTooth] = useState('');
   const [filter, setFilter] = useState('');
@@ -91,6 +94,7 @@ export default function DocumentsTab({ patient }) {
 
   return (
     <>
+      <ImagingBar patient={patient} />
       {can('clinical:write') && (
         <div className="card">
           <div className="inline" style={{ flexWrap: 'wrap', gap: 12 }}>
@@ -120,7 +124,7 @@ export default function DocumentsTab({ patient }) {
       {viewing && (
         <Modal title={viewing.doc.filename} wide onClose={close}>
           <div className="muted" style={{ marginBottom: 10 }}>
-            {catLabel(viewing.doc.category)}{viewing.doc.tooth ? ` · tooth #${viewing.doc.tooth}` : ''} · uploaded {fmtDate(viewing.doc.created_at)} by {viewing.doc.uploaded_by_name}
+            {catLabel(viewing.doc.category)}{viewing.doc.tooth ? ` · tooth #${viewing.doc.tooth}` : ''} · {viewing.doc.taken_at ? `taken ${fmtDate(viewing.doc.taken_at)} · ` : ''}added {fmtDate(viewing.doc.created_at)}{viewing.doc.uploaded_by_name ? ` by ${viewing.doc.uploaded_by_name}` : viewing.doc.notes ? ` · ${viewing.doc.notes}` : ''}
           </div>
           {!viewing.url && <div className="empty">Loading…</div>}
           {viewing.url && viewing.doc.mime.startsWith('image/') && <img src={viewing.url} alt={viewing.doc.filename} className="doc-viewer" />}
@@ -133,5 +137,70 @@ export default function DocumentsTab({ patient }) {
         </Modal>
       )}
     </>
+  );
+}
+
+const WS_KEY = 'dm_workstation';
+const readWs = () => {
+  try {
+    return localStorage.getItem(WS_KEY);
+  } catch {
+    return null;
+  }
+};
+
+// Open the patient in the imaging software on this operatory's PC (through its imaging bridge).
+function ImagingBar({ patient }) {
+  const { data: agents } = useApi('/imaging/agents');
+  const [ws, setWs] = useState(readWs);
+  const [status, setStatus] = useState(null);
+  const [error, setError] = useState(null);
+  if (!agents?.length) return null;
+  const agent = agents.find((a) => String(a.id) === String(ws));
+  const choose = (id) => {
+    setWs(id);
+    try {
+      localStorage.setItem(WS_KEY, id);
+    } catch {
+      /* per-browser convenience only */
+    }
+  };
+  const launch = async (app) => {
+    setError(null);
+    setStatus(`Opening ${patient.first_name} in ${app.name} on ${agent.name}…`);
+    try {
+      const cmd = await api.post(`/patients/${patient.id}/imaging/launch`, { agent_id: agent.id, app: app.id });
+      for (let i = 0; i < 20; i++) {
+        await new Promise((r) => setTimeout(r, 700));
+        const c = await api.get(`/imaging/commands/${cmd.id}`);
+        if (c.status === 'done') return setStatus(`${app.name} is open on ${agent.name}. New images will appear here automatically.`);
+        if (c.status === 'error' || c.status === 'expired') throw new Error(c.result || `${agent.name} didn't respond`);
+      }
+      setStatus(null);
+      throw new Error(`${agent.name} hasn't picked it up — is the imaging bridge running on that computer?`);
+    } catch (e) {
+      setStatus(null);
+      setError(e);
+    }
+  };
+  return (
+    <div className="card imaging-bar">
+      <label className="imaging-ws">
+        <span className="muted">This computer</span>
+        <select value={agent ? agent.id : ''} onChange={(e) => choose(e.target.value)} style={{ width: 'auto' }}>
+          <option value="">Choose workstation…</option>
+          {agents.map((a) => <option key={a.id} value={a.id}>{a.name}{a.online ? '' : ' (offline)'}</option>)}
+        </select>
+      </label>
+      {agent && (
+        <div className="inline" style={{ flexWrap: 'wrap', gap: 6 }}>
+          <span className={`live-dot${agent.online ? ' on' : ''}`}>{agent.online ? 'Bridge online' : 'Bridge offline'}</span>
+          {agent.apps.map((app) => <button key={app.id} className="small primary" disabled={!agent.online} onClick={() => launch(app)}>Open in {app.name}</button>)}
+          {!agent.apps.length && <span className="muted">No imaging programs set up on {agent.name}.</span>}
+        </div>
+      )}
+      {status && <div className="muted imaging-status">{status}</div>}
+      <ErrorBox error={error} />
+    </div>
   );
 }
