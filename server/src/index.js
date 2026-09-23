@@ -4,6 +4,7 @@ import { createApp, loadConfig } from './app.js';
 import { createMessenger, runReminders } from './messaging.js';
 import { runFinanceSync } from './routes/finance.js';
 import { runFillOffers } from './fill.js';
+import { runReviewSync } from './routes/reputation.js';
 import { initCluster, runExclusive } from './cluster.js';
 import { pollClearinghouse } from './clearinghouse.js';
 import { runRecallSequences } from './recalls.js';
@@ -131,6 +132,13 @@ if (process.env.FINANCE_SYNC !== 'off') {
     .catch(jobFailed('Finance sync'));
   setInterval(run, 4 * 60 * 60 * 1000).unref();
   setTimeout(run, 70_000).unref();
+}
+// Online reviews, every two hours (low ratings become a task to reply).
+{
+  const run = () => runExclusive('reviews', 20 * 60 * 1000, () => runReviewSync(db, { gbp: app.locals.gbp, secret }))
+    .catch(jobFailed('Review sync'));
+  setInterval(run, 2 * 60 * 60 * 1000).unref();
+  setTimeout(run, 90_000).unref();
 }
 // After-visit patient surveys (the day after, from 10am practice time).
 {

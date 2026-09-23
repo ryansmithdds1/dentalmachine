@@ -1754,6 +1754,32 @@ CREATE TABLE IF NOT EXISTS financing_applications (
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT
 );
+CREATE TABLE IF NOT EXISTS reviews (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  source TEXT NOT NULL DEFAULT 'google',
+  external_id TEXT,
+  author TEXT,
+  rating INTEGER,
+  text TEXT,
+  posted_at TEXT,
+  reply TEXT,
+  reply_status TEXT NOT NULL DEFAULT 'none',
+  replied_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS review_connections (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  location TEXT NOT NULL,
+  location_title TEXT,
+  access_token TEXT,
+  refresh_token TEXT,
+  expires_at TEXT,
+  synced_at TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 CREATE TABLE IF NOT EXISTS organizations (
   id INTEGER PRIMARY KEY,
   name TEXT NOT NULL,

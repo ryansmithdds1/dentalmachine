@@ -35,6 +35,8 @@ import labRxRoutes, { labPublicRoutes } from './routes/labrx.js';
 import patientCareRoutes, { learnPublicRoutes } from './routes/patientcare.js';
 import checkinRoutes, { checkinPublicRoutes } from './routes/checkin.js';
 import lenderRoutes, { lenderWebhooks } from './routes/lenders.js';
+import reputationRoutes, { reputationPublicRoutes } from './routes/reputation.js';
+import { createGoogleBusiness } from './reviews.js';
 import { createXrayAi, registerXrayAi } from './xrayai.js';
 import { registerFill } from './fill.js';
 import { createPlaid } from './finance/plaid.js';
@@ -94,6 +96,8 @@ export function loadConfig(env = process.env) {
     stripeWebhookSecret: env.STRIPE_WEBHOOK_SECRET || null,
     payments: env.PAYMENTS || null,
     twilioAuthToken: env.TWILIO_AUTH_TOKEN || null, twilioAccountSid: env.TWILIO_ACCOUNT_SID || null,
+    // Online reviews: GOOGLE_BUSINESS=sandbox, or an OAuth client with the Business Profile API.
+    googleBusiness: env.GOOGLE_BUSINESS || null, googleClientId: env.GOOGLE_CLIENT_ID || null, googleClientSecret: env.GOOGLE_CLIENT_SECRET || null,
     // Call recordings to text: TRANSCRIBE=deepgram (with DEEPGRAM_API_KEY) or sandbox.
     transcribe: env.TRANSCRIBE || null, deepgramKey: env.DEEPGRAM_API_KEY || null,
     sendgridWebhookKey: env.SENDGRID_WEBHOOK_KEY || null,
@@ -125,7 +129,7 @@ export function loadConfig(env = process.env) {
 // Plaid Link (connecting the practice's bank) runs from Plaid's own script and frame.
 export const CSP = "default-src 'self'; script-src 'self' https://cdn.plaid.com/link/v2/stable/link-initialize.js; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://production.plaid.com https://sandbox.plaid.com; frame-src 'self' blob: https://cdn.plaid.com; media-src 'self' blob:; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'";
 
-export function createApp({ db, secret, config: overrides = {}, fetchImpl = globalThis.fetch, messenger, storage, clearinghouse, erx, payments, mailer, attachmentSender, plaid, qbo, xrayAi, transcriber }) {
+export function createApp({ db, secret, config: overrides = {}, fetchImpl = globalThis.fetch, messenger, storage, clearinghouse, erx, payments, mailer, attachmentSender, plaid, qbo, xrayAi, transcriber, gbp }) {
   if (!secret) throw new Error('JWT secret is required');
   const config = { ...loadConfig(), ...overrides };
   messenger ??= createMessenger({ fetchImpl });
@@ -138,6 +142,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   registerXrayAi(db, { storage, xrayAi });
   registerFill(db, messenger);
   transcriber ??= createTranscriber({ config, fetchImpl });
+  gbp ??= createGoogleBusiness({ config, fetchImpl });
   mailer ??= overrides.mailer || createMailer({ fetchImpl });
   clearinghouse ??= createClearinghouse({ db, fetchImpl, config: { ...clearinghouseConfig(), ...(config.ediMode === 'sandbox' && !process.env.CLEARINGHOUSE ? { mode: 'sandbox' } : {}) } });
   startWebhooks(db, fetchImpl);
@@ -150,6 +155,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   app.locals.qbo = qbo;
   app.locals.messenger = messenger;
   app.locals.storage = storage;
+  app.locals.gbp = gbp;
   // Client IPs (rate limits, audit log) come from X-Forwarded-For only when set by a proxy we trust:
   // by default one on a private network (a load balancer in the same VPC). On Vercel it is Vercel's edge,
   // one hop, which replaces any X-Forwarded-For the client sent. Set TRUST_PROXY for other hosts.
@@ -163,6 +169,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   app.use(voiceWebhooks({ db, config }));
   app.use(phoneWebhooks({ db, config, messenger, storage, transcriber, fetchImpl }));
   app.use(lenderWebhooks({ db }));
+  app.use(reputationPublicRoutes({ db, secret, gbp, config }));
   app.use(financePublicRoutes({ db, config, secret, plaid, qbo }));
   // Signed forms can carry photos (insurance cards, ID), and documents sent to be read (benefit summaries, EOBs), so those routes take larger bodies.
   const jsonBody = express.json({ limit: '1mb' });
@@ -244,6 +251,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(patientCareRoutes({ db, messenger, config }));
   api.use(checkinRoutes({ db, messenger }));
   api.use(lenderRoutes({ db, messenger }));
+  api.use(reputationRoutes({ db, config, secret, gbp }));
   api.use(attachmentRoutes({ db, storage, sender: attachmentSender ?? createAttachmentSender(attachmentConfig(process.env, config.ediMode), fetchImpl) }));
   api.use(billingRoutes({ db, payments, config, messenger }));
   api.use(insuranceRoutes({ db }));

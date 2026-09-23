@@ -15,7 +15,7 @@ import { readOfflineDay } from './offline.js';
 import { ClockButton } from './components/TimeClock.jsx';
 import { useLiveEvents } from './live.js';
 import MfaSetup from './components/MfaSetup.jsx';
-import { Sun, CalendarDays, Users, MessageSquare, Inbox as InboxIcon, PhoneCall, Megaphone, Receipt, ListChecks, ChartColumn, Landmark, Settings as SettingsIcon, Search, PanelLeftClose, PanelLeftOpen, LogOut, Keyboard, Monitor, Moon, Sparkles, Phone, Building2 } from 'lucide-react';
+import { Sun, CalendarDays, Users, MessageSquare, Inbox as InboxIcon, PhoneCall, Megaphone, Receipt, ListChecks, ChartColumn, Landmark, Settings as SettingsIcon, Search, PanelLeftClose, PanelLeftOpen, LogOut, Keyboard, Monitor, Moon, Sparkles, Phone, Building2, Star } from 'lucide-react';
 import { getThemePref, setThemePref, watchTheme } from './theme.js';
 
 // Pages load on demand so the first screen appears quickly.
@@ -29,6 +29,7 @@ const Finance = lazy(() => import('./pages/Finance.jsx'));
 const Ask = lazy(() => import('./pages/Ask.jsx'));
 const Calls = lazy(() => import('./pages/Calls.jsx'));
 const Group = lazy(() => import('./pages/Group.jsx'));
+const Reputation = lazy(() => import('./pages/Reputation.jsx'));
 const Campaigns = lazy(() => import('./pages/Campaigns.jsx'));
 const UnsubscribePage = lazy(() => import('./pages/public/UnsubscribePage.jsx'));
 const RouteSlip = lazy(() => import('./pages/RouteSlip.jsx'));
@@ -162,6 +163,7 @@ function StaffApp() {
     ['/calls', Phone, 'Calls', can('patients:read')],
     ['/followups', PhoneCall, 'Follow-up lists', can('schedule:read')],
     ['/campaigns', Megaphone, 'Campaigns', can('patients:write')],
+    ['/reputation', Star, 'Reviews', can('patients:read')],
     ['/claims', Receipt, 'Billing', can('billing:read')],
     ['/office', ListChecks, 'To-do & labs', true],
     ['/reports', ChartColumn, 'Reports', can('reports:read')],
@@ -339,6 +341,7 @@ function Shell({ nav }) {
             <Route path="/ask" element={<Ask />} />
             <Route path="/calls" element={<Calls />} />
             <Route path="/group" element={<Group />} />
+            <Route path="/reputation" element={<Reputation />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
