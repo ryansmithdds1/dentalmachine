@@ -63,6 +63,10 @@ export function createApp({ db, secret }) {
     if (String(err?.message).includes('FOREIGN KEY')) return res.status(400).json({ error: 'Referenced record does not exist' });
     if (String(err?.message).includes('UNIQUE')) return res.status(409).json({ error: 'Record already exists' });
     if (String(err?.message).includes('CHECK constraint')) return res.status(400).json({ error: 'Invalid value' });
+    if (String(err?.message).includes('NOT NULL constraint')) {
+      const field = String(err.message).split('.').pop();
+      return res.status(400).json({ error: `${field} is required` });
+    }
     console.error(err);
     res.status(500).json({ error: 'Internal server error' });
   });
