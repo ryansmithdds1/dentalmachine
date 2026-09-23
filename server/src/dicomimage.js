@@ -1,5 +1,8 @@
 import { deflateSync } from 'node:zlib';
 
+// Largest image decoded on the server: 25 megapixels (a pan is about 3000×1500).
+export const MAX_PIXELS = 25_000_000;
+
 // Turns a DICOM image (what intraoral sensors, pans and CBCT slices export) into something a browser
 // can show: uncompressed 8/16-bit grayscale or RGB becomes a PNG (window/level and rescale applied,
 // MONOCHROME1 inverted); baseline-JPEG DICOM is handed back as its JPEG. Also reports pixel spacing,
@@ -138,6 +141,9 @@ export function dicomToImage(buf) {
   }
   if (![TS.implicit, TS.explicit].includes(d.transfer) || !d.pixelData || !d.rows || !d.columns) return null;
   const n = d.rows * d.columns;
+  // The header's size must match the pixels actually in the file (a forged 65535×65535 header would
+  // otherwise ask for gigabytes), and stay within what a dental image can be.
+  if (n > MAX_PIXELS || d.pixelData.length < n * (d.samples || 1) * (d.bitsAllocated / 8)) return null;
   if (d.samples === 3 && d.bitsAllocated === 8) {
     const rgb = Buffer.alloc(n * 3);
     for (let i = 0; i < n; i++) {

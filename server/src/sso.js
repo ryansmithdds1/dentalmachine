@@ -1,5 +1,6 @@
 import { createHash, createPublicKey, createVerify, randomBytes, createCipheriv, createDecipheriv } from 'node:crypto';
 import { HttpError } from './auth.js';
+import { assertPublicUrl } from './netguard.js';
 
 // Staff single sign-on with OpenID Connect: Google Workspace, Microsoft 365 / Entra ID, Okta, or any
 // standards-compliant identity provider. Authorization-code flow with PKCE; the ID token's signature
@@ -25,10 +26,14 @@ export const pkcePair = () => {
 
 // Discovery documents and key sets are cached for an hour.
 const cache = new Map();
+// The identity provider's addresses (a custom issuer, and whatever its discovery document names) must be
+// public https servers; plain http on localhost is allowed outside production for testing.
+const guard = (url) => assertPublicUrl(url, { what: "The identity provider's address", allowLocal: process.env.NODE_ENV !== 'production' });
 async function cached(url, fetchImpl) {
   const hit = cache.get(url);
   if (hit && hit.until > Date.now()) return hit.value;
-  const res = await fetchImpl(url, { signal: AbortSignal.timeout(10_000) });
+  await guard(url);
+  const res = await fetchImpl(url, { signal: AbortSignal.timeout(10_000), redirect: 'error' });
   if (!res.ok) throw new HttpError(502, `Identity provider unavailable (${res.status})`);
   const value = await res.json();
   cache.set(url, { value, until: Date.now() + 3600_000 });
@@ -37,8 +42,10 @@ async function cached(url, fetchImpl) {
 export const discover = (issuer, fetchImpl) => cached(`${issuer}/.well-known/openid-configuration`, fetchImpl);
 
 export async function exchangeCode({ config, code, redirectUri, verifier, clientId, clientSecret, fetchImpl }) {
+  await guard(config.token_endpoint);
   const res = await fetchImpl(config.token_endpoint, {
     method: 'POST',
+    redirect: 'error',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
     body: new URLSearchParams({ grant_type: 'authorization_code', code, redirect_uri: redirectUri, client_id: clientId, client_secret: clientSecret, code_verifier: verifier }),
     signal: AbortSignal.timeout(15_000),

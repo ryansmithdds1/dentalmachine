@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { requirePermission, HttpError } from '../auth.js';
+import { requirePermission, HttpError, can } from '../auth.js';
 import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, toCents, practiceNow } from '../util.js';
 
 const LAB_STATUSES = ['sent', 'received', 'returned_for_adjustment', 'delivered', 'cancelled'];
@@ -104,7 +104,9 @@ export default function officeRoutes({ db }) {
     ));
   });
 
-  r.post('/tasks', requirePermission('patients:read'), async (req, res) => {
+  // Read-only access doesn't create or change tasks; front desk, clinical and billing staff all can.
+  const taskWriter = (req, _res, next) => (['patients:write', 'billing:write', 'clinical:write'].some((p) => can(req.user, p)) ? next() : next(new HttpError(403, "You don't have permission to change tasks")));
+  r.post('/tasks', taskWriter, async (req, res) => {
     const row = pick(req.body, TASK_FIELDS);
     requireFields(row, ['title']);
     await validateTask(req, row);
@@ -113,7 +115,7 @@ export default function officeRoutes({ db }) {
     res.status(201).json(await db.get(`${TASK_SELECT} WHERE t.id = ?`, id));
   });
 
-  r.put('/tasks/:tid', requirePermission('patients:read'), async (req, res) => {
+  r.put('/tasks/:tid', taskWriter, async (req, res) => {
     const existing = await findOr404(db, 'tasks', req.params.tid, req.user.practice_id, 'Task');
     const row = pick(req.body, TASK_FIELDS);
     await validateTask(req, row);

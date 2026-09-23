@@ -39,7 +39,7 @@ test('time clock: clock in and out, own timesheet, manager fixes and payroll CSV
   const sheet = (await api.get('/timeclock?from=2031-03-01&to=2031-03-31')).data;
   assert.equal(sheet.summary[0].hours, 7.5);
   const csv = (await api.get('/timeclock/payroll.csv?from=2031-03-01&to=2031-03-31')).data;
-  assert.match(csv, /^Employee,Regular hours,Overtime hours,Total hours,Open punches\n"Hy Gienist",7\.5,0,7\.5,0\n$/);
+  assert.match(csv, /^\uFEFF?Employee,Regular hours,Overtime hours,Total hours,Open punches\r\nHy Gienist,7\.5,0,7\.5,0\r\n$/);
   const log = (await api.get('/audit-log?action=timeclock.edit')).data;
   assert.ok((log.rows || log).some((e) => e.action === 'timeclock.edit'));
 });

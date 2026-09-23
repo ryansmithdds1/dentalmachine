@@ -179,6 +179,11 @@ export default function billingRoutes({ db, payments = { enabled: false }, confi
 
   r.post('/ledger/:eid/void', requirePermission('billing:write'), async (req, res) => {
     const entry = await findOr404(db, 'ledger_entries', req.params.eid, req.user.practice_id, 'Ledger entry');
+    // Voiding a charge takes it off the patient's bill, the same as writing it off: same approval limit.
+    const limit = (await db.get('SELECT adjustment_approval_limit FROM practices WHERE id = ?', req.user.practice_id)).adjustment_approval_limit;
+    if (entry.amount > 0 && limit != null && entry.amount > limit && req.user.role !== 'admin') {
+      throw new HttpError(403, `Voiding charges over $${(limit / 100).toFixed(2)} needs an administrator`, { approval_required: true });
+    }
     const id = await voidLedgerEntry(db, entry, { userId: req.user.id, reason: req.body?.reason });
     await audit(db, req, 'ledger.void', 'ledger_entries', entry.id, { reason: req.body?.reason, reversal_id: id, amount: entry.amount });
     res.status(201).json({ reversal_id: id, balance: await patientBalance(db, req.user.practice_id, entry.patient_id) });

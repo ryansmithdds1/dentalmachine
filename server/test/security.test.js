@@ -73,3 +73,22 @@ test('non-admins see only what they need of users and practice settings; family 
   assert.equal((await api.del(`/patients/${stranger.id}/family/${kid.id}`)).status, 400);
   assert.equal((await api.del(`/patients/${patient.id}/family/${kid.id}`)).status, 200);
 });
+
+test('the app page is served with a content security policy that matches vercel.json', async () => {
+  const { CSP } = await import('../src/app.js');
+  const { readFileSync } = await import('node:fs');
+  const vercel = JSON.parse(readFileSync(new URL('../../vercel.json', import.meta.url), 'utf8'));
+  const header = vercel.headers[0].headers.find((x) => x.key === 'Content-Security-Policy');
+  assert.equal(header.value, CSP);
+  assert.match(CSP, /script-src 'self';/);
+  assert.match(CSP, /frame-ancestors 'none'/);
+});
+
+test('names are saved as one line of plain text', async () => {
+  const { api } = await h.practice();
+  const p = (await api.post('/patients', { first_name: 'Jane\r\nNM1*IL*1*EVIL', last_name: 'Doe\u0000' })).data;
+  assert.equal(p.first_name, 'Jane NM1*IL*1*EVIL');
+  assert.equal(p.last_name, 'Doe');
+  const upd = (await api.put(`/patients/${p.id}`, { last_name: 'Smith\n' })).data;
+  assert.equal(upd.last_name, 'Smith');
+});

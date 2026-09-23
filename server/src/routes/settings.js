@@ -10,6 +10,7 @@ import { validateTemplates, DEFAULT_TEMPLATES, TEMPLATE_META } from '../template
 import { recordFeeChange } from '../fees.js';
 import { cleanRoomUrl } from '../video.js';
 import { cleanPattern, parseDurations } from '../patterns.js';
+import { assertPublicUrl } from '../netguard.js';
 
 const ROLES = ['admin', 'dentist', 'hygienist', 'assistant', 'front_desk', 'billing'];
 const CATEGORIES = ['diagnostic', 'preventive', 'restorative', 'endodontics', 'periodontics', 'prosthodontics', 'oral_surgery', 'orthodontics', 'implants', 'adjunctive'];
@@ -17,10 +18,14 @@ const CATEGORIES = ['diagnostic', 'preventive', 'restorative', 'endodontics', 'p
 const requireAdmin = (req, _res, next) => (req.user.role === 'admin' ? next() : next(new HttpError(403, 'Administrator access required')));
 
 // Simple practice-scoped resources share one CRUD shape.
-function resource(r, db, { path, table, fields, required, validate = () => {}, order = 'name', afterCreate = null, afterUpdate = null }) {
+// `adminOnly` fields (a provider's DEA and license numbers) are shown to administrators and to the
+// person the row belongs to, not to everyone who can see the list.
+function resource(r, db, { path, table, fields, required, validate = () => {}, order = 'name', afterCreate = null, afterUpdate = null, adminOnly = [] }) {
   r.get(`/${path}`, async (req, res) => {
     const activeOnly = req.query.active === 'true' ? ' AND active = 1' : '';
-    res.json(await db.all(`SELECT * FROM ${table} WHERE practice_id = ?${activeOnly} ORDER BY ${order}`, req.user.practice_id));
+    const rows = await db.all(`SELECT * FROM ${table} WHERE practice_id = ?${activeOnly} ORDER BY ${order}`, req.user.practice_id);
+    const admin = req.user.role === 'admin';
+    res.json(rows.map((row) => (admin || !adminOnly.length || row.user_id === req.user.id ? row : Object.fromEntries(Object.entries(row).filter(([k]) => !adminOnly.includes(k))))));
   });
   r.post(`/${path}`, requireAdmin, async (req, res) => {
     const row = pick(req.body, fields);
@@ -102,6 +107,7 @@ export default function settingsRoutes({ db, secret, config = {} }) {
     if (!provider) Object.assign(row, { sso_client_secret: null, sso_only: 0 });
     if (provider === 'microsoft' && !row.sso_tenant) throw new HttpError(400, 'Enter your Microsoft Entra tenant ID (Azure portal → Entra ID → Overview)');
     if (provider === 'oidc' && !/^(https:\/\/|http:\/\/(localhost|127\.0\.0\.1)[:/])/.test(row.sso_issuer || '')) throw new HttpError(400, 'Enter the issuer URL (https://…) from your identity provider');
+    if (provider === 'oidc') await assertPublicUrl(row.sso_issuer, { what: 'The issuer URL', allowLocal: process.env.NODE_ENV !== 'production' });
     if (provider && !row.sso_client_id) throw new HttpError(400, 'Enter the client ID from your identity provider');
     const current = await db.get('SELECT sso_client_secret FROM practices WHERE id = ?', req.user.practice_id);
     if (provider && !row.sso_client_secret && !current.sso_client_secret) throw new HttpError(400, 'Enter the client secret from your identity provider');
@@ -286,7 +292,7 @@ export default function settingsRoutes({ db, secret, config = {} }) {
   });
 
   resource(r, db, {
-    path: 'providers', table: 'providers', required: ['name'],
+    path: 'providers', table: 'providers', required: ['name'], adminOnly: ['dea_number', 'license_number', 'erx_user_id'],
     fields: ['name', 'type', 'npi', 'license_number', 'dea_number', 'erx_user_id', 'color', 'active', 'user_id', 'working_hours', 'daily_goal', 'fee_schedule_id', 'video_room_url'],
     validate: async (row, req) => {
       if (row.working_hours != null) row.working_hours = JSON.stringify(validateWorkingHours(typeof row.working_hours === 'string' ? JSON.parse(row.working_hours) : row.working_hours));

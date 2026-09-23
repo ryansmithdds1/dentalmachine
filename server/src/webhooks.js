@@ -1,5 +1,6 @@
 import { createHmac, randomBytes } from 'node:crypto';
 import { insert } from './util.js';
+import { assertPublicUrl } from './netguard.js';
 
 // Outbound webhooks: other systems (reminder services, marketing tools, a practice's own website)
 // hear about new and changed appointments, patients and payments. Each delivery is signed like
@@ -56,8 +57,10 @@ export async function deliverWebhooks(db, { ids = null, fetchImpl = globalThis.f
     let code = null;
     let error = null;
     try {
+      await assertPublicUrl(d.url, { what: 'The webhook URL' });
+      // Redirects aren't followed: a 3xx counts as a failed delivery, so a public URL can't bounce us inward.
       const res = await fetchImpl(d.url, {
-        method: 'POST', body: d.payload, signal: AbortSignal.timeout(10_000),
+        method: 'POST', body: d.payload, signal: AbortSignal.timeout(10_000), redirect: 'manual',
         headers: { 'Content-Type': 'application/json', 'User-Agent': 'DentalMachine-Webhooks/1', 'DM-Event': d.event, 'DM-Signature': sign(d.secret, d.payload) },
       });
       code = res.status;

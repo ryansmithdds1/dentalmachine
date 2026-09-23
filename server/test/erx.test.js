@@ -61,6 +61,10 @@ test('e-prescribing: pharmacy, electronic send, and EPCS rules for controlled su
   assert.equal(printed.status, 'printed');
   const log = (await api.get('/audit-log?limit=50')).data;
   assert.ok(log.some((e) => e.action === 'prescription.sign' && JSON.parse(e.details).two_factor === true));
+
+  // Guessing signing codes locks the prescriber out after ten tries, even with the right code.
+  for (let i = 0; i < 9; i++) assert.equal((await api.post(`/patients/${patient.id}/prescriptions`, { ...hydro, otp: '000000' })).status, 403);
+  assert.equal((await api.post(`/patients/${patient.id}/prescriptions`, { ...hydro, otp: totp(secret, timeStep() + 1) })).status, 429);
 });
 
 test('DoseSpot single sign-on URL carries a verifiable one-time code and the patient', () => {

@@ -1,5 +1,5 @@
 import { inflateSync } from 'node:zlib';
-import { dicomToImage, encodePng } from './dicomimage.js';
+import { dicomToImage, encodePng, MAX_PIXELS } from './dicomimage.js';
 
 // Small previews for the documents grid, so the chart doesn't download every full-size x-ray and photo.
 // PNG, BMP and uncompressed DICOM are decoded and scaled here; a JPEG uses the thumbnail its camera
@@ -24,14 +24,15 @@ export function decodePng(buf) {
     else if (kind === 'IEND') break;
     pos += 12 + len;
   }
-  if (!w || !h || interlace || ![8, 16].includes(depth) || (type === 3 && depth !== 8) || w * h > 60_000_000) return null;
+  if (!w || !h || interlace || ![8, 16].includes(depth) || (type === 3 && depth !== 8) || w * h > MAX_PIXELS) return null;
   const channels = { 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 }[type];
   if (!channels) return null;
   const bpp = channels * (depth / 8);
   const stride = w * bpp;
   let raw;
   try {
-    raw = inflateSync(Buffer.concat(idat));
+    // Never inflate past what the header's size needs: a tiny file can otherwise expand to gigabytes.
+    raw = inflateSync(Buffer.concat(idat), { maxOutputLength: (stride + 1) * h });
   } catch {
     return null;
   }
@@ -91,7 +92,7 @@ function decodeBmp(buf) {
   const bits = buf.readUInt16LE(28);
   const compression = buf.readUInt32LE(30);
   const h = Math.abs(hRaw);
-  if (w <= 0 || !h || ![24, 32].includes(bits) || ![0, 3].includes(compression) || w * h > 60_000_000) return null;
+  if (w <= 0 || !h || ![24, 32].includes(bits) || ![0, 3].includes(compression) || w * h > MAX_PIXELS) return null;
   const bpp = bits / 8;
   const stride = Math.ceil((w * bpp) / 4) * 4;
   if (offset + stride * h > buf.length) return null;

@@ -16,19 +16,39 @@ export async function finishBooking(db, b, { providerId, start, duration, patien
   duration = Number(duration || b.duration);
   return db.tx(async () => {
     let pat = patientId;
-    // An existing patient booking online shouldn't become a second chart.
+    const chosen = !!patientId; // the office picked the chart
+    const today = (await practiceNow(db, pid)).slice(0, 10);
+    // An existing patient booking online shouldn't become a second chart, but anyone can type a name into
+    // a public form: it joins a chart only when the birth date and the phone or email on file all match.
+    // A near miss gets a new chart and a task to merge it if it's the same person.
+    let nearMiss = null;
     if (!pat) {
-      const match = (await findDuplicates(db, pid, { first_name: b.first_name, last_name: b.last_name, dob: b.dob, phone: b.phone, email: b.email }))
-        .find((m) => m.status !== 'archived' && m.last_name.toLowerCase() === b.last_name.toLowerCase() && (!b.dob || !m.dob || m.dob === b.dob));
-      pat = match?.id ?? null;
+      const digits = (s) => String(s || '').replace(/\D/g, '').slice(-10);
+      const found = (await findDuplicates(db, pid, { first_name: b.first_name, last_name: b.last_name, dob: b.dob, phone: b.phone, email: b.email }))
+        .filter((m) => m.status !== 'archived' && m.last_name.toLowerCase() === b.last_name.toLowerCase());
+      const sure = found.find((m) => b.dob && m.dob === b.dob
+        && ((digits(b.phone).length === 10 && digits(m.phone) === digits(b.phone)) || (b.email && m.email && m.email.toLowerCase() === String(b.email).toLowerCase())));
+      pat = sure?.id ?? null;
+      nearMiss = sure ? null : found[0] ?? null;
     }
+    const existing = !!pat;
     if (!pat) {
       pat = await insert(db, 'patients', {
         practice_id: pid, first_name: b.first_name, last_name: b.last_name, dob: b.dob, phone: b.phone, email: b.email,
         referral_source: b.referral_source || 'Online booking', notes: b.notes ? `Online booking note: ${b.notes}` : null, language: b.language === 'es' ? 'Spanish' : null,
       });
+      if (nearMiss) {
+        await insert(db, 'tasks', { practice_id: pid, patient_id: pat, priority: 'normal', due_date: today, title: `Online booking may be ${nearMiss.first_name} ${nearMiss.last_name} (chart #${nearMiss.id}) — check and merge if so` });
+      }
     }
-    if (b.insurance_carrier && b.insurance_member_id) {
+    if (b.insurance_carrier && b.insurance_member_id && existing && !chosen) {
+      // An existing chart's insurance isn't changed from a public form: the office reviews it first.
+      const holder = b.insurance_subscriber ? String(b.insurance_subscriber) : `${b.first_name} ${b.last_name}`;
+      await insert(db, 'insurance_updates', {
+        practice_id: pid, patient_id: pat, carrier_name: String(b.insurance_carrier).trim(), member_id: String(b.insurance_member_id), subscriber_name: holder,
+        relationship: holder.toLowerCase() === `${b.first_name} ${b.last_name}`.toLowerCase() ? 'self' : 'other', note: 'Entered when booking online',
+      });
+    } else if (b.insurance_carrier && b.insurance_member_id) {
       const carrierName = String(b.insurance_carrier).trim();
       let carrier = await db.get('SELECT id FROM insurance_carriers WHERE practice_id = ? AND lower(name) = lower(?)', pid, carrierName);
       const carrierId = carrier?.id ?? await insert(db, 'insurance_carriers', { practice_id: pid, name: carrierName });
@@ -40,7 +60,6 @@ export async function finishBooking(db, b, { providerId, start, duration, patien
           patient_id: pat, carrier_id: carrierId, priority: 'primary', subscriber_name: holder, subscriber_id: String(b.insurance_member_id),
           relationship: own ? 'self' : 'other', subscriber_dob: own ? b.dob : null,
         });
-        const today = (await practiceNow(db, pid)).slice(0, 10);
         await insert(db, 'tasks', { practice_id: pid, patient_id: pat, priority: 'normal', due_date: today, title: `Verify insurance from online booking: ${carrierName} ${b.insurance_member_id}` });
       }
     }

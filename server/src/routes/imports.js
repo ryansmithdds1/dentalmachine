@@ -16,7 +16,7 @@ export default function importRoutes({ db }) {
     const m = mapping && typeof mapping === 'object' ? mapping : detectMapping(kind, headers);
     const clean = {};
     for (const [field, i] of Object.entries(m)) {
-      if (!(field in FIELDS[kind])) throw new HttpError(400, `Unknown field ${field}`);
+      if (!Object.hasOwn(FIELDS[kind], field)) throw new HttpError(400, `Unknown field ${field}`);
       if (i === null || i === '' || i === undefined) continue;
       if (!Number.isInteger(Number(i)) || Number(i) < 0 || Number(i) >= headers.length) throw new HttpError(400, `Column for ${field} is out of range`);
       clean[field] = Number(i);
@@ -31,7 +31,8 @@ export default function importRoutes({ db }) {
   const validRows = (rows) => {
     if (!Array.isArray(rows) || rows.length > MAX_ROWS || rows.some((x) => !Array.isArray(x))) throw new HttpError(400, `rows must be a list of up to ${MAX_ROWS} rows`);
   };
-  const mapRow = (mapping, cells) => Object.fromEntries(Object.entries(mapping).map(([f, i]) => [f, cells[i] == null ? '' : String(cells[i])]));
+  // Cells are capped (a note can be long; nothing needs more than this).
+  const mapRow = (mapping, cells) => Object.fromEntries(Object.entries(mapping).map(([f, i]) => [f, cells[i] == null ? '' : String(cells[i]).slice(0, 20_000)]));
 
   // Runs rows, each in its own savepoint so one bad row doesn't stop the rest.
   const runRows = async (importer, kind, mapping, rows, offset) => {

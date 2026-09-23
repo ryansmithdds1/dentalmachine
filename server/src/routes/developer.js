@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { HttpError } from '../auth.js';
 import { findOr404, audit, insert, hashToken } from '../util.js';
 import { EVENTS, emitEvent, deliverWebhooks, markPayments } from '../webhooks.js';
+import { assertPublicUrl } from '../netguard.js';
 
 export const API_SCOPES = {
   'patients:read': 'Read patients', 'patients:write': 'Create and update patients',
@@ -39,9 +40,10 @@ export default function developerRoutes({ db, fetchImpl }) {
   });
 
   const endpointView = (e) => ({ ...e, events: JSON.parse(e.events), secret: undefined, secret_hint: `${e.secret.slice(0, 10)}…` });
-  const cleanEndpoint = (b) => {
+  const cleanEndpoint = async (b) => {
     const url = String(b?.url || '').trim();
     if (!/^https:\/\/[^\s/]+\.[^\s]+$/.test(url)) throw new HttpError(400, 'The URL must start with https://');
+    await assertPublicUrl(url, { what: 'The URL' });
     const events = [...new Set(Array.isArray(b.events) ? b.events : [])];
     if (!events.length || events.some((e) => e !== '*' && !EVENTS.includes(e))) throw new HttpError(400, `events must be some of: ${EVENTS.join(', ')}`);
     return { url, events: JSON.stringify(events), description: String(b.description || '').slice(0, 200) || null };
@@ -55,14 +57,14 @@ export default function developerRoutes({ db, fetchImpl }) {
   });
   r.post('/webhooks', async (req, res) => {
     const secret = `whsec_${randomBytes(24).toString('hex')}`;
-    const id = await insert(db, 'webhook_endpoints', { ...cleanEndpoint(req.body), practice_id: req.user.practice_id, secret });
+    const id = await insert(db, 'webhook_endpoints', { ...(await cleanEndpoint(req.body)), practice_id: req.user.practice_id, secret });
     await markPayments(db, req.user.practice_id);
     await audit(db, req, 'webhook.create', 'webhook_endpoints', id);
     res.status(201).json({ ...endpointView(await db.get('SELECT * FROM webhook_endpoints WHERE id = ?', id)), secret });
   });
   r.put('/webhooks/:wid', async (req, res) => {
     const e = await findOr404(db, 'webhook_endpoints', req.params.wid, req.user.practice_id, 'Webhook');
-    const row = { ...cleanEndpoint({ ...endpointView(e), ...req.body }), ...(req.body?.active !== undefined ? { active: req.body.active ? 1 : 0, failures: 0 } : {}) };
+    const row = { ...(await cleanEndpoint({ ...endpointView(e), ...req.body })), ...(req.body?.active !== undefined ? { active: req.body.active ? 1 : 0, failures: 0 } : {}) };
     await db.run(`UPDATE webhook_endpoints SET ${Object.keys(row).map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, ...Object.values(row), e.id);
     res.json(endpointView(await db.get('SELECT * FROM webhook_endpoints WHERE id = ?', e.id)));
   });

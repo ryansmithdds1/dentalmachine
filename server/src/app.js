@@ -82,6 +82,9 @@ export function loadConfig(env = process.env) {
   };
 }
 
+// Keep in step with the headers in vercel.json (where the app's static files are served by the CDN).
+export const CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; frame-src 'self' blob:; media-src 'self' blob:; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'";
+
 export function createApp({ db, secret, config: overrides = {}, fetchImpl = globalThis.fetch, messenger, storage, clearinghouse, erx, payments, mailer, attachmentSender }) {
   if (!secret) throw new Error('JWT secret is required');
   const config = { ...loadConfig(), ...overrides };
@@ -100,8 +103,10 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   app.locals.messenger = messenger;
   app.locals.storage = storage;
   // Client IPs (rate limits, audit log) come from X-Forwarded-For only when set by a proxy we trust:
-  // by default one on a private network (a load balancer in the same VPC). Set TRUST_PROXY for others.
-  app.set('trust proxy', process.env.TRUST_PROXY ? (/^\d+$/.test(process.env.TRUST_PROXY) ? Number(process.env.TRUST_PROXY) : process.env.TRUST_PROXY) : 'loopback, linklocal, uniquelocal');
+  // by default one on a private network (a load balancer in the same VPC). On Vercel it is Vercel's edge,
+  // one hop, which replaces any X-Forwarded-For the client sent. Set TRUST_PROXY for other hosts.
+  const trust = process.env.TRUST_PROXY || (process.env.VERCEL ? '1' : 'loopback, linklocal, uniquelocal');
+  app.set('trust proxy', /^\d+$/.test(trust) ? Number(trust) : trust);
   app.disable('x-powered-by');
   app.use(requestLogger());
   app.use(stripeWebhook({ db, config, payments, messenger })); // needs the raw body, so before express.json
@@ -113,6 +118,8 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   app.use((req, res, next) => {
     // Patient data isn't left in the browser's or a proxy's disk cache.
     if (req.path.startsWith('/api/')) res.set('Cache-Control', 'no-store');
+    // The app loads only its own scripts, so injected markup can't run code or send data elsewhere.
+    else res.set('Content-Security-Policy', CSP);
     res.set({
       'X-Content-Type-Options': 'nosniff',
       'X-Frame-Options': 'DENY',

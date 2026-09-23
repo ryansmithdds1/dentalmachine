@@ -84,3 +84,19 @@ test('a plan link turns itself off after five wrong birth dates', async () => {
   assert.equal((await h.client(null, { 'X-Plan-Pass': pass }).get(`/public/tp/${t3}`)).status, 403);
   assert.ok((await h.db.all("SELECT * FROM audit_log WHERE action = 'treatment_plan.link_view' AND entity_id = ?", other.id)).length === 1);
 });
+
+test('portal codes: wrong guesses for one address are capped across devices, and flooding mints no codes', async () => {
+  const slug = `cap-${Date.now()}`;
+  await h.practice({ slug });
+  const pub = h.client();
+  const ask = () => pub.post(`/public/portal/${slug}/code`, { contact: 'jane@example.com', dob: '1985-04-12' });
+  await ask();
+  for (let i = 0; i < 10; i++) assert.equal((await pub.post(`/public/portal/${slug}/verify`, { contact: 'jane@example.com', code: 'abcdef' })).status, 403);
+  assert.equal((await pub.post(`/public/portal/${slug}/verify`, { contact: 'jane@example.com', code: '123456' })).status, 429);
+
+  const practice = await h.db.get('SELECT id FROM practices WHERE slug = ?', slug);
+  const count = async () => Number((await h.db.get("SELECT COUNT(*) AS n FROM portal_codes WHERE practice_id = ? AND contact = '5125550100'", practice.id)).n);
+  const text = (ip) => h.client(null, { 'X-Forwarded-For': ip }).post(`/public/portal/${slug}/code`, { contact: '(512) 555-0100', dob: '1985-04-12' });
+  for (let i = 0; i < 14; i++) await text(`10.0.${i}.1`);
+  assert.equal(await count(), 10, 'codes stop being made after ten an hour');
+});

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { HttpError, can } from '../auth.js';
-import { insert, findOr404, audit, practiceNow } from '../util.js';
+import { insert, findOr404, audit, practiceNow, toCsv } from '../util.js';
 
 // Time clock. Punches are practice-local wall-clock times ("YYYY-MM-DD HH:MM"). Everyone clocks themselves
 // in and out; people with timeclock:manage see everyone's time, fix punches (audited) and export payroll.
@@ -132,10 +132,10 @@ export default function timeclockRoutes({ db }) {
     if (!manager(req)) throw new HttpError(403, 'Missing permission: timeclock:manage');
     const [from, to] = range(req);
     const rows = payrollSummary(await punchesFor(req, from, to));
-    const q = (v) => `"${String(v).replace(/"/g, '""')}"`;
-    const csv = ['Employee,Regular hours,Overtime hours,Total hours,Open punches', ...rows.map((x) => [q(x.name), x.regular_hours, x.overtime_hours, x.hours, x.open_punches].join(','))].join('\n');
+    // A name like "=HYPERLINK(…)" opens as text in a spreadsheet, not a formula.
+    const csv = toCsv(rows, [['Employee', (x) => x.name], ['Regular hours', (x) => x.regular_hours], ['Overtime hours', (x) => x.overtime_hours], ['Total hours', (x) => x.hours], ['Open punches', (x) => x.open_punches]]);
     await audit(db, req, 'timeclock.export', 'practices', req.user.practice_id, { from, to });
-    res.set({ 'Content-Type': 'text/csv', 'Content-Disposition': `attachment; filename="payroll-${from}-to-${to}.csv"` }).send(`${csv}\n`);
+    res.set({ 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="payroll-${from}-to-${to}.csv"` }).send(csv);
   });
   return r;
 }

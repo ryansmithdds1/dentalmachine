@@ -35,7 +35,7 @@ async function setup(extra = {}) {
   return { ...ctx, slug, type, day, slots };
 }
 
-test('instant booking: the visit goes straight on the schedule, existing patients are matched, insurance is added', async () => {
+test('instant booking: the visit goes straight on the schedule, existing patients are matched, insurance waits for review', async () => {
   const { api, slug, provider, patient, slots } = await setup({ instant_booking: true });
   const before = h.sent.length;
   const res = await h.client().post(`/public/practices/${slug}/booking-requests`, {
@@ -48,9 +48,11 @@ test('instant booking: the visit goes straight on the schedule, existing patient
   assert.equal(appts.length, 1); // booked on Jane's existing chart, not a new one
   assert.equal((await api.get('/patients?q=Doe')).data.rows.length, 1);
   assert.match(h.sent.slice(before)[0].body, /you're booked/);
-  const pol = (await api.get(`/patients/${patient.id}/insurance`)).data[0];
-  assert.deepEqual([pol.carrier_name, pol.subscriber_id, pol.relationship], ['Delta Dental', 'DD999', 'self']);
-  assert.ok((await api.get(`/tasks?patient_id=${patient.id}`)).data.some((t) => /Verify insurance from online booking/.test(t.title)));
+  // Insurance typed into a public form waits for the office before it touches an existing chart.
+  assert.equal((await api.get(`/patients/${patient.id}/insurance`)).data.length, 0);
+  const upd = (await api.get(`/patients/${patient.id}/insurance-updates`)).data;
+  const pending = (upd.updates || upd)[0];
+  assert.deepEqual([pending.carrier_name, pending.member_id, pending.status], ['Delta Dental', 'DD999', 'pending']);
   assert.equal((await api.get('/booking-requests')).data.length, 0); // nothing left for the office to accept
   // The slot is gone for the next person.
   const again = await h.client().post(`/public/practices/${slug}/booking-requests`, { first_name: 'Al', last_name: 'B', phone: '5125550111', reason: 'New patient exam', start: slots[0].start, provider_id: provider.id });
@@ -97,4 +99,16 @@ test('without instant booking, requests still wait for the office (and accept us
   const acc = await api.post(`/booking-requests/${res.id}/accept`, {});
   assert.equal(acc.status, 200, JSON.stringify(acc.data));
   assert.equal((await api.get(`/patients/${patient.id}`)).data.upcoming_appointments.length, 1);
+});
+
+test("online booking with just a patient's name doesn't land on their chart", async () => {
+  const { api, provider, patient, slug, slots } = await setup({ instant_booking: true });
+  const res = await h.client().post(`/public/practices/${slug}/booking-requests`, {
+    first_name: 'Jane', last_name: 'Doe', phone: '(512) 555-0177', reason: 'New patient exam', start: slots[0].start, provider_id: provider.id, insurance_carrier: 'Evil Ins', insurance_member_id: 'X1',
+  });
+  assert.equal(res.status, 201, JSON.stringify(res.data));
+  assert.equal((await api.get(`/patients/${patient.id}`)).data.upcoming_appointments.length, 0);
+  assert.equal((await api.get(`/patients/${patient.id}/insurance`)).data.length, 0);
+  const tasks = (await api.get('/tasks')).data;
+  assert.ok((tasks.tasks || tasks).some((t) => t.title.includes(`chart #${patient.id}`)), 'the office is asked to check');
 });

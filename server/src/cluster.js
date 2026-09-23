@@ -50,15 +50,18 @@ export const unlisten = (channel, fn) => local.off(channel, fn);
 
 // Fixed-window counter; returns the hit count in the current window.
 const windows = new Map();
-export async function hit(key, windowMs) {
+// Counts one more in the window and returns the count; `by = 0` just reads it.
+export async function hit(key, windowMs, by = 1) {
   if (redis) {
     const k = `${PREFIX}:rl:${key}:${Math.floor(Date.now() / windowMs)}`;
+    if (!by) return Number(await redis.get(k)) || 0;
     const n = await redis.incr(k);
     if (n === 1) await redis.pExpire(k, windowMs);
     return n;
   }
   const now = Date.now();
   const entry = windows.get(key);
+  if (!by) return entry && now - entry.start <= windowMs ? entry.count : 0;
   if (!entry || now - entry.start > windowMs) {
     windows.set(key, { start: now, count: 1, windowMs });
     // Keep memory bounded by dropping only windows that have ended (never live counters).

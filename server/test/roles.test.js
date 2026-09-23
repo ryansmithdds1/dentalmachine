@@ -50,3 +50,30 @@ test('custom roles and per-person overrides decide what someone can do', async (
   assert.equal((await hana.get('/reports/production')).status, 403);
   assert.equal((await hana.get('/roles')).status, 403);
 });
+
+test('schedule-only access: no chart, money or DEA numbers on the huddle, route slip, checkout or provider list', async () => {
+  const { api, provider, patient } = await h.practice();
+  await api.put(`/providers/${provider.id}`, { dea_number: 'AB1234563', license_number: 'TX-999' });
+  await api.put(`/patients/${patient.id}`, { allergies: 'Penicillin' });
+  const day = new Date(Date.now() + 86400_000).toISOString().slice(0, 10);
+  const appt = (await api.post('/appointments', { patient_id: patient.id, provider_id: provider.id, start_time: `${day} 09:00`, end_time: `${day} 10:00` })).data;
+  const role = (await api.post('/roles', { name: 'Scheduler', permissions: ['schedule:read', 'schedule:write'] })).data;
+  const email = `sched-${Date.now()}@example.com`;
+  await api.post('/users', { email, name: 'Sched', role: 'front_desk', custom_role_id: role.id, password: 'scheduler-password' });
+  const s = h.client((await h.client().post('/auth/login', { email, password: 'scheduler-password' })).data.token);
+
+  const huddle = (await s.get(`/huddle?date=${day}`)).data.rows[0];
+  assert.equal(huddle.allergies, null);
+  assert.equal(huddle.balance, null);
+  const slip = (await s.get(`/appointments/${appt.id}/route-slip`)).data;
+  assert.equal(slip.patient.allergies, undefined);
+  assert.equal(slip.balance, null);
+  assert.equal(slip.last_note, null);
+  const checkout = (await s.get(`/appointments/${appt.id}/checkout`)).data;
+  assert.equal(checkout.balance, null);
+  assert.deepEqual(checkout.ledger, []);
+  const prov = (await s.get('/providers')).data.find((p) => p.id === provider.id);
+  assert.equal(prov.dea_number, undefined);
+  assert.equal((await api.get('/providers')).data.find((p) => p.id === provider.id).dea_number, 'AB1234563');
+  assert.equal((await s.post('/tasks', { title: 'Call back' })).status, 403);
+});

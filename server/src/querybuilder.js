@@ -52,12 +52,16 @@ const OPS = { eq: '=', ne: '!=', gt: '>', gte: '>=', lt: '<', lte: '<=', contain
 const AGG = { count: 'Count', sum: 'Total', avg: 'Average', min: 'Lowest', max: 'Highest' };
 export const QUERY_META = { datasets: Object.fromEntries(Object.entries(DATASETS).map(([k, d]) => [k, { label: d.label, columns: Object.fromEntries(Object.entries(d.columns).map(([ck, v]) => [ck, { label: v.label, type: v.type }])) }])), ops: OPS, aggregates: AGG };
 
+// Only the lookup tables' own keys count ("constructor" or "toString" from a request are unknown, not
+// something inherited that ends up in the SQL).
+const own = (table, key) => (key != null && Object.hasOwn(table, String(key)) ? table[key] : undefined);
+
 // Turns a spec into { sql, args, headers }.
 export function buildQuery(spec, practiceId) {
-  const ds = DATASETS[spec?.dataset];
+  const ds = own(DATASETS, spec?.dataset);
   if (!ds) throw new HttpError(400, 'Choose what to report on');
   const col = (k) => {
-    const x = ds.columns[k];
+    const x = own(ds.columns, k);
     if (!x) throw new HttpError(400, `Unknown column ${k}`);
     return x;
   };
@@ -65,7 +69,7 @@ export function buildQuery(spec, practiceId) {
   const args = [practiceId];
   for (const f of (spec.filters || []).slice(0, 12)) {
     const x = col(f.column);
-    if (!OPS[f.op]) throw new HttpError(400, `Unknown comparison ${f.op}`);
+    if (!own(OPS, f.op)) throw new HttpError(400, `Unknown comparison ${f.op}`);
     if (f.op === 'empty') where.push(`(${x.sql} IS NULL OR ${x.sql} = '')`);
     else if (f.op === 'not_empty') where.push(`(${x.sql} IS NOT NULL AND ${x.sql} != '')`);
     else if (f.op === 'contains') { where.push(`lower(${x.sql}) LIKE ?`); args.push(`%${String(f.value ?? '').toLowerCase()}%`); }
@@ -80,7 +84,7 @@ export function buildQuery(spec, practiceId) {
   }
   const group = spec.group_by ? col(spec.group_by) : null;
   const aggs = (spec.aggregates || []).slice(0, 5).map((a) => {
-    if (!AGG[a.fn]) throw new HttpError(400, `Unknown total ${a.fn}`);
+    if (!own(AGG, a.fn)) throw new HttpError(400, `Unknown total ${a.fn}`);
     if (a.fn === 'count') return { sql: 'COUNT(*)', label: 'Count', type: 'number' };
     const x = col(a.column);
     if (!['money', 'number'].includes(x.type)) throw new HttpError(400, `${AGG[a.fn]} needs a number column`);

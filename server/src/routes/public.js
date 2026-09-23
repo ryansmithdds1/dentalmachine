@@ -203,6 +203,9 @@ export default function publicRoutes({ db, storage, payments, messenger, config 
        JOIN providers pv ON pv.id = a.provider_id WHERE a.confirm_token_hash = ?`, hashToken(token),
     );
     if (!a) throw new HttpError(404, 'This link is no longer valid');
+    // A reminder link stops working the day after the visit.
+    const yesterday = new Date(Date.parse(`${(await practiceNow(db, a.practice_id)).slice(0, 10)}T00:00:00Z`) - 86400_000).toISOString().slice(0, 10);
+    if (a.start_time.slice(0, 10) < yesterday) throw new HttpError(410, 'This link has expired');
     return a;
   };
   const apptView = (a) => ({

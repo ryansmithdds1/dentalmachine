@@ -185,7 +185,7 @@ export default function documentRoutes({ db, storage, config = {} }) {
     res.send(thumb.data);
   });
   // A browser's preview of an image the server can't decode (it only needs making once).
-  r.put('/documents/:did/thumb', requirePermission('clinical:read'), express.raw({ type: () => true, limit: 300_000 }), async (req, res) => {
+  r.put('/documents/:did/thumb', requirePermission('clinical:write'), express.raw({ type: () => true, limit: 300_000 }), async (req, res) => {
     const doc = await findOr404(db, 'documents', req.params.did, req.user.practice_id, 'Document');
     if (doc.deleted_at) throw new HttpError(404, 'Document not found');
     if (doc.thumb_key) return res.json({ ok: true, existing: true });

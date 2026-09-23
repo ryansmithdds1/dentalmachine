@@ -33,17 +33,22 @@ export function toCents(value, name = 'amount') {
   return Math.round(n);
 }
 
+// Names (first_name, carrier name, subscriber_name…) are one line of plain text wherever they're saved:
+// a newline or control character in one would break a claim file, a label or a CSV.
+const NAME_KEY = /(^|_)name$/;
+const cleanValue = (k, v) => (typeof v === 'string' && NAME_KEY.test(k) ? v.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim() : v);
+
 export async function insert(db, table, row) {
   const keys = Object.keys(row);
   const sql = `INSERT INTO ${table} (${keys.join(', ')}) VALUES (${keys.map(() => '?').join(', ')})`;
-  return (await db.run(sql, ...keys.map((k) => row[k]))).id;
+  return (await db.run(sql, ...keys.map((k) => cleanValue(k, row[k])))).id;
 }
 
 export async function update(db, table, id, practiceId, row) {
   const keys = Object.keys(row);
   if (!keys.length) return 0;
   const sql = `UPDATE ${table} SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ? AND practice_id = ?`;
-  return (await db.run(sql, ...keys.map((k) => row[k]), id, practiceId)).changes;
+  return (await db.run(sql, ...keys.map((k) => cleanValue(k, row[k])), id, practiceId)).changes;
 }
 
 // Fetches a row scoped to the caller's practice or 404s. Tenant isolation hinges on this.

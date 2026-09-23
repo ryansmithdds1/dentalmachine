@@ -4,12 +4,15 @@ import { clearOfflineDay } from './offline.js';
 
 const AuthContext = createContext(null);
 
-// Returning from single sign-on: the server redirects to /#sso=<token> (or #sso_error=…).
+// Returning from single sign-on: the server redirects to /#sso=<token> (or #sso_error=…, or
+// #sso_mfa=<ticket> when the authenticator code is still needed).
 let ssoError = null;
-if (typeof window !== 'undefined' && /^#(sso|sso_error)=/.test(window.location.hash)) {
+let ssoTicket = null;
+if (typeof window !== 'undefined' && /^#(sso|sso_error|sso_mfa)=/.test(window.location.hash)) {
   const params = new URLSearchParams(window.location.hash.slice(1));
   if (params.get('sso')) setToken(params.get('sso'));
   ssoError = params.get('sso_error');
+  ssoTicket = params.get('sso_mfa');
   window.history.replaceState(null, '', window.location.pathname + window.location.search);
 }
 // Password reset links arrive as /#reset=<token>.
@@ -21,6 +24,11 @@ if (typeof window !== 'undefined' && /^#reset=/.test(window.location.hash)) {
 export const takeResetToken = () => {
   const t = resetToken;
   resetToken = null;
+  return t;
+};
+export const takeSsoTicket = () => {
+  const t = ssoTicket;
+  ssoTicket = null;
   return t;
 };
 export const takeSsoError = () => {

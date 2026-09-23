@@ -103,6 +103,7 @@ const REQUIRED = {
   balances: ['patient', 'balance'],
 };
 
+// Dates, amounts and codes are short: anything longer is refused before it reaches a pattern.
 const norm = (h) => String(h || '').replace(/^﻿/, '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
 // Suggests which column feeds each field: { field: columnIndex }.
@@ -139,6 +140,7 @@ const blank = (v) => v == null || String(v).trim() === '';
 
 export function parseDate(v, { past = false } = {}) {
   const s = String(v ?? '').trim();
+  if (s.length > 64) throw new Error('Value is too long');
   if (!s) return null;
   let m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(s);
   let y; let mo; let d;
@@ -159,6 +161,7 @@ export function parseDate(v, { past = false } = {}) {
 
 export function parseTime(v) {
   const s = String(v ?? '').trim();
+  if (s.length > 64) throw new Error('Value is too long');
   const m = /(\d{1,2}):(\d{2})(?::\d{2})?\s*([ap])?\.?m?\.?/i.exec(s);
   if (!m) return null;
   let h = Number(m[1]);
@@ -174,6 +177,7 @@ export function parseTime(v) {
 // "$1,234.50", "(45.00)", "-12" → cents.
 export function parseMoney(v) {
   const s = String(v ?? '').trim();
+  if (s.length > 64) throw new Error('Value is too long');
   if (!s) return null;
   const neg = /^\(.*\)$/.test(s) || /^-/.test(s) || /-$/.test(s) || /\bCR$/i.test(s);
   const n = Number(s.replace(/[^0-9.]/g, ''));
@@ -257,6 +261,7 @@ function parsePriority(v) {
 // Recall interval in months. Open Dental stores intervals packed into an integer (years<<24 | months<<16 | weeks<<8 | days).
 function parseInterval(v) {
   const s = String(v ?? '').trim().toLowerCase();
+  if (s.length > 64) throw new Error('Value is too long');
   if (!s) return 6;
   const n = Number(s.replace(/\s*(m|mo|mos|months?)$/, ''));
   if (Number.isInteger(n) && n > 0 && n <= 60) return n;
@@ -268,6 +273,7 @@ function parseInterval(v) {
 
 function parseDuration(v) {
   const s = String(v ?? '').trim();
+  if (s.length > 64) throw new Error('Value is too long');
   if (!s) return null;
   if (/^[X/|]+$/i.test(s)) return s.length * 5; // Open Dental time pattern: one character per 5 minutes
   const n = Number(s.replace(/\s*(min|mins|minutes)$/i, ''));

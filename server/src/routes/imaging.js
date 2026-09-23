@@ -46,7 +46,7 @@ export default function imagingRoutes({ db, storage }) {
   });
 
   // "Open in DEXIS" from the chart: queue a launch on the chosen workstation.
-  r.post('/patients/:id/imaging/launch', requirePermission('clinical:read'), async (req, res) => {
+  r.post('/patients/:id/imaging/launch', requirePermission('clinical:write'), async (req, res) => {
     const patient = await findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient');
     const agent = await findOr404(db, 'bridge_agents', req.body?.agent_id, req.user.practice_id, 'Workstation');
     if (!agent.active) throw new HttpError(409, 'That workstation was removed');
@@ -326,6 +326,8 @@ export function sniffMime(buf, filename = '') {
   if (b.toString('latin1', 0, 4) === 'RIFF' && b.toString('latin1', 8, 12) === 'WEBP') return 'image/webp';
   if (b.toString('latin1', 0, 4) === 'II*\0' || b.toString('latin1', 0, 4) === 'MM\0*') return 'image/tiff';
   if (b.toString('latin1', 0, 4) === '%PDF') return 'application/pdf';
-  if (/\.dcm$/i.test(filename)) return 'application/dicom';
+  // DICOM without the usual 128-byte preamble: trusted by name only when it starts like a DICOM element
+  // (group 0002 or 0008, little-endian), so any file renamed .dcm isn't stored as an x-ray.
+  if (/\.dcm$/i.test(filename) && buf.length > 8 && [0x02, 0x08].includes(buf[0]) && buf[1] === 0x00) return 'application/dicom';
   return null;
 }

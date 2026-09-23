@@ -34,6 +34,7 @@ async function session(user, secret, db, req = null) {
 }
 
 const MAX_FAILURES = 10;
+const DUMMY_HASH = hashPassword(randomBytes(16).toString('hex'));
 const LOCK_MINUTES = 15;
 const RESET_MINUTES = 60;
 
@@ -83,7 +84,10 @@ export default function authRoutes({ db, secret, config = {}, fetchImpl = global
       await audit(db, { ip: req.ip, user: user ? { id: user.id, practice_id: user.practice_id } : null }, action, 'users', user?.id, { email });
       throw new HttpError(401, message, details);
     };
-    if (!user || !user.active || !verifyPassword(String(password || ''), user.password_hash)) await failed('auth.login_failed', 'Invalid email or password');
+    // The password is checked (against a stand-in when there's no such account) either way, so the answer
+    // takes as long for an unknown email as for a wrong password.
+    const passwordOk = verifyPassword(String(password || ''), user?.password_hash || DUMMY_HASH);
+    if (!user || !user.active || !passwordOk) await failed('auth.login_failed', 'Invalid email or password');
     if (user.mfa_enabled) {
       if (!req.body.mfa_code) throw new HttpError(401, 'Enter the 6-digit code from your authenticator app', { mfa_required: true });
       const step = verifyTotp(openMfaSecret(user.mfa_secret, secret), req.body.mfa_code, { lastStep: user.mfa_last_step });
@@ -179,13 +183,36 @@ export default function authRoutes({ db, secret, config = {}, fetchImpl = global
       // Staff are linked on first sign-in; administrators link deliberately while signed in, so an
       // identity-provider account can never take over an administrator by email alone.
       if (!user.sso_subject && user.role === 'admin' && !login.user_id) throw new HttpError(403, 'Administrators link single sign-on first: sign in with your password, then Settings → Single sign-on → Link my account');
-      await db.run("UPDATE users SET sso_subject = ?, last_login_at = datetime('now') WHERE id = ?", subject, user.id);
+      await db.run('UPDATE users SET sso_subject = ? WHERE id = ?', subject, user.id);
+      // Two-factor stays on for someone who turned it on: the identity provider is one factor, not both.
+      if (user.mfa_enabled) return back(res, { sso_mfa: signToken({ sub: user.id, aud: 'sso-mfa' }, secret, 300) });
+      await db.run("UPDATE users SET last_login_at = datetime('now') WHERE id = ?", user.id);
       await audit(db, { ip: req.ip, user }, 'auth.sso_login', 'users', user.id, { provider: cfg.practice.sso_provider });
       back(res, { sso: (await session(user, secret, db, req)).token });
     } catch (err) {
       await audit(db, { ip: req.ip, user: null }, 'auth.sso_failed', null, null, { error: err.message }).catch(() => {});
       back(res, { sso_error: err instanceof HttpError ? err.message : 'Single sign-on failed' });
     }
+  });
+
+  // Second step of single sign-on for someone with two-factor on: the code from their authenticator app.
+  r.post('/sso/mfa', limiter, async (req, res) => {
+    const ticket = verifyToken(String(req.body?.ticket || ''), secret);
+    if (!ticket || ticket.aud !== 'sso-mfa') throw new HttpError(401, 'Sign-in expired — please sign in again');
+    const user = await db.get('SELECT * FROM users WHERE id = ? AND active = 1', ticket.sub);
+    if (!user?.mfa_enabled) throw new HttpError(401, 'Sign-in expired — please sign in again');
+    if (user.locked_until && user.locked_until > new Date().toISOString()) throw new HttpError(429, 'Too many failed sign-ins — try again in 15 minutes');
+    const step = verifyTotp(openMfaSecret(user.mfa_secret, secret), req.body?.code, { lastStep: user.mfa_last_step });
+    if (step == null) {
+      await db.run('UPDATE users SET failed_logins = failed_logins + 1 WHERE id = ?', user.id);
+      await db.run('UPDATE users SET locked_until = ?, failed_logins = 0 WHERE id = ? AND failed_logins >= ?', new Date(Date.now() + LOCK_MINUTES * 60_000).toISOString(), user.id, MAX_FAILURES);
+      await audit(db, { ip: req.ip, user }, 'auth.mfa_failed', 'users', user.id, { sso: true });
+      throw new HttpError(401, 'Invalid authentication code', { mfa_required: true });
+    }
+    await db.run("UPDATE users SET mfa_last_step = ?, failed_logins = 0, last_login_at = datetime('now') WHERE id = ?", step, user.id);
+    const practice = await db.get('SELECT sso_provider FROM practices WHERE id = ?', user.practice_id);
+    await audit(db, { ip: req.ip, user }, 'auth.sso_login', 'users', user.id, { provider: practice.sso_provider, mfa: true });
+    res.json(await session(user, secret, db, req));
   });
 
   r.get('/me', authenticate(db, secret, { allowMfaSetup: true }), async (req, res) => {
@@ -199,6 +226,7 @@ export default function authRoutes({ db, secret, config = {}, fetchImpl = global
     if (!verifyPassword(String(current_password || ''), row.password_hash)) throw new HttpError(400, 'Current password is incorrect');
     validatePassword(new_password);
     await db.run('UPDATE users SET password_hash = ? WHERE id = ?', hashPassword(new_password), req.user.id);
+    await db.run("UPDATE password_resets SET used_at = datetime('now') WHERE user_id = ? AND used_at IS NULL", req.user.id);
     await endOtherSessions(req.user.id);
     await audit(db, req, 'auth.password_changed', 'users', req.user.id);
     // Other devices are signed out; this one gets a fresh session.
@@ -247,6 +275,8 @@ export default function authRoutes({ db, secret, config = {}, fetchImpl = global
     validatePassword(req.body?.password);
     if (!(await db.run("UPDATE password_resets SET used_at = datetime('now') WHERE id = ? AND used_at IS NULL", row.id)).changes) throw new HttpError(400, 'This reset link was already used');
     await db.run('UPDATE users SET password_hash = ?, failed_logins = 0, locked_until = NULL WHERE id = ?', hashPassword(req.body.password), row.user_id);
+    // Any other reset links still sitting in the inbox stop working too.
+    await db.run("UPDATE password_resets SET used_at = datetime('now') WHERE user_id = ? AND used_at IS NULL", row.user_id);
     await endOtherSessions(row.user_id);
     const user = await db.get('SELECT * FROM users WHERE id = ?', row.user_id);
     await audit(db, { ip: req.ip, user: { id: user.id, practice_id: user.practice_id } }, 'auth.password_reset', 'users', user.id);

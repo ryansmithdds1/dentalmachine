@@ -57,7 +57,9 @@ export function portalPublicRoutes({ db, secret, messenger }) {
       .sort((a, b) => (a.guarantor_id ? 1 : 0) - (b.guarantor_id ? 1 : 0));
     const patient = candidates[0];
     const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
-    await insert(db, 'portal_codes', {
+    // Past the cap no code is made at all, so requests spread over many devices can't pile up
+    // live codes to guess against.
+    if (!flood) await insert(db, 'portal_codes', {
       practice_id: practice.id, patient_id: patient?.id ?? null, contact: key, code_hash: hashCode(code).toString('hex'),
       expires_at: new Date(Date.now() + CODE_TTL_MINUTES * 60_000).toISOString().slice(0, 19).replace('T', ' '),
     });
@@ -77,6 +79,9 @@ export function portalPublicRoutes({ db, secret, messenger }) {
     const contact = String(req.body?.contact || '').trim().toLowerCase();
     const key = contact.includes('@') ? contact : digits(contact);
     const given = hashCode(String(req.body?.code || '').replace(/\D/g, ''));
+    // Wrong guesses for one address are capped whatever device they come from.
+    const guessKey = `portal-verify:${practice.id}:${key}`;
+    if ((await hit(guessKey, 60 * 60_000, 0)) >= 10) throw new HttpError(429, 'Too many tries — wait an hour, or call the office');
     const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
     // Any live code for this address can be used (a later request with a mistyped birth date doesn't
     // hide the real one). Each guess uses up one of a code's five attempts before it is compared.
@@ -89,6 +94,7 @@ export function portalPublicRoutes({ db, secret, messenger }) {
       if (c.patient_id && timingSafeEqual(Buffer.from(c.code_hash, 'hex'), given)) row = c;
     }
     if (!row || !(await db.run("UPDATE portal_codes SET used_at = datetime('now') WHERE id = ? AND used_at IS NULL", row.id)).changes) {
+      await hit(guessKey, 60 * 60_000);
       const expired = !live.length && (await db.get('SELECT id FROM portal_codes WHERE practice_id = ? AND contact = ? AND used_at IS NULL LIMIT 1', practice.id, key));
       throw new HttpError(403, expired ? 'That code has expired — request a new one' : "That code isn't right — check it and try again");
     }

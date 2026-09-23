@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { deflateSync } from 'node:zlib';
 import { harness } from './helpers.js';
 import { decodePng, jpegExifThumb, imageSize, makeThumbnail } from '../src/thumbnails.js';
-import { encodePng } from '../src/dicomimage.js';
+import { encodePng, dicomToImage } from '../src/dicomimage.js';
+import { buildDicom } from '../src/dicom.js';
 
 const h = harness();
 
@@ -137,4 +138,25 @@ test('documents: tags, and scan-to-chart from a phone through a short-lived link
   await h.db.run("UPDATE upload_links SET expires_at = '2000-01-01T00:00:00Z'");
   assert.equal((await fetch(`${h.origin}/api/public/upload/${tok}`)).status, 410);
   assert.equal((await fetch(`${h.origin}/api/public/upload/not-a-token`)).status, 404);
+});
+
+test('decode bombs: a tiny file claiming a huge image is refused, not decoded', () => {
+  // PNG: a 100×100 header with a compressed stream that inflates to 50 MB.
+  const chunk = (type, data) => {
+    const len = Buffer.alloc(4); len.writeUInt32BE(data.length);
+    return Buffer.concat([len, Buffer.from(type), data, Buffer.alloc(4)]);
+  };
+  const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(100, 0); ihdr.writeUInt32BE(100, 4); ihdr[8] = 8; ihdr[9] = 0;
+  const bomb = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(Buffer.alloc(50_000_000))), chunk('IEND', Buffer.alloc(0))]);
+  assert.ok(bomb.length < 100_000);
+  assert.equal(decodePng(bomb), null);
+  // DICOM: a header claiming 60000×60000 with a few bytes of pixels.
+  const dcm = buildDicom({ patientId: 'X', image: { rows: 60000, columns: 60000 }, pixels: Buffer.alloc(32) });
+  assert.equal(dicomToImage(dcm), null);
+});
+
+test('a file named .dcm is only taken as DICOM when it looks like one', async () => {
+  const { sniffMime } = await import('../src/routes/imaging.js');
+  assert.equal(sniffMime(Buffer.from('<html><script>alert(1)</script></html>'), 'xray.dcm'), null);
+  assert.equal(sniffMime(Buffer.from([0x08, 0x00, 0x05, 0x00, 0x43, 0x53, 0x02, 0x00, 0x49, 0x52]), 'xray.dcm'), 'application/dicom');
 });

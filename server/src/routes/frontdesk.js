@@ -58,7 +58,11 @@ export default function frontDeskRoutes({ db, messenger }) {
   }
 
   r.get('/appointments/:id/checkout', requirePermission('schedule:read'), async (req, res) => {
-    res.json(await checkoutSummary(req.user.practice_id, Number(req.params.id)));
+    const s = await checkoutSummary(req.user.practice_id, Number(req.params.id));
+    // Scheduling access alone shows the visit, not the money or the chart.
+    if (!can(req.user, 'billing:read')) Object.assign(s, { estimate: null, ledger: [], paid_today: null, balance: null, suggested_payment: null, policy: null, unclaimed: [] });
+    if (!can(req.user, 'clinical:read')) s.procedures = [];
+    res.json(s);
   });
 
   // Finish the visit: complete its planned work (when allowed) and mark the patient checked out.
@@ -244,9 +248,16 @@ export default function frontDeskRoutes({ db, messenger }) {
         recall_due: recall?.due_date ?? null, carrier: policy?.carrier_name ?? null, eligibility: lastElig, labs, flags,
       };
     });
+    // Health details need clinical access, and money needs billing access, beyond seeing the schedule.
+    const clinical = can(req.user, 'clinical:read');
+    const billing = can(req.user, 'billing:read');
+    for (const x of rows) {
+      if (!clinical) Object.assign(x, { medical_alerts: null, allergies: null, labs: [], flags: x.flags.filter((f) => !['lab_not_back', 'update_medical_history', 'unscheduled_treatment'].includes(f)) });
+      if (!billing) Object.assign(x, { production: 0, balance: null, family_balance: 0, unscheduled_amount: 0, carrier: null, eligibility: null, flags: x.flags.filter((f) => !['balance_due', 'verify_insurance'].includes(f)) });
+    }
     const production = rows.reduce((s, x) => s + x.production, 0);
     res.json({
-      date, daily_goal: practice.daily_goal, production,
+      date, daily_goal: billing ? practice.daily_goal : null, production,
       summary: {
         appointments: rows.length,
         new_patients: rows.filter((x) => x.flags.includes('new_patient')).length,
@@ -266,7 +277,7 @@ export default function frontDeskRoutes({ db, messenger }) {
     const a = await findOr404(db, 'appointments', req.params.aid, pid, 'Appointment');
     const patient = await findOr404(db, 'patients', a.patient_id, pid, 'Patient');
     await audit(db, req, 'route_slip.print', 'appointments', a.id);
-    res.json({
+    const slip = {
       appointment: await db.get(
         `SELECT a.*, pv.name AS provider_name, o.name AS operatory_name, t.name AS type_name FROM appointments a JOIN providers pv ON pv.id = a.provider_id
          LEFT JOIN operatories o ON o.id = a.operatory_id LEFT JOIN appointment_types t ON t.id = a.appointment_type_id WHERE a.id = ?`, a.id,
@@ -281,7 +292,12 @@ export default function frontDeskRoutes({ db, messenger }) {
       recall: await db.all("SELECT type, due_date FROM recalls WHERE patient_id = ? AND status != 'inactive'", patient.id),
       last_visit: (await db.get("SELECT MAX(start_time) AS t FROM appointments WHERE patient_id = ? AND status = 'completed' AND start_time < ?", patient.id, a.start_time)).t,
       last_note: (await db.get('SELECT body, created_at FROM clinical_notes WHERE patient_id = ? ORDER BY id DESC LIMIT 1', patient.id)) || null,
-    });
+    };
+    // Each part of the slip needs the access it would need anywhere else.
+    if (!can(req.user, 'patients:read')) slip.patient = pick(patient, ['id', 'first_name', 'last_name', 'preferred_name', 'dob', 'phone']);
+    if (!can(req.user, 'clinical:read')) Object.assign(slip, { todays_procedures: [], unscheduled: [], last_note: null, patient: { ...slip.patient, medical_alerts: undefined, allergies: undefined, medications: undefined } });
+    if (!can(req.user, 'billing:read')) Object.assign(slip, { policy: null, balance: null, todays_procedures: slip.todays_procedures.map(({ fee: _f, ...p }) => p), unscheduled: slip.unscheduled.map(({ fee: _f, ...p }) => p) });
+    res.json(slip);
   });
 
   // ---- Follow-up lists (the "unscheduled" and "broken appointment" lists) ----

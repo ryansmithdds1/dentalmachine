@@ -5,6 +5,8 @@ import { generateKeyPairSync, createSign, createHash } from 'node:crypto';
 import { harness } from './helpers.js';
 import { signToken } from '../src/auth.js';
 import { verifiedEmail } from '../src/sso.js';
+import { totp, timeStep } from '../src/totp.js';
+import { assertPublicUrl, isPrivateAddress } from '../src/netguard.js';
 
 const signPortal = () => signToken({ sub: 1, pid: 1, aud: 'portal' }, 'test-secret');
 const unscoped = () => signToken({ sub: 1, pid: 1 }, 'test-secret');
@@ -126,4 +128,42 @@ test('only verified emails are trusted from identity providers', () => {
 test('staff routes need a staff token', async () => {
   const res = await fetch(`${h.origin}/api/patients`, { headers: { Authorization: `Bearer ${unscoped()}` } });
   assert.equal(res.status, 401);
+});
+
+test('single sign-on still asks for the authenticator code when two-factor is on', async () => {
+  const { api } = await h.practice();
+  await api.put('/practice/sso', { provider: 'oidc', issuer: base, client_id: 'dm-client', client_secret: 'shh', domain: 'example.com' });
+  const email = `mfa-${Date.now()}@example.com`;
+  await api.post('/users', { email, name: 'Hyg', role: 'hygienist', password: 'correct-horse-battery' });
+  const staff = h.client((await h.client().post('/auth/login', { email, password: 'correct-horse-battery' })).data.token);
+  const { secret } = (await staff.post('/auth/mfa/setup')).data;
+  assert.equal((await staff.post('/auth/mfa/enable', { code: totp(secret, timeStep() - 1) })).status, 200);
+
+  const back = await ssoLogin(email);
+  assert.equal(back.get('sso'), null, 'no session from the identity provider alone');
+  const ticket = back.get('sso_mfa');
+  assert.ok(ticket);
+  assert.equal((await h.client(ticket).get('/patients')).status, 401, 'the ticket is not a session');
+  assert.equal((await h.client().post('/auth/sso/mfa', { ticket, code: '000000' })).status, 401);
+  const ok = await h.client().post('/auth/sso/mfa', { ticket, code: totp(secret) });
+  assert.equal(ok.status, 200);
+  assert.equal((await h.client(ok.data.token).get('/auth/me')).data.user.email, email);
+  assert.equal((await h.client().post('/auth/sso/mfa', { ticket, code: totp(secret) })).status, 401, 'code not reusable');
+});
+
+test('webhooks and identity providers can only reach public https servers', async () => {
+  for (const ip of ['127.0.0.1', '10.1.2.3', '172.20.0.1', '192.168.1.1', '169.254.169.254', '100.64.0.1', '0.0.0.0', '::1', 'fd00::1', 'fe80::1', '::ffff:10.0.0.1']) assert.ok(isPrivateAddress(ip), ip);
+  for (const ip of ['8.8.8.8', '172.32.0.1', '2606:4700::1111']) assert.ok(!isPrivateAddress(ip), ip);
+  const resolve = async (host) => [{ address: host === 'evil.example.com' ? '10.0.0.5' : '93.184.216.34' }];
+  await assert.rejects(assertPublicUrl('https://evil.example.com/hook', { resolve }), /public internet address/);
+  await assert.rejects(assertPublicUrl('https://hooks.example.com:8443/x', { resolve }), /standard https port/);
+  await assert.rejects(assertPublicUrl('http://hooks.example.com/x', { resolve }), /https/);
+  await assert.rejects(assertPublicUrl('https://metadata.internal/x', { resolve }), /public internet address/);
+  assert.ok(await assertPublicUrl('https://hooks.example.com/x', { resolve }));
+
+  const { api } = await h.practice();
+  for (const url of ['https://169.254.169.254/latest/meta-data', 'https://10.0.0.8/hook', 'https://localhost.localdomain/x', 'https://[::1]/x']) {
+    assert.equal((await api.post('/webhooks', { url, events: ['*'] })).status, 400, url);
+  }
+  assert.equal((await api.put('/practice/sso', { provider: 'oidc', issuer: 'https://10.0.0.8', client_id: 'x', client_secret: 'y' })).status, 400);
 });

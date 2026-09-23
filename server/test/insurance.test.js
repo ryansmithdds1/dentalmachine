@@ -220,6 +220,13 @@ test('adjustment types, approval limit and family transfers', async () => {
   assert.equal((await ctx.api.post(`/patients/${ctx.patient.id}/adjustments`, { amount: -8000, description: 'Discount', adjustment_type: 'Courtesy discount' })).status, 201, 'admins can');
   const rep = (await ctx.api.get('/reports/adjustments')).data;
   assert.equal(rep.rows.find((r) => r.type === 'Courtesy discount').amount, -10000);
+  // Voiding a big charge is a write-off by another name: same limit.
+  const proc = (await ctx.api.post(`/patients/${ctx.patient.id}/procedures`, { code: 'D2740', tooth: '3', provider_id: ctx.provider.id })).data;
+  await ctx.api.post(`/procedures/${proc.id}/complete`, {});
+  const charge = await h.db.get("SELECT id, amount FROM ledger_entries WHERE procedure_id = ? AND type = 'charge'", proc.id);
+  assert.ok(charge.amount > 5000);
+  assert.equal((await desk.post(`/ledger/${charge.id}/void`, { reason: 'oops' })).status, 403);
+  assert.equal((await ctx.api.post(`/ledger/${charge.id}/void`, { reason: 'oops' })).status, 201);
 
   const kid = (await ctx.api.post('/patients', { first_name: 'Kid', last_name: 'Doe' })).data;
   const stranger = (await ctx.api.post('/patients', { first_name: 'Not', last_name: 'Family' })).data;
