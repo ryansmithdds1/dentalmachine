@@ -82,3 +82,34 @@ test('editing a denied claim: fixes the chart, re-estimates, keeps a diff, and g
   assert.match(file, /NTE\*ADD\*CROWN, NOT A FILLING; TOOTH CORRECTED~/);
   assert.equal((await api.get(`/patients/${patient.id}/ledger`)).status, 200);
 });
+
+test('insurance follow-up calls: logged on the claim, and the worklist waits until the follow-up date', async () => {
+  const { api, claimFor } = await setup();
+  const other = await h.practice();
+  const stale = await claimFor('D2740', '3');
+  await api.post(`/claims/${stale.id}/submit`);
+  await h.db.run('UPDATE claims SET submitted_at = ? WHERE id = ?', new Date(Date.now() - 45 * 86400_000).toISOString(), stale.id);
+  assert.equal((await api.post(`/claims/${stale.id}/calls`, { outcome: 'maybe' })).status, 400);
+  assert.equal((await other.api.post(`/claims/${stale.id}/calls`, { outcome: 'in_process' })).status, 404);
+
+  const later = new Date(Date.now() + 7 * 86400_000).toISOString().slice(0, 10);
+  const call = await api.post(`/claims/${stale.id}/calls`, { outcome: 'need_info', contact: 'Maria', reference: 'CALL-5521', note: 'Needs x-ray and narrative', follow_up_date: later });
+  assert.equal(call.status, 201);
+  const events = (await api.get(`/claims/${stale.id}/events`)).data;
+  const logged = events.find((e) => e.source === 'call');
+  assert.equal(logged.status, 'need_info');
+  assert.deepEqual([logged.details.contact, logged.details.reference, logged.details.follow_up_date], ['Maria', 'CALL-5521', later]);
+  assert.ok(logged.user_name);
+  assert.match(logged.message, /spoke with Maria · ref CALL-5521/);
+
+  // Someone's on it: off the attention list until the follow-up date.
+  let row = (await api.get('/claims')).data.find((c) => c.id === stale.id);
+  assert.equal(row.attention, null);
+  assert.equal(row.follow_up_date, later);
+  await h.db.run('UPDATE claims SET follow_up_date = ? WHERE id = ?', new Date(Date.now() - 86400_000).toISOString().slice(0, 10), stale.id);
+  row = (await api.get('/claims?attention=1')).data.find((c) => c.id === stale.id);
+  assert.equal(row.attention, 'Follow-up due (last call: payer needs more information)');
+  // A call with no follow-up date goes back to the usual rule.
+  await api.post(`/claims/${stale.id}/calls`, { outcome: 'in_process' });
+  assert.match((await api.get('/claims')).data.find((c) => c.id === stale.id).attention, /No payment after 45 days/);
+});

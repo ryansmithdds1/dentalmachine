@@ -2,9 +2,9 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, getToken } from '../api.js';
 import { useApi } from '../hooks.js';
-import { fmtUtcDate, fmtUtcDateTime } from '../format.js';
+import { fmtDate, fmtUtcDate, fmtUtcDateTime } from '../format.js';
 import { useAuth } from '../auth.jsx';
-import { ErrorBox } from './ui.jsx';
+import { ErrorBox, useSubmit } from './ui.jsx';
 
 // Where a claim is in its electronic journey, in plain language.
 export const CH_STATUS = {
@@ -150,12 +150,50 @@ const summarize = (f) => {
   return '';
 };
 
+export const CALL_OUTCOMES = {
+  in_process: 'In process', paid: 'Paid — payment on the way', denied: 'Denied', need_info: 'Payer needs more information',
+  not_on_file: 'No record of the claim', resubmit: 'Asked to resubmit', pending_patient: 'Waiting on the patient (COB, other coverage)', other: 'Other',
+};
+
+// A call to the payer about the claim, with when to follow up next.
+export function CallForm({ claim, onDone, onCancel }) {
+  const inDays = (n) => new Date(Date.now() + n * 86400_000).toISOString().slice(0, 10);
+  const [form, setForm] = useState({ outcome: 'in_process', contact: '', reference: '', note: '', follow_up_date: inDays(14) });
+  const { submit, busy, error } = useSubmit(async () => { await api.post(`/claims/${claim.id}/calls`, form); onDone(); });
+  return (
+    <form className="call-form" onSubmit={(e) => { e.preventDefault(); submit(); }}>
+      <ErrorBox error={error} />
+      <div className="form-grid">
+        <label>
+          What they said
+          <select value={form.outcome} onChange={(e) => setForm({ ...form, outcome: e.target.value })}>
+            {Object.entries(CALL_OUTCOMES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          </select>
+        </label>
+        <label>Spoke with<input value={form.contact} onChange={(e) => setForm({ ...form, contact: e.target.value })} placeholder="Rep's name" /></label>
+        <label>Call reference #<input value={form.reference} onChange={(e) => setForm({ ...form, reference: e.target.value })} /></label>
+        <label>
+          Follow up on
+          <input type="date" value={form.follow_up_date} onChange={(e) => setForm({ ...form, follow_up_date: e.target.value })} />
+          <span className="inline" style={{ gap: 4, marginTop: 4 }}>
+            {[7, 14, 30].map((n) => <button key={n} type="button" className="small" onClick={() => setForm({ ...form, follow_up_date: inDays(n) })}>{n} days</button>)}
+            <button type="button" className="small" onClick={() => setForm({ ...form, follow_up_date: '' })}>None</button>
+          </span>
+        </label>
+        <label className="full">Notes<textarea rows={2} value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} placeholder="e.g. needs x-ray and narrative; reprocessing in 10 days" /></label>
+      </div>
+      <div className="form-actions"><button type="button" onClick={onCancel}>Cancel</button><button className="primary" disabled={busy}>Save call</button></div>
+    </form>
+  );
+}
+
 // Claim page: status check (276/277) and the claim's electronic timeline.
 export function ClaimEdiCard({ claim, onChange }) {
   const { can, practice } = useAuth();
   const { data: events, reload } = useApi(`/claims/${claim.id}/events`);
   const [err, setErr] = useState(null);
   const [checking, setChecking] = useState(false);
+  const [calling, setCalling] = useState(false);
   const check = async () => {
     setErr(null);
     setChecking(true);
@@ -173,18 +211,32 @@ export function ClaimEdiCard({ claim, onChange }) {
     }
   };
   const canCheck = can('billing:read') && ['submitted', 'partially_paid', 'paid', 'denied'].includes(claim.status);
-  if (!events?.length && !canCheck) return null;
+  const canCall = can('billing:write') && claim.status !== 'void';
+  if (!events?.length && !canCheck && !canCall) return null;
   return (
     <div className="card">
       <div className="inline" style={{ justifyContent: 'space-between' }}>
         <h2 style={{ margin: 0 }}>Status and history</h2>
-        {canCheck && <button className="small" disabled={checking} onClick={check}>{checking ? 'Asking payer…' : 'Check status with payer'}</button>}
+        <span className="inline" style={{ gap: 6 }}>
+          {canCall && <button className="small" onClick={() => setCalling(true)}>Log a call</button>}
+          {canCheck && <button className="small" disabled={checking} onClick={check}>{checking ? 'Asking payer…' : 'Check status with payer'}</button>}
+        </span>
       </div>
+      {claim.follow_up_date && ['submitted', 'partially_paid'].includes(claim.status) && <div className="muted" style={{ fontSize: 13, marginTop: 6 }}>Next follow-up: {fmtDate(claim.follow_up_date)}</div>}
       <ErrorBox error={err} />
+      {calling && <CallForm claim={claim} onCancel={() => setCalling(false)} onDone={() => { setCalling(false); reload(); onChange?.(); }} />}
       <ol className="timeline">
         {events?.map((e) => (
           <li key={e.id} className={`tl-${(CH_STATUS[e.status] || [])[1] || 'info'}`}>
-            {e.source === 'edit' ? (
+            {e.source === 'call' ? (
+              <>
+                <div><strong>📞 Call: {CALL_OUTCOMES[e.status] || e.status}</strong> <span className="muted">· {e.user_name || 'staff'} · {fmtUtcDateTime(e.created_at, practice?.timezone)}</span></div>
+                <div className="muted">
+                  {[e.details?.contact && `Spoke with ${e.details.contact}`, e.details?.reference && `ref ${e.details.reference}`, e.details?.follow_up_date && `follow up ${fmtDate(e.details.follow_up_date)}`].filter(Boolean).join(' · ')}
+                </div>
+                {e.details?.note && <div>{e.details.note}</div>}
+              </>
+            ) : e.source === 'edit' ? (
               <>
                 <div><strong>Edited</strong> <span className="muted">· {e.user_name || 'staff'} · {fmtUtcDateTime(e.created_at, practice?.timezone)}</span></div>
                 <ul className="claim-diff">

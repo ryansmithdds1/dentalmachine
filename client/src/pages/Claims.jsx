@@ -6,7 +6,7 @@ import { useAuth } from '../auth.jsx';
 import { money, fmtDate, fmtDateTime, toCents } from '../format.js';
 import { Badge, ErrorBox, Modal } from '../components/ui.jsx';
 import { PlanSummary } from '../components/patient/PaymentPlans.jsx';
-import { ChStatus, ClearinghousePanel, sendClaims, describeResponses } from '../components/ClaimEdi.jsx';
+import { ChStatus, ClearinghousePanel, sendClaims, describeResponses, CallForm, CALL_OUTCOMES } from '../components/ClaimEdi.jsx';
 import InsurancePlanForm from '../components/InsurancePlanForm.jsx';
 import { useLookup } from '../hooks.js';
 import { downloadCsv, dollars } from '../api.js';
@@ -157,7 +157,7 @@ function ClaimList() {
                     )}
                   </td>
                   <td>#{c.id}</td>
-                  <td>{c.first_name} {c.last_name}{c.attention && <div className="claim-attention">{c.attention}</div>}</td>
+                  <td>{c.first_name} {c.last_name}{c.attention && <div className="claim-attention">{c.attention}</div>}{!c.attention && c.follow_up_date && ['submitted', 'partially_paid'].includes(c.status) && <div className="muted" style={{ fontSize: 12 }}>📞 Follow up {fmtDate(c.follow_up_date)}</div>}</td>
                   <td>{c.carrier_name}</td>
                   <td>{fmtDate(c.created_at)}</td>
                   <td>{fmtDate(c.submitted_at)}{c.submitted_at && <div className="muted" style={{ fontSize: 12 }}>{c.age_days} days</div>}</td>
@@ -285,8 +285,10 @@ function Plans() {
 }
 
 function InsuranceFollowup() {
+  const { can } = useAuth();
   const [carrier, setCarrier] = useState('');
-  const { data } = useApi(`/reports/outstanding-claims${carrier ? `?carrier_id=${carrier}` : ''}`);
+  const [calling, setCalling] = useState(null);
+  const { data, reload } = useApi(`/reports/outstanding-claims${carrier ? `?carrier_id=${carrier}` : ''}`);
   const carriers = useLookup('/carriers');
   if (!data) return <div className="empty">Loading…</div>;
   const B = [['d0_30', '0–30 days'], ['d31_60', '31–60 days'], ['d61_90', '61–90 days'], ['d90_plus', '90+ days']];
@@ -306,7 +308,7 @@ function InsuranceFollowup() {
         </div>
         <div className="table-wrap">
           <table>
-            <thead><tr><th>Claim</th><th>Patient</th><th>Carrier</th><th>Submitted</th><th className="num">Days out</th><th className="num">Expected</th><th>Status</th></tr></thead>
+            <thead><tr><th>Claim</th><th>Patient</th><th>Carrier</th><th>Submitted</th><th className="num">Days out</th><th className="num">Expected</th><th>Status</th><th>Last call</th><th className="no-print" /></tr></thead>
             <tbody>
               {data.rows.map((c) => (
                 <tr key={c.id}>
@@ -317,11 +319,17 @@ function InsuranceFollowup() {
                   <td className="num" style={{ color: c.days_out > 60 ? 'var(--danger)' : c.days_out > 30 ? 'var(--warn)' : undefined, fontWeight: c.days_out > 30 ? 700 : 400 }}>{c.days_out}</td>
                   <td className="num">{money(c.estimated_amount - c.paid_amount)}</td>
                   <td><Badge value={c.status} /></td>
+                  <td style={{ fontSize: 13 }}>
+                    {c.last_call_at ? <>{CALL_OUTCOMES[c.last_call_outcome] || c.last_call_outcome} <span className="muted">· {fmtDate(c.last_call_at.slice(0, 10))}</span></> : <span className="muted">—</span>}
+                    {c.follow_up_date && <div className={c.follow_up_date <= data.as_of ? 'text-danger' : 'muted'}>Follow up {fmtDate(c.follow_up_date)}</div>}
+                  </td>
+                  <td className="no-print">{can('billing:write') && <button className="small" onClick={() => setCalling(c)}>Log call</button>}</td>
                 </tr>
               ))}
             </tbody>
           </table>
           {data.rows.length === 0 && <div className="empty">No outstanding claims. 🎉</div>}
+          {calling && <Modal title={`Call about claim #${calling.id} · ${calling.first_name} ${calling.last_name}`} wide onClose={() => setCalling(null)}><CallForm claim={calling} onCancel={() => setCalling(null)} onDone={() => { setCalling(null); reload(); }} /></Modal>}
         </div>
       </div>
     </>

@@ -37,6 +37,11 @@ async function stampDeductibleYear(db, row, policy) {
   row.deductible_year = benefitYear({ ...policy, ...row }, today).start;
 }
 
+export const CALL_OUTCOMES = {
+  in_process: 'In process', paid: 'Paid — payment on the way', denied: 'Denied', need_info: 'Payer needs more information',
+  not_on_file: 'No record of the claim', resubmit: 'Asked to resubmit', pending_patient: 'Waiting on the patient (COB, other coverage)', other: 'Other',
+};
+
 export default function insuranceRoutes({ db }) {
   const r = Router();
 
@@ -167,14 +172,20 @@ export default function insuranceRoutes({ db }) {
     const rows = await db.all(`${CLAIM_SELECT} WHERE ${where.join(' AND ')} ORDER BY c.created_at DESC, c.id DESC`, ...params);
     // Worklist: how old each claim is (since it was sent, or created if not yet sent) and whether it needs
     // someone — rejected, denied, or no answer from the payer after 30 days. Those come first.
+    // A logged call with a follow-up date quiets "no payment" until that date comes round.
     const now = Date.now();
+    const today = (await practiceNow(db, req.user.practice_id)).slice(0, 10);
+    const open = (c) => ['submitted', 'partially_paid'].includes(c.status);
     for (const c of rows) {
       const since = c.submitted_at || c.created_at;
       c.age_days = Math.max(0, Math.floor((now - Date.parse(since.includes('T') ? since : `${since.replace(' ', 'T')}Z`)) / 86400_000));
+      const outcome = CALL_OUTCOMES[c.last_call_outcome]?.toLowerCase();
       c.attention = c.ch_status === 'rejected' && c.status === 'draft' ? `Rejected: ${c.ch_message || 'see claim history'}`
         : c.status === 'denied' ? `Denied${c.denial_reason ? `: ${c.denial_reason}` : ''}`
-          : ['submitted', 'partially_paid'].includes(c.status) && c.age_days > 30 ? `No payment after ${c.age_days} days`
-            : null;
+          : open(c) && c.follow_up_date && c.follow_up_date <= today ? `Follow-up due${outcome ? ` (last call: ${outcome})` : ''}`
+            : open(c) && c.follow_up_date ? null
+              : open(c) && c.age_days > 30 ? `No payment after ${c.age_days} days`
+                : null;
     }
     const [min, max] = { '0-30': [0, 30], '31-60': [31, 60], '61-90': [61, 90], '90+': [91, Infinity] }[req.query.age] || [0, Infinity];
     let out = rows.filter((c) => c.age_days >= min && c.age_days <= max);
@@ -259,6 +270,22 @@ export default function insuranceRoutes({ db }) {
   // code, tooth and surfaces (corrected on the chart too), the prior-authorization number, and a note to
   // the payer. What changed is kept on the claim's history. A claim the payer already has goes back out as a
   // corrected claim (below) once edited.
+  // A phone call (or portal check) with the payer about this claim: who, reference number, what they said,
+  // and when to follow up next. Kept in the claim's history.
+  r.post('/claims/:cid/calls', requirePermission('billing:write'), async (req, res) => {
+    const claim = await findOr404(db, 'claims', req.params.cid, req.user.practice_id, 'Claim');
+    const outcome = req.body?.outcome;
+    requireOneOf(outcome, Object.keys(CALL_OUTCOMES), 'outcome');
+    const clean = (v, n) => String(v ?? '').trim().slice(0, n) || null;
+    const call = { outcome, contact: clean(req.body.contact, 100), reference: clean(req.body.reference, 60), note: clean(req.body.note, 1000), follow_up_date: clean(req.body.follow_up_date, 10) };
+    if (call.follow_up_date && !/^\d{4}-\d{2}-\d{2}$/.test(call.follow_up_date)) throw new HttpError(400, 'Follow-up date must be YYYY-MM-DD');
+    const message = [CALL_OUTCOMES[outcome], call.contact && `spoke with ${call.contact}`, call.reference && `ref ${call.reference}`, call.note, call.follow_up_date && `follow up ${call.follow_up_date}`].filter(Boolean).join(' · ');
+    await insert(db, 'claim_events', { practice_id: claim.practice_id, claim_id: claim.id, source: 'call', status: outcome, message: message.slice(0, 500), details: JSON.stringify(call), user_id: req.user.id });
+    await db.run("UPDATE claims SET follow_up_date = ?, last_call_at = datetime('now'), last_call_outcome = ? WHERE id = ?", call.follow_up_date, outcome, claim.id);
+    await audit(db, req, 'claim.call', 'claims', claim.id, { outcome });
+    res.status(201).json({ ...call, message });
+  });
+
   r.put('/claims/:cid', requirePermission('billing:write'), async (req, res) => {
     const claim = await findOr404(db, 'claims', req.params.cid, req.user.practice_id, 'Claim');
     if (!['draft', 'denied'].includes(claim.status)) {
