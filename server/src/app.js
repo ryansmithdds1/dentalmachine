@@ -307,6 +307,8 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
     if (/foreign key/i.test(msg)) return res.status(400).json({ error: 'Referenced record does not exist' });
     if (/unique constraint|UNIQUE/i.test(msg)) return res.status(409).json({ error: 'Record already exists' });
     if (/check constraint/i.test(msg)) return res.status(400).json({ error: 'Invalid value' });
+    // A malformed id or number in the address ("/patients/abc"): Postgres refuses it; SQLite simply finds nothing.
+    if (err?.code === '22P02' || /invalid input syntax for type (integer|bigint|numeric)/i.test(msg)) return res.status(404).json({ error: 'Not found' });
     if (/not[- ]null constraint/i.test(msg)) {
       const field = err.column || (msg.match(/column "([^"]+)"/)?.[1] ?? msg.split('.').pop());
       return res.status(400).json({ error: `${field} is required` });
