@@ -154,7 +154,7 @@ The "OD / Curve" column shows which competitor has the feature: ✓ = has it, ~ 
 | 58 | ✅ **Lab directory and lab slips.** _(Photo attachments go on the patient's documents.)_ Link to a procedure, printable Rx slip, photo attachments. | Lab workflow. | ✓ / ~ | P3 | S |
 | 59 | **Ortho module.** Ortho chart, contract billing (down payment plus monthly auto-billing), bracket and wire log, ortho lifetime max. | GP offices doing ortho or aligners. | ✓ / ~ | P3 | L |
 | 60 | ✅ **Full CDT code set import** with treatment area, time units and auto-condition (extraction → missing). | Completeness. | ✓ / ✓ | P2 | S |
-| 61 | **Voice perio entry.** | Hygienist productivity; Curve and newer PMSs advertise it. | ~ / ✓ | P3 | M |
+| 61 | ✅ _(Done: 🎤 Voice on the perio chart uses the browser's speech recognition (Chrome, Edge, Safari): say the readings along the probing path; “bleeding”, “pus”, “plaque”, “skip”, “back”, “next tooth”, “missing”, “stop”. Numbers heard as words or homophones count.)_ **Voice perio entry.** | Hygienist productivity; Curve and newer PMSs advertise it. | ~ / ✓ | P3 | M |
 
 ### 2.5 Patient engagement and marketing
 

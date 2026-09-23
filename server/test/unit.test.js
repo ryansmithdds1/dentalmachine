@@ -88,3 +88,12 @@ test('Postgres translation survives an unmatched quote', () => {
   assert.equal(toPostgres("SELECT 'it"), "SELECT 'it", 'an unterminated string ends the scan');
   assert.equal(toPostgres("SELECT ? WHERE a = 'it''s'"), "SELECT $1 WHERE a = 'it''s'");
 });
+
+test('voice perio: numbers, homophones and commands from what the recognizer heard', async () => {
+  const { parseSpeech } = await import('../../client/src/components/patient/voicePerio.js');
+  assert.deepEqual(parseSpeech('3 2 3 4 bleeding'), [{ n: 3 }, { n: 2 }, { n: 3 }, { n: 4 }, { cmd: 'bop' }]);
+  assert.deepEqual(parseSpeech('three to for, 323. Twelve! next tooth pus back skip missing stop'), [
+    { n: 3 }, { n: 2 }, { n: 4 }, { n: 3 }, { n: 2 }, { n: 3 }, { n: 12 }, { cmd: 'next_tooth' }, { cmd: 'sup' }, { cmd: 'back' }, { cmd: 'skip' }, { cmd: 'missing' }, { cmd: 'stop' },
+  ]);
+  assert.deepEqual(parseSpeech('um the patient'), []);
+});
