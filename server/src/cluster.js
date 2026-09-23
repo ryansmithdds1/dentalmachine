@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import { withActor } from './actor.js';
 import { randomUUID } from 'node:crypto';
 
 // Shared state for running several API servers behind a load balancer.
@@ -81,7 +82,8 @@ export const jobRuns = () => [...lastRuns.entries()].map(([name, r]) => ({ name,
 const track = async (name, fn) => {
   const started = new Date().toISOString();
   try {
-    const out = await fn();
+    // Everything a job changes is attributed to it in the audit log.
+    const out = await withActor({ source: 'automation', actor: `Job: ${name}`, userId: null }, fn);
     lastRuns.set(name, { started, finished: new Date().toISOString(), ok: true });
     return out;
   } catch (err) {

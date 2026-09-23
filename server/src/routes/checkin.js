@@ -32,7 +32,7 @@ export function checkinPublicRoutes({ db }) {
     }
     const done = ids.length ? await checkInToday(db, p.id, ids, { via: 'qr' }) : [];
     if (!done.length) throw new HttpError(404, `We couldn't find a visit for today with those details. Please check in at the front desk${p.phone ? ` or call ${p.phone}` : ''}.`);
-    await db.run('INSERT INTO audit_log (practice_id, action, entity, entity_id, ip) VALUES (?, ?, ?, ?, ?)', p.id, 'checkin.qr', 'appointments', done[0].id, req.ip ?? null);
+    await audit(db, { ip: req.ip, user: { practice_id: p.id, id: null } }, 'checkin.qr', 'appointments', done[0].id, null, { source: 'patient', actor: 'Patient (QR check-in)', patientId: done[0].patient_id });
     res.json({ checked_in: done.map((v) => ({ name: v.first_name, time: v.start_time.slice(11, 16) })) });
   });
   return r;

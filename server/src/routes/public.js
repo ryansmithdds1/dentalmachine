@@ -1,6 +1,6 @@
 import express, { Router } from 'express';
 import { HttpError, rateLimit, signToken, verifyToken } from '../auth.js';
-import { insert, update, hashToken, practiceNow, normalizeDateTime, audit, mapSeq, publicPractice, friendlyDateTime } from '../util.js';
+import { insert, update, hashToken, practiceNow, normalizeDateTime, audit, mapSeq, publicPractice, friendlyDateTime, recorded } from '../util.js';
 import { MEDICAL_CONDITIONS, parseMedicalHistory, contactUpdatesFromHistory } from '../forms.js';
 import { fillFields, checkAnswers, formPdf } from '../formtemplates.js';
 import { patientLang } from '../templates.js';
@@ -281,7 +281,7 @@ export default function publicRoutes({ db, storage, payments, messenger, config,
       // Confirmed from a link: by text or by email, whichever the link came in.
       const via = link.channel || (await db.get("SELECT channel FROM messages WHERE appointment_id = ? AND direction = 'outbound' ORDER BY id DESC LIMIT 1", open[0].id))?.channel;
       for (const v of open) {
-        await db.run("UPDATE appointments SET status = 'confirmed', confirmed_at = COALESCE(confirmed_at, datetime('now')), confirmed_via = ? WHERE id = ? AND status IN ('scheduled','confirmed')", via === 'email' ? 'email' : 'text', v.id);
+        await recorded(db, 'appointments', v.id, () => db.run("UPDATE appointments SET status = 'confirmed', confirmed_at = COALESCE(confirmed_at, datetime('now')), confirmed_via = ? WHERE id = ? AND status IN ('scheduled','confirmed')", via === 'email' ? 'email' : 'text', v.id));
       }
     } else {
       const v = open[0];
@@ -289,7 +289,7 @@ export default function publicRoutes({ db, storage, payments, messenger, config,
       const when = friendlyDateTime(v.start_time);
       const note = String(req.body?.note || '').trim().slice(0, 300);
       if (action === 'cancel') {
-        await db.run("UPDATE appointments SET status = 'cancelled' WHERE id = ?", v.id);
+        await recorded(db, 'appointments', v.id, () => db.run("UPDATE appointments SET status = 'cancelled' WHERE id = ?", v.id));
         await releaseAppointment(db, v.id);
         openSlotLater(db, v.id);
         // The front desk hears about it, with who might fill the opening.
@@ -325,7 +325,7 @@ export default function publicRoutes({ db, storage, payments, messenger, config,
     const practiceId = visits[0].practice_id;
     const address = link.channel === 'email' ? link.address : (await db.get('SELECT email FROM patients WHERE id = ?', recipient?.id ?? visits[0].patient_id))?.email;
     if (address) await recordOptOut(db, practiceId, 'email', address, 'unsubscribe');
-    await db.run('UPDATE patients SET email_opt_in = 0 WHERE id = ?', recipient?.id ?? visits[0].patient_id);
+    await recorded(db, 'patients', recipient?.id ?? visits[0].patient_id, () => db.run('UPDATE patients SET email_opt_in = 0 WHERE id = ?', recipient?.id ?? visits[0].patient_id));
     return visits[0].practice_name;
   };
   const page = (title, body) => `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escHtml(title)}</title></head><body style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:480px;margin:40px auto;padding:0 16px;color:#1f2933">${body}</body></html>`;

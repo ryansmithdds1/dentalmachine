@@ -1,4 +1,4 @@
-import { practiceNow } from './util.js';
+import { practiceNow, recorded } from './util.js';
 import { publish } from './events.js';
 
 // Checking in from a phone: texting HERE, or scanning the QR code at the door. Checks in today's visits
@@ -17,7 +17,7 @@ export async function checkInToday(db, practiceId, patientIds, { via = 'text' } 
     practiceId, ...patientIds, `${today} 00:00`, soon,
   );
   for (const v of visits) {
-    await db.run("UPDATE appointments SET status = 'checked_in', arrived_at = COALESCE(arrived_at, ?), checked_in_via = ? WHERE id = ?", now, via, v.id);
+    await recorded(db, 'appointments', v.id, () => db.run("UPDATE appointments SET status = 'checked_in', arrived_at = COALESCE(arrived_at, ?), checked_in_via = ? WHERE id = ?", now, via, v.id));
   }
   if (visits.length) publish(practiceId, { type: 'schedule', dates: [today], source: 'checkin', checked_in: visits.map((v) => ({ id: v.id, name: v.first_name })) });
   return visits;

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { requirePermission, HttpError } from '../auth.js';
-import { insert, findOr404, audit, practiceNow, paged } from '../util.js';
+import { insert, findOr404, audit, practiceNow, paged, recorded } from '../util.js';
 import { agingReport } from '../aging.js';
 import { preferredChannel, sendMessage } from '../messaging.js';
 
@@ -101,7 +101,7 @@ export default function collectionRoutes({ db, messenger }) {
       });
     }
     await record(req, acct.id, stage, { amount: row.overdue, message_id: message?.id ?? null });
-    await db.run('UPDATE patients SET collection_status = ? WHERE id = ?', stage, acct.id);
+    await recorded(db, 'patients', acct.id, () => db.run('UPDATE patients SET collection_status = ? WHERE id = ?', stage, acct.id));
     res.status(201).json({ stage, amount: row.overdue, body, message });
   });
 
@@ -112,7 +112,7 @@ export default function collectionRoutes({ db, messenger }) {
     if (!agency) throw new HttpError(400, 'Which agency? Set one in Collections settings or type it in');
     const row = (await collectionsList(db, req.user.practice_id)).find((x) => x.id === acct.id);
     await record(req, acct.id, 'agency', { amount: row?.overdue ?? null, note: agency.slice(0, 200) });
-    await db.run("UPDATE patients SET collection_status = 'agency' WHERE id = ?", acct.id);
+    await recorded(db, 'patients', acct.id, () => db.run("UPDATE patients SET collection_status = 'agency' WHERE id = ?", acct.id));
     if (req.body?.write_off) await writeOff(req, { ...acct, collection_status: 'agency' }, `Sent to ${agency}`);
     res.status(201).json({ ok: true });
   });
@@ -127,7 +127,7 @@ export default function collectionRoutes({ db, messenger }) {
       description: `Bad debt write-off${note ? ` — ${note}` : ''}`.slice(0, 300), entry_date: (await practiceNow(db, req.user.practice_id)).slice(0, 10), created_by: req.user.id,
     });
     await record(req, acct.id, 'written_off', { amount, note: note || null });
-    if (acct.collection_status !== 'agency') await db.run("UPDATE patients SET collection_status = 'written_off' WHERE id = ?", acct.id);
+    if (acct.collection_status !== 'agency') await recorded(db, 'patients', acct.id, () => db.run("UPDATE patients SET collection_status = 'written_off' WHERE id = ?", acct.id));
     return amount;
   };
   r.post('/collections/:id/write-off', requirePermission('billing:write'), async (req, res) => {
@@ -139,7 +139,7 @@ export default function collectionRoutes({ db, messenger }) {
   // Paid up, or on a payment plan: take the account out of collections.
   r.post('/collections/:id/clear', requirePermission('billing:write'), async (req, res) => {
     const acct = await account(req);
-    await db.run('UPDATE patients SET collection_status = NULL WHERE id = ?', acct.id);
+    await recorded(db, 'patients', acct.id, () => db.run('UPDATE patients SET collection_status = NULL WHERE id = ?', acct.id));
     await record(req, acct.id, 'cleared', { note: String(req.body?.note || '').trim().slice(0, 300) || null });
     res.json({ ok: true });
   });

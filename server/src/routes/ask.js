@@ -1,4 +1,5 @@
 import express, { Router } from 'express';
+import { setActor } from '../actor.js';
 import Anthropic from '@anthropic-ai/sdk';
 import { requirePermission, HttpError, can, rateLimit } from '../auth.js';
 import { hashToken, audit, practiceNow } from '../util.js';
@@ -96,6 +97,7 @@ export function mcpRoutes({ db }) {
     const k = key.startsWith('dm_live_') ? await db.get('SELECT * FROM api_keys WHERE key_hash = ? AND revoked_at IS NULL', hashToken(key)) : null;
     if (!k) return res.status(401).set('WWW-Authenticate', 'Bearer').json(rpcError(req.body?.id, -32001, 'Send an API key from Settings → API & webhooks: Authorization: Bearer dm_live_…'));
     const scopes = JSON.parse(k.scopes);
+    setActor({ source: 'api', actor: `MCP: ${k.name}`, practiceId: k.practice_id });
     const tools = DATA_TOOLS.filter((t) => scopes.includes(t.scope));
     await db.run("UPDATE api_keys SET last_used_at = datetime('now') WHERE id = ?", k.id);
 

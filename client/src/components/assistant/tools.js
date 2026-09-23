@@ -1,4 +1,4 @@
-import { api } from '../../api.js';
+import { assistantApi as api } from '../../api.js';
 
 // The changes the assistant makes, run in the browser once the person says yes (or at once, for low-risk
 // ones). Every step goes through the same API as the screens, as the signed-in user: permissions, office

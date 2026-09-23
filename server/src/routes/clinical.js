@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { requirePermission, HttpError } from '../auth.js';
 import {
-  pick, requireFields, requireOneOf, insert, update, findOr404, audit, validTooth, normalizeSurfaces, mapSeq, codeArea, QUADRANTS, ARCHES, practiceNow } from '../util.js';
+  pick, requireFields, requireOneOf, insert, update, findOr404, audit, validTooth, normalizeSurfaces, mapSeq, codeArea, QUADRANTS, ARCHES, practiceNow, recorded } from '../util.js';
 import { completeProcedure, estimateCoverage, primaryPolicy, voidLedgerEntry } from '../services.js';
 import { signedVersion } from './casepres.js';
 import { memberSavings } from '../memberships.js';
@@ -179,7 +179,7 @@ export default function clinicalRoutes({ db }) {
     if (existing.status !== 'completed') throw new HttpError(409, 'Only completed procedures can be un-completed');
     const charge = await db.get("SELECT * FROM ledger_entries WHERE procedure_id = ? AND type = 'charge' AND voided_at IS NULL AND reverses_id IS NULL ORDER BY id DESC LIMIT 1", existing.id);
     if (charge) await voidLedgerEntry(db, charge, { userId: req.user.id, reason: req.body?.reason });
-    else await db.run("UPDATE procedures SET status = 'planned', completed_at = NULL WHERE id = ?", existing.id);
+    else await recorded(db, 'procedures', existing.id, () => db.run("UPDATE procedures SET status = 'planned', completed_at = NULL WHERE id = ?", existing.id));
     await audit(db, req, 'procedure.uncomplete', 'procedures', existing.id, { reason: req.body?.reason });
     res.json(await db.get('SELECT * FROM procedures WHERE id = ?', existing.id));
   });
@@ -187,7 +187,7 @@ export default function clinicalRoutes({ db }) {
   r.post('/procedures/:pid/cancel', requirePermission('clinical:write'), async (req, res) => {
     const existing = await findOr404(db, 'procedures', req.params.pid, req.user.practice_id, 'Procedure');
     if (existing.status !== 'planned') throw new HttpError(409, 'Only planned procedures can be cancelled; un-complete completed work first');
-    await db.run("UPDATE procedures SET status = 'cancelled' WHERE id = ?", existing.id);
+    await recorded(db, 'procedures', existing.id, () => db.run("UPDATE procedures SET status = 'cancelled' WHERE id = ?", existing.id));
     await audit(db, req, 'procedure.cancel', 'procedures', existing.id);
     res.json({ ok: true });
   });
@@ -263,7 +263,7 @@ export default function clinicalRoutes({ db }) {
       if (row.status === 'accepted' && existing.option_group) {
         const others = await db.all("SELECT id FROM treatment_plans WHERE practice_id = ? AND option_group = ? AND id != ? AND status = 'proposed'", req.user.practice_id, existing.option_group, existing.id);
         for (const o of others) {
-          await db.run("UPDATE treatment_plans SET status = 'rejected' WHERE id = ?", o.id);
+          await recorded(db, 'treatment_plans', o.id, () => db.run("UPDATE treatment_plans SET status = 'rejected' WHERE id = ?", o.id));
           await db.run("UPDATE procedures SET status = 'cancelled' WHERE treatment_plan_id = ? AND status = 'planned'", o.id);
         }
       }
@@ -309,8 +309,8 @@ export default function clinicalRoutes({ db }) {
     const p = await findOr404(db, 'procedures', req.params.pid, req.user.practice_id, 'Procedure');
     if (p.treatment_plan_id !== plan.id) throw new HttpError(404, 'That procedure is not on this plan');
     if (p.status !== 'planned') throw new HttpError(409, 'Completed work stays on the plan');
-    if (req.query.cancel) await db.run("UPDATE procedures SET status = 'cancelled' WHERE id = ?", p.id);
-    else await db.run('UPDATE procedures SET treatment_plan_id = NULL WHERE id = ?', p.id);
+    if (req.query.cancel) await recorded(db, 'procedures', p.id, () => db.run("UPDATE procedures SET status = 'cancelled' WHERE id = ?", p.id));
+    else await recorded(db, 'procedures', p.id, () => db.run('UPDATE procedures SET treatment_plan_id = NULL WHERE id = ?', p.id));
     await audit(db, req, 'treatment_plan.remove', 'treatment_plans', plan.id, { procedure_id: p.id, cancelled: !!req.query.cancel });
     res.json(await planWithDetails(await db.get('SELECT * FROM treatment_plans WHERE id = ?', plan.id)));
   });
@@ -438,7 +438,7 @@ export default function clinicalRoutes({ db }) {
     if (!provider?.user_id && existing.author_id !== req.user.id && req.user.role !== 'admin' && !(await db.get('SELECT 1 AS ok FROM providers WHERE user_id = ? AND practice_id = ?', req.user.id, req.user.practice_id))) {
       throw new HttpError(403, 'Only the author or a provider can sign this note');
     }
-    const signed = await db.run("UPDATE clinical_notes SET signed = 1, signed_at = datetime('now'), signed_by = ? WHERE id = ? AND signed = 0", req.user.id, existing.id);
+    const signed = await recorded(db, 'clinical_notes', existing.id, () => db.run("UPDATE clinical_notes SET signed = 1, signed_at = datetime('now'), signed_by = ? WHERE id = ? AND signed = 0", req.user.id, existing.id));
     if (!signed.changes) throw new HttpError(409, 'Note already signed');
     await audit(db, req, 'note.sign', 'clinical_notes', existing.id);
     res.json(await db.get('SELECT * FROM clinical_notes WHERE id = ?', existing.id));

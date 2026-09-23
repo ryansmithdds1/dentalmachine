@@ -1,4 +1,5 @@
-import { insert, practiceNow } from './util.js';
+import { insert, practiceNow, recorded } from './util.js';
+import { withActor } from './actor.js';
 import { aiClient, structured } from './ai.js';
 import { sendMessage } from './messaging.js';
 import { hoursFor } from './hours.js';
@@ -159,6 +160,9 @@ const RECEPTION_TOOLS = [
 const addMin = (dt, n) => new Date(Date.parse(`${dt.replace(' ', 'T')}:00Z`) + n * 60000).toISOString().slice(0, 16).replace('T', ' ');
 
 async function receptionTool(db, call, practice, name, input) {
+  return withActor({ source: 'ai', actor: 'AI receptionist', userId: null, practiceId: practice.id }, () => receptionAct(db, call, practice, name, input));
+}
+async function receptionAct(db, call, practice, name, input) {
   const pid = practice.id;
   const now = await practiceNow(db, pid);
   const mine = async () => (call.patient_id ? db.all("SELECT id, patient_id, start_time, end_time, reason, provider_id FROM appointments WHERE practice_id = ? AND start_time > ? AND status IN ('scheduled','confirmed') AND (patient_id = ? OR patient_id IN (SELECT id FROM patients WHERE guarantor_id = ?)) ORDER BY start_time LIMIT 6", pid, now, call.patient_id, call.patient_id) : []);
@@ -201,7 +205,7 @@ async function receptionTool(db, call, practice, name, input) {
     const a = (await mine()).find((v) => v.id === Number(input.appointment_id));
     if (!a) return { error: 'That visit isn’t one of the caller’s upcoming visits.' };
     if (input.action === 'cancel') {
-      await db.run("UPDATE appointments SET status = 'cancelled' WHERE id = ?", a.id);
+      await recorded(db, 'appointments', a.id, () => db.run("UPDATE appointments SET status = 'cancelled' WHERE id = ?", a.id));
       await db.run("UPDATE procedures SET appointment_id = NULL WHERE appointment_id = ? AND status = 'planned'", a.id);
       await db.run('UPDATE calls SET outcome = ? WHERE id = ?', 'cancelled', call.id);
       publish(pid, { type: 'schedule', dates: [a.start_time.slice(0, 10)], source: 'phone' });
@@ -210,7 +214,7 @@ async function receptionTool(db, call, practice, name, input) {
     const start = String(input.new_start || '');
     const minutes = (Date.parse(`${a.end_time.replace(' ', 'T')}:00Z`) - Date.parse(`${a.start_time.replace(' ', 'T')}:00Z`)) / 60000;
     if (!(await openSlots(db, pid, a.provider_id, start.slice(0, 10), { duration: minutes, after: now })).includes(start)) return { error: 'That time is not open for this provider. Check open_times.' };
-    await db.run("UPDATE appointments SET start_time = ?, end_time = ?, operatory_id = NULL, status = 'scheduled', confirmed_at = NULL, reminder_sent_at = NULL, notice_due = 'moved' WHERE id = ?", start, addMin(start, minutes), a.id);
+    await recorded(db, 'appointments', a.id, () => db.run("UPDATE appointments SET start_time = ?, end_time = ?, operatory_id = NULL, status = 'scheduled', confirmed_at = NULL, reminder_sent_at = NULL, notice_due = 'moved' WHERE id = ?", start, addMin(start, minutes), a.id));
     await db.run('UPDATE calls SET outcome = ? WHERE id = ?', 'rescheduled', call.id);
     publish(pid, { type: 'schedule', dates: [...new Set([a.start_time.slice(0, 10), start.slice(0, 10)])], source: 'phone' });
     return { moved: true, start, note: 'The team will assign a chair.' };

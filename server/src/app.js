@@ -1,4 +1,6 @@
 import express from 'express';
+import { actorMiddleware, setActor } from './actor.js';
+import { flushChanges } from './util.js';
 import { existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -165,6 +167,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   app.set('trust proxy', /^\d+$/.test(trust) ? Number(trust) : trust);
   app.disable('x-powered-by');
   app.use(requestLogger());
+  app.use(actorMiddleware(db, flushChanges));
   app.use(stripeWebhook({ db, config, payments, messenger })); // needs the raw body, so before express.json
   app.use(smsWebhook({ db, config }));
   app.use(deliveryWebhooks({ db, config }));
@@ -225,6 +228,16 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
 
   const api = express.Router();
   api.use(authenticate(db, secret));
+  // The signed-in person — or the assistant acting for them (its requests say so) — for the audit trail.
+  api.use((req, _res, next) => {
+    const ai = req.get('X-Acting-For') === 'assistant';
+    setActor({
+      source: ai ? 'ai' : 'human', userId: req.user.id, practiceId: req.user.practice_id, actor: ai ? `Assistant (for ${req.user.name})` : req.user.name,
+      // A reason typed for a change ("why?") travels with it into the audit log.
+      reason: typeof req.body?.change_reason === 'string' ? req.body.change_reason.trim().slice(0, 500) || null : null,
+    });
+    next();
+  });
   api.use(officeAccess(db));
   api.use((_req, res, next) => {
     res.set('Cache-Control', 'no-store'); // PHI must not be cached by intermediaries

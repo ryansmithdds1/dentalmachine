@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { requirePermission, HttpError } from '../auth.js';
-import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, toCents, practiceNow, mapSeq, paged } from '../util.js';
+import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, toCents, practiceNow, mapSeq, paged, recorded } from '../util.js';
 
 const FREQ_DAYS = { weekly: 7, biweekly: 14 };
 
@@ -238,7 +238,7 @@ export default function familyRoutes({ db }) {
     if (oldG.id === newG.id) return res.json({ ok: true });
     await db.tx(async () => {
       await db.run('UPDATE patients SET guarantor_id = ? WHERE practice_id = ? AND (guarantor_id = ? OR id = ?)', newG.id, req.user.practice_id, oldG.id, oldG.id);
-      await db.run('UPDATE patients SET guarantor_id = NULL WHERE id = ?', newG.id);
+      await recorded(db, 'patients', newG.id, () => db.run('UPDATE patients SET guarantor_id = NULL WHERE id = ?', newG.id));
     });
     await audit(db, req, 'family.guarantor_change', 'patients', newG.id, { from: oldG.id });
     res.json({ ok: true });

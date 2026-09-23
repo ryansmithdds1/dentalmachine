@@ -105,7 +105,7 @@ export default function reputationRoutes({ db, config, secret, gbp }) {
     if (!text) throw new HttpError(400, 'Write the reply');
     if (review.source !== 'google') throw new HttpError(400, 'Only Google reviews can be answered from here');
     await postReply(db, gbp, secret, review, text).catch((err) => { throw new HttpError(502, err.message); });
-    await audit(db, req, 'review.reply', 'reviews', review.id);
+    await audit(db, req, 'review.reply', 'reviews', review.id, req.body.ai_drafted ? { drafted_by: 'AI', approved_by: req.user.name } : null);
     res.json(await db.get('SELECT * FROM reviews WHERE id = ?', review.id));
   });
   return r;

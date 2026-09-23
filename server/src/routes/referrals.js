@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { requirePermission, HttpError } from '../auth.js';
-import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, practiceNow } from '../util.js';
+import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, practiceNow, recorded } from '../util.js';
 
 const STATUSES = ['open', 'scheduled', 'seen', 'report_received', 'closed'];
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -71,7 +71,7 @@ export default function referralRoutes({ db }) {
     // The first referral in becomes the patient's "referred by".
     if (row.direction === 'in' && !patient.referred_by_id) {
       const c = await db.get('SELECT name FROM referral_contacts WHERE id = ?', row.contact_id);
-      await db.run('UPDATE patients SET referred_by_id = ?, referral_source = COALESCE(referral_source, ?) WHERE id = ?', row.contact_id, c.name, patient.id);
+      await recorded(db, 'patients', patient.id, () => db.run('UPDATE patients SET referred_by_id = ?, referral_source = COALESCE(referral_source, ?) WHERE id = ?', row.contact_id, c.name, patient.id));
     }
     await audit(db, req, 'referral.create', 'referrals', id, { direction: row.direction });
     res.status(201).json(await db.get(`${SELECT} WHERE x.id = ?`, id));

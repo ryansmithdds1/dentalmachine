@@ -1,5 +1,6 @@
 import { randomBytes, createHash } from 'node:crypto';
 import { HttpError } from './auth.js';
+import { currentActor } from './actor.js';
 
 // Picks allowed fields from a body, trimming strings and turning '' into null.
 export function pick(body, fields) {
@@ -41,14 +42,114 @@ const cleanValue = (k, v) => (typeof v === 'string' && NAME_KEY.test(k) ? v.repl
 export async function insert(db, table, row) {
   const keys = Object.keys(row);
   const sql = `INSERT INTO ${table} (${keys.join(', ')}) VALUES (${keys.map(() => '?').join(', ')})`;
-  return (await db.run(sql, ...keys.map((k) => cleanValue(k, row[k])))).id;
+  const id = (await db.run(sql, ...keys.map((k) => cleanValue(k, row[k])))).id;
+  if (CREATED.has(table)) await noteChange(db, table, { ...row, id }, null, row);
+  return id;
 }
 
+// Updates a row in the caller's practice. What changed (before → after) goes to the audit log.
 export async function update(db, table, id, practiceId, row) {
   const keys = Object.keys(row);
   if (!keys.length) return 0;
+  const before = UNTRACKED.has(table) ? null : await db.get(`SELECT * FROM ${table} WHERE id = ? AND practice_id = ?`, id, practiceId);
   const sql = `UPDATE ${table} SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ? AND practice_id = ?`;
-  return (await db.run(sql, ...keys.map((k) => cleanValue(k, row[k])), id, practiceId)).changes;
+  const changes = (await db.run(sql, ...keys.map((k) => cleanValue(k, row[k])), id, practiceId)).changes;
+  if (before && changes) await noteChange(db, table, before, before, row);
+  return changes;
+}
+
+// The same, for a row already known to be the caller's (by id alone): status changes, moves, sign-offs.
+export async function change(db, table, id, row) {
+  const keys = Object.keys(row);
+  if (!keys.length) return 0;
+  const before = await db.get(`SELECT * FROM ${table} WHERE id = ?`, id);
+  if (!before) return 0;
+  const n = (await db.run(`UPDATE ${table} SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, ...keys.map((k) => cleanValue(k, row[k])), id)).changes;
+  if (n) await noteChange(db, table, before, before, row);
+  return n;
+}
+
+// Runs a raw UPDATE (status moves with datetime('now'), COALESCE…) on one row and records what it changed.
+export async function recorded(db, table, id, run) {
+  const before = await db.get(`SELECT * FROM ${table} WHERE id = ?`, id);
+  const out = await run();
+  if (!before) return out;
+  const after = await db.get(`SELECT * FROM ${table} WHERE id = ?`, id);
+  const patch = {};
+  for (const k of Object.keys(after || {})) if (!same(before[k], after[k])) patch[k] = after[k];
+  if (Object.keys(patch).length) await noteChange(db, table, before, before, patch);
+  return out;
+}
+
+// ---- The audit trail ----
+// Every create (of the records below) and every update through update()/change() is recorded with the
+// fields that changed, before and after, and who or what did it (see actor.js). Routes add the action's
+// meaning with audit(); when they do, the changes ride on that entry, otherwise they get their own.
+const CREATED = new Set(['patients', 'appointments', 'procedures', 'ledger_entries', 'claims', 'clinical_notes', 'prescriptions', 'treatment_plans', 'patient_insurance',
+  'insurance_checks', 'payment_plans', 'tooth_conditions', 'users', 'documents', 'booking_requests', 'lab_cases', 'financing_applications', 'insurance_plans', 'procedure_codes']);
+const UNTRACKED = new Set(['audit_log', 'appointment_reminders', 'conversation_state', 'messages', 'calls', 'webhook_deliveries', 'edi_inbox', 'conversion_rows', 'import_batches',
+  'scribe_sessions', 'fill_offers', 'fill_offer_recipients', 'review_connections', 'qbo_connections', 'bank_connections', 'bank_transactions', 'qbo_pl', 'qbo_accounts', 'api_keys', 'eligibility_checks']);
+const SECRET = /password|token|secret|_hash$|^mfa_|access_key|refresh/i;
+// Bookkeeping that changes with every edit says nothing about what changed.
+const NOISE = new Set(['updated_at']);
+const shown = (k, v) => {
+  if (v === undefined) return null;
+  if (SECRET.test(k)) return v == null ? null : '[hidden]';
+  if (typeof v === 'boolean') return v ? 1 : 0;
+  return typeof v === 'string' && v.length > 2000 ? `${v.slice(0, 2000)}…` : v;
+};
+const same = (a, b) => (a ?? '') === (b ?? '') || String(a ?? '') === String(b ?? '');
+
+async function noteChange(db, table, row, before, patch) {
+  const diff = {};
+  for (const k of Object.keys(patch)) {
+    if (NOISE.has(k)) continue;
+    const to = shown(k, typeof patch[k] === 'boolean' ? Number(patch[k]) : patch[k]);
+    const from = before ? shown(k, before[k]) : null;
+    if (before && same(from, to)) continue;
+    // Secrets are noted as changed, never shown (nor their stored form named).
+    diff[SECRET.test(k) ? k.replace(/_hash$|_encrypted$/, '') : k] = before ? [from, to] : to;
+  }
+  if (!Object.keys(diff).length) return;
+  const entry = {
+    table, id: row.id, created: !before, changes: diff, practiceId: row.practice_id ?? null,
+    patientId: table === 'patients' ? row.id : row.patient_id ?? null, locationId: row.location_id ?? null,
+  };
+  const ctx = currentActor();
+  if (ctx?.pending) {
+    const key = `${table}:${row.id}`;
+    const had = ctx.pending.get(key);
+    if (had) {
+      for (const [k, v] of Object.entries(diff)) had.changes[k] = had.created || !had.changes[k] ? v : [had.changes[k][0], v[1]];
+    } else ctx.pending.set(key, entry);
+    return;
+  }
+  await writeAudit(db, null, { action: `${SINGULAR(table)}.${entry.created ? 'create' : 'change'}`, entity: table, entityId: row.id, ...entry });
+}
+
+const SINGULAR = (t) => ({ patients: 'patient', appointments: 'appointment', procedures: 'procedure', ledger_entries: 'ledger', claims: 'claim', clinical_notes: 'note', prescriptions: 'prescription',
+  treatment_plans: 'treatment_plan', patient_insurance: 'insurance', insurance_checks: 'insurance_check', payment_plans: 'payment_plan', tooth_conditions: 'condition', users: 'user',
+  documents: 'document', booking_requests: 'booking_request', lab_cases: 'lab_case', insurance_plans: 'insurance_plan', procedure_codes: 'fee' }[t] || t.replace(/s$/, ''));
+
+// Writes what's left of a request's changes (those no route audit took in), just before the response.
+export async function flushChanges(db, pending) {
+  const left = [...pending.values()];
+  for (const e of left) await writeAudit(db, null, { action: `${SINGULAR(e.table)}.${e.created ? 'create' : 'change'}`, entity: e.table, entityId: e.id, ...e });
+}
+
+async function writeAudit(db, req, e) {
+  const ctx = currentActor();
+  const source = e.source || req?.source || (req?.user?.role === 'api' ? 'api' : null) || ctx?.source || (req?.user?.id ? 'human' : 'automation');
+  const userId = req?.user?.id ?? (source === 'human' || source === 'ai' ? ctx?.userId ?? null : null);
+  await db.run(
+    `INSERT INTO audit_log (practice_id, user_id, action, entity, entity_id, details, ip, source, actor, patient_id, location_id, reason, changes)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    req?.user?.practice_id ?? e.practiceId ?? ctx?.practiceId ?? null, userId, e.action, e.entity ?? null, e.entityId ?? null,
+    e.details ? JSON.stringify(e.details) : null, req?.ip ?? ctx?.ip ?? null, source,
+    e.actor || req?.actor || (req?.user?.role === 'api' ? req.user.name : null) || ctx?.actor || req?.user?.name || null,
+    e.patientId ?? null, e.locationId ?? req?.location_id ?? null, (e.reason || ctx?.reason) ? String(e.reason || ctx.reason).slice(0, 500) : null,
+    e.changes && Object.keys(e.changes).length ? JSON.stringify(e.changes) : null,
+  );
 }
 
 // Fetches a row scoped to the caller's practice or 404s. Tenant isolation hinges on this.
@@ -58,17 +159,29 @@ export async function findOr404(db, table, id, practiceId, label = table) {
   return row;
 }
 
-export async function audit(db, req, action, entity, entityId, details) {
-  await db.run(
-    'INSERT INTO audit_log (practice_id, user_id, action, entity, entity_id, details, ip) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    req.user?.practice_id ?? null,
-    req.user?.id ?? null,
-    action,
-    entity ?? null,
-    entityId ?? null,
-    details ? JSON.stringify(details) : null,
-    req.ip ?? null,
-  );
+// Records an action: who (the signed-in person, or the API key, AI or automation acting — see actor.js),
+// what (action, record), where from, why (opts.reason), and the before/after of any fields changed on that
+// record during this request. opts: { reason, patientId, locationId, source, actor, before, after }.
+export async function audit(db, req, action, entity, entityId, details, opts = {}) {
+  const ctx = currentActor();
+  const key = `${entity}:${entityId}`;
+  const held = ctx?.pending?.get(key);
+  if (held) ctx.pending.delete(key);
+  let changes = held?.changes || null;
+  if (opts.before || opts.after) {
+    changes = { ...(changes || {}) };
+    for (const k of new Set([...Object.keys(opts.before || {}), ...Object.keys(opts.after || {})])) {
+      const from = shown(k, opts.before?.[k]);
+      const to = shown(k, opts.after?.[k]);
+      if (!same(from, to)) changes[k] = opts.before ? [from, to] : to;
+    }
+  }
+  const reason = opts.reason ?? details?.reason ?? null;
+  const patientId = opts.patientId ?? held?.patientId ?? (entity === 'patients' ? entityId : details?.patient_id ?? null);
+  await writeAudit(db, req, {
+    action, entity, entityId, details, reason, patientId, changes, source: opts.source, actor: opts.actor,
+    practiceId: held?.practiceId ?? null, locationId: opts.locationId ?? held?.locationId ?? null,
+  });
 }
 
 export const isoDate = (d = new Date()) => d.toISOString().slice(0, 10);

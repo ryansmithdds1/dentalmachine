@@ -432,10 +432,12 @@ export class Importer {
 
   async balanceForward(patientId, cents, key) {
     const known = await this.externalId('balances', key);
-    const entry = known && await this.db.get('SELECT id, voided_at FROM ledger_entries WHERE id = ? AND practice_id = ?', known.local_id, this.pid);
+    const entry = known && await this.db.get('SELECT id, amount, voided_at FROM ledger_entries WHERE id = ? AND practice_id = ?', known.local_id, this.pid);
+    if (entry && !entry.voided_at && entry.amount === cents) return 'unchanged';
+    // A corrected balance replaces the old one: the old entry is voided (never edited) and a new one posted.
     if (entry && !entry.voided_at) {
-      await this.db.run('UPDATE ledger_entries SET amount = ? WHERE id = ?', cents, entry.id);
-      return 'updated';
+      await this.db.run("UPDATE ledger_entries SET voided_at = datetime('now'), voided_by = ?, void_reason = 'Replaced by a corrected import' WHERE id = ?", this.batch.created_by ?? null, entry.id);
+      if (!cents) return 'updated';
     }
     if (!cents) return 'skipped';
     const id = await insert(this.db, 'ledger_entries', {
@@ -443,6 +445,7 @@ export class Importer {
       description: `Balance forward from ${SOURCE_NAMES[this.source]}`, adjustment_type: 'Balance forward', created_by: this.batch.created_by,
     });
     await this.remember('balances', key, id, true);
+    if (entry) return 'updated';
     return 'created';
   }
 

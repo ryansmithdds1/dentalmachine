@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { HttpError } from '../auth.js';
-import { insert, audit } from '../util.js';
+import { insert, audit, recorded } from '../util.js';
 
 // The first-run checklist for a new office: practice details → providers → chairs → fees → insurance →
 // messaging → go live. Each step uses the ordinary settings screens; this tracks what's done.
@@ -40,7 +40,7 @@ export default function setupRoutes({ db, config = {} }) {
     if (pct) {
       const codes = await db.all('SELECT id, fee FROM procedure_codes WHERE practice_id = ?', req.user.practice_id);
       await db.tx(async () => {
-        for (const c of codes) await db.run('UPDATE procedure_codes SET fee = ? WHERE id = ?', Math.round((c.fee * (100 + pct)) / 100 / 100) * 100, c.id);
+        for (const c of codes) await recorded(db, 'procedure_codes', c.id, () => db.run('UPDATE procedure_codes SET fee = ? WHERE id = ?', Math.round((c.fee * (100 + pct)) / 100 / 100) * 100, c.id));
       });
     }
     await db.run('UPDATE practices SET setup_fees_reviewed = 1 WHERE id = ?', req.user.practice_id);

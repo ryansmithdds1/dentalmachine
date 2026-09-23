@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { requirePermission, HttpError } from '../auth.js';
-import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, toCents, practiceNow, mapSeq, publicPractice, validTooth, paged, pageArgs } from '../util.js';
+import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, toCents, practiceNow, mapSeq, publicPractice, validTooth, paged, pageArgs, recorded } from '../util.js';
 import { estimateCoverage, postClaimPayment, benefitYear, deductibleMet, reverseEntry, createClaim, checkPostingDate } from '../services.js';
 import { savePolicy, validatePlan, syncPlan, PLAN_BENEFITS, DEFAULT_FREQUENCIES, planFor } from '../benefits.js';
 
@@ -367,7 +367,7 @@ export default function insuranceRoutes({ db }) {
     await db.tx(async () => {
       if (Object.keys(claimRow).length) await update(db, 'claims', claim.id, req.user.practice_id, claimRow);
       for (const [line, row] of procUpdates) {
-        await db.run(`UPDATE procedures SET ${Object.keys(row).map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, ...Object.values(row), line.procedure_id);
+        await recorded(db, 'procedures', line.procedure_id, () => db.run(`UPDATE procedures SET ${Object.keys(row).map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, ...Object.values(row), line.procedure_id));
       }
       // A different code can change what insurance covers: re-estimate this claim's lines.
       if (procUpdates.some(([, row]) => row.code)) {
@@ -376,7 +376,7 @@ export default function insuranceRoutes({ db }) {
           const procs = await db.all(`SELECT * FROM procedures WHERE id IN (${items.map(() => '?').join(',')})`, ...items.map((i) => i.procedure_id));
           const est = await estimateCoverage(db, policy, procs);
           for (const e of est.items) await db.run('UPDATE claim_items SET estimated_amount = ?, write_off = ? WHERE claim_id = ? AND procedure_id = ?', e.insurance, e.write_off, claim.id, e.procedure_id);
-          await db.run('UPDATE claims SET estimated_amount = ?, deductible_applied = ?, write_off_estimate = ? WHERE id = ?', est.total_insurance, est.total_deductible, est.total_write_off, claim.id);
+          await recorded(db, 'claims', claim.id, () => db.run('UPDATE claims SET estimated_amount = ?, deductible_applied = ?, write_off_estimate = ? WHERE id = ?', est.total_insurance, est.total_deductible, est.total_write_off, claim.id));
         }
       }
       const summary = changes.map((c) => `${c.field}: ${c.from ?? '—'} → ${c.to ?? '—'}`).join('; ');
@@ -398,7 +398,7 @@ export default function insuranceRoutes({ db }) {
     if (!reference) throw new HttpError(400, "Enter the payer's claim number for the original claim (from the EOB or claim status)");
     const procedureIds = (await db.all('SELECT procedure_id FROM claim_items WHERE claim_id = ?', claim.id)).map((x) => x.procedure_id);
     const id = await db.tx(async () => {
-      await db.run("UPDATE claims SET status = 'void', ch_status = ?, ch_message = ? WHERE id = ?", 'replaced', kind === 'void' ? 'Cancelled at the payer by a void claim' : 'Replaced by a corrected claim', claim.id);
+      await recorded(db, 'claims', claim.id, () => db.run("UPDATE claims SET status = 'void', ch_status = ?, ch_message = ? WHERE id = ?", 'replaced', kind === 'void' ? 'Cancelled at the payer by a void claim' : 'Replaced by a corrected claim', claim.id));
       const newId = await createClaim(db, {
         practiceId: req.user.practice_id, policyId: claim.patient_insurance_id, procedureIds, userId: req.user.id,
         extra: { frequency_code: kind === 'void' ? '8' : '7', original_reference: reference.slice(0, 50), corrected_from_id: claim.id, preauth_number: claim.preauth_number, remarks: claim.remarks },
@@ -480,7 +480,7 @@ export default function insuranceRoutes({ db }) {
     if (!reason) throw new HttpError(400, 'Give a reason for reopening');
     const date = (await practiceNow(db, req.user.practice_id)).slice(0, 10);
     await db.tx(async () => {
-      if (!(await db.run("UPDATE claims SET status = 'submitted', paid_amount = 0, paid_at = NULL WHERE id = ? AND status IN ('paid','partially_paid')", claim.id)).changes) {
+      if (!(await recorded(db, 'claims', claim.id, () => db.run("UPDATE claims SET status = 'submitted', paid_amount = 0, paid_at = NULL WHERE id = ? AND status IN ('paid','partially_paid')", claim.id))).changes) {
         throw new HttpError(409, 'The claim changed — reload and try again');
       }
       const posted = await db.all("SELECT * FROM ledger_entries WHERE claim_id = ? AND type IN ('insurance_payment','adjustment') AND voided_at IS NULL AND reverses_id IS NULL", claim.id);

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { messageText, patientLang, subjectFor } from '../templates.js';
 import { requirePermission, HttpError, rateLimit, signToken, verifyToken } from '../auth.js';
-import { pick, requireFields, insert, findOr404, audit, newToken, hashToken } from '../util.js';
+import { pick, requireFields, insert, findOr404, audit, newToken, hashToken, recorded } from '../util.js';
 import { estimateCoverage, primaryPolicy, benefitYear, withPlan } from '../services.js';
 import { practiceNow } from '../util.js';
 import { financingOptions } from '../financing.js';
@@ -261,10 +261,10 @@ export default function casePresentationRoutes({ db, messenger, config, erx, sec
     if (send) {
       try {
         const out = await erx.transmit({ ...row, id, pharmacy_ncpdp: pharmacy.ncpdp, patient, provider });
-        await db.run("UPDATE prescriptions SET status = ?, erx_reference = ?, transmitted_at = datetime('now') WHERE id = ?", out.status, out.reference, id);
+        await recorded(db, 'prescriptions', id, () => db.run("UPDATE prescriptions SET status = ?, erx_reference = ?, transmitted_at = datetime('now') WHERE id = ?", out.status, out.reference, id));
         await audit(db, req, 'prescription.transmit', 'prescriptions', id, { reference: out.reference, pharmacy: pharmacy.ncpdp });
       } catch (err) {
-        await db.run("UPDATE prescriptions SET status = 'error', erx_error = ? WHERE id = ?", String(err.message).slice(0, 300), id);
+        await recorded(db, 'prescriptions', id, () => db.run("UPDATE prescriptions SET status = 'error', erx_error = ? WHERE id = ?", String(err.message).slice(0, 300), id));
       }
     }
     res.status(201).json(rxView(await db.get(`${RX_SELECT} WHERE rx.id = ?`, id)));
@@ -365,10 +365,10 @@ export function publicCasePresentation({ db, storage, secret }) {
     if (image != null && (typeof image !== 'string' || !image.startsWith('data:image/png;base64,') || image.length > 300_000)) throw new HttpError(400, 'Invalid signature image');
     if (!req.body?.consent) throw new HttpError(400, 'Please confirm you have read and understand the plan');
     const snapshot = JSON.stringify(snapshotOf(await planView(db, plan)));
-    const signed = await db.run(
+    const signed = await recorded(db, 'treatment_plans', plan.id, () => db.run(
       "UPDATE treatment_plans SET status = 'accepted', accepted_at = COALESCE(accepted_at, datetime('now')), signed_at = datetime('now'), signature_name = ?, signature_image = ?, signed_snapshot = ? WHERE id = ? AND signed_at IS NULL",
       name, image || null, snapshot, plan.id,
-    );
+    ));
     if (!signed.changes) throw new HttpError(409, 'This plan has already been signed');
     await audit(db, { ip: req.ip, user: { practice_id: plan.practice_id, id: null } }, 'treatment_plan.patient_signed', 'treatment_plans', plan.id);
     // The signed copy is filed in the chart, so it's there even if the plan is edited later.

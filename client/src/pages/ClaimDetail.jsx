@@ -310,7 +310,7 @@ function Attachments({ claim, onChange }) {
                   setForm((f) => ({ ...f, drafting: true }));
                   try {
                     const d = await api.post(`/claims/${claim.id}/narrative`, {});
-                    setForm((f) => ({ ...f, drafting: false, narrative: d.narrative, report_type: f.document_id ? f.report_type : 'OZ', hint: [d.missing?.length ? `Not in the chart (add if you can): ${d.missing.join('; ')}` : '', d.attach?.length ? `Send with it: ${d.attach.join('; ')}` : ''].filter(Boolean).join(' · ') }));
+                    setForm((f) => ({ ...f, drafting: false, ai_drafted: true, narrative: d.narrative, report_type: f.document_id ? f.report_type : 'OZ', hint: [d.missing?.length ? `Not in the chart (add if you can): ${d.missing.join('; ')}` : '', d.attach?.length ? `Send with it: ${d.attach.join('; ')}` : ''].filter(Boolean).join(' · ') }));
                   } catch (e) { setErr(e); setForm((f) => ({ ...f, drafting: false })); }
                 }}>{form.drafting ? 'Writing…' : 'Draft the narrative with AI'}</button>
                 {form.hint && <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>{form.hint}</div>}

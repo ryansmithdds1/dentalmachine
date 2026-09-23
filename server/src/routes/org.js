@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { randomBytes } from 'node:crypto';
 import { HttpError, rateLimit } from '../auth.js';
-import { insert, audit, hashToken, practiceNow } from '../util.js';
+import { insert, audit, hashToken, practiceNow, recorded } from '../util.js';
 import { toolByName } from '../datatools.js';
 import { agingReport } from '../aging.js';
 import { financeOverview } from '../finance/metrics.js';
@@ -50,7 +50,7 @@ async function copyInto(db, kind, from, to, userId) {
       const have = await db.get('SELECT id, fee FROM procedure_codes WHERE practice_id = ? AND code = ?', to, c.code);
       if (have) {
         if (have.fee !== c.fee) {
-          await db.run('UPDATE procedure_codes SET fee = ? WHERE id = ?', c.fee, have.id);
+          await recorded(db, 'procedure_codes', have.id, () => db.run('UPDATE procedure_codes SET fee = ? WHERE id = ?', c.fee, have.id));
           await recordFeeChange(db, { practiceId: to, code: c.code, oldFee: have.fee, newFee: c.fee, userId });
           n++;
         }

@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync, existsSync } from 'node:fs';
 import { HttpError } from './auth.js';
-import { insert } from './util.js';
+import { insert, recorded } from './util.js';
 import { parse999, parse277, parseTA1, parseX12, x12Type, sandbox999, sandbox277, sandbox835 } from './x12.js';
 import { importEra, claimForControl, claimEvent, parseControl } from './era.js';
 
@@ -239,7 +239,7 @@ async function rejectBatch(db, b, message) {
       await claimEvent(db, claim, 'batch', claim.ch_status || 'sent', `An earlier submission (batch ${b.control}) was rejected; the latest one is unaffected`);
       continue;
     }
-    await db.run("UPDATE claims SET status = 'draft' WHERE id = ? AND status = 'submitted' AND batch_id = ?", id, b.id);
+    await recorded(db, 'claims', b.id, () => db.run("UPDATE claims SET status = 'draft' WHERE id = ? AND status = 'submitted' AND batch_id = ?", id, b.id));
     await claimEvent(db, claim, 'batch', 'rejected', `${message} — fix and resend`);
   }
 }
@@ -293,7 +293,7 @@ async function apply277(db, status, scope) {
       continue;
     }
     if (c.payer_claim_number) await db.run('UPDATE claims SET payer_claim_number = ? WHERE id = ?', c.payer_claim_number, claim.id);
-    if (c.group === 'rejected') await db.run("UPDATE claims SET status = 'draft' WHERE id = ? AND status = 'submitted'", claim.id);
+    if (c.group === 'rejected') await recorded(db, 'claims', claim.id, () => db.run("UPDATE claims SET status = 'draft' WHERE id = ? AND status = 'submitted'", claim.id));
     await claimEvent(db, claim, status.kind, c.group, `${c.text}${c.category ? ` (${c.category})` : ''}${c.group === 'rejected' ? ' — fix and resend' : ''}`);
     out.push({ claim_id: claim.id, status: c.group });
   }

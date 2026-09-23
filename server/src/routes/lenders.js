@@ -1,4 +1,5 @@
 import express, { Router } from 'express';
+import { setActor } from '../actor.js';
 import { requirePermission, HttpError } from '../auth.js';
 import { findOr404, insert, audit, practiceNow } from '../util.js';
 import { LENDERS, STATUSES, applicationLink, verifyLenderSignature } from '../lenders.js';
@@ -86,6 +87,7 @@ export function lenderWebhooks({ db }) {
   r.post('/api/webhooks/financing/:lender', express.raw({ type: '*/*', limit: '64kb' }), async (req, res) => {
     const lender = String(req.params.lender);
     if (!LENDERS[lender]) return res.status(404).end();
+    setActor({ source: 'integration', actor: LENDERS[lender].name });
     const raw = Buffer.isBuffer(req.body) ? req.body : Buffer.from('');
     if (!verifyLenderSignature(lender, raw, req.headers['x-signature'] || req.headers['x-webhook-signature'])) return res.status(401).json({ error: 'Bad signature' });
     let b;

@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { SOURCES } from '../actor.js';
 import { HttpError, hashPassword, PERMISSION_CATALOG, PERMISSIONS } from '../auth.js';
 import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, toCents, practiceNow, staffPractice, toCsv } from '../util.js';
 import { validatePassword } from './auth.js';
@@ -430,6 +431,16 @@ export default function settingsRoutes({ db, secret, config = {} }) {
       where.push('a.user_id = ?');
       params.push(Number(req.query.user_id));
     }
+    if (req.query.source) {
+      requireOneOf(req.query.source, SOURCES, 'source');
+      where.push('a.source = ?');
+      params.push(req.query.source);
+    }
+    if (req.query.location_id) {
+      where.push('a.location_id = ?');
+      params.push(Number(req.query.location_id));
+    }
+    if (req.query.changes === '1') where.push('a.changes IS NOT NULL');
     if (req.query.action) {
       where.push('a.action LIKE ?');
       params.push(`${String(req.query.action).replace(/[%_]/g, '')}%`);
@@ -445,17 +456,17 @@ export default function settingsRoutes({ db, secret, config = {} }) {
       const id = Number(req.query.patient_id);
       // Their record, their appointments/charts/bills (by the record's patient), or details that name them.
       const owned = ['appointments', 'procedures', 'ledger_entries', 'claims', 'clinical_notes', 'documents', 'treatment_plans', 'prescriptions', 'perio_exams', 'patient_insurance'];
-      where.push(`((a.entity = 'patients' AND a.entity_id = ?) OR ${owned.map((t) => `(a.entity = '${t}' AND a.entity_id IN (SELECT id FROM ${t} WHERE patient_id = ?))`).join(' OR ')} OR a.details LIKE ? OR a.details LIKE ?)`);
-      params.push(id, ...owned.map(() => id), `%"patient_id":${id},%`, `%"patient_id":${id}}%`);
+      where.push(`(a.patient_id = ? OR (a.entity = 'patients' AND a.entity_id = ?) OR ${owned.map((t) => `(a.entity = '${t}' AND a.entity_id IN (SELECT id FROM ${t} WHERE patient_id = ?))`).join(' OR ')} OR a.details LIKE ? OR a.details LIKE ?)`);
+      params.push(id, id, ...owned.map(() => id), `%"patient_id":${id},%`, `%"patient_id":${id}}%`);
     }
     const rows = await db.all(
-      `SELECT a.*, u.name AS user_name FROM audit_log a LEFT JOIN users u ON u.id = a.user_id
+      `SELECT a.*, u.name AS user_name, l.name AS location_name FROM audit_log a LEFT JOIN users u ON u.id = a.user_id LEFT JOIN locations l ON l.id = a.location_id
        WHERE ${where.join(' AND ')} ORDER BY a.id DESC LIMIT ? OFFSET ?`, ...params, limit, offset,
     );
     if (!csv) return res.json(rows);
-    await audit(db, req, 'audit_log.export', null, null, { filters: pick(req.query, ['from', 'to', 'user_id', 'patient_id', 'action', 'entity']), rows: rows.length });
+    await audit(db, req, 'audit_log.export', null, null, { filters: pick(req.query, ['from', 'to', 'user_id', 'patient_id', 'action', 'entity', 'source', 'location_id']), rows: rows.length });
     res.set({ 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="audit-log-${new Date().toISOString().slice(0, 10)}.csv"` });
-    res.send(toCsv(rows, [['When (UTC)', (r) => r.created_at], ['User', (r) => r.user_name || ''], ['Action', (r) => r.action], ['Record', (r) => r.entity || ''], ['Record ID', (r) => r.entity_id ?? ''], ['IP', (r) => r.ip || ''], ['Details', (r) => r.details || '']]));
+    res.send(toCsv(rows, [['When (UTC)', (r) => r.created_at], ['Source', (r) => r.source || ''], ['Who', (r) => r.actor || r.user_name || ''], ['User', (r) => r.user_name || ''], ['Action', (r) => r.action], ['Record', (r) => r.entity || ''], ['Record ID', (r) => r.entity_id ?? ''], ['Patient #', (r) => r.patient_id ?? ''], ['Office', (r) => r.location_name || ''], ['Reason', (r) => r.reason || ''], ['Before → after', (r) => r.changes || ''], ['IP', (r) => r.ip || ''], ['Details', (r) => r.details || '']]));
   });
 
   return r;

@@ -34,7 +34,8 @@ export default function attachmentRoutes({ db, storage, sender }) {
     const id = await insert(db, 'claim_attachments', {
       practice_id: req.user.practice_id, claim_id: claim.id, document_id: documentId, report_type: b.report_type, narrative, transmission, created_by: req.user.id,
     });
-    await audit(db, req, 'claim.attachment_add', 'claims', claim.id, { attachment_id: id });
+    // An AI-drafted narrative is recorded as drafted by AI and approved (sent) by this person.
+    await audit(db, req, 'claim.attachment_add', 'claims', claim.id, { attachment_id: id, ...(b.ai_drafted && narrative ? { drafted_by: 'AI', approved_by: req.user.name } : {}) });
     res.status(201).json(await list(claim.id));
   });
 

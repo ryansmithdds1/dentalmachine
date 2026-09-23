@@ -124,6 +124,8 @@ export default function scribeRoutes({ db, config }) {
     const s = await findOr404(db, 'scribe_sessions', req.params.sid, req.user.practice_id, 'Session');
     const note = req.body?.note_id ? await findOr404(db, 'clinical_notes', req.body.note_id, req.user.practice_id, 'Note') : null;
     await db.run('UPDATE scribe_sessions SET note_id = ?, edited = ? WHERE id = ?', note?.id ?? null, req.body?.edited ? 1 : 0, s.id);
+    // The chain for the record: the AI scribe drafted it, this person reviewed (and maybe edited) and saved it.
+    if (note) await audit(db, req, 'note.ai_draft_approved', 'clinical_notes', note.id, { drafted_by: 'AI scribe', approved_by: req.user.name, edited_before_saving: !!req.body?.edited, scribe_session: s.id }, { patientId: note.patient_id });
     res.json({ ok: true });
   });
 

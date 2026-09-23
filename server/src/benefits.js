@@ -1,6 +1,6 @@
 import { HttpError } from './auth.js';
 import { coverageTier } from './defaults.js';
-import { insert, addMonths, practiceNow, mapSeq } from './util.js';
+import { insert, addMonths, practiceNow, mapSeq, recorded } from './util.js';
 
 // ---- Insurance plans ----
 // A plan is the employer group's coverage (shared by every subscriber and dependant on it); a policy is
@@ -354,11 +354,11 @@ export async function savePolicy(db, practiceId, policyId, row) {
   }
   if (Object.keys(planFields).length) {
     validatePlan(planFields);
-    await db.run(`UPDATE insurance_plans SET ${Object.keys(planFields).map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, ...Object.values(planFields), planId);
+    await recorded(db, 'insurance_plans', planId, () => db.run(`UPDATE insurance_plans SET ${Object.keys(planFields).map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, ...Object.values(planFields), planId));
   }
   const fields = { ...own, plan_id: planId };
   delete fields.benefit_month;
-  if (policy) await db.run(`UPDATE patient_insurance SET ${Object.keys(fields).map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, ...Object.values(fields), policy.id);
+  if (policy) await recorded(db, 'patient_insurance', policy.id, () => db.run(`UPDATE patient_insurance SET ${Object.keys(fields).map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, ...Object.values(fields), policy.id));
   else policyId = await insert(db, 'patient_insurance', { ...fields, practice_id: practiceId });
   if (row.benefit_month != null) await db.run('UPDATE insurance_plans SET benefit_month = ? WHERE id = ?', Number(row.benefit_month), planId);
   await syncPlan(db, planId);

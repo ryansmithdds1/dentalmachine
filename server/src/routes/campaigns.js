@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { requirePermission, HttpError } from '../auth.js';
-import { findOr404, audit, hashToken } from '../util.js';
+import { findOr404, audit, hashToken, recorded } from '../util.js';
 import { SEGMENTS, CAMPAIGN_VARS, segmentPatients, pickRecipients, campaignVars, finalBody, normalize, createCampaign, runCampaigns, cleanParams, validateBody } from '../campaigns.js';
 import { recordOptOut } from '../messaging.js';
 
@@ -109,7 +109,7 @@ export function campaignPublicRoutes({ db }) {
   r.post('/unsubscribe/:token', async (req, res) => {
     const x = await find(req.params.token);
     await db.tx(async () => {
-      await db.run(`UPDATE patients SET ${x.channel === 'sms' ? 'sms_opt_in' : 'email_opt_in'} = 0 WHERE id = ?`, x.patient_id);
+      await recorded(db, 'patients', x.patient_id, () => db.run(`UPDATE patients SET ${x.channel === 'sms' ? 'sms_opt_in' : 'email_opt_in'} = 0 WHERE id = ?`, x.patient_id));
       if (x.channel === 'email') await recordOptOut(db, x.practice_id, 'email', x.to_address, 'unsubscribe');
       await db.run("UPDATE campaign_recipients SET unsubscribed_at = COALESCE(unsubscribed_at, datetime('now')) WHERE id = ?", x.id);
     });

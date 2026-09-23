@@ -45,11 +45,11 @@ export class ApiError extends Error {
   }
 }
 
-async function request(method, path, body) {
+async function request(method, path, body, extraHeaders = {}) {
   const token = getToken();
   const res = await fetch(`/api${path}`, {
     method,
-    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...locationHeader() },
+    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...locationHeader(), ...extraHeaders },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   const data = await res.json().catch(() => ({}));
@@ -70,6 +70,16 @@ export const api = {
   put: (p, b) => request('PUT', p, b),
   patch: (p, b) => request('PATCH', p, b),
   del: (p) => request('DELETE', p),
+};
+
+// What the assistant does on someone's behalf is recorded as the AI acting for them, not as them.
+const AI = { 'X-Acting-For': 'assistant' };
+export const assistantApi = {
+  get: (p) => request('GET', p, undefined, AI),
+  post: (p, b = {}) => request('POST', p, b, AI),
+  put: (p, b) => request('PUT', p, b, AI),
+  patch: (p, b) => request('PATCH', p, b, AI),
+  del: (p) => request('DELETE', p, undefined, AI),
 };
 
 // Downloads a file from the API (with the session token) and saves it.

@@ -2088,6 +2088,14 @@ const COLUMNS = [
   ['insurance_carriers', 'timely_filing_days', 'INTEGER'],
   // Digital lab Rx: the prescription, its files from the chart, and the lab's private link and updates.
   ['booking_requests', 'source', 'TEXT'],
+  // The audit trail: who or what acted (a person, the AI, an automation, the API, an import, an integration,
+  // a patient), for which patient and office, why, and each changed field's before and after.
+  ['audit_log', 'source', 'TEXT'],
+  ['audit_log', 'actor', 'TEXT'],
+  ['audit_log', 'patient_id', 'INTEGER'],
+  ['audit_log', 'location_id', 'INTEGER'],
+  ['audit_log', 'reason', 'TEXT'],
+  ['audit_log', 'changes', 'TEXT'],
   ['practices', 'onboarding_dismissed', 'INTEGER NOT NULL DEFAULT 0'],
   ['appointments', 'checked_in_via', 'TEXT'],
   ['appointments', 'ready_texted_at', 'TEXT'],
@@ -2125,6 +2133,29 @@ const RELAXED = [
   ['messages', 'messages_status_check', "CHECK (status IN ('queued','sent','failed'))", "CHECK (status IN ('queued','sent','failed','blocked'))"],
 ];
 
+// Enforced by the database itself, whatever the code does: the audit log is append-only (only the id
+// references can be re-pointed, as a backup restore does), and a ledger entry's amount and type never change
+// (corrections are voids and reversing entries).
+const GUARDS_SQLITE = `
+CREATE TRIGGER IF NOT EXISTS audit_log_no_edit BEFORE UPDATE OF action, entity, details, ip, created_at, source, actor, reason, changes ON audit_log
+BEGIN SELECT RAISE(ABORT, 'The audit log cannot be changed'); END;
+CREATE TRIGGER IF NOT EXISTS audit_log_no_delete BEFORE DELETE ON audit_log
+BEGIN SELECT RAISE(ABORT, 'The audit log cannot be changed'); END;
+CREATE TRIGGER IF NOT EXISTS ledger_amount_fixed BEFORE UPDATE OF amount, type ON ledger_entries
+WHEN OLD.amount IS NOT NEW.amount OR OLD.type IS NOT NEW.type
+BEGIN SELECT RAISE(ABORT, 'Ledger amounts cannot be edited: void or reverse the entry'); END;
+`;
+const GUARDS_PG = [
+  `CREATE OR REPLACE FUNCTION dm_audit_append_only() RETURNS trigger LANGUAGE plpgsql AS $f$ BEGIN RAISE EXCEPTION 'The audit log cannot be changed'; END $f$`,
+  'DROP TRIGGER IF EXISTS audit_log_no_edit ON audit_log',
+  'CREATE TRIGGER audit_log_no_edit BEFORE UPDATE OF action, entity, details, ip, created_at, source, actor, reason, changes ON audit_log FOR EACH ROW EXECUTE FUNCTION dm_audit_append_only()',
+  'DROP TRIGGER IF EXISTS audit_log_no_delete ON audit_log',
+  'CREATE TRIGGER audit_log_no_delete BEFORE DELETE ON audit_log FOR EACH ROW EXECUTE FUNCTION dm_audit_append_only()',
+  `CREATE OR REPLACE FUNCTION dm_ledger_fixed() RETURNS trigger LANGUAGE plpgsql AS $f$ BEGIN RAISE EXCEPTION 'Ledger amounts cannot be edited: void or reverse the entry'; END $f$`,
+  'DROP TRIGGER IF EXISTS ledger_amount_fixed ON ledger_entries',
+  'CREATE TRIGGER ledger_amount_fixed BEFORE UPDATE OF amount, type ON ledger_entries FOR EACH ROW WHEN (OLD.amount IS DISTINCT FROM NEW.amount OR OLD.type IS DISTINCT FROM NEW.type) EXECUTE FUNCTION dm_ledger_fixed()',
+];
+
 const INDEXES = `
 CREATE UNIQUE INDEX IF NOT EXISTS idx_practice_slug ON practices(slug);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_appt_token ON appointments(confirm_token_hash);
@@ -2137,6 +2168,8 @@ CREATE INDEX IF NOT EXISTS idx_proc_appt ON procedures(appointment_id);
 CREATE INDEX IF NOT EXISTS idx_proc_plan ON procedures(treatment_plan_id);
 CREATE INDEX IF NOT EXISTS idx_proc_done ON procedures(practice_id, status, completed_at);
 CREATE INDEX IF NOT EXISTS idx_ledger_date ON ledger_entries(practice_id, entry_date);
+CREATE INDEX IF NOT EXISTS idx_audit_patient ON audit_log(practice_id, patient_id, id);
+CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log(practice_id, user_id, id);
 CREATE INDEX IF NOT EXISTS idx_ledger_proc ON ledger_entries(procedure_id);
 CREATE INDEX IF NOT EXISTS idx_ledger_claim ON ledger_entries(claim_id);
 CREATE INDEX IF NOT EXISTS idx_ledger_plan ON ledger_entries(payment_plan_id);
@@ -2236,6 +2269,7 @@ function openSqlite(path) {
     db.exec('PRAGMA writable_schema = OFF');
   }
   db.exec(INDEXES);
+  db.exec(GUARDS_SQLITE);
 
   const cache = new Map();
   const stmt = (sql) => {
@@ -2377,7 +2411,7 @@ async function openPostgres(url, { freshSchema = false } = {}) {
   const setup = await pool.connect();
   // Skip the migration when this exact schema is already in place (serverless cold starts would
   // otherwise re-run hundreds of statements each time).
-  const version = createHash('sha256').update(JSON.stringify([SCHEMA, COLUMNS, INDEXES, RELAXED])).digest('hex').slice(0, 16);
+  const version = createHash('sha256').update(JSON.stringify([SCHEMA, COLUMNS, INDEXES, RELAXED, GUARDS_PG])).digest('hex').slice(0, 16);
   const current = await setup.query('SELECT version FROM schema_meta').then((r) => r.rows[0]?.version, () => null);
   if (current === version && !freshSchema) setup.release();
   else {
@@ -2390,6 +2424,7 @@ async function openPostgres(url, { freshSchema = false } = {}) {
       for (const [table, column, def] of COLUMNS) await setup.query(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${column} ${pgSchema(def)}`);
       for (const [table, name, , to] of RELAXED) await setup.query(`ALTER TABLE ${table} DROP CONSTRAINT IF EXISTS ${name}; ALTER TABLE ${table} ADD CONSTRAINT ${name} ${to}`);
       await setup.query(pgSchema(INDEXES));
+      for (const q of GUARDS_PG) await setup.query(q);
       await setup.query('CREATE TABLE IF NOT EXISTS schema_meta (version TEXT NOT NULL)');
       await setup.query('DELETE FROM schema_meta');
       await setup.query('INSERT INTO schema_meta (version) VALUES ($1)', [version]);

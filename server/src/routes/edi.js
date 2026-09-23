@@ -1,7 +1,7 @@
 import express, { Router } from 'express';
 import { scrubClaim } from '../scrubber.js';
 import { requirePermission, HttpError } from '../auth.js';
-import { findOr404, audit, insert, update, practiceNow, mapSeq } from '../util.js';
+import { findOr404, audit, insert, update, practiceNow, mapSeq, recorded } from '../util.js';
 import { build837D, build276, parse271, parse277, sandbox277, x12Type } from '../x12.js';
 import { pollClearinghouse, processInbound } from '../clearinghouse.js';
 import { claimEvent } from '../era.js';
@@ -177,7 +177,7 @@ export default function ediRoutes({ db, config, clearinghouse: ch }) {
     }
     await db.run("UPDATE edi_batches SET status = 'sent', filename = ?, claim_ids = ?, x12 = ? WHERE id = ?", filename, JSON.stringify(claimIds), file, batchId);
     for (const b of bundles) {
-      await db.run("UPDATE claims SET status = CASE WHEN status IN ('draft','denied') THEN 'submitted' ELSE status END, submitted_at = COALESCE(submitted_at, datetime('now')), denial_reason = NULL, batch_id = ?, control_number = ? WHERE id = ?", batchId, b.claim.control_number, b.claim.id);
+      await recorded(db, 'claims', b.claim.id, () => db.run("UPDATE claims SET status = CASE WHEN status IN ('draft','denied') THEN 'submitted' ELSE status END, submitted_at = COALESCE(submitted_at, datetime('now')), denial_reason = NULL, batch_id = ?, control_number = ? WHERE id = ?", batchId, b.claim.control_number, b.claim.id));
       await claimEvent(db, { ...b.claim }, 'submit', 'sent', `Sent to ${ch.name} in batch ${control}`);
     }
     await audit(db, req, 'claims.submit', 'edi_batches', batchId, { claim_ids: claimIds, transport: ch.batch.transport });
@@ -265,7 +265,7 @@ export default function ediRoutes({ db, config, clearinghouse: ch }) {
     const { bundles, claimIds, file } = await batchFile(req);
     if (req.body?.mark_submitted !== false) {
       for (const b of bundles) {
-        if (['draft', 'denied'].includes(b.claim.status)) await db.run("UPDATE claims SET status = 'submitted', submitted_at = datetime('now'), denial_reason = NULL WHERE id = ?", b.claim.id);
+        if (['draft', 'denied'].includes(b.claim.status)) await recorded(db, 'claims', b.claim.id, () => db.run("UPDATE claims SET status = 'submitted', submitted_at = datetime('now'), denial_reason = NULL WHERE id = ?", b.claim.id));
       }
     }
     await audit(db, req, 'claims.export_837', 'claims', claimIds[0], { claim_ids: claimIds });

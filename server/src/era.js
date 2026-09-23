@@ -1,5 +1,5 @@
 import { HttpError } from './auth.js';
-import { insert, practiceNow } from './util.js';
+import { insert, practiceNow, recorded } from './util.js';
 import { parse835All, CARC } from './x12.js';
 import { postClaimPayment } from './services.js';
 
@@ -116,7 +116,7 @@ export async function postEra(db, practiceId, era, { userId = null, filename = n
           await claimEvent(db, claim, '835', 'request', `Payer says duplicate claim (${reason}) — check before resending`);
           continue;
         }
-        await db.run("UPDATE claims SET status = 'denied', denial_reason = ?, payer_claim_number = COALESCE(?, payer_claim_number) WHERE id = ?", reason, lines[0].c.payer_claim_number, claim.id);
+        await recorded(db, 'claims', claim.id, () => db.run("UPDATE claims SET status = 'denied', denial_reason = ?, payer_claim_number = COALESCE(?, payer_claim_number) WHERE id = ?", reason, lines[0].c.payer_claim_number, claim.id));
         await claimEvent(db, claim, '835', 'denied', `Denied: ${reason}`);
         details.push({ ...merged, result: 'denied' });
         continue;

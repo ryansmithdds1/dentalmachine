@@ -1,9 +1,10 @@
 import express, { Router } from 'express';
+import { setActor } from '../actor.js';
 import { HERE, checkInToday } from '../checkin.js';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { requirePermission, HttpError } from '../auth.js';
 import { sendMessage, recordOptOut, clearOptOut, isOptedOutAddress, visitsText, markBad } from '../messaging.js';
-import { insert, findOr404, audit, practiceNow, friendlyDateTime } from '../util.js';
+import { insert, findOr404, audit, practiceNow, friendlyDateTime, recorded } from '../util.js';
 import { publish } from '../events.js';
 import { offerFor, claimOffer } from '../fill.js';
 import { patientLang } from '../templates.js';
@@ -46,6 +47,7 @@ export function smsWebhook({ db, config }) {
         .find((m) => digits(m.to_address) === digits(from));
       return hit ? db.get('SELECT * FROM practices WHERE id = ?', hit.practice_id) : null;
     };
+    setActor({ source: 'patient', actor: 'Patient (text message)' });
     const practice = own || (await lastTexted())
       || ((await db.get('SELECT COUNT(*) AS n FROM practices')).n === 1 ? await db.get('SELECT * FROM practices LIMIT 1') : null);
     if (!practice) return res.type('text/xml').send(twiml());
@@ -114,7 +116,7 @@ export function smsWebhook({ db, config }) {
       reply = lang === 'es' ? 'Entendido, gracias.' : 'No problem — thanks for letting us know.';
     } else if (STOP.includes(keyword)) {
       // "CANCEL" is a carrier opt-out keyword: the carrier stops our texts whatever we do, so we record it too.
-      for (const p of candidates) await db.run('UPDATE patients SET sms_opt_in = 0 WHERE id = ?', p.id);
+      for (const p of candidates) await recorded(db, 'patients', p.id, () => db.run('UPDATE patients SET sms_opt_in = 0 WHERE id = ?', p.id));
       // The number itself is recorded too, so nothing reaches it even if it isn't (yet) on a patient's chart.
       await recordOptOut(db, practice.id, 'sms', from, 'stop');
       // Twilio sends the carrier-required opt-out confirmation itself.
@@ -126,7 +128,7 @@ export function smsWebhook({ db, config }) {
         ? (lang === 'es' ? `¡Gracias! ${names} ya está registrado(a). Le avisaremos por mensaje cuando estemos listos.` : `Thanks! ${names} ${done.length > 1 ? 'are' : 'is'} checked in. We'll text you when we're ready for you.`)
         : (lang === 'es' ? `No encontramos una cita para hoy. Por favor pase a la recepción o llame al ${phone}.` : `We couldn't find a visit for today. Please come to the front desk or call ${phone}.`);
     } else if (START.includes(keyword)) {
-      for (const p of candidates) await db.run('UPDATE patients SET sms_opt_in = 1 WHERE id = ?', p.id);
+      for (const p of candidates) await recorded(db, 'patients', p.id, () => db.run('UPDATE patients SET sms_opt_in = 1 WHERE id = ?', p.id));
       await clearOptOut(db, practice.id, 'sms', from);
     } else if (HELP.includes(keyword)) {
       // Carriers require an answer to HELP: who we are, how to reach a person, how to stop.
@@ -139,7 +141,7 @@ export function smsWebhook({ db, config }) {
       const day = open[0]?.start_time.slice(0, 10);
       const confirm = open.filter((a) => a.start_time.startsWith(day));
       for (const appt of confirm) {
-        await db.run("UPDATE appointments SET status = 'confirmed', confirmed_at = datetime('now'), confirmed_via = 'text' WHERE id = ?", appt.id);
+        await recorded(db, 'appointments', appt.id, () => db.run("UPDATE appointments SET status = 'confirmed', confirmed_at = datetime('now'), confirmed_via = 'text' WHERE id = ?", appt.id));
       }
       if (confirm.length) {
         publish(practice.id, { type: 'schedule', dates: [day], source: 'sms' });

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { openSlotLater } from '../fill.js';
 import { requirePermission, HttpError, can } from '../auth.js';
-import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, normalizeDateTime, practiceNow, mapSeq, paged } from '../util.js';
+import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, normalizeDateTime, practiceNow, mapSeq, paged, recorded } from '../util.js';
 import { hoursFor, providerHours, providerHoursFor, providerHoursOn, validateHours } from '../hours.js';
 import { publish, eventStream } from '../events.js';
 import { emitAppointment } from '../webhooks.js';
@@ -479,19 +479,19 @@ export default function scheduleRoutes({ db }) {
     }
     const via = req.body.confirmed_via;
     requireOneOf(via, CONFIRM_METHODS, 'confirmed_via');
-    await db.run(
+    await recorded(db, 'appointments', existing.id, () => db.run(
       "UPDATE appointments SET status = ?, confirmed_at = CASE WHEN ? = 'confirmed' THEN COALESCE(confirmed_at, datetime('now')) ELSE confirmed_at END WHERE id = ?",
       status, status, existing.id,
-    );
+    ));
     // "Left a message" is a contact attempt, not a confirmation.
-    if (via) await db.run('UPDATE appointments SET confirmed_via = ? WHERE id = ?', via, existing.id);
-    else if (status === 'confirmed' && !existing.confirmed_via) await db.run("UPDATE appointments SET confirmed_via = 'phone' WHERE id = ?", existing.id);
+    if (via) await recorded(db, 'appointments', existing.id, () => db.run('UPDATE appointments SET confirmed_via = ? WHERE id = ?', via, existing.id));
+    else if (status === 'confirmed' && !existing.confirmed_via) await recorded(db, 'appointments', existing.id, () => db.run("UPDATE appointments SET confirmed_via = 'phone' WHERE id = ?", existing.id));
     // Patient flow: when they arrived, were seated and left (practice-local time, for wait and chair times).
     const flow = { checked_in: 'arrived_at', in_chair: 'seated_at', completed: 'dismissed_at' }[status];
     if (flow) {
       const now = await practiceNow(db, req.user.practice_id);
-      await db.run(`UPDATE appointments SET ${flow} = COALESCE(${flow}, ?) WHERE id = ?`, now, existing.id);
-      if (status === 'in_chair') await db.run('UPDATE appointments SET arrived_at = COALESCE(arrived_at, ?) WHERE id = ?', now, existing.id);
+      await recorded(db, 'appointments', existing.id, () => db.run(`UPDATE appointments SET ${flow} = COALESCE(${flow}, ?) WHERE id = ?`, now, existing.id));
+      if (status === 'in_chair') await recorded(db, 'appointments', existing.id, () => db.run('UPDATE appointments SET arrived_at = COALESCE(arrived_at, ?) WHERE id = ?', now, existing.id));
     }
     if (status === 'cancelled' || status === 'no_show') await releaseAppointment(db, existing.id);
     if (status === 'cancelled' && existing.status !== 'cancelled') openSlotLater(db, existing.id);
@@ -508,7 +508,7 @@ export default function scheduleRoutes({ db }) {
     if (status === 'cancelled' && req.body.scope === 'following' && existing.series_id) {
       const later = await db.all("SELECT id, start_time FROM appointments WHERE series_id = ? AND practice_id = ? AND start_time > ? AND status IN ('scheduled','confirmed')", existing.series_id, req.user.practice_id, existing.start_time);
       for (const occ of later) {
-        await db.run("UPDATE appointments SET status = 'cancelled' WHERE id = ?", occ.id);
+        await recorded(db, 'appointments', occ.id, () => db.run("UPDATE appointments SET status = 'cancelled' WHERE id = ?", occ.id));
         await db.run("UPDATE recalls SET status = 'due', appointment_id = NULL WHERE appointment_id = ? AND status = 'scheduled'", occ.id);
         // Their pre-loaded type procedures are only placeholders; drop them rather than leave "planned" work behind.
         await db.run("DELETE FROM procedures WHERE appointment_id = ? AND status = 'planned' AND treatment_plan_id IS NULL", occ.id);

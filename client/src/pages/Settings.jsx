@@ -835,7 +835,8 @@ function ResourceForm({ spec, row, onDone }) {
 function AuditLog() {
   const [params] = useSearchParams();
   const users = useLookup('/users');
-  const [filters, setFilters] = useState({ from: '', to: '', user_id: '', action: '', patient_id: params.get('patient_id') || '' });
+  const offices = useLookup('/locations');
+  const [filters, setFilters] = useState({ from: '', to: '', user_id: '', action: '', patient_id: params.get('patient_id') || '', source: '', location_id: '', changes: '' });
   const [applied, setApplied] = useState(filters);
   const [pages, setPages] = useState(1);
   const qs = (extra = {}) => new URLSearchParams(Object.fromEntries(Object.entries({ ...applied, ...extra }).filter(([, v]) => v !== '' && v != null))).toString();
@@ -853,6 +854,9 @@ function AuditLog() {
           <label>User<select value={filters.user_id} onChange={set('user_id')}><option value="">Anyone</option>{users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select></label>
           <label>Action starts with<input value={filters.action} onChange={set('action')} placeholder="e.g. patient.view, ledger." /></label>
           <label>Patient #<input value={filters.patient_id} onChange={set('patient_id')} inputMode="numeric" style={{ width: 90 }} /></label>
+          <label>Done by<select value={filters.source} onChange={set('source')}><option value="">Anyone or anything</option>{Object.entries(AUDIT_SOURCES).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></label>
+          {offices.length > 1 && <label>Office<select value={filters.location_id} onChange={set('location_id')}><option value="">All</option>{offices.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</select></label>}
+          <label className="checkbox"><input type="checkbox" checked={filters.changes === '1'} onChange={(e) => setFilters({ ...filters, changes: e.target.checked ? '1' : '' })} /> Only changes</label>
           <button className="primary">Search</button>
           <button type="button" onClick={() => download(`/audit-log?${qs({ format: 'csv' })}`, 'audit-log.csv').catch(setErr)}>⬇ Export CSV</button>
         </form>
@@ -860,16 +864,19 @@ function AuditLog() {
       </div>
       <div className="table-wrap">
         <table>
-          <thead><tr><th>When (UTC)</th><th>User</th><th>Action</th><th>Record</th><th>IP</th><th>Details</th></tr></thead>
+          <thead><tr><th>When (UTC)</th><th>Who</th><th>Action</th><th>Record</th><th>Before → after</th><th>Details</th></tr></thead>
           <tbody>
             {rows?.map((r) => (
               <tr key={r.id}>
                 <td style={{ whiteSpace: 'nowrap' }}>{r.created_at}</td>
-                <td>{r.user_name || '—'}</td>
-                <td><code>{r.action}</code></td>
-                <td>{r.entity ? `${r.entity} #${r.entity_id}` : ''}</td>
-                <td className="muted">{r.ip}</td>
-                <td className="muted" style={{ fontSize: 12 }}>{r.details}</td>
+                <td>
+                  {r.actor || r.user_name || '—'}
+                  <div className="muted" style={{ fontSize: 11 }}>{AUDIT_SOURCES[r.source] || r.source}{r.source === 'ai' && r.user_name ? ` · for ${r.user_name}` : ''}{r.location_name ? ` · ${r.location_name}` : ''}{r.ip ? ` · ${r.ip}` : ''}</div>
+                </td>
+                <td><code>{r.action}</code>{r.reason && <div style={{ fontSize: 12 }}>Why: {r.reason}</div>}</td>
+                <td>{r.entity ? `${r.entity} #${r.entity_id}` : ''}{r.patient_id && r.entity !== 'patients' ? <div className="muted" style={{ fontSize: 11 }}>patient #{r.patient_id}</div> : null}</td>
+                <td style={{ fontSize: 12 }}><Changes json={r.changes} /></td>
+                <td className="muted" style={{ fontSize: 12, maxWidth: 260, overflowWrap: 'anywhere' }}>{r.details}</td>
               </tr>
             ))}
           </tbody>
@@ -1670,6 +1677,21 @@ function XrayAiSetting() {
           </label>
         </>
       ) : <div className="muted" style={{ fontSize: 13 }}>Off on this server. Set XRAY_AI=vendor (with XRAY_AI_URL, XRAY_AI_KEY) for an FDA-cleared service, or XRAY_AI=claude.</div>}
+    </div>
+  );
+}
+
+const AUDIT_SOURCES = { human: 'A person', ai: 'AI', automation: 'Automation', api: 'API', import: 'Import', integration: 'Outside service', patient: 'Patient' };
+// Before → after for each changed field (or the values set, for something new).
+function Changes({ json }) {
+  if (!json) return null;
+  let c;
+  try { c = JSON.parse(json); } catch { return null; }
+  return (
+    <div>
+      {Object.entries(c).slice(0, 12).map(([k, v]) => (
+        <div key={k}><span className="muted">{k.replace(/_/g, ' ')}:</span> {Array.isArray(v) ? <><s className="muted">{v[0] == null || v[0] === '' ? '∅' : String(v[0]).slice(0, 60)}</s> → {v[1] == null || v[1] === '' ? '∅' : String(v[1]).slice(0, 60)}</> : String(v ?? '∅').slice(0, 60)}</div>
+      ))}
     </div>
   );
 }

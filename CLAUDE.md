@@ -12,7 +12,11 @@ who did it · what happened · when · what was there before · what is there no
 1. **Never silently change important data.** Clinical notes, treatment, diagnoses, fees, payments, adjustments,
    insurance, claims, balances, appointments, prescriptions, signed documents: record before/after, who, when,
    why (when a reason is required) and the source (human, AI, automation, API, import, integration).
-2. **Everything important goes through `audit()`** (`server/src/util.js`) with before/after for edits. Audit
+2. **How changes get recorded:** write through `insert()` / `update()` / `change()` or wrap a raw UPDATE in
+   `recorded(db, table, id, () => db.run(...))` (all in `server/src/util.js`) — they capture before/after.
+   Every request and job runs as an actor (`server/src/actor.js`: human, ai, automation, api, import,
+   integration, patient); set it with `setActor`/`withActor` for new webhooks, jobs and AI flows.
+   Everything important also goes through `audit()` (`server/src/util.js`) with before/after for edits. Audit
    rows are append-only: no route may update or delete them.
 3. **Reverse, don't edit or delete, money and clinical records.** Ledger entries are voided or reversed
    (`voided_at`, `reverses_id`), never edited. Signed notes get addenda. Claims are corrected or voided.

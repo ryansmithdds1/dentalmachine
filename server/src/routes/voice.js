@@ -1,7 +1,8 @@
 import express, { Router } from 'express';
+import { setActor } from '../actor.js';
 import { timingSafeEqual } from 'node:crypto';
 import { twilioSignature } from './sms.js';
-import { hashToken, insert, practiceNow } from '../util.js';
+import { hashToken, insert, practiceNow, recorded } from '../util.js';
 import { patientLang } from '../templates.js';
 import { publish } from '../events.js';
 import { summarizeCall } from '../phones.js';
@@ -47,6 +48,7 @@ export function voiceWebhooks({ db, config }) {
   const reject = (res) => res.status(403).type('text/xml').send(twiml(''));
 
   r.post('/api/webhooks/twilio/voice/confirm/:token', form, async (req, res) => {
+    setActor({ source: 'patient', actor: 'Patient (confirmation call)' });
     if (!signed(req)) return reject(res);
     const c = await callFor(req.params.token);
     if (!c) return res.type('text/xml').send(twiml('<Hangup/>'));
@@ -58,7 +60,7 @@ export function voiceWebhooks({ db, config }) {
     // A voicemail gets a message; a person gets asked.
     if (/^machine/.test(String(req.body.AnsweredBy || ''))) {
       if (c.call) await db.run("UPDATE calls SET answered_by = 'machine', outcome = 'voicemail' WHERE id = ?", c.call.id);
-      for (const v of visits) if (v.status === 'scheduled') await db.run("UPDATE appointments SET confirmed_via = 'left_message' WHERE id = ? AND status = 'scheduled'", v.id);
+      for (const v of visits) if (v.status === 'scheduled') await recorded(db, 'appointments', v.id, () => db.run("UPDATE appointments SET confirmed_via = 'left_message' WHERE id = ? AND status = 'scheduled'", v.id));
       return res.type('text/xml').send(twiml(say(lang, lang === 'es'
         ? `Hola, le llama ${practice.name} para recordarle la cita de ${names} ${when}. Por favor llámenos al ${phone} para confirmar. Gracias.`
         : `Hello, this is ${practice.name} with a reminder of ${names}'s appointment on ${when}. Please call us at ${phone} to confirm, or reply to our text. Thank you.`) + '<Hangup/>'));
@@ -76,6 +78,7 @@ export function voiceWebhooks({ db, config }) {
   });
 
   r.post('/api/webhooks/twilio/voice/confirm/:token/answer', form, async (req, res) => {
+    setActor({ source: 'patient', actor: 'Patient (confirmation call)' });
     if (!signed(req)) return reject(res);
     const c = await callFor(req.params.token);
     if (!c) return res.type('text/xml').send(twiml('<Hangup/>'));
@@ -85,7 +88,7 @@ export function voiceWebhooks({ db, config }) {
     const change = /\b2\b|change|resched|cancel|another|different|cambi|otro/.test(heard);
     if (yes && !change) {
       for (const v of visits) {
-        await db.run("UPDATE appointments SET status = 'confirmed', confirmed_at = COALESCE(confirmed_at, datetime('now')), confirmed_via = 'call' WHERE id = ? AND status IN ('scheduled','confirmed')", v.id);
+        await recorded(db, 'appointments', v.id, () => db.run("UPDATE appointments SET status = 'confirmed', confirmed_at = COALESCE(confirmed_at, datetime('now')), confirmed_via = 'call' WHERE id = ? AND status IN ('scheduled','confirmed')", v.id));
       }
       if (call) await db.run("UPDATE calls SET outcome = 'confirmed' WHERE id = ?", call.id);
       publish(practice.id, { type: 'schedule', dates: [visits[0].start_time.slice(0, 10)], source: 'call' });

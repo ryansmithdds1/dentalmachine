@@ -1,4 +1,4 @@
-import { insert, friendlyDateTime, newToken, localNow, zonedToUtc } from './util.js';
+import { insert, friendlyDateTime, newToken, localNow, zonedToUtc, recorded } from './util.js';
 import { templatesFor, renderTemplate, patientLang, fixedText, subjectFor } from './templates.js';
 
 // Delivery drivers. "log" records the message without sending it (development / not yet configured).
@@ -99,7 +99,7 @@ export async function markBad(db, practiceId, channel, to, reason) {
   if (!key) return 0;
   const col = channel === 'sms' ? 'phone' : 'email';
   const hits = (await db.all(`SELECT id, ${col} AS v FROM patients WHERE practice_id = ? AND ${col} IS NOT NULL`, practiceId)).filter((p) => optOutAddress(channel, p.v) === key);
-  for (const p of hits) await db.run(`UPDATE patients SET ${channel}_bad_at = datetime('now'), ${channel}_bad_reason = ? WHERE id = ?`, String(reason).slice(0, 200), p.id);
+  for (const p of hits) await recorded(db, 'patients', p.id, () => db.run(`UPDATE patients SET ${channel}_bad_at = datetime('now'), ${channel}_bad_reason = ? WHERE id = ?`, String(reason).slice(0, 200), p.id));
   return hits.length;
 }
 

@@ -1,4 +1,4 @@
-import { insert, localNow, friendlyDateTime } from './util.js';
+import { insert, localNow, friendlyDateTime, recorded } from './util.js';
 import { sendMessage, withinSendHours, recipientFor } from './messaging.js';
 import { templatesFor, renderTemplate, patientLang, fixedText } from './templates.js';
 import { validateAppt } from './routes/schedule.js';
@@ -137,8 +137,8 @@ export async function claimOffer(db, recipient) {
       const end = new Date(Date.parse(`${offer.start_time.replace(' ', 'T')}:00Z`) + length * 60000).toISOString().slice(0, 16).replace('T', ' ');
       const row = { ...current, start_time: offer.start_time, end_time: end, provider_id: offer.provider_id, operatory_id: offer.operatory_id, status: 'confirmed' };
       try { await validateAppt(db, offer.practice_id, row, { overrideBlockout: true }); } catch { return { won: false, offer }; }
-      await db.run("UPDATE appointments SET start_time = ?, end_time = ?, provider_id = ?, operatory_id = ?, status = 'confirmed', confirmed_at = datetime('now'), confirmed_via = 'text', asap = 0, reminder_sent_at = NULL, notice_due = NULL WHERE id = ?",
-        row.start_time, row.end_time, row.provider_id, row.operatory_id, current.id);
+      await recorded(db, 'appointments', current.id, () => db.run("UPDATE appointments SET start_time = ?, end_time = ?, provider_id = ?, operatory_id = ?, status = 'confirmed', confirmed_at = datetime('now'), confirmed_via = 'text', asap = 0, reminder_sent_at = NULL, notice_due = NULL WHERE id = ?",
+        row.start_time, row.end_time, row.provider_id, row.operatory_id, current.id));
       await db.run('DELETE FROM appointment_reminders WHERE appointment_id = ?', current.id);
       apptId = current.id;
     } else {

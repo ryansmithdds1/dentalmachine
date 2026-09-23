@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { setActor } from '../actor.js';
 import { requirePermission, HttpError, rateLimit } from '../auth.js';
 import { findOr404, audit, newToken, hashToken, insert, practiceNow } from '../util.js';
 import { publish } from '../events.js';
@@ -89,11 +90,12 @@ export function labPublicRoutes({ db, storage }) {
     const doc = await db.get('SELECT * FROM documents WHERE id = ? AND patient_id = ? AND deleted_at IS NULL', did, c.patient_id);
     if (!doc) throw new HttpError(404, 'File not found');
     const data = await storage.read(doc.storage_key, !!doc.encrypted);
-    await db.run('INSERT INTO audit_log (practice_id, action, entity, entity_id, details, ip) VALUES (?, ?, ?, ?, ?, ?)', c.practice_id, 'lab_link.download', 'documents', doc.id, JSON.stringify({ lab_case: c.id }), req.ip ?? null);
+    await audit(db, { ip: req.ip, user: { practice_id: c.practice_id, id: null } }, 'lab_link.download', 'documents', doc.id, { lab_case: c.id }, { source: 'integration', actor: `Lab: ${c.lab_name}`, patientId: c.patient_id });
     res.set({ 'Content-Type': doc.mime || 'application/octet-stream', 'Content-Disposition': `attachment; filename="${String(doc.filename).replace(/["\r\n]/g, '')}"`, 'Cache-Control': 'no-store' }).send(data);
   });
   r.post('/lab/:token/status', limiter, async (req, res) => {
     const c = await caseFor(req.params.token);
+    setActor({ source: 'integration', actor: `Lab: ${c.lab_name}`, practiceId: c.practice_id });
     const status = String(req.body?.status || '');
     if (!Object.hasOwn(LAB_UPDATES, status)) throw new HttpError(400, `status must be one of: ${Object.keys(LAB_UPDATES).join(', ')}`);
     const note = String(req.body?.note || '').trim().slice(0, 1000) || null;

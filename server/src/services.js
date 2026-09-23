@@ -1,5 +1,5 @@
 import { HttpError } from './auth.js';
-import { insert, practiceNow } from './util.js';
+import { insert, practiceNow, recorded } from './util.js';
 import { benefitYear, deductibleMet, estimateCoverage } from './benefits.js';
 import { resetRecalls } from './recalls.js';
 import { applyMemberBenefit } from './memberships.js';
@@ -56,11 +56,11 @@ export async function completeProcedure(db, user, procedure, { providerId, appoi
   const location = (visit && (await db.get('SELECT location_id FROM appointments WHERE id = ? AND practice_id = ?', visit, procedure.practice_id))?.location_id) || locationId;
 
   await db.tx(async () => {
-    await db.run(
+    await recorded(db, 'procedures', procedure.id, () => db.run(
       `UPDATE procedures SET status = 'completed', completed_at = datetime('now'), provider_id = ?, appointment_id = COALESCE(?, appointment_id)
        WHERE id = ?`,
       provider, appointmentId ?? null, procedure.id,
-    );
+    ));
     await insert(db, 'ledger_entries', {
       practice_id: procedure.practice_id,
       patient_id: procedure.patient_id,
@@ -104,7 +104,7 @@ export async function completeProcedure(db, user, procedure, { providerId, appoi
     // Close out the treatment plan once nothing remains planned.
     if (procedure.treatment_plan_id) {
       const remaining = (await db.get("SELECT COUNT(*) AS n FROM procedures WHERE treatment_plan_id = ? AND status = 'planned'", procedure.treatment_plan_id)).n;
-      if (remaining === 0) await db.run("UPDATE treatment_plans SET status = 'completed' WHERE id = ?", procedure.treatment_plan_id);
+      if (remaining === 0) await recorded(db, 'treatment_plans', procedure.treatment_plan_id, () => db.run("UPDATE treatment_plans SET status = 'completed' WHERE id = ?", procedure.treatment_plan_id));
     }
   });
 }
@@ -133,10 +133,10 @@ export async function postClaimPayment(
     }
     await postClaimLines(db, claim, { amount, writeOff, lines });
     // Only an open claim takes a payment; a concurrent post rolls this one back instead of doubling it.
-    const updated = await db.run(
+    const updated = await recorded(db, 'claims', claim.id, () => db.run(
       "UPDATE claims SET paid_amount = paid_amount + ?, status = ?, paid_at = datetime('now'), denial_reason = NULL, payer_claim_number = COALESCE(?, payer_claim_number) WHERE id = ? AND status IN ('submitted','partially_paid','denied')",
       amount, final ? 'paid' : 'partially_paid', payerClaimNumber, claim.id,
-    );
+    ));
     if (!updated.changes) throw new HttpError(409, `Claim #${claim.id} is no longer open for payment`);
     // The first payment on a claim counts toward the deductible: what the payer says it applied (835 PR-1),
     // or else what we estimated. It goes to the benefit year of the date of service.
@@ -149,7 +149,7 @@ export async function postClaimPayment(
       // Only this benefit year's deductible is tracked; a late payment for last year's visit doesn't count.
       if (start === current) {
         const met = Math.min(policy.deductible, deductibleMet(policy, date) + applied);
-        await db.run('UPDATE patient_insurance SET deductible_met = ?, deductible_year = ? WHERE id = ?', met, start, policy.id);
+        await recorded(db, 'patient_insurance', policy.id, () => db.run('UPDATE patient_insurance SET deductible_met = ?, deductible_year = ? WHERE id = ?', met, start, policy.id));
       }
     }
     await db.run('UPDATE claims SET paid_date = ? WHERE id = ?', date, claim.id);
@@ -280,7 +280,7 @@ export async function checkPostingDate(db, practiceId, date) {
 // type is posted today, so past day sheets and closed periods never change.
 export async function reverseEntry(db, entry, { userId, reason, date }) {
   if (entry.reverses_id) throw new HttpError(409, "A reversal can't itself be voided");
-  const marked = await db.run("UPDATE ledger_entries SET voided_at = datetime('now'), voided_by = ?, void_reason = ? WHERE id = ? AND voided_at IS NULL", userId ?? null, reason, entry.id);
+  const marked = await recorded(db, 'ledger_entries', entry.id, () => db.run("UPDATE ledger_entries SET voided_at = datetime('now'), voided_by = ?, void_reason = ? WHERE id = ? AND voided_at IS NULL", userId ?? null, reason, entry.id));
   if (!marked.changes) throw new HttpError(409, 'That entry was already voided');
   return insert(db, 'ledger_entries', {
     practice_id: entry.practice_id, patient_id: entry.patient_id, type: entry.type, amount: -entry.amount,
@@ -302,7 +302,7 @@ export async function voidLedgerEntry(db, entry, { userId, reason }) {
     if (entry.type === 'charge' && entry.procedure_id) {
       const claim = await db.get("SELECT c.id FROM claim_items ci JOIN claims c ON c.id = ci.claim_id WHERE ci.procedure_id = ? AND c.status != 'void'", entry.procedure_id);
       if (claim) throw new HttpError(409, `The procedure is on claim #${claim.id} — void that claim first`);
-      await db.run("UPDATE procedures SET status = 'planned', completed_at = NULL WHERE id = ? AND status = 'completed'", entry.procedure_id);
+      await recorded(db, 'procedures', entry.procedure_id, () => db.run("UPDATE procedures SET status = 'planned', completed_at = NULL WHERE id = ? AND status = 'completed'", entry.procedure_id));
       await db.run('DELETE FROM tooth_conditions WHERE procedure_id = ?', entry.procedure_id);
       // The plan discount given for it goes too.
       const discounts = await db.all("SELECT * FROM ledger_entries WHERE procedure_id = ? AND adjustment_type = 'Treatment plan discount' AND voided_at IS NULL AND reverses_id IS NULL", entry.procedure_id);

@@ -3,7 +3,7 @@ import { openSlotLater } from '../fill.js';
 import { createHash, randomInt, timingSafeEqual } from 'node:crypto';
 import { HttpError, rateLimit, signToken, verifyToken } from '../auth.js';
 import { hit } from '../cluster.js';
-import { insert, audit, practiceNow, newToken, pick, mapSeq, publicPractice } from '../util.js';
+import { insert, audit, practiceNow, newToken, pick, mapSeq, publicPractice, recorded } from '../util.js';
 import { sendMessage } from '../messaging.js';
 import { publish } from '../events.js';
 import { planStatus } from './family.js';
@@ -182,14 +182,14 @@ export function portalRoutes({ db, secret, config, payments, messenger, storage 
     if (row.email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(row.email)) throw new HttpError(400, 'Enter a valid email address');
     if (row.phone && digits(row.phone).length !== 10) throw new HttpError(400, 'Enter a 10-digit phone number');
     const keys = Object.keys(row);
-    if (keys.length) await db.run(`UPDATE patients SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, ...keys.map((k) => row[k]), patient.id);
+    if (keys.length) await recorded(db, 'patients', patient.id, () => db.run(`UPDATE patients SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, ...keys.map((k) => row[k]), patient.id));
     await pAudit(req, 'portal.contact_update', 'patients', patient.id, { fields: keys });
     res.json({ ok: true });
   });
 
   r.post('/appointments/:aid/confirm', async (req, res) => {
     const a = await ownAppt(req);
-    if (a.status === 'scheduled') await db.run("UPDATE appointments SET status = 'confirmed', confirmed_at = datetime('now'), confirmed_via = 'portal' WHERE id = ?", a.id);
+    if (a.status === 'scheduled') await recorded(db, 'appointments', a.id, () => db.run("UPDATE appointments SET status = 'confirmed', confirmed_at = datetime('now'), confirmed_via = 'portal' WHERE id = ?", a.id));
     publish(req.portal.practice.id, { type: 'schedule', dates: [a.start_time.slice(0, 10)], source: 'portal' });
     await pAudit(req, 'portal.confirm', 'appointments', a.id);
     res.json({ ok: true });
@@ -199,7 +199,7 @@ export function portalRoutes({ db, secret, config, payments, messenger, storage 
     const a = await ownAppt(req);
     const now = await practiceNow(db, req.portal.practice.id);
     if (a.start_time <= addHours(now, 24)) throw new HttpError(409, `Visits within 24 hours can't be cancelled online — please call ${req.portal.practice.phone || 'the office'}`);
-    await db.run("UPDATE appointments SET status = 'cancelled' WHERE id = ?", a.id);
+    await recorded(db, 'appointments', a.id, () => db.run("UPDATE appointments SET status = 'cancelled' WHERE id = ?", a.id));
     await db.run("UPDATE procedures SET appointment_id = NULL WHERE appointment_id = ? AND status = 'planned'", a.id);
     const p = req.portal.household.find((h) => h.id === a.patient_id);
     await insert(db, 'tasks', {
@@ -243,7 +243,7 @@ export function portalRoutes({ db, secret, config, payments, messenger, storage 
       await validateAppt(db, practice.id, row);
     }
     // The new time gets its reminders afresh, and a confirmation of the move.
-    await db.run("UPDATE appointments SET start_time = ?, end_time = ?, operatory_id = ?, status = ?, confirmed_at = NULL, reminder_sent_at = NULL, notice_due = 'booked' WHERE id = ?", start, end, row.operatory_id, 'scheduled', a.id);
+    await recorded(db, 'appointments', a.id, () => db.run("UPDATE appointments SET start_time = ?, end_time = ?, operatory_id = ?, status = ?, confirmed_at = NULL, reminder_sent_at = NULL, notice_due = 'booked' WHERE id = ?", start, end, row.operatory_id, 'scheduled', a.id));
     await db.run('DELETE FROM appointment_reminders WHERE appointment_id = ?', a.id);
     const p = req.portal.household.find((h) => h.id === a.patient_id);
     await insert(db, 'tasks', {

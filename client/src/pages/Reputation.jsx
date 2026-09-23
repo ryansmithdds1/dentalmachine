@@ -66,6 +66,7 @@ function Review({ review: r, canWrite, onChange }) {
   const [text, setText] = useState(r.reply_status === 'posted' ? null : r.reply || '');
   const [busy, setBusy] = useState(false);
   const [caution, setCaution] = useState(null);
+  const [drafted, setDrafted] = useState(false);
   const [err, setErr] = useState(null);
   const act = async (fn) => { setBusy(true); setErr(null); try { await fn(); } catch (e) { setErr(e); } finally { setBusy(false); } };
   return (
@@ -84,8 +85,8 @@ function Review({ review: r, canWrite, onChange }) {
           {caution && <div className="text-warn" style={{ fontSize: 12 }}>{caution}</div>}
           <div className="muted" style={{ fontSize: 11 }}>Never confirm they’re a patient or mention their care — even to thank them.</div>
           <div className="form-actions">
-            <button disabled={busy} onClick={() => act(async () => { const d = await api.post(`/reviews/${r.id}/draft`); setText(d.reply); setCaution(d.caution); })}>Draft with AI</button>
-            <button className="primary" disabled={busy || !text?.trim()} onClick={() => act(async () => { await api.post(`/reviews/${r.id}/reply`, { text }); onChange(); })}>Post reply</button>
+            <button disabled={busy} onClick={() => act(async () => { const d = await api.post(`/reviews/${r.id}/draft`); setText(d.reply); setCaution(d.caution); setDrafted(true); })}>Draft with AI</button>
+            <button className="primary" disabled={busy || !text?.trim()} onClick={() => act(async () => { await api.post(`/reviews/${r.id}/reply`, { text, ai_drafted: drafted }); onChange(); })}>Post reply</button>
           </div>
         </div>
       )}

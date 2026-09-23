@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { requirePermission, HttpError, can } from '../auth.js';
-import { pick, requireFields, insert, update, findOr404, audit, practiceNow, mapSeq, friendlyDateTime } from '../util.js';
+import { pick, requireFields, insert, update, findOr404, audit, practiceNow, mapSeq, friendlyDateTime, recorded } from '../util.js';
 import { sendMessage, preferredChannel, recipientFor } from '../messaging.js';
 import { messageText, patientLang, subjectFor } from '../templates.js';
 import { primaryPolicy, patientBalance, estimateCoverage, completeProcedure } from '../services.js';
@@ -81,10 +81,10 @@ export default function frontDeskRoutes({ db, messenger }) {
     // finish: false completes the work without checking the patient out yet.
     if (req.body?.finish !== false) {
       const now = await practiceNow(db, req.user.practice_id);
-      await db.run(
+      await recorded(db, 'appointments', a.id, () => db.run(
         "UPDATE appointments SET status = 'completed', dismissed_at = COALESCE(dismissed_at, ?), checked_out_at = ?, checked_out_by = ? WHERE id = ?",
         now, now, req.user.id, a.id,
-      );
+      ));
     }
     await audit(db, req, 'appointment.checkout', 'appointments', a.id, { completed_procedures: completed });
     res.json({ ...(await checkoutSummary(req.user.practice_id, a.id)), completed_procedures: completed });

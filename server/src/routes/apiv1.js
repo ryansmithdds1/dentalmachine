@@ -1,6 +1,7 @@
 import express, { Router } from 'express';
+import { setActor } from '../actor.js';
 import { HttpError, rateLimit } from '../auth.js';
-import { insert, hashToken, normalizeDateTime, audit, practiceNow } from '../util.js';
+import { insert, hashToken, normalizeDateTime, audit, practiceNow, recorded } from '../util.js';
 import { apiPatient, apiAppointment, apiPayment, emitEvent } from '../webhooks.js';
 import { validateAppt, openSlots } from './schedule.js';
 import { findDuplicates } from './patients.js';
@@ -28,6 +29,7 @@ export default function apiV1Routes({ db }) {
       req.api = { key_id: k.id, name: k.name, practice_id: k.practice_id, scopes: JSON.parse(k.scopes) };
       // Every API change is audited as coming from this key.
       req.user = { id: null, practice_id: k.practice_id, role: 'api', name: `API: ${k.name}` };
+      setActor({ source: 'api', actor: `API: ${k.name}`, practiceId: k.practice_id });
       if (!k.last_used_at || Date.parse(`${k.last_used_at.replace(' ', 'T')}Z`) < Date.now() - 60_000) await db.run("UPDATE api_keys SET last_used_at = datetime('now') WHERE id = ?", k.id);
       next();
     } catch (err) {
@@ -98,7 +100,7 @@ export default function apiV1Routes({ db }) {
     const row = cleanPatient(req.body || {}, false);
     if (!Object.keys(row).length) throw new HttpError(400, 'Nothing to update');
     if (row.primary_provider_id && !(await db.get('SELECT id FROM providers WHERE id = ? AND practice_id = ?', row.primary_provider_id, pid(req)))) throw new HttpError(400, 'primary_provider_id not found');
-    await db.run(`UPDATE patients SET ${Object.keys(row).map((k) => `${k} = ?`).join(', ')}, updated_at = datetime('now') WHERE id = ?`, ...Object.values(row), p.id);
+    await recorded(db, 'patients', p.id, () => db.run(`UPDATE patients SET ${Object.keys(row).map((k) => `${k} = ?`).join(', ')}, updated_at = datetime('now') WHERE id = ?`, ...Object.values(row), p.id));
     const after = await db.get('SELECT * FROM patients WHERE id = ?', p.id);
     await audit(db, req, 'patient.update', 'patients', p.id, { via: 'api', fields: Object.keys(row) });
     await emitEvent(db, pid(req), 'patient.updated', apiPatient(after));
@@ -163,9 +165,9 @@ export default function apiV1Routes({ db }) {
   const setStatus = (status) => async (req, res) => {
     const a = await apptOr404(req);
     if (!['scheduled', 'confirmed'].includes(a.status)) throw new HttpError(409, `Appointment is ${a.status}`);
-    if (status === 'confirmed') await db.run("UPDATE appointments SET status = 'confirmed', confirmed_at = COALESCE(confirmed_at, datetime('now')), confirmed_via = 'api' WHERE id = ?", a.id);
+    if (status === 'confirmed') await recorded(db, 'appointments', a.id, () => db.run("UPDATE appointments SET status = 'confirmed', confirmed_at = COALESCE(confirmed_at, datetime('now')), confirmed_via = 'api' WHERE id = ?", a.id));
     else {
-      await db.run("UPDATE appointments SET status = 'cancelled' WHERE id = ?", a.id);
+      await recorded(db, 'appointments', a.id, () => db.run("UPDATE appointments SET status = 'cancelled' WHERE id = ?", a.id));
       await db.run("UPDATE procedures SET appointment_id = NULL WHERE appointment_id = ? AND status = 'planned'", a.id);
     }
     const after = await db.get('SELECT * FROM appointments WHERE id = ?', a.id);
