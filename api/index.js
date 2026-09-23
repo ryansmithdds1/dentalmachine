@@ -19,6 +19,15 @@ export default async function handler(req, res) {
     ready = null;
     throw err;
   });
-  const app = await ready;
+  let app;
+  try {
+    app = await ready;
+  } catch (err) {
+    // Start-up failed (usually the database): answer plainly and try again on the next request.
+    console.error('Startup failed:', err);
+    res.statusCode = 503;
+    res.setHeader('Content-Type', 'application/json');
+    return res.end(JSON.stringify({ error: 'The server is starting up or cannot reach its database. Try again shortly.' }));
+  }
   return app(req, res);
 }
