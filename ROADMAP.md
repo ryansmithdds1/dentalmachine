@@ -133,7 +133,7 @@ The "OD / Curve" column shows which competitor has the feature: ✓ = has it, ~ 
 | 42 | ✅ (slot hold done; instant booking and deposits still to do) **Instant online booking** into approved slots (optional), holding the slot while a request is pending; collect insurance and a deposit. | Curve and NexHealth-style self-scheduling. | ✓ / ✓ | P2 | M |
 | 43 | ✅ **Referral tracking.** Referring doctors and referred-out, with referral letters and a report. | Specialists depend on it; GPs track sources. | ✓ / ✓ | P2 | M |
 | 44 | ✅ **Texting inbox upgrades.** Unknown numbers (attach to patient), email threads, assignment, archiving, editable quick replies, MMS photos. | Front-desk communication hub. | ✓ / ✓ | P2 | M |
-| 45 | **Custom forms builder:** consents (extraction, endo, sedation), HIPAA, financial policy, COVID/pre-op; auto-sent before visits; insurance card and ID photo upload. | Paperless office, Curve Forms. | ✓ / ✓ | P1 | L |
+| 45 | ✅ **Custom forms builder:** consents (extraction, endo, sedation), HIPAA, financial policy, COVID/pre-op; auto-sent before visits; insurance card and ID photo upload. | Paperless office, Curve Forms. | ✓ / ✓ | P1 | L |
 | 46 | ✅ **Patient appointment history** on the chart (past visits, no-shows, cancellations). | Basic context. | ✓ / ✓ | P1 | S |
 | 47 | **Command palette actions** ("book for…", "text…", "take payment…"). | Speed. | ~ / ~ | P3 | S |
 
@@ -150,7 +150,7 @@ The "OD / Curve" column shows which competitor has the feature: ✓ = has it, ~ 
 | 54 | ✅ **Structured medical history.** _(Done: condition checklist, vitals/BP with warnings, ASA, premed alerts on chart and schedule, history review. Allergies and medications stay free text.)_ Coded allergies and medications, vitals and blood pressure, ASA class, premedication flag driving alerts, history versions with side-by-side review. | Safety. | ✓ / ✓ | P2 | M |
 | 55 | **Image viewer.** Zoom, pan, brightness and contrast, rotate, measure, annotate; FMX mount templates; side-by-side comparison; DICOM rendering (dcmjs / cornerstone). | Curve ships integrated imaging; this is a visible gap. | ✓ / ✓ | P1 | L |
 | 56 | **Direct sensor capture** (TWAIN bridge) as well as imaging-program bridges. | Offices without DEXIS or similar software. | ✓ / ✓ | P3 | L |
-| 57 | **Procedure-specific informed consents** with signature, filed as a document. | Risk management. | ✓ / ✓ | P1 | M |
+| 57 | ✅ **Procedure-specific informed consents** with signature, filed as a document. | Risk management. | ✓ / ✓ | P1 | M |
 | 58 | ✅ **Lab directory and lab slips.** _(Photo attachments go on the patient's documents.)_ Link to a procedure, printable Rx slip, photo attachments. | Lab workflow. | ✓ / ~ | P3 | S |
 | 59 | **Ortho module.** Ortho chart, contract billing (down payment plus monthly auto-billing), bracket and wire log, ortho lifetime max. | GP offices doing ortho or aligners. | ✓ / ~ | P3 | L |
 | 60 | ✅ **Full CDT code set import** with treatment area, time units and auto-condition (extraction → missing). | Completeness. | ✓ / ✓ | P2 | S |

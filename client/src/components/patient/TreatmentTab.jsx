@@ -6,6 +6,7 @@ import { money, fmtDate, practiceToday, toCents, fromCents } from '../../format.
 import { Badge, ErrorBox, Modal, useSubmit } from '../ui.jsx';
 import AppointmentForm from '../AppointmentForm.jsx';
 import { CodePicker } from './ChartTab.jsx';
+import SendForms from '../FormsSend.jsx';
 import { codeArea, QUADRANT_LABELS } from '../Odontogram.jsx';
 
 export default function TreatmentTab({ patient, onChange }) {
@@ -18,6 +19,7 @@ export default function TreatmentTab({ patient, onChange }) {
   const [creating, setCreating] = useState(false);
   const [err, setErr] = useState(null);
   const [presenting, setPresenting] = useState(null);
+  const [consent, setConsent] = useState(null);
   const [note, setNote] = useState(null);
   const refresh = () => { reload(); reloadLoose(); onChange?.(); };
 
@@ -42,6 +44,9 @@ export default function TreatmentTab({ patient, onChange }) {
       <ErrorBox error={err} />
       {note && <div className="public-notice ok" style={{ marginBottom: 12 }}>{note}</div>}
       {presenting && <PresentModal plan={presenting} patient={patient} onClose={() => { setPresenting(null); refresh(); }} />}
+      {consent && (
+        <SendForms patient={patient} title={`Consent for “${consent.name}”`} procedureIds={consent.procedures.filter((p) => p.status === 'planned').map((p) => p.id)} onClose={() => setConsent(null)} />
+      )}
       {plans?.length === 0 && unplanned.length === 0 && <div className="card empty">No treatment planned.</div>}
 
       {plans?.map((plan) => (
@@ -63,6 +68,7 @@ export default function TreatmentTab({ patient, onChange }) {
                   <button className="small" onClick={() => act(async () => { await api.post('/preauths', { patient_insurance_id: plan.estimate.policy.id, treatment_plan_id: plan.id }); setNote('Pre-authorization created — send it from Billing → Pre-authorizations.'); })}>Pre-authorize</button>
                 )}
                 <button className="small" onClick={() => window.open(`/treatment-plans/${plan.id}/print`, '_blank')}>Print</button>
+                {plan.procedures.some((p) => p.status === 'planned') && <button className="small" title="Informed consent for this plan's procedures" onClick={() => setConsent(plan)}>Consent…</button>}
                 {plan.status !== 'rejected' && <button className="small" onClick={() => setAdding(plan)}>+ Add work</button>}
                 {plan.status === 'proposed' && <button className="small" title="A copy of this plan's unstarted work to change into another option (e.g. implant vs bridge). Accepting one option declines the others." onClick={() => act(() => api.post(`/treatment-plans/${plan.id}/duplicate`, {}))}>+ Alternative</button>}
                 {plan.status !== 'rejected' && (

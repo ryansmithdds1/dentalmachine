@@ -660,6 +660,22 @@ CREATE TABLE IF NOT EXISTS portal_codes (
 CREATE INDEX IF NOT EXISTS idx_portal_codes ON portal_codes(practice_id, contact);
 
 -- Patients without an appointment who want one (or an earlier one), and when they can come.
+-- Practice-defined forms (consents, policies, intake): a list of fields, versioned when edited.
+CREATE TABLE IF NOT EXISTS form_templates (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  name TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'consent',
+  description TEXT,
+  fields TEXT NOT NULL,
+  procedure_codes TEXT,
+  auto_send INTEGER NOT NULL DEFAULT 0,
+  renew_months INTEGER NOT NULL DEFAULT 0,
+  version INTEGER NOT NULL DEFAULT 1,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 -- Data conversion from another practice system: one batch per imported file.
 CREATE TABLE IF NOT EXISTS import_batches (
   id INTEGER PRIMARY KEY,
@@ -1030,6 +1046,14 @@ const COLUMNS = [
   ['practices', 'reminder_steps', 'TEXT'],
   ['practices', 'custom_fields', 'TEXT'],
   ['patients', 'custom', 'TEXT'],
+  ['form_requests', 'template_id', 'INTEGER REFERENCES form_templates(id)'],
+  ['form_requests', 'appointment_id', 'INTEGER REFERENCES appointments(id)'],
+  ['form_requests', 'packet_id', 'INTEGER'],
+  ['form_requests', 'context', 'TEXT'],
+  ['patient_forms', 'template_id', 'INTEGER REFERENCES form_templates(id)'],
+  ['patient_forms', 'template_version', 'INTEGER'],
+  ['patient_forms', 'fields', 'TEXT'],
+  ['patient_forms', 'document_id', 'INTEGER REFERENCES documents(id)'],
   ['appointment_series', 'monthly_by', 'TEXT'],
   ['appointment_series', 'until_date', 'TEXT'],
   ['blockouts', 'series_key', 'TEXT'],
@@ -1133,7 +1157,7 @@ export function schemaInfo() {
     if (tables.has(table) && !tables.get(table).some((c) => c.name === column)) tables.get(table).push({ name: column, type: def.split(' ')[0], ref: ref ? ref[1] : null, notnull: /NOT NULL/.test(def) });
   }
   const aliases = { guarantor_id: 'patients', referred_by_id: 'referral_contacts', primary_provider_id: 'providers', primary_hygienist_id: 'providers', default_provider_id: 'providers', created_by: 'users', handled_by: 'users', recorded_by: 'users', reviewed_by: 'users', signed_by: 'users', voided_by: 'users', checked_out_by: 'users', assigned_to: 'users', author_id: 'users',
-    addendum_of: 'clinical_notes', plan_id: 'insurance_plans', batch_id: 'edi_batches', primary_claim_id: 'claims', corrected_from_id: 'claims', reverses_id: 'ledger_entries', refund_of_id: 'ledger_entries' };
+    addendum_of: 'clinical_notes', plan_id: 'insurance_plans', batch_id: 'edi_batches', primary_claim_id: 'claims', corrected_from_id: 'claims', reverses_id: 'ledger_entries', refund_of_id: 'ledger_entries', packet_id: 'form_requests' };
   for (const [table, cols] of tables) {
     for (const c of cols) {
       if (c.ref || c.name === 'id' || c.type !== 'INTEGER') continue; // text IDs belong to outside services (Twilio, Stripe)

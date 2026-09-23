@@ -602,3 +602,7 @@ span.perio-site { border-color: transparent; }
 .waitlist-offer { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border); }
 .progress { height: 6px; background: var(--border, #e5e7eb); border-radius: 3px; overflow: hidden; margin-top: 8px; }
 .progress > div { height: 100%; background: var(--primary, #0f766e); transition: width 0.2s; }
+.form-editor { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 18px; margin-top: 8px; }
+.form-editor .field-row { display: flex; flex-direction: column; gap: 6px; padding: 10px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 8px; }
+.form-preview { max-height: 60vh; overflow: auto; }
+@media (max-width: 800px) { .form-editor { grid-template-columns: 1fr; } }

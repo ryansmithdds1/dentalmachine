@@ -36,6 +36,7 @@ Cloud practice management software for dental offices: scheduling, patient recor
 | **Reminders & messaging** | Texts or emails reminders automatically (24, 48 or 72 hours ahead). Each reminder has a link the patient taps to confirm or cancel, which updates the schedule. Staff can also send one-off messages and recall reminders. Every message is logged, and patients can opt out of texts or email. |
 | **Online booking** | Each practice gets a mobile-friendly booking page (`/book/<name>`) showing real open times on weekdays. Requests land in the **Online requests** queue. Accepting one matches an existing patient or creates a new one, books the appointment and sends a confirmation. |
 | **Digital intake forms** | Staff text or email a single-use link, or open it on a tablet in the office. The patient fills in their medical history and contact details and signs on screen. The answers update the chart's alerts, allergies and medications, and the signed form is kept on the record. |
+| **Forms & consents** | A form builder for consents, policies and intake (paragraphs, checkboxes, initials, yes/no, pick lists, photos of insurance cards and IDs, signatures), with starter extraction, root canal, sedation, HIPAA and financial-policy forms. Several forms go out as one link. Consents tied to procedure codes are suggested from the treatment plan and filled in with the procedures, teeth and dentist. Forms marked auto-send go out before visits when a patient hasn't signed them (or they've lapsed). Each signed form is filed in the chart as a PDF with the exact wording and version the patient signed. |
 | **Documents & X-rays** | Upload images, PDFs and DICOM files to the patient record, tag them by type and tooth, and view or download them. Files are encrypted when stored (AES-256-GCM). |
 | **Card payments (text-to-pay)** | Sends the patient a secure Stripe Checkout link. When they pay, the payment posts to the ledger automatically. |
 | **Day sheet** | End-of-day close-out: production, payments and the deposit broken down by payment method. Printable. |
@@ -178,7 +179,7 @@ All endpoints are under `/api` and need `Authorization: Bearer <token>`, except 
 | EDI | `POST /claims/837`, `GET /claims/:id/validate`, `POST /insurance/:id/eligibility`, `GET /eligibility/:id/270`, `POST /eligibility/:id/response\|apply`, `GET /patients/:id/eligibility`, `POST /era/import`, `GET /era` |
 | Texting | `GET /conversations`, `GET /conversations/unread`, `GET /patients/:id/conversation`, `POST /patients/:id/conversation/read`, `POST /webhooks/twilio/sms` (signed by Twilio) |
 | Office | `GET/POST/PUT /lab-cases`, `GET/POST/PUT /tasks` |
-| Engagement | `GET /messages`, `POST /patients/:id/messages`, `POST /appointments/:id/remind`, `POST /recalls/:id/remind`, `GET /booking-requests`, `POST /booking-requests/:id/accept\|decline`, `POST /patients/:id/form-requests`, `GET /patients/:id/forms` |
+| Engagement | `GET /messages`, `POST /patients/:id/messages`, `POST /appointments/:id/remind`, `POST /recalls/:id/remind`, `GET /booking-requests`, `POST /booking-requests/:id/accept\|decline`, `POST /patients/:id/form-requests`, `GET /patients/:id/forms`, `GET/POST/PUT /form-templates`, `POST /patients/:id/form-packets`, `GET /patients/:id/consents/suggest` |
 | Documents | `GET/POST /patients/:id/documents`, `GET /documents/:id/file`, `DELETE /documents/:id` |
 | Payments | `GET /payments/config`, `GET/POST /patients/:id/payment-requests`, `POST /webhooks/stripe` (signed by Stripe) |
 | 2FA | `POST /auth/mfa/setup\|enable\|disable` |
@@ -193,7 +194,7 @@ All endpoints are under `/api` and need `Authorization: Bearer <token>`, except 
 | Cards & autopay | `GET/POST /patients/:id/payment-methods`, `POST /patients/:id/card-setup`, `DELETE /payment-methods/:id`, `POST /payment-plans/:id/charge-now`; `PUT /payment-plans/:id` accepts `autopay_method_id` |
 | Portal (patient session) | `/api/public/portal/:practice/code\|verify`, then `/api/portal/me`, `/contact`, `/appointments/:id/confirm\|cancel`, `/forms/:id/open`, `/treatment-plans/:id/open`, `/pay` |
 | Sign-on & system | `GET /auth/sso/lookup\|start\|callback`, `GET/PUT /practice/sso`, `GET /integrations` |
-| Public (no login) | `GET /public/practices/:slug`, `GET /public/practices/:slug/availability`, `POST /public/practices/:slug/booking-requests`, `GET/POST /public/confirm/:token`, `GET/POST /public/forms/:token`, `GET/POST /public/tp/:token` |
+| Public (no login) | `GET /public/practices/:slug`, `GET /public/practices/:slug/availability`, `POST /public/practices/:slug/booking-requests`, `GET/POST /public/confirm/:token`, `GET/POST /public/forms/:token`, `POST /public/forms/:token/:id`, `GET/POST /public/tp/:token` |
 
 ## Roadmap ideas
 - Direct REST integrations with individual clearinghouses and payers that don't offer SFTP or CAQH CORE

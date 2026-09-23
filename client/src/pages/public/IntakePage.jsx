@@ -3,40 +3,69 @@ import { useParams } from 'react-router-dom';
 import { api } from '../../api.js';
 import { ErrorBox, useSubmit } from '../../components/ui.jsx';
 import SignaturePad from '../../components/SignaturePad.jsx';
+import FormFields, { formComplete } from '../../components/FormFields.jsx';
 import PublicLayout from './PublicLayout.jsx';
 
 export default function IntakePage() {
   const { token } = useParams();
   const [info, setInfo] = useState(null);
   const [loadError, setLoadError] = useState(null);
-  const [a, setA] = useState({ conditions: [], consent_hipaa: false, consent_treatment: false });
-  const [signatureName, setSignatureName] = useState('');
-  const [signatureImage, setSignatureImage] = useState(null);
-  const [done, setDone] = useState(false);
+  const [finished, setFinished] = useState([]);
 
   useEffect(() => {
-    api.get(`/public/forms/${token}`).then((f) => {
-      setInfo(f);
-      setA((cur) => ({ ...cur, ...Object.fromEntries(Object.entries(f.prefill).map(([k, v]) => [k, v || ''])) }));
-    }).catch(setLoadError);
+    api.get(`/public/forms/${token}`).then(setInfo).catch(setLoadError);
   }, [token]);
-
-  const { submit, busy, error } = useSubmit(async () => {
-    await api.post(`/public/forms/${token}`, { answers: a, signature_name: signatureName, signature_image: signatureImage });
-    setDone(true);
-    window.scrollTo(0, 0);
-  });
 
   if (loadError) return <PublicLayout title="Patient forms"><ErrorBox error={loadError} /></PublicLayout>;
   if (!info) return <PublicLayout title="Patient forms"><p>Loading…</p></PublicLayout>;
   const practice = { name: info.practice_name };
-  if (done) {
+  const forms = info.forms || [{ id: 0, kind: 'medical_history', name: 'Health history', status: 'pending' }];
+  const todo = forms.filter((f) => f.status === 'pending' && !finished.includes(f.id));
+  const current = todo[0];
+  const done = (id) => { setFinished((x) => [...x, id]); window.scrollTo(0, 0); };
+  if (!current) {
     return (
       <PublicLayout title="All done!" practice={practice}>
-        <div className="public-notice ok">Thank you, {info.first_name}. Your health history has been securely sent to {info.practice_name}.</div>
+        <div className="public-notice ok">Thank you, {info.first_name}. Your {forms.length > 1 ? 'forms have' : forms[0].kind === 'medical_history' ? 'health history has' : 'form has'} been securely sent to {info.practice_name}.</div>
       </PublicLayout>
     );
   }
+  const step = forms.length > 1 ? <div className="muted" style={{ marginBottom: 8 }}>Form {forms.indexOf(current) + 1} of {forms.length}{forms.length > 1 ? ` · ${forms.map((f) => f.name).join(' · ')}` : ''}</div> : null;
+  return current.kind === 'medical_history'
+    ? <HistoryForm key={current.id} info={info} token={token} practice={practice} step={step} onDone={() => done(current.id)} />
+    : <PracticeForm key={current.id} form={current} info={info} token={token} practice={practice} step={step} onDone={() => done(current.id)} />;
+}
+
+function PracticeForm({ form, info, token, practice, step, onDone }) {
+  const [answers, setAnswers] = useState({});
+  const [signatureName, setSignatureName] = useState('');
+  const { submit, busy, error } = useSubmit(async () => {
+    await api.post(`/public/forms/${token}/${form.id}`, { answers, signature_name: signatureName });
+    onDone();
+  });
+  return (
+    <PublicLayout title={form.name} practice={practice}>
+      {step}
+      <form onSubmit={(e) => { e.preventDefault(); submit(); }}>
+        <div className="card">
+          <FormFields fields={form.fields} answers={answers} onChange={setAnswers} signatureName={signatureName} onSignatureName={setSignatureName} />
+        </div>
+        <ErrorBox error={error} />
+        <button className="primary big" disabled={busy || !formComplete(form.fields, answers, signatureName)}>{busy ? 'Sending…' : 'Sign and submit'}</button>
+      </form>
+    </PublicLayout>
+  );
+}
+
+function HistoryForm({ info, token, practice, step, onDone }) {
+  const [a, setA] = useState(() => ({ conditions: [], consent_hipaa: false, consent_treatment: false, ...Object.fromEntries(Object.entries(info.prefill).map(([k, v]) => [k, v || ''])) }));
+  const [signatureName, setSignatureName] = useState('');
+  const [signatureImage, setSignatureImage] = useState(null);
+
+  const { submit, busy, error } = useSubmit(async () => {
+    await api.post(`/public/forms/${token}`, { answers: a, signature_name: signatureName, signature_image: signatureImage });
+    onDone();
+  });
 
   const text = (k, label, props = {}) => (
     <label className={props.full ? 'full' : ''}>
@@ -59,6 +88,7 @@ export default function IntakePage() {
 
   return (
     <PublicLayout title="Health history" practice={practice}>
+      {step}
       <p>Hi {info.first_name}, please complete this before your visit. It takes about 5 minutes. Your answers go directly into your secure dental record.</p>
       <form onSubmit={(e) => { e.preventDefault(); submit(); }}>
         <div className="card">

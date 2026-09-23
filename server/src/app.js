@@ -30,6 +30,7 @@ import chartingRoutes from './routes/charting.js';
 import referralRoutes from './routes/referrals.js';
 import importRoutes from './routes/imports.js';
 import backupRoutes from './routes/backup.js';
+import formRoutes from './routes/forms.js';
 import { createMessenger } from './messaging.js';
 import { createStorage } from './storage.js';
 import { createClearinghouse, clearinghouseConfig } from './clearinghouse.js';
@@ -78,7 +79,10 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   app.disable('x-powered-by');
   app.use(stripeWebhook({ db, config, payments })); // needs the raw body, so before express.json
   app.use(smsWebhook({ db, config }));
-  app.use(express.json({ limit: '1mb' }));
+  // Signed forms can carry photos (insurance cards, ID), so that one route takes larger bodies.
+  const jsonBody = express.json({ limit: '1mb' });
+  const formBody = express.json({ limit: '15mb' });
+  app.use((req, res, next) => (/^\/api\/public\/forms\/[^/]+\/\d+$/.test(req.path) ? formBody : jsonBody)(req, res, next));
   app.use((_req, res, next) => {
     res.set({
       'X-Content-Type-Options': 'nosniff',
@@ -94,7 +98,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   app.use('/api/public', (_req, res, next) => {
     res.set('Cache-Control', 'no-store');
     next();
-  }, publicRoutes({ db }), publicCasePresentation({ db }), portalPublicRoutes({ db, secret, messenger }));
+  }, publicRoutes({ db, storage }), publicCasePresentation({ db }), portalPublicRoutes({ db, secret, messenger }));
   app.use('/api/portal', portalRoutes({ db, secret, config, payments }));
 
   app.use('/api/bridge', (_req, res, next) => {
@@ -115,6 +119,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(referralRoutes({ db }));
   api.use(importRoutes({ db }));
   api.use(backupRoutes({ db, storage, config }));
+  api.use(formRoutes({ db, messenger, config }));
   api.use(billingRoutes({ db, payments }));
   api.use(insuranceRoutes({ db }));
   api.use(settingsRoutes({ db, secret, config }));

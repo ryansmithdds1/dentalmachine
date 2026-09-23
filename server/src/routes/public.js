@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { HttpError, rateLimit } from '../auth.js';
 import { insert, update, hashToken, practiceNow, normalizeDateTime, audit, mapSeq, publicPractice } from '../util.js';
 import { MEDICAL_CONDITIONS, parseMedicalHistory, contactUpdatesFromHistory } from '../forms.js';
+import { fillFields, checkAnswers, formPdf } from '../formtemplates.js';
 import { openSlots } from './schedule.js';
 import { publish } from '../events.js';
 import { officeHours } from '../hours.js';
@@ -17,7 +18,7 @@ const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 // Unauthenticated endpoints reached from links sent to patients and the public booking page.
 // They expose only the minimum needed and are rate limited.
-export default function publicRoutes({ db }) {
+export default function publicRoutes({ db, storage }) {
   const r = Router();
   const limiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 30 });
   const reader = rateLimit({ windowMs: 60 * 1000, max: 120 });
@@ -140,8 +141,9 @@ export default function publicRoutes({ db }) {
     res.json(apptView(await apptForToken(req.params.token)));
   });
 
-  // ---- Intake forms ----
-  const formForToken = async (token) => {
+  // ---- Patient forms ----
+  // A link opens a packet: the health history and/or practice forms sent together.
+  const packetForToken = async (token) => {
     const f = await db.get(
       `SELECT fr.*, p.first_name, p.last_name, p.dob, p.phone, p.email, p.address, p.city, p.state, p.zip, p.emergency_contact,
          p.allergies, p.medications, pr.name AS practice_name
@@ -149,37 +151,93 @@ export default function publicRoutes({ db }) {
        WHERE fr.token_hash = ?`, hashToken(token),
     );
     if (!f) throw new HttpError(404, 'This form link is not valid');
-    if (f.status === 'completed') throw new HttpError(410, 'This form has already been submitted. Thank you!');
     if (f.expires_at < new Date().toISOString()) throw new HttpError(410, 'This form link has expired. Please ask the office for a new one.');
-    return f;
+    const items = await db.all(
+      `SELECT fr.id, fr.kind, fr.status, fr.template_id, fr.context, t.name, t.kind AS template_kind, t.fields, t.version
+       FROM form_requests fr LEFT JOIN form_templates t ON t.id = fr.template_id
+       WHERE fr.patient_id = ? AND (fr.id = ? OR fr.packet_id = ?) ORDER BY fr.id`, f.patient_id, f.packet_id || f.id, f.packet_id || f.id,
+    );
+    if (items.every((x) => x.status === 'completed')) throw new HttpError(410, 'These forms have already been submitted. Thank you!');
+    return { f, items };
   };
+  const contextFor = (f, item) => ({
+    ...JSON.parse(item.context || '{}'), patient: `${f.first_name} ${f.last_name}`, first_name: f.first_name, practice: f.practice_name,
+    date: new Date().toISOString().slice(0, 10),
+  });
 
   r.get('/forms/:token', reader, async (req, res) => {
-    const f = await formForToken(req.params.token);
+    const { f, items } = await packetForToken(req.params.token);
+    const history = items.find((x) => x.kind === 'medical_history');
     // Prefill contact details only; clinical history is always re-entered by the patient.
     res.json({
-      practice_name: f.practice_name, kind: f.kind, first_name: f.first_name, last_name: f.last_name,
+      practice_name: f.practice_name, kind: history ? 'medical_history' : 'custom', first_name: f.first_name, last_name: f.last_name,
       conditions: MEDICAL_CONDITIONS,
       prefill: { phone: f.phone, email: f.email, address: f.address, city: f.city, state: f.state, zip: f.zip, emergency_contact: f.emergency_contact },
+      forms: items.map((x) => (x.kind === 'medical_history'
+        ? { id: x.id, kind: 'medical_history', name: 'Health history', status: x.status }
+        : { id: x.id, kind: 'custom', name: x.name, form_kind: x.template_kind, status: x.status, fields: fillFields(JSON.parse(x.fields || '[]'), contextFor(f, x)) })),
     });
   });
 
   r.post('/forms/:token', limiter, async (req, res) => {
-    const f = await formForToken(req.params.token);
+    const { f, items } = await packetForToken(req.params.token);
+    const item = items.find((x) => x.kind === 'medical_history' && x.status === 'pending');
+    if (!item) throw new HttpError(410, 'Your health history has already been submitted. Thank you!');
     const { answers, signatureName, signatureImage } = parseMedicalHistory(req.body);
     const formId = await db.tx(async () => {
       const id = await insert(db, 'patient_forms', {
-        practice_id: f.practice_id, patient_id: f.patient_id, request_id: f.id, kind: f.kind, data: JSON.stringify(answers),
+        practice_id: f.practice_id, patient_id: f.patient_id, request_id: item.id, kind: 'medical_history', data: JSON.stringify(answers),
         signature_name: signatureName, signature_image: signatureImage, ip: req.ip, user_agent: String(req.headers['user-agent'] || '').slice(0, 300),
         review_status: 'pending',
       });
       // Contact details apply now; medical changes wait for a clinician to review them against the chart,
       // so a rushed "none" on a tablet can't erase an allergy the office recorded.
       await update(db, 'patients', f.patient_id, f.practice_id, { ...contactUpdatesFromHistory(answers), updated_at: new Date().toISOString() });
-      await db.run("UPDATE form_requests SET status = 'completed', completed_at = datetime('now') WHERE id = ?", f.id);
+      await db.run("UPDATE form_requests SET status = 'completed', completed_at = datetime('now') WHERE id = ?", item.id);
       return id;
     });
     await logPublic(req, f.practice_id, 'form.submit', 'patient_forms', formId, { patient_id: f.patient_id });
+    res.status(201).json({ ok: true });
+  });
+
+  // One practice form from the packet: answers are checked against its fields, and the signed form is
+  // filed in the chart as a PDF (photos of insurance cards and IDs are filed as images).
+  r.post('/forms/:token/:rid', limiter, async (req, res) => {
+    const { f, items } = await packetForToken(req.params.token);
+    const item = items.find((x) => x.id === Number(req.params.rid) && x.kind === 'custom');
+    if (!item) throw new HttpError(404, 'Form not found');
+    if (item.status === 'completed') throw new HttpError(410, 'This form has already been submitted. Thank you!');
+    const fields = fillFields(JSON.parse(item.fields || '[]'), contextFor(f, item));
+    const { answers, photos, signature, signatureName } = checkAnswers(fields, req.body);
+    const signedAt = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    const practice = await db.get('SELECT name FROM practices WHERE id = ?', f.practice_id);
+    const pdf = formPdf({ practice, patient: f, template: { name: item.name, version: item.version }, fields, answers, photos, signatureName, signedAt, ip: req.ip });
+    const saved = await storage.save(f.practice_id, pdf);
+    const files = await Promise.all(photos.map(async (p) => ({ ...p, ...(await storage.save(f.practice_id, p.bytes)) })));
+    const day = signedAt.slice(0, 10);
+    const formId = await db.tx(async () => {
+      const docId = await insert(db, 'documents', {
+        practice_id: f.practice_id, patient_id: f.patient_id, category: item.template_kind === 'consent' ? 'consent' : 'document',
+        filename: `${item.name} ${day}.pdf`.replace(/[^\w.\- ()]/g, '_'), mime: 'application/pdf', size: pdf.length,
+        storage_key: saved.storageKey, encrypted: saved.encrypted ? 1 : 0, notes: `Signed by ${signatureName || `${f.first_name} ${f.last_name}`}`,
+      });
+      for (const p of files) {
+        await insert(db, 'documents', {
+          practice_id: f.practice_id, patient_id: f.patient_id, category: /insurance/i.test(p.label) ? 'insurance_card' : 'photo',
+          filename: `${p.label} ${day}.${p.mime === 'image/png' ? 'png' : 'jpg'}`.replace(/[^\w.\- ()]/g, '_'), mime: p.mime, size: p.bytes.length,
+          storage_key: p.storageKey, encrypted: p.encrypted ? 1 : 0, notes: `From ${item.name}`,
+        });
+      }
+      const id = await insert(db, 'patient_forms', {
+        practice_id: f.practice_id, patient_id: f.patient_id, request_id: item.id, kind: 'custom', template_id: item.template_id, template_version: item.version,
+        fields: JSON.stringify(fields), data: JSON.stringify(Object.fromEntries(Object.entries(answers).filter(([k]) => !fields.find((x) => x.key === k && x.type === 'signature')))),
+        signature_name: signatureName || `${f.first_name} ${f.last_name}`, signature_image: signature, document_id: docId,
+        ip: req.ip, user_agent: String(req.headers['user-agent'] || '').slice(0, 300),
+      });
+      await db.run("UPDATE form_requests SET status = 'completed', completed_at = datetime('now') WHERE id = ?", item.id);
+      return id;
+    });
+    await logPublic(req, f.practice_id, 'form.submit', 'patient_forms', formId, { patient_id: f.patient_id, template_id: item.template_id });
     res.status(201).json({ ok: true });
   });
 

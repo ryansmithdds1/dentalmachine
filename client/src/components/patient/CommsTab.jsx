@@ -5,6 +5,7 @@ import { useAuth } from '../../auth.jsx';
 import { fmtDate, fmtDateTime, label } from '../../format.js';
 import { Badge, ErrorBox, Modal, useSubmit } from '../ui.jsx';
 import { MessageTable } from '../../pages/Requests.jsx';
+import SendForms, { openPdf } from '../FormsSend.jsx';
 
 // Messages, intake forms and communication preferences for one patient.
 export default function CommsTab({ patient, onChange }) {
@@ -12,20 +13,8 @@ export default function CommsTab({ patient, onChange }) {
   const { data: messages, reload } = useApi(`/messages?patient_id=${patient.id}`);
   const { data: forms, reload: reloadForms } = useApi(can('clinical:read') ? `/patients/${patient.id}/forms` : null);
   const [modal, setModal] = useState(null);
-  const [link, setLink] = useState(null);
   const [err, setErr] = useState(null);
 
-  const sendForms = async (send) => {
-    setErr(null);
-    try {
-      const r = await api.post(`/patients/${patient.id}/form-requests`, send ? { send } : {});
-      setLink(r);
-      reload();
-      reloadForms();
-    } catch (e) {
-      setErr(e);
-    }
-  };
   const togglePref = async (field) => {
     await api.put(`/patients/${patient.id}`, { [field]: !patient[field] });
     onChange?.();
@@ -46,29 +35,24 @@ export default function CommsTab({ patient, onChange }) {
           {can('patients:write') && <div className="form-actions" style={{ justifyContent: 'flex-start' }}><button className="primary" onClick={() => setModal('message')}>Send a message</button></div>}
         </div>
         <div className="card">
-          <h2>Health history forms</h2>
-          {can('patients:write') && (
-            <div className="inline" style={{ flexWrap: 'wrap', marginBottom: 12 }}>
-              <button className="primary" onClick={() => sendForms('auto')}>Send form link</button>
-              <button onClick={() => sendForms(null)}>Get link to open here (tablet)</button>
-            </div>
-          )}
-          {link && (
-            <div className="public-notice ok" style={{ marginBottom: 12 }}>
-              {link.message ? `Sent by ${link.message.channel === 'sms' ? 'text' : 'email'}. ` : ''}Link (valid until {fmtDate(link.expires_at)}):{' '}
-              <a href={link.url} target="_blank" rel="noreferrer">{link.url}</a>
-            </div>
-          )}
-          {forms?.submissions.map((f) => (
-            <div key={f.id} className="inline" style={{ justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
-              <span>Medical history · signed by <strong>{f.signature_name}</strong> {fmtDateTime(f.signed_at)}</span>
-              <button className="small" onClick={() => setModal({ form: f })}>View</button>
-            </div>
-          ))}
-          {forms?.requests.filter((r) => r.status === 'pending').map((r) => (
-            <div key={r.id} className="muted" style={{ padding: '6px 0' }}>Form link sent {fmtDate(r.created_at)} · <Badge value="pending" /></div>
-          ))}
-          {forms && !forms.submissions.length && !forms.requests.length && <div className="muted">No forms on file.</div>}
+          <div className="inline" style={{ justifyContent: 'space-between' }}>
+            <h2 style={{ margin: 0 }}>Forms & consents</h2>
+            {can('patients:write') && <button className="primary" onClick={() => setModal('send-forms')}>Send forms…</button>}
+          </div>
+          <div style={{ marginTop: 10 }}>
+            {forms?.submissions.map((f) => (
+              <div key={f.id} className="inline" style={{ justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
+                <span>{f.kind === 'medical_history' ? 'Health history' : f.template_name || 'Form'} · signed by <strong>{f.signature_name}</strong> {fmtDateTime(f.signed_at)}</span>
+                {f.document_id
+                  ? <button className="small" onClick={() => openPdf(f.document_id, f.template_name || 'form').catch(setErr)}>PDF</button>
+                  : <button className="small" onClick={() => setModal({ form: f })}>View</button>}
+              </div>
+            ))}
+            {forms?.requests.filter((r) => r.status === 'pending').map((r) => (
+              <div key={r.id} className="muted" style={{ padding: '6px 0' }}>{r.kind === 'medical_history' ? 'Health history' : r.template_name} · sent {fmtDate(r.created_at)} · <Badge value={new Date(r.expires_at) < new Date() ? 'expired' : 'pending'} /></div>
+            ))}
+            {forms && !forms.submissions.length && !forms.requests.length && <div className="muted">No forms on file.</div>}
+          </div>
         </div>
       </div>
 
@@ -82,6 +66,7 @@ export default function CommsTab({ patient, onChange }) {
           <MessageForm patient={patient} onDone={() => { setModal(null); reload(); }} />
         </Modal>
       )}
+      {modal === 'send-forms' && <SendForms patient={patient} onClose={() => setModal(null)} onSent={() => { reload(); reloadForms(); }} />}
       {modal?.form && (
         <Modal title="Medical history" wide onClose={() => setModal(null)}>
           <FormView form={modal.form} />

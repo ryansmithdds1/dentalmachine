@@ -1,11 +1,12 @@
 import { Router } from 'express';
 import { requirePermission, HttpError } from '../auth.js';
-import { pick, requireFields, requireOneOf, insert, findOr404, audit, newToken, friendlyDateTime, mapSeq, publicPractice } from '../util.js';
+import { pick, requireFields, requireOneOf, insert, findOr404, audit, friendlyDateTime, mapSeq, publicPractice } from '../util.js';
 import { sendMessage, sendAppointmentReminder, runReminders, preferredChannel } from '../messaging.js';
 import { runRecallSequences } from '../recalls.js';
 import { validateAppt } from './schedule.js';
 import { publish } from '../events.js';
 import { templatesFor, renderTemplate } from '../templates.js';
+import { createPacket, runFormSends } from '../formtemplates.js';
 
 const requireAdmin = (req, _res, next) => (req.user.role === 'admin' ? next() : next(new HttpError(403, 'Administrator access required')));
 
@@ -76,7 +77,8 @@ export default function engagementRoutes({ db, messenger, config }) {
   });
 
   r.post('/messaging/run-reminders', requireAdmin, async (req, res) => {
-    const sent = (await runReminders(db, messenger, { appUrl: config.appUrl })) + (await runRecallSequences(db, messenger, { appUrl: config.appUrl }));
+    const sent = (await runReminders(db, messenger, { appUrl: config.appUrl })) + (await runRecallSequences(db, messenger, { appUrl: config.appUrl }))
+      + (await runFormSends(db, messenger, { appUrl: config.appUrl }));
     await audit(db, req, 'messaging.run_reminders', null, null, { sent });
     res.json({ sent });
   });
@@ -165,33 +167,25 @@ export default function engagementRoutes({ db, messenger, config }) {
   // ---- Intake forms ----
   r.post('/patients/:id/form-requests', requirePermission('patients:write'), async (req, res) => {
     const patient = await patientOr404(req);
-    const { token, hash } = newToken();
-    const expires = new Date(Date.now() + 14 * 86400_000).toISOString();
-    const id = await insert(db, 'form_requests', {
-      practice_id: req.user.practice_id, patient_id: patient.id, kind: 'medical_history', token_hash: hash, expires_at: expires, created_by: req.user.id,
+    const templateIds = Array.isArray(req.body?.template_ids) ? req.body.template_ids : [];
+    const packet = await createPacket(db, messenger, {
+      practiceId: req.user.practice_id, patient, history: req.body?.history !== false, templateIds, userId: req.user.id, send: req.body?.send || null, appUrl: config.appUrl,
     });
-    const url = `${config.appUrl}/f/${token}`;
-    let message = null;
-    if (req.body?.send) {
-      const target = preferredChannel(patient, req.body.send === 'auto' ? undefined : req.body.send);
-      if (!target) throw new HttpError(400, 'Patient has no reachable phone or email (or has opted out)');
-      const name = await practiceName(req.user.practice_id);
-      message = await sendMessage(db, messenger, {
-        practiceId: req.user.practice_id, patientId: patient.id, userId: req.user.id, kind: 'intake_form', channel: target.channel, to: target.to,
-        subject: `Please complete your forms for ${name}`,
-        body: `Hi ${patient.first_name}, please complete your health history for ${name} before your visit: ${url}`,
-      });
-    }
-    await audit(db, req, 'form_request.create', 'form_requests', id);
-    res.status(201).json({ id, url, expires_at: expires, message });
+    await audit(db, req, 'form_request.create', 'form_requests', packet.id);
+    res.status(201).json(packet);
   });
 
   r.get('/patients/:id/forms', requirePermission('clinical:read'), async (req, res) => {
     const patient = await patientOr404(req);
     res.json({
-      requests: await db.all('SELECT id, kind, status, expires_at, completed_at, created_at FROM form_requests WHERE practice_id = ? AND patient_id = ? ORDER BY id DESC', req.user.practice_id, patient.id),
-      submissions: (await db.all('SELECT * FROM patient_forms WHERE practice_id = ? AND patient_id = ? ORDER BY id DESC', req.user.practice_id, patient.id))
-        .map((f) => ({ ...f, data: JSON.parse(f.data) })),
+      requests: await db.all(
+        `SELECT fr.id, fr.kind, fr.status, fr.expires_at, fr.completed_at, fr.created_at, fr.packet_id, fr.template_id, t.name AS template_name
+         FROM form_requests fr LEFT JOIN form_templates t ON t.id = fr.template_id WHERE fr.practice_id = ? AND fr.patient_id = ? ORDER BY fr.id DESC`, req.user.practice_id, patient.id,
+      ),
+      submissions: (await db.all(
+        `SELECT f.id, f.kind, f.data, f.signature_name, f.signature_image, f.signed_at, f.review_status, f.ip, f.template_id, f.template_version, f.document_id, t.name AS template_name
+         FROM patient_forms f LEFT JOIN form_templates t ON t.id = f.template_id WHERE f.practice_id = ? AND f.patient_id = ? ORDER BY f.id DESC`, req.user.practice_id, patient.id,
+      )).map((f) => ({ ...f, data: JSON.parse(f.data) })),
     });
   });
 

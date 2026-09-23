@@ -7,6 +7,7 @@ import { pollClearinghouse } from './clearinghouse.js';
 import { runRecallSequences } from './recalls.js';
 import { runAutopay } from './payments.js';
 import { runAutomaticBackups } from './backup.js';
+import { runFormSends } from './formtemplates.js';
 
 let secret = process.env.JWT_SECRET;
 if (!secret) {
@@ -26,7 +27,7 @@ const app = createApp({ db, secret, config, messenger });
 
 // Appointment reminders every 10 minutes. With Redis, only one server runs each pass (REMINDERS=off disables).
 if (process.env.REMINDERS !== 'off') {
-  const tick = () => runExclusive('reminders', 5 * 60 * 1000, async () => (await runReminders(db, messenger, { appUrl: config.appUrl })) + (await runRecallSequences(db, messenger, { appUrl: config.appUrl })))
+  const tick = () => runExclusive('reminders', 5 * 60 * 1000, async () => (await runReminders(db, messenger, { appUrl: config.appUrl })) + (await runRecallSequences(db, messenger, { appUrl: config.appUrl })) + (await runFormSends(db, messenger, { appUrl: config.appUrl })))
     .then((n) => n && console.log(`Sent ${n} appointment reminder(s)`))
     .catch((err) => console.error('Reminder job failed:', err));
   setInterval(tick, 10 * 60 * 1000).unref();
