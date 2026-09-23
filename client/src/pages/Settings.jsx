@@ -185,6 +185,8 @@ function Practice() {
             </select>
           </label>
           <label className="checkbox full"><input type="checkbox" checked={!!current.online_booking} onChange={(e) => change('online_booking', e.target.checked)} /> Allow patients to request appointments online</label>
+          <label className="checkbox full"><input type="checkbox" checked={current.portal_enabled !== 0} onChange={(e) => change('portal_enabled', e.target.checked)} /> Patient portal (visits, balance and online payment, forms, treatment plans)</label>
+          {current.portal_enabled !== 0 && <span className="muted full" style={{ fontSize: 12, marginTop: -6 }}>Portal address: {window.location.origin}/portal/{current.slug || current.id} — it&apos;s also printed on statements.</span>}
           <label>
             Daily production goal ($)
             <input type="number" min="0" step="100" value={current.daily_goal != null ? current.daily_goal / 100 : ''} onChange={(e) => change('daily_goal', Math.round(Number(e.target.value) * 100))} />

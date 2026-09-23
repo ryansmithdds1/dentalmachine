@@ -15,7 +15,7 @@ async function session(user, secret, db) {
   const mfaEnabled = !!(await db.get('SELECT mfa_enabled FROM users WHERE id = ?', id))?.mfa_enabled;
   const requireMfa = !!(await db.get('SELECT require_mfa FROM practices WHERE id = ?', practice_id))?.require_mfa;
   return {
-    token: signToken({ sub: id, pid: practice_id, role }, secret),
+    token: signToken({ sub: id, pid: practice_id, role, aud: 'staff' }, secret),
     user: {
       id, practice_id, email, name, role, permissions: role === 'admin' ? ['*'] : PERMISSIONS[role] || [],
       mfa_enabled: mfaEnabled, mfa_setup_required: requireMfa && !mfaEnabled,

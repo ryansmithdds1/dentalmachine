@@ -14,6 +14,7 @@ import { TreatmentPlanPrint, PrescriptionPrint } from './pages/PrintDocs.jsx';
 import CommandPalette from './components/CommandPalette.jsx';
 import IdleLogout from './components/IdleLogout.jsx';
 import CaseAcceptance from './pages/public/CaseAcceptance.jsx';
+import Portal from './pages/public/Portal.jsx';
 import Reports from './pages/Reports.jsx';
 import Settings from './pages/Settings.jsx';
 import Statement from './pages/Statement.jsx';
@@ -38,6 +39,7 @@ export default function App() {
       <Route path="/f/:token" element={<IntakePage />} />
       <Route path="/pay/:result" element={<PayResult />} />
       <Route path="/tp/:token" element={<CaseAcceptance />} />
+      <Route path="/portal/:key" element={<Portal />} />
       <Route path="*" element={<StaffApp />} />
     </Routes>
   );

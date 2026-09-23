@@ -69,7 +69,8 @@ export function authenticate(db, secret, { allowMfaSetup = false } = {}) {
     const header = req.headers.authorization || '';
     const token = header.startsWith('Bearer ') ? header.slice(7) : null;
     const payload = token && verifyToken(token, secret);
-    if (!payload) return next(new HttpError(401, 'Authentication required'));
+    // Only staff sessions reach staff routes (patient-portal tokens are signed with the same key).
+    if (!payload || (payload.aud && payload.aud !== 'staff')) return next(new HttpError(401, 'Authentication required'));
     const user = await db.get('SELECT id, practice_id, email, name, role, active FROM users WHERE id = ?', payload.sub);
     if (!user || !user.active) return next(new HttpError(401, 'Account disabled or not found'));
     // Practices can require 2FA; until it's set up, only the account/MFA endpoints are reachable.

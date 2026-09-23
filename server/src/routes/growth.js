@@ -5,6 +5,7 @@ import { sendMessage, preferredChannel } from '../messaging.js';
 import { renderTemplate, templatesFor } from '../templates.js';
 import { mailable, statementHtml } from '../mail.js';
 import { statementData } from './billing.js';
+import { portalKey } from './portal.js';
 
 const requireAdmin = (req, _res, next) => (req.user.role === 'admin' ? next() : next(new HttpError(403, 'Administrator access required')));
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -134,7 +135,7 @@ export default function growthRoutes({ db, messenger, config, mailer = { enabled
     });
     const counts = { email: 0, mail: 0, print: 0 };
     const printIds = [];
-    const portalUrl = `${config.appUrl}/portal`;
+    const portalUrl = `${config.appUrl}/portal/${portalKey(practice)}`;
     for (const a of accounts) {
       let method = 'print';
       let reference = null;

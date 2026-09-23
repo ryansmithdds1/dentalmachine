@@ -645,6 +645,19 @@ CREATE TABLE IF NOT EXISTS statement_deliveries (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS portal_codes (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER REFERENCES patients(id),
+  contact TEXT NOT NULL,
+  code_hash TEXT NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  expires_at TEXT NOT NULL,
+  used_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_portal_codes ON portal_codes(practice_id, contact);
+
 CREATE TABLE IF NOT EXISTS tasks (
   id INTEGER PRIMARY KEY,
   practice_id INTEGER NOT NULL REFERENCES practices(id),
@@ -733,6 +746,7 @@ const COLUMNS = [
   ['payment_plans', 'autopay_last_attempt', 'TEXT'],
   ['payment_plans', 'autopay_message', 'TEXT'],
   ['statement_runs', 'mailed', 'INTEGER NOT NULL DEFAULT 0'],
+  ['practices', 'portal_enabled', 'INTEGER NOT NULL DEFAULT 1'],
   ['appointments', 'series_id', 'INTEGER REFERENCES appointment_series(id)'],
 ];
 

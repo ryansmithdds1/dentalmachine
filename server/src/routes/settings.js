@@ -40,7 +40,7 @@ export default function settingsRoutes({ db }) {
   r.get('/practice', async (req, res) => res.json(await db.get('SELECT * FROM practices WHERE id = ?', req.user.practice_id)));
   r.get('/message-templates/defaults', (_req, res) => res.json(DEFAULT_TEMPLATES));
   r.put('/practice', requireAdmin, async (req, res) => {
-    const row = pick(req.body, ['name', 'address', 'city', 'state', 'zip', 'phone', 'email', 'tax_id', 'npi', 'timezone', 'slug', 'online_booking', 'reminder_hours', 'require_mfa', 'office_hours', 'daily_goal', 'sms_number', 'review_url', 'review_requests', 'idle_timeout_minutes', 'message_templates', 'hygiene_goal']);
+    const row = pick(req.body, ['name', 'address', 'city', 'state', 'zip', 'phone', 'email', 'tax_id', 'npi', 'timezone', 'slug', 'online_booking', 'reminder_hours', 'require_mfa', 'office_hours', 'daily_goal', 'sms_number', 'review_url', 'review_requests', 'idle_timeout_minutes', 'message_templates', 'hygiene_goal', 'portal_enabled']);
     if (row.message_templates != null) row.message_templates = validateTemplates(row.message_templates);
     if (row.review_url && !/^https:\/\/\S+$/.test(row.review_url)) throw new HttpError(400, 'Review link must start with https://');
     if (row.idle_timeout_minutes != null) {

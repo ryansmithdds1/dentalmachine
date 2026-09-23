@@ -24,6 +24,7 @@ import frontDeskRoutes from './routes/frontdesk.js';
 import casePresentationRoutes, { publicCasePresentation } from './routes/casepres.js';
 import growthRoutes from './routes/growth.js';
 import imagingRoutes, { bridgeAgentRoutes } from './routes/imaging.js';
+import { portalPublicRoutes, portalRoutes } from './routes/portal.js';
 import { createMessenger } from './messaging.js';
 import { createStorage } from './storage.js';
 import { createClearinghouse, clearinghouseConfig } from './clearinghouse.js';
@@ -80,7 +81,8 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   app.use('/api/public', (_req, res, next) => {
     res.set('Cache-Control', 'no-store');
     next();
-  }, publicRoutes({ db }), publicCasePresentation({ db }));
+  }, publicRoutes({ db }), publicCasePresentation({ db }), portalPublicRoutes({ db, secret, messenger }));
+  app.use('/api/portal', portalRoutes({ db, secret, config, payments }));
 
   app.use('/api/bridge', (_req, res, next) => {
     res.set('Cache-Control', 'no-store');
