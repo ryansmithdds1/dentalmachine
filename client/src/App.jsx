@@ -8,6 +8,7 @@ import IdleLogout from './components/IdleLogout.jsx';
 import { Suspense, lazy, useEffect, useState } from 'react';
 import { api, getLocationId, setLocationId } from './api.js';
 import { readOfflineDay } from './offline.js';
+import { ClockButton } from './components/TimeClock.jsx';
 import { useLiveEvents } from './live.js';
 import MfaSetup from './components/MfaSetup.jsx';
 
@@ -206,6 +207,7 @@ function Shell({ nav }) {
         </nav>
         <div className="sidebar-footer">
           <LocationPicker user={user} />
+          <ClockButton />
           <div style={{ color: '#fff' }}>{user.name}</div>
           <div>{label(user.role)}</div>
           <button className="small" onClick={logout}>Sign out</button>

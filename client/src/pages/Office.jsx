@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
+import TimeClock from '../components/TimeClock.jsx';
 import { api } from '../api.js';
 import { useApi } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
@@ -7,8 +8,22 @@ import { fmtDate, fmtDateTime, money, practiceToday } from '../format.js';
 import { Modal } from '../components/ui.jsx';
 import { LabCaseForm, TaskForm, LAB_STATUSES } from '../components/OfficeForms.jsx';
 
-// Team to-do list and lab case tracking.
+// Team to-do list and lab case tracking, and the time clock.
 export default function Office() {
+  const [params, setParams] = useSearchParams();
+  const tab = params.get('tab') === 'time' ? 'time' : 'todo';
+  return (
+    <>
+      <div className="tabs" style={{ marginBottom: 12 }}>
+        <button className={tab === 'todo' ? 'active' : ''} onClick={() => setParams({})}>To-do & labs</button>
+        <button className={tab === 'time' ? 'active' : ''} onClick={() => setParams({ tab: 'time' })}>Time clock</button>
+      </div>
+      {tab === 'time' ? <TimeClock /> : <OfficeBoard />}
+    </>
+  );
+}
+
+function OfficeBoard() {
   const { can, practice } = useAuth();
   const [mine, setMine] = useState(false);
   const [showDone, setShowDone] = useState(false);

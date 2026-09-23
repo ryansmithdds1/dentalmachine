@@ -787,6 +787,22 @@ CREATE TABLE IF NOT EXISTS fee_history (
 );
 CREATE INDEX IF NOT EXISTS idx_fee_history ON fee_history(practice_id, code);
 
+-- Time clock: staff punch in and out; managers fix punches and export hours for payroll.
+CREATE TABLE IF NOT EXISTS time_punches (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  location_id INTEGER,
+  clock_in TEXT NOT NULL,
+  clock_out TEXT,
+  break_minutes INTEGER NOT NULL DEFAULT 0,
+  note TEXT,
+  edited_by INTEGER,
+  edited_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_time_punches ON time_punches(practice_id, user_id, clock_in);
+
 -- Patient surveys (NPS and other questions), sent after visits or to a list; one response row per patient asked.
 CREATE TABLE IF NOT EXISTS surveys (
   id INTEGER PRIMARY KEY,
