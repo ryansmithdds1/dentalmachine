@@ -4,7 +4,7 @@ import { hashPassword, verifyPassword, signToken, verifyToken, authenticate, rat
 import { pick, requireFields, insert, audit, newToken, hashToken, staffPractice } from '../util.js';
 import { seedPracticeDefaults } from '../defaults.js';
 import { generateSecret, verifyTotp, otpauthUrl } from '../totp.js';
-import { PROVIDERS, issuerFor, pkcePair, discover, exchangeCode, verifyIdToken, verifiedEmail, openSecret } from '../sso.js';
+import { PROVIDERS, issuerFor, pkcePair, discover, exchangeCode, verifyIdToken, verifiedEmail, openSecret, sealMfaSecret, openMfaSecret } from '../sso.js';
 
 export function validatePassword(pw) {
   if (typeof pw !== 'string' || pw.length < 10) {
@@ -86,9 +86,11 @@ export default function authRoutes({ db, secret, config = {}, fetchImpl = global
     if (!user || !user.active || !verifyPassword(String(password || ''), user.password_hash)) await failed('auth.login_failed', 'Invalid email or password');
     if (user.mfa_enabled) {
       if (!req.body.mfa_code) throw new HttpError(401, 'Enter the 6-digit code from your authenticator app', { mfa_required: true });
-      const step = verifyTotp(user.mfa_secret, req.body.mfa_code, { lastStep: user.mfa_last_step });
+      const step = verifyTotp(openMfaSecret(user.mfa_secret, secret), req.body.mfa_code, { lastStep: user.mfa_last_step });
       if (step == null) await failed('auth.mfa_failed', 'Invalid authentication code', { mfa_required: true });
       await db.run('UPDATE users SET mfa_last_step = ? WHERE id = ?', step, user.id);
+      // Keys saved before they were encrypted are sealed on the next sign-in.
+      if (!String(user.mfa_secret).startsWith('v1.')) await db.run('UPDATE users SET mfa_secret = ? WHERE id = ?', sealMfaSecret(user.mfa_secret, secret), user.id);
     }
     await db.run("UPDATE users SET last_login_at = datetime('now'), failed_logins = 0, locked_until = NULL WHERE id = ?", user.id);
     req.user = user;
@@ -258,14 +260,14 @@ export default function authRoutes({ db, secret, config = {}, fetchImpl = global
     const row = await db.get('SELECT mfa_enabled FROM users WHERE id = ?', req.user.id);
     if (row.mfa_enabled) throw new HttpError(409, 'Two-factor authentication is already enabled');
     const mfaSecret = generateSecret();
-    await db.run('UPDATE users SET mfa_secret = ? WHERE id = ?', mfaSecret, req.user.id);
+    await db.run('UPDATE users SET mfa_secret = ? WHERE id = ?', sealMfaSecret(mfaSecret, secret), req.user.id);
     res.json({ secret: mfaSecret, otpauth_url: otpauthUrl(mfaSecret, req.user.email) });
   });
 
   r.post('/mfa/enable', authed, async (req, res) => {
     const row = await db.get('SELECT mfa_secret, mfa_enabled FROM users WHERE id = ?', req.user.id);
     if (!row.mfa_secret) throw new HttpError(400, 'Start setup first');
-    const step = verifyTotp(row.mfa_secret, req.body?.code);
+    const step = verifyTotp(openMfaSecret(row.mfa_secret, secret), req.body?.code);
     if (step == null) throw new HttpError(400, 'That code did not match. Check your phone clock and try again.');
     await db.run('UPDATE users SET mfa_enabled = 1, mfa_last_step = ? WHERE id = ?', step, req.user.id);
     await audit(db, req, 'auth.mfa_enabled', 'users', req.user.id);

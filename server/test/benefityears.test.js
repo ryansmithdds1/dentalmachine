@@ -45,7 +45,9 @@ test('financing: in-house monthly quotes and lender links on the plan, for staff
 
   // The patient sees it when reviewing the plan online.
   const url = (await api.post(`/treatment-plans/${plan.id}/present`, {})).data.url;
-  const pub = await (await fetch(`${h.origin}/api/public/tp/${url.split('/tp/')[1]}`)).json();
+  const tok = url.split('/tp/')[1];
+  const { pass } = (await h.client().post(`/public/tp/${tok}/verify`, { dob: '1985-04-12' })).data;
+  const pub = (await h.client(null, { 'X-Plan-Pass': pass }).get(`/public/tp/${tok}`)).data;
   assert.equal(pub.financing.in_house[0].months, 12);
   assert.equal(pub.practice.financing, undefined);
 });

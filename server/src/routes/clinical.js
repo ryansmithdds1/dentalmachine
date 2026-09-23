@@ -451,7 +451,7 @@ export default function clinicalRoutes({ db }) {
   const perioView = (e) => ({ ...e, readings: JSON.parse(e.readings) });
   r.get('/patients/:id/perio', requirePermission('clinical:read'), async (req, res) => {
     const patient = await patientOr404(req);
-    res.json((await db.all('SELECT * FROM perio_exams WHERE patient_id = ? AND practice_id = ? ORDER BY exam_date DESC, id DESC', patient.id, req.user.practice_id)).map(perioView));
+    res.json((await db.all('SELECT * FROM perio_exams WHERE patient_id = ? AND practice_id = ? AND deleted_at IS NULL ORDER BY exam_date DESC, id DESC', patient.id, req.user.practice_id)).map(perioView));
   });
 
   const siteList = (tooth, v, key, lo, hi, what) => {
@@ -505,19 +505,23 @@ export default function clinicalRoutes({ db }) {
   // Exams stay editable (a hygienist finishing the chart later, or fixing a misread).
   r.put('/perio/:eid', requirePermission('clinical:write'), async (req, res) => {
     const exam = await findOr404(db, 'perio_exams', req.params.eid, req.user.practice_id, 'Perio exam');
+    if (exam.deleted_at) throw new HttpError(404, 'Perio exam not found');
     const row = pick(req.body, ['exam_date', 'provider_id', 'notes']);
     if (req.body?.readings) row.readings = JSON.stringify(validReadings(req.body.readings));
     if (row.exam_date && !/^\d{4}-\d{2}-\d{2}$/.test(row.exam_date)) throw new HttpError(400, 'exam_date must be YYYY-MM-DD');
     if (row.provider_id) await findOr404(db, 'providers', row.provider_id, req.user.practice_id, 'Provider');
     await update(db, 'perio_exams', exam.id, req.user.practice_id, row);
-    await audit(db, req, 'perio.update', 'perio_exams', exam.id);
+    // The medical record keeps what the chart said before the change.
+    await audit(db, req, 'perio.update', 'perio_exams', exam.id, { before: Object.fromEntries(Object.keys(row).map((k) => [k, exam[k]])) });
     res.json(perioView(await db.get('SELECT * FROM perio_exams WHERE id = ?', exam.id)));
   });
 
   r.delete('/perio/:eid', requirePermission('clinical:write'), async (req, res) => {
     const exam = await findOr404(db, 'perio_exams', req.params.eid, req.user.practice_id, 'Perio exam');
-    await db.run('DELETE FROM perio_exams WHERE id = ?', exam.id);
-    await audit(db, req, 'perio.delete', 'perio_exams', exam.id);
+    if (exam.deleted_at) throw new HttpError(404, 'Perio exam not found');
+    // Part of the medical record: hidden from the chart, never erased.
+    await db.run("UPDATE perio_exams SET deleted_at = datetime('now') WHERE id = ?", exam.id);
+    await audit(db, req, 'perio.delete', 'perio_exams', exam.id, { patient_id: exam.patient_id, exam_date: exam.exam_date });
     res.json({ ok: true });
   });
 

@@ -2,6 +2,7 @@ import express from 'express';
 import { existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readAudit } from './accesslog.js';
 import { authenticate, HttpError, rateLimit } from './auth.js';
 import authRoutes from './routes/auth.js';
 import patientRoutes from './routes/patients.js';
@@ -109,7 +110,9 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   const jsonBody = express.json({ limit: '1mb' });
   const formBody = express.json({ limit: '15mb' });
   app.use((req, res, next) => (/^\/api\/public\/forms\/[^/]+\/\d+$/.test(req.path) ? formBody : jsonBody)(req, res, next));
-  app.use((_req, res, next) => {
+  app.use((req, res, next) => {
+    // Patient data isn't left in the browser's or a proxy's disk cache.
+    if (req.path.startsWith('/api/')) res.set('Cache-Control', 'no-store');
     res.set({
       'X-Content-Type-Options': 'nosniff',
       'X-Frame-Options': 'DENY',
@@ -119,12 +122,14 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
     next();
   });
 
+  app.use(readAudit(db));
+
   app.get('/api/health', (_req, res) => res.json({ ok: true }));
   app.use('/api/auth', authRoutes({ db, secret, config, fetchImpl, messenger }));
   app.use('/api/public', (_req, res, next) => {
     res.set('Cache-Control', 'no-store');
     next();
-  }, publicRoutes({ db, storage, payments, messenger, config }), publicCasePresentation({ db, storage }), portalPublicRoutes({ db, secret, messenger }), campaignPublicRoutes({ db }), surveyPublicRoutes({ db }));
+  }, publicRoutes({ db, storage, payments, messenger, config }), publicCasePresentation({ db, storage, secret }), portalPublicRoutes({ db, secret, messenger }), campaignPublicRoutes({ db }), surveyPublicRoutes({ db }));
   app.use('/api/portal', portalRoutes({ db, secret, config, payments, messenger, storage }));
   app.use('/api/v1', apiV1Routes({ db }));
 
@@ -180,7 +185,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(officeRoutes({ db }));
   api.use(ppoRoutes({ db, config }));
   api.use(frontDeskRoutes({ db, messenger }));
-  api.use(casePresentationRoutes({ db, messenger, config, erx }));
+  api.use(casePresentationRoutes({ db, messenger, config, erx, secret }));
   api.use(growthRoutes({ db, messenger, config, mailer }));
   api.use(collectionRoutes({ db, messenger }));
   api.use(depositRoutes({ db }));
@@ -210,11 +215,13 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
     }
     if (err?.type === 'entity.parse.failed') return res.status(400).json({ error: 'Invalid JSON' });
     if (err?.type === 'entity.too.large') return res.status(413).json({ error: 'Upload is too large' });
-    if (String(err?.message).includes('FOREIGN KEY')) return res.status(400).json({ error: 'Referenced record does not exist' });
-    if (String(err?.message).includes('UNIQUE')) return res.status(409).json({ error: 'Record already exists' });
-    if (String(err?.message).includes('CHECK constraint')) return res.status(400).json({ error: 'Invalid value' });
-    if (String(err?.message).includes('NOT NULL constraint')) {
-      const field = String(err.message).split('.').pop();
+    // Constraint errors, worded differently by SQLite and Postgres.
+    const msg = String(err?.message);
+    if (/foreign key/i.test(msg)) return res.status(400).json({ error: 'Referenced record does not exist' });
+    if (/unique constraint|UNIQUE/i.test(msg)) return res.status(409).json({ error: 'Record already exists' });
+    if (/check constraint/i.test(msg)) return res.status(400).json({ error: 'Invalid value' });
+    if (/not[- ]null constraint/i.test(msg)) {
+      const field = err.column || (msg.match(/column "([^"]+)"/)?.[1] ?? msg.split('.').pop());
       return res.status(400).json({ error: `${field} is required` });
     }
     // Unexpected: logged with the request id (shown to the user so they can quote it) and reported.

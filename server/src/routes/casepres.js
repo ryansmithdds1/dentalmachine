@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { messageText, patientLang, subjectFor } from '../templates.js';
-import { requirePermission, HttpError, rateLimit } from '../auth.js';
+import { requirePermission, HttpError, rateLimit, signToken, verifyToken } from '../auth.js';
 import { pick, requireFields, insert, findOr404, audit, newToken, hashToken } from '../util.js';
 import { estimateCoverage, primaryPolicy, benefitYear, withPlan } from '../services.js';
 import { practiceNow } from '../util.js';
@@ -46,7 +46,9 @@ const planView = async (db, plan) => {
     signed_version: signedVersion(plan, procedures),
   };
 };
-const SIGN_LINK_DAYS = 30;
+const SIGN_LINK_DAYS = 14;
+// Wrong birth dates before a plan link stops working.
+const MAX_DOB_TRIES = 5;
 
 // The plan as a PDF: once signed, exactly the version the patient signed (with their signature);
 // before that, the current plan marked as an estimate awaiting signature.
@@ -96,7 +98,7 @@ export async function planPdf(db, plan) {
 }
 const pdfFilename = (plan) => `Treatment plan ${plan.name} ${(plan.signed_at || '').slice(0, 10)}`.trim().replace(/[^\w.\- ()]/g, '_');
 
-export default function casePresentationRoutes({ db, messenger, config, erx }) {
+export default function casePresentationRoutes({ db, messenger, config, erx, secret }) {
   const r = Router();
 
   // Staff: send the plan to the patient to review and sign remotely, or get a link for a chairside tablet.
@@ -105,7 +107,7 @@ export default function casePresentationRoutes({ db, messenger, config, erx }) {
     if (plan.signed_at) throw new HttpError(409, 'This plan is already signed');
     const { token, hash } = newToken();
     const expires = new Date(Date.now() + SIGN_LINK_DAYS * 86400_000).toISOString();
-    await db.run("UPDATE treatment_plans SET sign_token_hash = ?, sign_token_expires_at = ?, presented_at = datetime('now') WHERE id = ?", hash, expires, plan.id);
+    await db.run("UPDATE treatment_plans SET sign_token_hash = ?, sign_token_expires_at = ?, sign_token_failures = 0, presented_at = datetime('now') WHERE id = ?", hash, expires, plan.id);
     const url = `${config.appUrl}/tp/${token}`;
     let message = null;
     if (req.body?.send) {
@@ -248,7 +250,7 @@ export default function casePresentationRoutes({ db, messenger, config, erx }) {
       if (!pharmacy?.ncpdp) throw new HttpError(400, "Choose the patient's pharmacy first");
       // Electronic prescriptions carry the prescriber's signature, so only they can send one.
       if (provider.user_id !== req.user.id) throw new HttpError(403, `Only ${provider.name} can sign and send this prescription — save it for them to send, or print it for a wet signature`);
-      signature = await checkEpcs(db, { user: req.user, provider, schedule: row.schedule, refills: row.refills, otp: req.body.otp });
+      signature = await checkEpcs(db, { user: req.user, provider, schedule: row.schedule, refills: row.refills, otp: req.body.otp, secret });
     }
     const id = await insert(db, 'prescriptions', {
       ...row, practice_id: req.user.practice_id, patient_id: patient.id, created_by: req.user.id,
@@ -282,17 +284,49 @@ export default function casePresentationRoutes({ db, messenger, config, erx }) {
 }
 
 // Patient-facing treatment plan review & e-signature.
-export function publicCasePresentation({ db, storage }) {
+// Holding the link isn't enough to see the plan: the patient confirms their date of birth first and gets
+// a short-lived pass for this plan (sent back as X-Plan-Pass, or ?pass= for the PDF download).
+export const planPass = (plan, secret) => signToken({ sub: plan.id, aud: 'tp-view' }, secret, 2 * 3600);
+export function publicCasePresentation({ db, storage, secret }) {
   const r = Router();
   const limiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 30 });
-  const byToken = async (token) => {
+  const dobLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20 });
+  const byToken = async (token, req) => {
     const plan = await db.get('SELECT * FROM treatment_plans WHERE sign_token_hash = ?', hashToken(token));
     if (!plan) throw new HttpError(404, 'This link is no longer valid');
     // Links expire; once signed, the patient can look at what they signed for a week.
     const signedLongAgo = plan.signed_at && Date.parse(`${plan.signed_at.replace(' ', 'T')}Z`) < Date.now() - 7 * 86400_000;
     if (signedLongAgo || (plan.sign_token_expires_at && plan.sign_token_expires_at < new Date().toISOString())) throw new HttpError(410, 'This link has expired — please ask the office for a new one');
+    if (req && !(await passOk(req, plan))) {
+      const practice = await db.get('SELECT name, phone FROM practices WHERE id = ?', plan.practice_id);
+      throw new HttpError(403, 'Enter your date of birth to see your plan', { dob_required: true, practice });
+    }
     return plan;
   };
+  const passOk = async (req, plan) => {
+    const patient = await db.get('SELECT dob FROM patients WHERE id = ?', plan.patient_id);
+    if (!patient?.dob) return true; // nothing on file to check against
+    const pass = verifyToken(req.get('X-Plan-Pass') || req.query.pass || '', secret);
+    return !!pass && pass.aud === 'tp-view' && pass.sub === plan.id;
+  };
+
+  r.post('/tp/:token/verify', dobLimiter, async (req, res) => {
+    const plan = await byToken(req.params.token);
+    const patient = await db.get('SELECT dob FROM patients WHERE id = ?', plan.patient_id);
+    const dob = String(req.body?.dob || '').trim();
+    if (patient?.dob && dob !== patient.dob) {
+      await db.run('UPDATE treatment_plans SET sign_token_failures = sign_token_failures + 1 WHERE id = ?', plan.id);
+      const tries = Number((await db.get('SELECT sign_token_failures AS n FROM treatment_plans WHERE id = ?', plan.id)).n);
+      await audit(db, { ip: req.ip, user: { practice_id: plan.practice_id, id: null } }, 'treatment_plan.link_dob_failed', 'treatment_plans', plan.id, { patient_id: plan.patient_id, tries });
+      if (tries >= MAX_DOB_TRIES) {
+        await db.run('UPDATE treatment_plans SET sign_token_hash = NULL WHERE id = ?', plan.id);
+        throw new HttpError(410, 'This link has been turned off after too many tries — please ask the office for a new one');
+      }
+      throw new HttpError(403, "That date of birth doesn't match our records", { dob_required: true });
+    }
+    await db.run('UPDATE treatment_plans SET sign_token_failures = 0 WHERE id = ?', plan.id);
+    res.json({ pass: planPass(plan, secret) });
+  });
   const publicView = async (plan) => {
     const live = await planView(db, plan);
     // After signing, the patient sees exactly the version they signed.
@@ -309,14 +343,21 @@ export function publicCasePresentation({ db, storage }) {
     };
   };
 
-  r.get('/tp/:token', async (req, res) => res.json(await publicView(await byToken(req.params.token))));
+  // Anyone holding the link can read the plan, so each look is on the record.
+  const linkAudit = (req, plan, action) => audit(db, { ip: req.ip, user: { practice_id: plan.practice_id, id: null } }, action, 'treatment_plans', plan.id, { patient_id: plan.patient_id });
+  r.get('/tp/:token', async (req, res) => {
+    const plan = await byToken(req.params.token, req);
+    await linkAudit(req, plan, 'treatment_plan.link_view');
+    res.json(await publicView(plan));
+  });
   r.get('/tp/:token/pdf', async (req, res) => {
-    const plan = await byToken(req.params.token);
+    const plan = await byToken(req.params.token, req);
+    await linkAudit(req, plan, 'treatment_plan.link_pdf');
     res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': `attachment; filename="${pdfFilename(plan)}.pdf"` }).send(await planPdf(db, plan));
   });
 
   r.post('/tp/:token', limiter, async (req, res) => {
-    const plan = await byToken(req.params.token);
+    const plan = await byToken(req.params.token, req);
     if (plan.signed_at) throw new HttpError(409, 'This plan has already been signed');
     const name = String(req.body?.signature_name || '').trim();
     if (name.length < 2) throw new HttpError(400, 'Type your full name to sign');

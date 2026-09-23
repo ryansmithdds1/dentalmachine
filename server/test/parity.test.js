@@ -29,10 +29,10 @@ after(() => {
   rmSync(uploadDir, { recursive: true, force: true });
 });
 
-function client(token) {
+function client(token, headers = {}) {
   const call = async (method, path, body) => {
     const res = await fetch(`${origin}/api${path}`, {
-      method, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: body === undefined ? undefined : JSON.stringify(body),
+      method, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...headers }, body: body === undefined ? undefined : JSON.stringify(body),
     });
     const text = await res.text();
     let data = text;
@@ -132,7 +132,14 @@ test('case presentation: send plan, patient reviews estimate and e-signs', async
   const pres = (await api.post(`/treatment-plans/${plan.id}/present`, { send: 'sms' })).data;
   assert.match(pres.message.body, /Review and sign here: https:\/\/app\.example\.com\/tp\//);
   const token = pres.url.split('/tp/')[1];
-  const pub = client();
+  // The link alone shows nothing: the patient confirms their birth date first.
+  const locked = await client().get(`/public/tp/${token}`);
+  assert.equal(locked.status, 403);
+  assert.equal(locked.data.details.dob_required, true);
+  assert.equal(locked.data.procedures, undefined);
+  assert.equal((await client().post(`/public/tp/${token}/verify`, { dob: '1985-04-21' })).status, 403);
+  const { pass } = (await client().post(`/public/tp/${token}/verify`, { dob: '1985-04-12' })).data;
+  const pub = client(null, { 'X-Plan-Pass': pass });
   const view = (await pub.get(`/public/tp/${token}`)).data;
   assert.equal(view.first_name, 'Jane');
   assert.equal(view.procedures[0].code, 'D2740');

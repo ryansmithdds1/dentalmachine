@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { harness } from './helpers.js';
-import { createLogger, createErrorReporter, parseDsn } from '../src/monitoring.js';
+import { createLogger, createErrorReporter, parseDsn, scrubMessage } from '../src/monitoring.js';
 
 const reports = [];
 const h = harness({ config: { reporter: { enabled: true, capture: (err, ctx) => { reports.push({ err, ctx }); return 'evt'; } } } });
@@ -69,4 +69,14 @@ test('unexpected errors: 500 with a request id, logged and reported without requ
   assert.equal(reports.at(-1).ctx.tags.route, '/patients/:id');
   assert.equal(reports.at(-1).ctx.platform, 'javascript');
   assert.equal((await fetch(`${h.origin}/api/client-errors`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).status, 400);
+});
+
+test('error reports and logs carry the shape of a database error, not the patient data in it', () => {
+  assert.equal(scrubMessage('duplicate key value violates unique constraint "users_email_key"'), 'duplicate key value violates unique constraint "…"');
+  assert.equal(scrubMessage('Key (email)=(jane@example.com) already exists.'), 'Key (email)=(…) already exists.');
+  assert.equal(scrubMessage("invalid input syntax for type date: '1985-13-40'"), "invalid input syntax for type date: '…'");
+  assert.doesNotMatch(scrubMessage('texting jane.doe@example.com at 512-555-0100 failed'), /jane|555/);
+  const lines = [];
+  createLogger({ format: 'json', write: (_l, line) => lines.push(line) }).error('Failed:', new Error('bad value "Jane Doe"'));
+  assert.doesNotMatch(lines[0], /Jane/);
 });

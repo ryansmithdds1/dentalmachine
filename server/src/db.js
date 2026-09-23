@@ -1484,6 +1484,8 @@ const COLUMNS = [
   ['practices', 'review_url', 'TEXT'],
   ['practices', 'review_requests', 'INTEGER NOT NULL DEFAULT 0'],
   ['practices', 'idle_timeout_minutes', 'INTEGER NOT NULL DEFAULT 15'],
+  ['perio_exams', 'deleted_at', 'TEXT'],
+  ['treatment_plans', 'sign_token_failures', 'INTEGER NOT NULL DEFAULT 0'],
   ['practices', 'message_templates', 'TEXT'],
   ['practices', 'hygiene_goal', 'INTEGER NOT NULL DEFAULT 0'],
   ['providers', 'dea_number', 'TEXT'],

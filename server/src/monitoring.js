@@ -6,6 +6,17 @@ import { hostname } from 'node:os';
 // text is easier to read in a terminal. Fields never include request bodies or patient details.
 const LEVELS = { debug: 10, info: 20, warn: 30, error: 40 };
 
+// Error messages can quote the data that caused them (a database error naming the value it rejected, a
+// parse error echoing input). Logs and error reports get the shape of the problem, never the values.
+export function scrubMessage(text) {
+  return String(text ?? '')
+    .replace(/"(?:[^"\\]|\\.)*"/g, '"…"')
+    .replace(/'(?:[^'\\]|\\.)*'/g, "'…'")
+    .replace(/\(([^()]*)\)=\(([^()]*)\)/g, '($1)=(…)')
+    .replace(/[\w.+-]+@[\w-]+(\.[\w-]+)+/g, '[email]')
+    .replace(/\d[\d\s().-]{5,}\d/g, '[number]');
+}
+
 export function createLogger({ format = process.env.LOG_FORMAT || (process.env.NODE_ENV === 'production' ? 'json' : 'text'), level = process.env.LOG_LEVEL || 'info', write } = {}) {
   const min = LEVELS[level] ?? LEVELS.info;
   const out = write || ((lvl, line) => (lvl >= LEVELS.warn ? process.stderr : process.stdout).write(`${line}\n`));
@@ -15,7 +26,7 @@ export function createLogger({ format = process.env.LOG_FORMAT || (process.env.N
     const fields = {};
     const words = [];
     for (const a of args) {
-      if (a instanceof Error) Object.assign(fields, { error: a.message, stack: a.stack });
+      if (a instanceof Error) Object.assign(fields, { error: scrubMessage(a.message), stack: scrubMessage(a.stack) });
       else if (a && typeof a === 'object') Object.assign(fields, a);
       else words.push(String(a));
     }
@@ -69,7 +80,7 @@ export function createErrorReporter({ dsn = process.env.SENTRY_DSN, environment 
     const eventId = randomUUID().replace(/-/g, '');
     const event = {
       event_id: eventId, timestamp: now / 1000, platform, level: 'error', environment, ...(release ? { release } : {}), server_name: hostname(),
-      exception: { values: [{ type: err?.name || 'Error', value: String(err?.message || err).slice(0, 1000), stacktrace: { frames: frames(err?.stack) } }] },
+      exception: { values: [{ type: err?.name || 'Error', value: scrubMessage(err?.message || err).slice(0, 1000), stacktrace: { frames: frames(err?.stack) } }] },
       tags: Object.fromEntries(Object.entries(tags).filter(([, v]) => v != null).map(([k, v]) => [k, String(v)])),
       ...(user ? { user } : {}), ...(request ? { request } : {}), extra,
     };

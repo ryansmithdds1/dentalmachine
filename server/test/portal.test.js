@@ -79,7 +79,10 @@ test('patient portal: code sign-in, household view, confirm/cancel, pay, forms a
   assert.ok((tasks.tasks || tasks).some((t) => /cancelled .* online.*Soccer game/.test(t.title)));
 
   const planLink = (await portal.post(`/portal/treatment-plans/${tp.id}/open`)).data.url;
-  assert.equal((await pub.get(`/public/tp/${planLink.split('/').pop()}`)).status, 200);
+  // Already signed in to the portal: the link carries its own pass (in the #fragment), no birth date asked.
+  const [tpToken, tpPass] = planLink.split('/').pop().split('#pass=');
+  assert.equal((await pub.get(`/public/tp/${tpToken}`)).status, 403);
+  assert.equal((await h.client(null, { 'X-Plan-Pass': tpPass }).get(`/public/tp/${tpToken}`)).status, 200);
   const formLink = (await portal.post(`/portal/forms/${me.forms[0].id}/open`)).data.url;
   assert.equal((await pub.get(`/public/forms/${formLink.split('/').pop()}`)).status, 200);
 

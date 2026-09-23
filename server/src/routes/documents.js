@@ -98,7 +98,7 @@ export default function documentRoutes({ db, storage, config = {} }) {
     if (doc.deleted_at) throw new HttpError(404, 'Document not found');
     const img = await viewable(doc);
     await audit(db, req, 'document.view', 'documents', doc.id, { patient_id: doc.patient_id });
-    res.set({ 'Content-Type': img.mime, 'Content-Length': img.data.length, 'Cache-Control': 'private, max-age=300', 'Content-Security-Policy': "default-src 'none'; sandbox" });
+    res.set({ 'Content-Type': img.mime, 'Content-Length': img.data.length, 'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'none'; sandbox" });
     res.send(img.data);
   });
 
@@ -181,7 +181,7 @@ export default function documentRoutes({ db, storage, config = {} }) {
       const saved = await storage.save(doc.practice_id, thumb.data);
       await db.run('UPDATE documents SET thumb_key = ?, thumb_mime = ?, thumb_encrypted = ? WHERE id = ?', saved.storageKey, thumb.mime, saved.encrypted ? 1 : 0, doc.id);
     }
-    res.set({ 'Content-Type': thumb.mime, 'Content-Length': thumb.data.length, 'Cache-Control': 'private, max-age=86400', 'Content-Security-Policy': "default-src 'none'; sandbox" });
+    res.set({ 'Content-Type': thumb.mime, 'Content-Length': thumb.data.length, 'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'none'; sandbox" });
     res.send(thumb.data);
   });
   // A browser's preview of an image the server can't decode (it only needs making once).

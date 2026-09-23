@@ -199,6 +199,8 @@ export default {
   'Your estimated cost': 'Su costo estimado',
   'Insurance amounts are estimates and not a guarantee of payment. Ask us about payment plans.': 'Los montos del seguro son estimados y no garantizan el pago. Pregúntenos por los planes de pago.',
   'Accept your plan': 'Acepte su plan',
+  'Continue': 'Continuar',
+  'To keep your information private, please confirm your date of birth.': 'Para proteger su información, confirme su fecha de nacimiento.',
   'I have reviewed this treatment plan, my questions have been answered, and I understand the estimated costs are my responsibility if insurance pays less.': 'He revisado este plan de tratamiento, se han respondido mis preguntas y entiendo que los costos estimados son mi responsabilidad si el seguro paga menos.',
   'Type your full name': 'Escriba su nombre completo',
   'Accept & sign': 'Aceptar y firmar',

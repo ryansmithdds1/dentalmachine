@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { HttpError } from './auth.js';
 import { verifyTotp } from './totp.js';
+import { openMfaSecret } from './sso.js';
 
 // Electronic prescribing.
 //   ERX=none      (default) prescriptions are printed and signed by hand.
@@ -68,7 +69,7 @@ export function doseSpotSsoUrl({ url, clinicId, clinicKey, userId, patient, phra
 
 // DEA 21 CFR 1311 for controlled substances, enforced for in-app e-prescribing (sandbox) and recorded for audits:
 // only the prescriber can sign, they need a DEA number, and signing needs a fresh second-factor code.
-export async function checkEpcs(db, { user, provider, schedule, refills, otp }) {
+export async function checkEpcs(db, { user, provider, schedule, refills, otp, secret }) {
   if (!schedule) return null;
   if (!['II', 'III', 'IV', 'V'].includes(schedule)) throw new HttpError(400, 'schedule must be II, III, IV or V');
   if (!provider.dea_number) throw new HttpError(400, `${provider.name} needs a DEA number (Settings → Providers) to prescribe controlled substances`);
@@ -77,7 +78,7 @@ export async function checkEpcs(db, { user, provider, schedule, refills, otp }) 
   const u = await db.get('SELECT mfa_enabled, mfa_secret, mfa_last_step FROM users WHERE id = ?', user.id);
   if (!u.mfa_enabled) throw new HttpError(403, 'Turn on two-factor authentication (Settings → My account) to sign controlled-substance prescriptions', { mfa_setup_required: true });
   if (!otp) throw new HttpError(403, 'Enter the 6-digit code from your authenticator app to sign', { otp_required: true });
-  const step = verifyTotp(u.mfa_secret, otp, { lastStep: u.mfa_last_step });
+  const step = verifyTotp(openMfaSecret(u.mfa_secret, secret), otp, { lastStep: u.mfa_last_step });
   if (step == null) throw new HttpError(403, 'That code is not valid — wait for a new one and try again', { otp_required: true });
   await db.run('UPDATE users SET mfa_last_step = ? WHERE id = ?', step, user.id);
   return { signed_by: user.id, two_factor: true };

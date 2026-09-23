@@ -113,7 +113,7 @@ export default function imagingRoutes({ db, storage }) {
     if (!data) throw new HttpError(404, 'File missing from storage');
     const view = u.mime === 'application/dicom' ? dicomToImage(data) : { mime: u.mime, data };
     if (!view || !/^image\//.test(view.mime)) throw new HttpError(415, 'No preview for this file');
-    res.set({ 'Content-Type': view.mime, 'Cache-Control': 'private, max-age=300', 'Content-Security-Policy': "default-src 'none'; sandbox" }).send(view.data);
+    res.set({ 'Content-Type': view.mime, 'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'none'; sandbox" }).send(view.data);
   });
   // File several at once into one patient's chart (or discard mistakes).
   r.post('/imaging/unfiled/file', requirePermission('clinical:write'), async (req, res) => {

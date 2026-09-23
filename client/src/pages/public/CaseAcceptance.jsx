@@ -1,11 +1,34 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { api } from '../../api.js';
 import { money } from '../../format.js';
 import { ErrorBox, useSubmit } from '../../components/ui.jsx';
 import SignaturePad from '../../components/SignaturePad.jsx';
 import PublicLayout from './PublicLayout.jsx';
 import { locale, suggestLang, useLang, useT } from './i18n.js';
+
+// The plan link alone doesn't open the plan: the patient confirms their birth date and gets a short-lived
+// pass (a portal link already carries one in its #fragment). Kept for this tab only.
+const passKey = (token) => `dm_tp_pass_${token.slice(0, 12)}`;
+function readPass(token) {
+  const fromLink = new URLSearchParams(window.location.hash.slice(1)).get('pass');
+  try {
+    if (fromLink) {
+      sessionStorage.setItem(passKey(token), fromLink);
+      window.history.replaceState(null, '', window.location.pathname);
+    }
+    return sessionStorage.getItem(passKey(token)) || '';
+  } catch {
+    return fromLink || '';
+  }
+}
+async function call(method, path, body, pass) {
+  const res = await fetch(`/api/public${path}`, {
+    method, headers: { 'Content-Type': 'application/json', ...(pass ? { 'X-Plan-Pass': pass } : {}) }, body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw Object.assign(new Error(data.error || res.statusText), { status: res.status, details: data.details });
+  return data;
+}
 
 // Patient-facing treatment plan: plain-language costs, then accept with an e-signature.
 export default function CaseAcceptance() {
@@ -14,24 +37,50 @@ export default function CaseAcceptance() {
   const { token } = useParams();
   const [plan, setPlan] = useState(null);
   const [loadError, setLoadError] = useState(null);
+  const [pass, setPass] = useState(() => readPass(token));
+  const [locked, setLocked] = useState(null);
+  const [dob, setDob] = useState('');
   const [name, setName] = useState('');
   const [image, setImage] = useState(null);
   const [consent, setConsent] = useState(false);
   useEffect(() => {
-    api.get(`/public/tp/${token}`).then((p) => { suggestLang(p.language); setPlan(p); }).catch(setLoadError);
-  }, [token]);
+    call('GET', `/tp/${token}`, null, pass)
+      .then((p) => { suggestLang(p.language); setLocked(null); setPlan(p); })
+      .catch((err) => (err.details?.dob_required ? setLocked(err.details) : setLoadError(err)));
+  }, [token, pass]);
+  const verify = useSubmit(async () => {
+    const { pass: fresh } = await call('POST', `/tp/${token}/verify`, { dob });
+    try {
+      sessionStorage.setItem(passKey(token), fresh);
+    } catch {
+      /* storage unavailable */
+    }
+    setPass(fresh);
+  });
   const { submit, busy, error } = useSubmit(async () => {
-    setPlan(await api.post(`/public/tp/${token}`, { signature_name: name, signature_image: image, consent }));
+    setPlan(await call('POST', `/tp/${token}`, { signature_name: name, signature_image: image, consent }, pass));
     window.scrollTo(0, 0);
   });
   if (loadError) return <PublicLayout title={t('Treatment plan')}><ErrorBox error={loadError} /></PublicLayout>;
+  if (locked && !plan) {
+    return (
+      <PublicLayout title={t('Treatment plan')} practice={locked.practice}>
+        <form className="card" onSubmit={(ev) => { ev.preventDefault(); verify.submit(); }}>
+          <p>{t('To keep your information private, please confirm your date of birth.')}</p>
+          <label>{t('Date of birth')}<input required type="date" value={dob} onChange={(ev) => setDob(ev.target.value)} /></label>
+          <ErrorBox error={verify.error} />
+          <button className="primary big" style={{ marginTop: 12 }} disabled={verify.busy || !dob}>{t('Continue')}</button>
+        </form>
+      </PublicLayout>
+    );
+  }
   if (!plan) return <PublicLayout title={t('Treatment plan')}><p>{t('Loading…')}</p></PublicLayout>;
   const e = plan.estimate;
   const planned = plan.procedures.filter((p) => p.status === 'planned');
 
   return (
     <PublicLayout title={plan.signed_at ? t('Thank you!') : t('Your treatment plan, {name}', { name: plan.first_name })} practice={plan.practice}>
-      {plan.signed_at && <div className="public-notice ok" style={{ marginBottom: 16 }}>{t('You accepted this plan on {date}. We’ll be in touch to schedule — or call us at {phone}.', { date: new Date(plan.signed_at.replace(' ', 'T') + 'Z').toLocaleDateString(locale(lang)), phone: plan.practice.phone })} <a href={`/api/public/tp/${token}/pdf`}>{t('Download a copy (PDF)')}</a></div>}
+      {plan.signed_at && <div className="public-notice ok" style={{ marginBottom: 16 }}>{t('You accepted this plan on {date}. We’ll be in touch to schedule — or call us at {phone}.', { date: new Date(plan.signed_at.replace(' ', 'T') + 'Z').toLocaleDateString(locale(lang)), phone: plan.practice.phone })} <a href={`/api/public/tp/${token}/pdf${pass ? `?pass=${encodeURIComponent(pass)}` : ''}`}>{t('Download a copy (PDF)')}</a></div>}
       <div className="card">
         <h2>{plan.name}</h2>
         {planned.map((p, i) => (

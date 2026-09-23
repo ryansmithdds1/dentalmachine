@@ -15,6 +15,7 @@ import { receiptData, receiptPdf } from '../receipts.js';
 import { sniffMime } from './imaging.js';
 import { MAX_UPLOAD_BYTES } from './documents.js';
 import { runMembershipBilling } from '../memberships.js';
+import { planPass } from './casepres.js';
 
 const CODE_TTL_MINUTES = 10;
 const SESSION_HOURS = 2;
@@ -414,9 +415,11 @@ export function portalRoutes({ db, secret, config, payments, messenger, storage 
     const tp = await db.get(`SELECT * FROM treatment_plans WHERE id = ? AND patient_id IN (${inList(req.portal.ids)}) AND signed_at IS NULL`, Number(req.params.tid), ...req.portal.ids);
     if (!tp) throw new HttpError(404, 'Treatment plan not found');
     const { token, hash } = newToken();
-    await db.run("UPDATE treatment_plans SET sign_token_hash = ?, presented_at = COALESCE(presented_at, datetime('now')) WHERE id = ?", hash, tp.id);
+    // Signed in to the portal already, so no birth-date check: the pass rides in the link's #fragment,
+    // which browsers never send to a server. The link itself only lasts a day.
+    await db.run("UPDATE treatment_plans SET sign_token_hash = ?, sign_token_expires_at = ?, sign_token_failures = 0, presented_at = COALESCE(presented_at, datetime('now')) WHERE id = ?", hash, new Date(Date.now() + 86400_000).toISOString(), tp.id);
     await pAudit(req, 'portal.plan_open', 'treatment_plans', tp.id);
-    res.json({ url: `/tp/${token}` });
+    res.json({ url: `/tp/${token}#pass=${planPass(tp, secret)}` });
   });
 
   // Pay the balance: Stripe's hosted page, or an immediate simulated payment in sandbox mode.

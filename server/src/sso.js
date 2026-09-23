@@ -81,19 +81,24 @@ export function verifiedEmail(provider, claims) {
   return String(claims.email || '').toLowerCase();
 }
 
-// The client secret is stored encrypted with a key derived from the server's signing secret.
-const keyFrom = (secret) => createHash('sha256').update(`sso:${secret}`).digest();
-export function sealSecret(value, secret) {
+// Secrets kept in the database (the SSO client secret, staff 2FA keys) are stored encrypted with a key
+// derived from the server's signing secret; `purpose` keeps each kind under its own key.
+const keyFrom = (secret, purpose) => createHash('sha256').update(`${purpose}:${secret}`).digest();
+export function sealSecret(value, secret, purpose = 'sso') {
   if (!value) return null;
   const iv = randomBytes(12);
-  const c = createCipheriv('aes-256-gcm', keyFrom(secret), iv);
+  const c = createCipheriv('aes-256-gcm', keyFrom(secret, purpose), iv);
   const body = Buffer.concat([c.update(String(value), 'utf8'), c.final()]);
   return `v1.${b64url(iv)}.${b64url(c.getAuthTag())}.${b64url(body)}`;
 }
-export function openSecret(sealed, secret) {
+export function openSecret(sealed, secret, purpose = 'sso') {
   if (!sealed) return null;
   const [, iv, tag, body] = String(sealed).split('.');
-  const d = createDecipheriv('aes-256-gcm', keyFrom(secret), Buffer.from(iv, 'base64url'));
+  const d = createDecipheriv('aes-256-gcm', keyFrom(secret, purpose), Buffer.from(iv, 'base64url'));
   d.setAuthTag(Buffer.from(tag, 'base64url'));
   return Buffer.concat([d.update(Buffer.from(body, 'base64url')), d.final()]).toString('utf8');
 }
+
+// Staff authenticator-app keys. Older rows hold the base32 key as-is (base32 never contains a dot).
+export const sealMfaSecret = (value, secret) => sealSecret(value, secret, 'mfa');
+export const openMfaSecret = (stored, secret) => (stored && String(stored).startsWith('v1.') ? openSecret(stored, secret, 'mfa') : stored);
