@@ -45,7 +45,25 @@ export function smsWebhook({ db, config }) {
 
     const keyword = body.toUpperCase().replace(/[^A-Z ]/g, '').trim();
     let reply = null;
+    // A patient who writes "cancel" (the carriers' opt-out word, or "I need to cancel…") usually means their
+    // appointment. We can't cancel it for them from one word, so the front desk gets a task to call.
+    const wantsToCancel = candidates.length && (keyword === 'CANCEL' || /\bcancel|resched/i.test(body));
+    if (wantsToCancel) {
+      const now = await practiceNow(db, practice.id);
+      const appt = await db.get(
+        `SELECT * FROM appointments WHERE practice_id = ? AND patient_id IN (${candidates.map(() => '?').join(',')})
+         AND status IN ('scheduled','confirmed') AND start_time > ? ORDER BY start_time LIMIT 1`, practice.id, ...candidates.map((p) => p.id), now,
+      );
+      if (appt) {
+        const who = candidates.find((p) => p.id === appt.patient_id);
+        await insert(db, 'tasks', {
+          practice_id: practice.id, patient_id: appt.patient_id, priority: 'high', due_date: now.slice(0, 10),
+          title: `${who.first_name} ${who.last_name} texted "${body.slice(0, 60)}" — may want to cancel ${friendlyDateTime(appt.start_time)}. Call to reschedule.`,
+        });
+      }
+    }
     if (STOP.includes(keyword)) {
+      // "CANCEL" is a carrier opt-out keyword: the carrier stops our texts whatever we do, so we record it too.
       for (const p of candidates) await db.run('UPDATE patients SET sms_opt_in = 0 WHERE id = ?', p.id);
       // Twilio sends the carrier-required opt-out confirmation itself.
     } else if (START.includes(keyword)) {

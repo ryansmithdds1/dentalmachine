@@ -60,14 +60,37 @@ export async function validateAppt(db, practiceId, row, { overrideBlockout = fal
   if (!overrideBlockout) {
     const blocks = await findBlockouts(db, practiceId, row);
     if (blocks.length) throw new HttpError(409, `That time is blocked: ${blocks[0].reason}`, { blockouts: blocks, can_override: true });
-    // Providers with their own hours (part-time hygienists, visiting specialists) aren't booked outside them.
-    if (providerHours(provider)) {
-      const date = row.start_time.slice(0, 10);
-      const ranges = providerHoursFor(null, provider, date);
-      const inside = ranges.some(([o, c]) => row.start_time.slice(11) >= o && row.end_time.slice(11) <= c);
-      if (!inside) throw new HttpError(409, `${provider.name} isn't scheduled to work then`, { outside_hours: ranges, can_override: true });
+    // Nobody is booked outside their hours — the provider's own (part-time hygienists, visiting
+    // specialists) or else the office's — without a deliberate override.
+    const date = row.start_time.slice(0, 10);
+    const practice = providerHours(provider) ? null : await db.get('SELECT office_hours FROM practices WHERE id = ?', practiceId);
+    const ranges = providerHoursFor(practice, provider, date);
+    const inside = ranges.some(([o, c]) => row.start_time.slice(11) >= o && row.end_time.slice(11) <= c);
+    if (!inside) {
+      throw new HttpError(409, providerHours(provider) ? `${provider.name} isn't scheduled to work then` : 'That time is outside office hours', { outside_hours: ranges, can_override: true });
     }
   }
+}
+
+// Recall visits: which recall a booked appointment takes care of. The visit's procedures decide
+// (prophy, perio maintenance); a hygiene visit with none on it covers the patient's due recalls.
+const RECALL_FOR_CODE = { D1110: 'prophy', D1120: 'prophy', D4910: 'perio_maint', D4346: 'prophy' };
+export async function linkRecalls(db, practiceId, apptId) {
+  const appt = await db.get('SELECT a.*, pv.type AS provider_type FROM appointments a JOIN providers pv ON pv.id = a.provider_id WHERE a.id = ?', apptId);
+  if (!appt) return;
+  const codes = (await db.all("SELECT code FROM procedures WHERE appointment_id = ? AND status = 'planned'", apptId)).map((p) => p.code);
+  const types = [...new Set(codes.map((c) => RECALL_FOR_CODE[c]).filter(Boolean))];
+  if (!types.length && appt.provider_type !== 'hygienist') return;
+  await db.run(
+    `UPDATE recalls SET status = 'scheduled', appointment_id = ? WHERE practice_id = ? AND patient_id = ? AND status IN ('due','contacted')${types.length ? ` AND type IN (${types.map(() => '?').join(',')})` : ''}`,
+    apptId, practiceId, appt.patient_id, ...types,
+  );
+}
+// A cancelled or missed visit gives back what it held: its planned procedures go back to the
+// unscheduled-treatment list, and the recalls it covered are due again.
+export async function releaseAppointment(db, apptId) {
+  await db.run("UPDATE procedures SET appointment_id = NULL WHERE appointment_id = ? AND status = 'planned'", apptId);
+  await db.run("UPDATE recalls SET status = 'due', appointment_id = NULL WHERE appointment_id = ? AND status = 'scheduled'", apptId);
 }
 
 const toMin = (hhmm) => {
@@ -222,7 +245,7 @@ export default function scheduleRoutes({ db }) {
     for (const procId of req.body.procedure_ids || []) {
       await db.run("UPDATE procedures SET appointment_id = ? WHERE id = ? AND practice_id = ? AND patient_id = ? AND status = 'planned'", id, Number(procId), req.user.practice_id, row.patient_id);
     }
-    await db.run("UPDATE recalls SET status = 'scheduled' WHERE practice_id = ? AND patient_id = ? AND status IN ('due','contacted')", req.user.practice_id, row.patient_id);
+    await linkRecalls(db, req.user.practice_id, id);
     await audit(db, req, 'appointment.create', 'appointments', id);
     changed(req, row.start_time, ...(series ? Array.from({ length: repeat.count }, (_, i) => shiftVisit(row.start_time, repeat, i)) : []));
     res.status(201).json({ ...(await db.get(`${SELECT} WHERE a.id = ?`, id)), ...(series ? { series } : {}) });
@@ -235,11 +258,14 @@ export default function scheduleRoutes({ db }) {
     if (!['cancelled', 'no_show'].includes(merged.status)) await validateAppt(db, req.user.practice_id, merged, { overrideBlockout: !!req.body.override_blockout });
     else requireOneOf(merged.status, STATUSES, 'status');
     const row = pick(merged, FIELDS);
+    const inactive = ['cancelled', 'no_show'];
     // A moved appointment needs a fresh reminder and confirmation.
     if (row.start_time !== existing.start_time) Object.assign(row, { reminder_sent_at: null, confirmed_at: null });
     await update(db, 'appointments', existing.id, req.user.practice_id, row);
     // Keep attached procedures with the provider the patient is now seeing.
     if (Number(row.provider_id) !== existing.provider_id) await db.run("UPDATE procedures SET provider_id = ? WHERE appointment_id = ? AND status = 'planned'", row.provider_id, existing.id);
+    // Cancelling from the edit form releases procedures and recalls, same as the status buttons.
+    if (inactive.includes(row.status) && !inactive.includes(existing.status)) await releaseAppointment(db, existing.id);
     await audit(db, req, 'appointment.update', 'appointments', existing.id, { fields: Object.keys(changes) });
     // "This and following": apply the same shift (and provider/chair/length changes) to later visits in the series.
     let seriesUpdate = null;
@@ -284,13 +310,12 @@ export default function scheduleRoutes({ db }) {
       "UPDATE appointments SET status = ?, confirmed_at = CASE WHEN ? = 'confirmed' THEN COALESCE(confirmed_at, datetime('now')) ELSE confirmed_at END WHERE id = ?",
       status, status, existing.id,
     );
-    if (status === 'cancelled' || status === 'no_show') {
-      await db.run("UPDATE procedures SET appointment_id = NULL WHERE appointment_id = ? AND status = 'planned'", existing.id);
-    }
+    if (status === 'cancelled' || status === 'no_show') await releaseAppointment(db, existing.id);
     if (status === 'cancelled' && req.body.scope === 'following' && existing.series_id) {
       const later = await db.all("SELECT id, start_time FROM appointments WHERE series_id = ? AND practice_id = ? AND start_time > ? AND status IN ('scheduled','confirmed')", existing.series_id, req.user.practice_id, existing.start_time);
       for (const occ of later) {
         await db.run("UPDATE appointments SET status = 'cancelled' WHERE id = ?", occ.id);
+        await db.run("UPDATE recalls SET status = 'due', appointment_id = NULL WHERE appointment_id = ? AND status = 'scheduled'", occ.id);
         // Their pre-loaded type procedures are only placeholders; drop them rather than leave "planned" work behind.
         await db.run("DELETE FROM procedures WHERE appointment_id = ? AND status = 'planned' AND treatment_plan_id IS NULL", occ.id);
       }

@@ -29,9 +29,12 @@ export default function patientRoutes({ db }) {
       params.push(status);
     }
     if (q) {
-      where.push(`(p.first_name LIKE ? OR p.last_name LIKE ? OR (p.first_name || ' ' || p.last_name) LIKE ? OR p.phone LIKE ? OR p.email LIKE ? OR p.dob = ? OR CAST(p.id AS TEXT) = ?)`);
+      // Phone numbers match on their digits, however either side is formatted: 5125550100 finds (512) 555-0100.
+      const digits = /^[\d\s().+-]+$/.test(q) ? q.replace(/\D/g, '').replace(/^1(?=\d{10}$)/, '') : '';
+      const phoneDigits = "replace(replace(replace(replace(replace(COALESCE(p.phone, ''), '(', ''), ')', ''), '-', ''), ' ', ''), '.', '')";
+      where.push(`(p.first_name LIKE ? OR p.last_name LIKE ? OR (p.first_name || ' ' || p.last_name) LIKE ? OR p.phone LIKE ? OR p.email LIKE ? OR p.dob = ? OR CAST(p.id AS TEXT) = ?${digits.length >= 4 ? ` OR ${phoneDigits} LIKE ?` : ''})`);
       const like = `%${q}%`;
-      params.push(like, like, like, like, like, q, q);
+      params.push(like, like, like, like, like, q, q, ...(digits.length >= 4 ? [`%${digits}%`] : []));
     }
     const whereSql = where.join(' AND ');
     const total = (await db.get(`SELECT COUNT(*) AS n FROM patients p WHERE ${whereSql}`, ...params)).n;

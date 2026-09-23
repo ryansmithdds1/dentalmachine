@@ -49,7 +49,7 @@ async function setup() {
   n++;
   const reg = await client().post('/auth/register', { practice_name: `Parity ${n}`, name: 'Admin', email: `par${n}@example.com`, password: 'correct-horse-battery' });
   const api = client(reg.data.token);
-  await api.put('/practice', { npi: '1234567893', tax_id: '74-1234567', address: '1 Main', city: 'Austin', state: 'TX', zip: '78701', phone: '512-555-0000' });
+  await api.put('/practice', { npi: '1234567893', tax_id: '74-1234567', address: '1 Main', city: 'Austin', state: 'TX', zip: '78701', phone: '512-555-0000', office_hours: Object.fromEntries([0, 1, 2, 3, 4, 5, 6].map((d) => [d, [['00:00', '23:59']]])) });
   const dentist = (await api.post('/providers', { name: 'Dr. Ann Lee', type: 'dentist', npi: '1987654321' })).data;
   const hygienist = (await api.post('/providers', { name: 'Sam RDH', type: 'hygienist' })).data;
   const patient = (await api.post('/patients', { first_name: 'Jane', last_name: 'Doe', dob: '1985-04-12', phone: '5125550100', email: 'jane@example.com', allergies: 'Penicillin', referral_source: 'Google' })).data;

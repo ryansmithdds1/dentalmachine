@@ -764,6 +764,7 @@ const COLUMNS = [
   ['ledger_entries', 'reverses_id', 'INTEGER'],
   ['ledger_entries', 'refund_of_id', 'INTEGER'],
   ['practices', 'lock_date', 'TEXT'],
+  ['recalls', 'appointment_id', 'INTEGER'],
   ['patient_insurance', 'benefit_month', 'INTEGER NOT NULL DEFAULT 1'],
   ['patient_insurance', 'deductible_year', 'TEXT'],
   ['sso_logins', 'user_id', 'INTEGER'],

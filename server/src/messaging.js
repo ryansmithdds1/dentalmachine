@@ -95,7 +95,7 @@ export async function sendAppointmentReminder(db, messenger, { appointmentId, ap
   const vars = { first_name: a.first_name, practice: a.practice_name, when, provider: a.provider_name, link, phone: a.practice_phone || '' };
   const body = kind === 'booking_confirmation'
     ? renderTemplate(templates.booking_confirmation, vars)
-    : `${renderTemplate(templates.reminder, vars)}${target.channel === 'sms' ? ' Reply C to confirm, STOP to opt out.' : ''}`;
+    : `${renderTemplate(templates.reminder, vars)}${target.channel === 'sms' ? ' Reply C to confirm, or call us to reschedule. Reply STOP to opt out.' : ''}`;
   const msg = await sendMessage(db, messenger, {
     practiceId: a.practice_id, patientId: a.patient_id, appointmentId: a.id, userId, kind,
     channel: target.channel, to: target.to, subject: `Your appointment at ${a.practice_name}`, body,

@@ -76,3 +76,40 @@ test('provider working hours limit open slots, online booking and staff booking'
   // Back to office hours.
   assert.equal((await api.put(`/providers/${hyg.id}`, { working_hours: null })).data.working_hours, null);
 });
+
+test('recalls follow the visit that covers them; cancelling from the edit form releases everything', async () => {
+  const { api, provider, patient } = await h.practice();
+  const hyg = (await api.post('/providers', { name: 'Sam RDH', type: 'hygienist' })).data;
+  await api.post(`/patients/${patient.id}/procedures`, { code: 'D1110', provider_id: hyg.id, complete: true }); // starts a prophy recall
+  const recall = async () => (await h.db.get('SELECT * FROM recalls WHERE patient_id = ?', patient.id));
+  assert.equal((await recall()).status, 'due');
+  // An emergency visit with the dentist doesn't take the patient off recall.
+  const emergency = (await api.post('/appointments', { patient_id: patient.id, provider_id: provider.id, start_time: `${MON} 08:00`, end_time: `${MON} 08:30`, reason: 'Toothache' })).data;
+  assert.equal((await recall()).status, 'due');
+  // A hygiene visit does, and cancelling it (from the edit form) puts the recall back and frees the procedures.
+  const crown = (await api.post(`/patients/${patient.id}/procedures`, { code: 'D2740', tooth: '3', provider_id: provider.id })).data;
+  const visit = (await api.post('/appointments', { patient_id: patient.id, provider_id: hyg.id, start_time: `${MON} 10:00`, end_time: `${MON} 11:00`, procedure_ids: [crown.id] })).data;
+  assert.equal((await recall()).status, 'scheduled');
+  assert.equal((await recall()).appointment_id, visit.id);
+  const put = await api.put(`/appointments/${visit.id}`, { status: 'cancelled' });
+  assert.equal(put.status, 200);
+  assert.equal((await recall()).status, 'due');
+  assert.equal((await h.db.get('SELECT appointment_id FROM procedures WHERE id = ?', crown.id)).appointment_id, null);
+  assert.equal((await api.patch(`/appointments/${emergency.id}/status`, { status: 'no_show' })).status, 200);
+});
+
+test('office hours apply to every provider unless overridden; phone search ignores formatting', async () => {
+  const { api, provider, patient } = await h.practice();
+  const sunday = await api.post('/appointments', { patient_id: patient.id, provider_id: provider.id, start_time: '2031-01-05 10:00', end_time: '2031-01-05 11:00' });
+  assert.equal(sunday.status, 409);
+  assert.match(sunday.data.error, /outside office hours/);
+  assert.equal(sunday.data.details.can_override, true);
+  const evening = await api.post('/appointments', { patient_id: patient.id, provider_id: provider.id, start_time: `${MON} 18:00`, end_time: `${MON} 18:30` });
+  assert.equal(evening.status, 409);
+  assert.equal((await api.post('/appointments', { patient_id: patient.id, provider_id: provider.id, start_time: `${MON} 18:00`, end_time: `${MON} 18:30`, override_blockout: true })).status, 201);
+
+  for (const q of ['5125550100', '512-555-0100', '555 0100', '(512) 555']) {
+    const found = (await api.get(`/patients?q=${encodeURIComponent(q)}`)).data.rows;
+    assert.ok(found.some((p) => p.id === patient.id), q);
+  }
+});

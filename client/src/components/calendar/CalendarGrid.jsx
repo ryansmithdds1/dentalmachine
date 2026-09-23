@@ -151,7 +151,7 @@ export default function CalendarGrid({
   const startResize = (e, appt, colIdx, s, eMin) => {
     e.stopPropagation();
     e.preventDefault();
-    if (readOnly) return;
+    if (readOnly || ['completed', 'cancelled', 'no_show'].includes(appt.status)) return;
     setDrag({ kind: 'resize', appt, col: colIdx, s, e: eMin, e2: eMin, x0: e.clientX, y0: e.clientY });
   };
   const startSelect = (e, colIdx) => {

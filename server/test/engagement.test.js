@@ -1,5 +1,6 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { DEFAULT_HOURS } from '../src/hours.js';
 import { mkdtempSync, rmSync, readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -72,6 +73,7 @@ async function setup() {
   const reg = await client().post('/auth/register', { practice_name: `Eng ${n}`, name: 'Admin', email: `eng${n}@example.com`, password: 'correct-horse-battery' });
   assert.equal(reg.status, 201);
   const api = client(reg.data.token);
+  await api.put('/practice', { office_hours: Object.fromEntries([0, 1, 2, 3, 4, 5, 6].map((d) => [d, [['00:00', '23:59']]])) }); // tests book at any hour
   const provider = (await api.post('/providers', { name: 'Dr. Who', type: 'dentist' })).data;
   const patient = (await api.post('/patients', { first_name: 'Pat', last_name: 'Smith', phone: '(512) 555-0100', email: 'pat@example.com' })).data;
   return { api, provider, patient, email: `eng${n}@example.com` };
@@ -143,6 +145,7 @@ test('failed deliveries are recorded, not thrown', async () => {
 
 test('online booking: public request → front desk accepts → patient + appointment created', async () => {
   const { api, provider } = await setup();
+  await api.put('/practice', { office_hours: DEFAULT_HOURS }); // slots come from real office hours
   const pub = client();
   assert.equal((await pub.get('/public/practices/eng-booking')).status, 404);
   assert.equal((await api.put('/practice', { online_booking: true })).status, 400, 'needs a slug first');

@@ -201,6 +201,12 @@ test('two-way texting: signed inbound webhook, C to confirm, STOP opts out', asy
   await api.post(`/patients/${patient.id}/conversation/read`);
   assert.equal((await api.get('/conversations/unread')).data.unread, 0);
 
+  // "CANCEL" is a carrier opt-out word, but the patient usually means the appointment: the front desk gets a task.
+  await send({ ...base, Body: 'Cancel' });
+  assert.equal((await api.get(`/patients/${patient.id}`)).data.sms_opt_in, 0);
+  const tasks = (await api.get('/tasks')).data;
+  assert.ok((tasks.tasks || tasks).some((t) => t.patient_id === patient.id && /may want to cancel/.test(t.title)));
+  await send({ ...base, Body: 'START' });
   await send({ ...base, Body: 'STOP' });
   assert.equal((await api.get(`/patients/${patient.id}`)).data.sms_opt_in, 0);
   await send({ ...base, Body: 'START' });

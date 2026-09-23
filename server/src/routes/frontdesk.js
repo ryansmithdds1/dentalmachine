@@ -117,7 +117,8 @@ export default function frontDeskRoutes({ db }) {
       ...x,
       last_contact: await lastContact(x.patient_id, 'unscheduled')
     }));
-    res.json(rows);
+    // Patients who declined drop off the list (until something new is planned or they're asked for).
+    res.json(req.query.all ? rows : rows.filter((x) => x.last_contact?.outcome !== 'declined' || x.planned_since > x.last_contact.created_at));
   });
 
   r.get('/followups/broken', requirePermission('schedule:read'), async (req, res) => {
@@ -136,7 +137,7 @@ export default function frontDeskRoutes({ db }) {
       ...x,
       last_contact: await lastContact(x.patient_id, 'broken')
     }));
-    res.json(rows);
+    res.json(req.query.all ? rows : rows.filter((x) => x.last_contact?.outcome !== 'declined' || x.start_time > x.last_contact.created_at));
   });
 
   r.get('/patients/:id/followups', requirePermission('patients:read'), async (req, res) => {

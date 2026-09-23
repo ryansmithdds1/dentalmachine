@@ -3,20 +3,20 @@ import { Link } from 'react-router-dom';
 import { api } from '../api.js';
 import { useApi } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
-import { fmtDate, fmtDateTime, money } from '../format.js';
+import { fmtDate, fmtDateTime, money, practiceToday } from '../format.js';
 import { Modal } from '../components/ui.jsx';
 import { LabCaseForm, TaskForm, LAB_STATUSES } from '../components/OfficeForms.jsx';
 
 // Team to-do list and lab case tracking.
 export default function Office() {
-  const { can } = useAuth();
+  const { can, practice } = useAuth();
   const [mine, setMine] = useState(false);
   const [showDone, setShowDone] = useState(false);
   const { data: tasks, reload: reloadTasks } = useApi(`/tasks?${mine ? 'mine=true&' : ''}${showDone ? 'status=done' : ''}`);
   const [labFilter, setLabFilter] = useState('open');
   const { data: labs, reload: reloadLabs } = useApi(can('clinical:read') ? `/lab-cases${labFilter === 'open' ? '?open=true' : ''}` : null);
   const [modal, setModal] = useState(null);
-  const today = new Date().toISOString().slice(0, 10);
+  const today = practiceToday(practice?.timezone);
 
   const toggle = async (t) => {
     await api.put(`/tasks/${t.id}`, { status: t.status === 'done' ? 'open' : 'done' });

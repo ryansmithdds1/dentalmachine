@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useApi } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
-import { money, fullName, age, fmtDate, fmtDateTime, fmtUtcDate, label } from '../format.js';
+import { money, fullName, age, fmtDate, fmtDateTime, fmtUtcDate, label, practiceToday } from '../format.js';
 import { Modal, Badge } from '../components/ui.jsx';
 import PatientForm from '../components/PatientForm.jsx';
 import AppointmentForm from '../components/AppointmentForm.jsx';
@@ -21,7 +21,7 @@ import { api } from '../api.js';
 
 export default function PatientDetail() {
   const { id } = useParams();
-  const { can } = useAuth();
+  const { can, practice } = useAuth();
   const { data: p, error, reload } = useApi(`/patients/${id}`);
   const [tab, setTab] = useState('overview');
   const [modal, setModal] = useState(null);
@@ -119,7 +119,7 @@ export default function PatientDetail() {
       )}
       {modal === 'appt' && (
         <Modal title="Book appointment" onClose={() => setModal(null)}>
-          <AppointmentForm patient={p} defaults={{ date: new Date().toISOString().slice(0, 10) }} onCancel={() => setModal(null)} onSaved={() => { setModal(null); reload(); }} />
+          <AppointmentForm patient={p} defaults={{ date: practiceToday(practice?.timezone) }} onCancel={() => setModal(null)} onSaved={() => { setModal(null); reload(); }} />
         </Modal>
       )}
     </>

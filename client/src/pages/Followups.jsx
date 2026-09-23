@@ -5,6 +5,7 @@ import { useApi } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
 import { money, fmtDate, fmtDateTime, label, shiftDate, practiceToday } from '../format.js';
 import { Badge, ErrorBox, Modal, useSubmit } from '../components/ui.jsx';
+import AppointmentForm from '../components/AppointmentForm.jsx';
 
 const OUTCOMES = [['left_voicemail', 'Left voicemail'], ['texted', 'Texted'], ['emailed', 'Emailed'], ['spoke_scheduled', 'Spoke — scheduled'], ['spoke_will_call', 'Spoke — will call back'], ['declined', 'Declined'], ['wrong_number', 'Wrong number'], ['note', 'Note']];
 const outcomeLabel = (o) => OUTCOMES.find((x) => x[0] === o)?.[1] || o;
@@ -13,8 +14,8 @@ const outcomeLabel = (o) => OUTCOMES.find((x) => x[0] === o)?.[1] || o;
 export default function Followups() {
   const [params, setParams] = useSearchParams();
   const tab = params.get('tab') || 'recall';
-  const { data: unsched } = useApi('/followups/unscheduled');
-  const { data: broken } = useApi('/followups/broken');
+  const { data: unsched, reload: reloadUnsched } = useApi('/followups/unscheduled');
+  const { data: broken, reload: reloadBroken } = useApi('/followups/broken');
   return (
     <>
       <div className="page-header">
@@ -29,8 +30,8 @@ export default function Followups() {
         <button className={tab === 'broken' ? 'active' : ''} onClick={() => setParams({ tab: 'broken' })}>Broken appointments {broken ? <span className="count">{broken.length}</span> : null}</button>
       </div>
       {tab === 'recall' && <Recall />}
-      {tab === 'unscheduled' && <CallList kind="unscheduled" rows={unsched} />}
-      {tab === 'broken' && <CallList kind="broken" rows={broken} />}
+      {tab === 'unscheduled' && <CallList kind="unscheduled" rows={unsched} onChange={reloadUnsched} />}
+      {tab === 'broken' && <CallList kind="broken" rows={broken} onChange={reloadBroken} />}
     </>
   );
 }
@@ -43,6 +44,7 @@ function Recall() {
   const [selected, setSelected] = useState([]);
   const [notice, setNotice] = useState(null);
   const [logFor, setLogFor] = useState(null);
+  const [bookFor, setBookFor] = useState(null);
   const campaign = async () => {
     const r = await api.post('/recalls/campaign', { recall_ids: selected });
     setNotice(`Sent ${r.sent} recall reminder${r.sent === 1 ? '' : 's'}${r.skipped ? ` · ${r.skipped} skipped (no phone/email or opted out)` : ''}.`);
@@ -78,6 +80,7 @@ function Recall() {
                   <td><Badge value={r.status} />{r.last_contacted_at && <div className="muted" style={{ fontSize: 11 }}>contacted {fmtDate(r.last_contacted_at)}</div>}</td>
                   <td style={{ whiteSpace: 'nowrap' }}>
                     {can('patients:write') && <button className="small" onClick={() => setLogFor({ patient_id: r.patient_id, name: `${r.first_name} ${r.last_name}` })}>Log call</button>}{' '}
+                    {can('schedule:write') && <button className="small primary" onClick={() => setBookFor({ patient: { id: r.patient_id, first_name: r.first_name, last_name: r.last_name }, date: r.due_date > today ? r.due_date : today })}>Book</button>}{' '}
                     {can('schedule:write') && <button className="small" title="Inactive — stop recalling this patient" onClick={() => api.put(`/recalls/${r.id}`, { status: 'inactive' }).then(reload)}>Remove</button>}
                   </td>
                 </tr>
@@ -88,13 +91,24 @@ function Recall() {
         </div>
       </div>
       {logFor && <LogCall kind="recall" target={logFor} onDone={() => { setLogFor(null); reload(); }} />}
+      {bookFor && <BookModal {...bookFor} onDone={() => { setBookFor(null); reload(); }} />}
     </>
   );
 }
 
-function CallList({ kind, rows }) {
-  const { can } = useAuth();
+// Books the patient straight from a list: their planned procedures can be attached in the form.
+function BookModal({ patient, date, onDone }) {
+  return (
+    <Modal title={`Book ${patient.first_name} ${patient.last_name}`} onClose={() => onDone(null)}>
+      <AppointmentForm patient={patient} defaults={{ date }} onCancel={() => onDone(null)} onSaved={onDone} />
+    </Modal>
+  );
+}
+
+function CallList({ kind, rows, onChange }) {
+  const { can, practice } = useAuth();
   const [logFor, setLogFor] = useState(null);
+  const [bookFor, setBookFor] = useState(null);
   const [hidden, setHidden] = useState([]);
   if (!rows) return <div className="empty">Loading…</div>;
   const shown = rows.filter((r) => !hidden.includes(r.patient_id));
@@ -130,7 +144,7 @@ function CallList({ kind, rows }) {
                   <td>{r.last_contact ? <><div>{outcomeLabel(r.last_contact.outcome)}</div><div className="muted" style={{ fontSize: 11 }}>{fmtDate(r.last_contact.created_at)}</div></> : <span className="muted">Never</span>}</td>
                   <td style={{ whiteSpace: 'nowrap' }}>
                     {can('patients:write') && <button className="small" onClick={() => setLogFor({ patient_id: r.patient_id, name: `${r.first_name} ${r.last_name}` })}>Log call</button>}{' '}
-                    <Link to={`/schedule?date=${practiceToday()}`}><button className="small primary">Book</button></Link>
+                    {can('schedule:write') && <button className="small primary" onClick={() => setBookFor({ patient: { id: r.patient_id, first_name: r.first_name, last_name: r.last_name }, date: practiceToday(practice?.timezone) })}>Book</button>}
                   </td>
                 </tr>
               ))}
@@ -139,7 +153,8 @@ function CallList({ kind, rows }) {
           {shown.length === 0 && <div className="empty">List is clear. 🎉</div>}
         </div>
       </div>
-      {logFor && <LogCall kind={kind} target={logFor} onDone={(outcome) => { setLogFor(null); if (outcome === 'declined') setHidden([...hidden, logFor.patient_id]); }} />}
+      {logFor && <LogCall kind={kind} target={logFor} onDone={(outcome) => { setLogFor(null); if (outcome === 'declined') setHidden([...hidden, logFor.patient_id]); onChange?.(); }} />}
+      {bookFor && <BookModal {...bookFor} onDone={(saved) => { setBookFor(null); if (saved) { setHidden([...hidden, bookFor.patient.id]); onChange?.(); } }} />}
     </>
   );
 }
