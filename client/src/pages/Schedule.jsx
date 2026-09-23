@@ -405,6 +405,7 @@ export default function Schedule() {
           appt={selected} can={can} onClose={() => setSelectedId(null)}
           onStatus={(s, scope, extra) => setStatus(selected, s, scope, extra)}
           onEdit={() => setModal({ type: 'edit', appt: selected })}
+          onCheckout={() => nav(`/checkout/${selected.id}`)}
           onChart={() => nav(`/patients/${selected.patient_id}`)}
           onMove={() => {
             setPlacing(selected);

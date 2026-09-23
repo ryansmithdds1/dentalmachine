@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { requirePermission, HttpError } from '../auth.js';
 import { pick, requireFields, requireOneOf, insert, findOr404, audit, newToken, friendlyDateTime, mapSeq, publicPractice } from '../util.js';
 import { sendMessage, sendAppointmentReminder, runReminders, preferredChannel } from '../messaging.js';
+import { runRecallSequences } from '../recalls.js';
 import { validateAppt } from './schedule.js';
 import { publish } from '../events.js';
 import { templatesFor, renderTemplate } from '../templates.js';
@@ -75,7 +76,7 @@ export default function engagementRoutes({ db, messenger, config }) {
   });
 
   r.post('/messaging/run-reminders', requireAdmin, async (req, res) => {
-    const sent = await runReminders(db, messenger, { appUrl: config.appUrl });
+    const sent = (await runReminders(db, messenger, { appUrl: config.appUrl })) + (await runRecallSequences(db, messenger, { appUrl: config.appUrl }));
     await audit(db, req, 'messaging.run_reminders', null, null, { sent });
     res.json({ sent });
   });

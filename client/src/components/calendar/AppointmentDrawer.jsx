@@ -4,14 +4,20 @@ import { fmtTime, fmtDateTime, money } from '../../format.js';
 import { Badge } from '../ui.jsx';
 
 const FLOW = {
-  scheduled: [['confirmed', 'Confirm'], ['checked_in', 'Check in']],
+  scheduled: [['checked_in', 'Check in']],
   confirmed: [['checked_in', 'Check in']],
   checked_in: [['in_chair', 'Seat']],
   in_chair: [['completed', 'Complete']],
 };
 
 // Side panel for one appointment: keeps the calendar visible while the front desk works.
-export default function AppointmentDrawer({ appt: a, can, onClose, onStatus, onEdit, onChart, onMove, onToggleAsap, onReminder }) {
+const CONFIRM = [['phone', 'By phone'], ['text', 'By text'], ['email', 'By email'], ['in_person', 'In person']];
+export const CONFIRMED_VIA = { phone: 'by phone', text: 'by text', email: 'by email', in_person: 'in person', portal: 'in the portal', left_message: '' };
+
+// Minutes between two practice-local 'YYYY-MM-DD HH:MM' times.
+const mins = (a, b) => (a && b ? Math.round((Date.parse(`${b.replace(' ', 'T')}Z`) - Date.parse(`${a.replace(' ', 'T')}Z`)) / 60000) : null);
+
+export default function AppointmentDrawer({ appt: a, can, onClose, onStatus, onEdit, onChart, onMove, onToggleAsap, onReminder, onCheckout }) {
   useEffect(() => {
     const onKey = (e) => e.key === 'Escape' && onClose();
     window.addEventListener('keydown', onKey);
@@ -47,6 +53,15 @@ export default function AppointmentDrawer({ appt: a, can, onClose, onStatus, onE
           {a.series_id ? <span className="series-chip" title="Recurring visit">↻ {series ? `${series.position} of ${series.total} · every ${series.every > 1 ? `${series.every} ` : ''}${series.unit}${series.every > 1 ? 's' : ''}` : 'Recurring'}</span> : null}
           {a._pending && <span className="muted">Saving…</span>}
         </div>
+        {w && active && a.status === 'scheduled' && (
+          <div className="drawer-actions">
+            <select value="" aria-label="Confirm" onChange={(e) => e.target.value && onStatus(e.target.value === 'left_message' ? 'scheduled' : 'confirmed', null, { confirmed_via: e.target.value })} style={{ width: 'auto' }}>
+              <option value="">Confirm…</option>
+              {CONFIRM.map(([v, l]) => <option key={v} value={v}>Confirmed {l.toLowerCase()}</option>)}
+              <option value="left_message">Left a message</option>
+            </select>
+          </div>
+        )}
         {w && active && (
           <div className="drawer-actions">
             {(FLOW[a.status] || []).map(([s, l]) => {
@@ -61,6 +76,12 @@ export default function AppointmentDrawer({ appt: a, can, onClose, onStatus, onE
               }
               return <button key={s} className="primary" onClick={() => onStatus(s)}>{l}</button>;
             })}
+            {['checked_in', 'in_chair'].includes(a.status) && onCheckout && <button onClick={onCheckout}>Check out…</button>}
+          </div>
+        )}
+        {a.status === 'completed' && onCheckout && w && (
+          <div className="drawer-actions">
+            <button className={a.checked_out_at ? '' : 'primary'} onClick={onCheckout}>{a.checked_out_at ? 'Checkout & walkout' : 'Check out…'}</button>
           </div>
         )}
         <dl className="kv" style={{ gridTemplateColumns: '110px 1fr' }}>
@@ -71,7 +92,19 @@ export default function AppointmentDrawer({ appt: a, can, onClose, onStatus, onE
           {a.procedure_summary && (<><dt>Procedures</dt><dd>{a.procedure_summary}</dd></>)}
           <dt>Production</dt><dd>{money(a.production || 0)}</dd>
           <dt>Confirmation</dt>
-          <dd>{a.confirmed_at ? `Confirmed ${fmtDateTime(a.confirmed_at.replace('T', ' '))}` : a.reminder_sent_at ? `Reminder sent ${fmtDateTime(a.reminder_sent_at)}` : 'Not reminded yet'}</dd>
+          <dd>
+            {a.confirmed_at ? `Confirmed ${CONFIRMED_VIA[a.confirmed_via] || ''} ${fmtDateTime(a.confirmed_at.replace('T', ' '))}` : a.confirmed_via === 'left_message' ? 'Left a message' : a.reminder_sent_at ? `Reminder sent ${fmtDateTime(a.reminder_sent_at)}` : 'Not reminded yet'}
+          </dd>
+          {a.arrived_at && (
+            <>
+              <dt>Visit</dt>
+              <dd>
+                Arrived {fmtTime(a.arrived_at)}{mins(a.start_time, a.arrived_at) > 5 ? <span className="badge warn" style={{ marginLeft: 4 }}>{mins(a.start_time, a.arrived_at)} min late</span> : null}
+                {a.seated_at && <> · seated {fmtTime(a.seated_at)} <span className="muted">(waited {Math.max(0, mins(a.arrived_at, a.seated_at))} min)</span></>}
+                {a.dismissed_at && <> · out {fmtTime(a.dismissed_at)}{a.seated_at ? <span className="muted"> ({mins(a.seated_at, a.dismissed_at)} min in chair)</span> : null}</>}
+              </dd>
+            </>
+          )}
           {a.notes && (<><dt>Notes</dt><dd style={{ whiteSpace: 'pre-wrap' }}>{a.notes}</dd></>)}
         </dl>
         <div className="drawer-actions">

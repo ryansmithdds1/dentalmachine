@@ -24,10 +24,30 @@ export function providerHours(provider) {
     return null;
   }
 }
+// Alternating weeks: { ...weekA, alt: { anchor: 'YYYY-MM-DD', hours: weekB } } — the week containing
+// the anchor date and every other week after it use weekB.
+const mondayOf = (date) => {
+  const d = new Date(`${date}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
+  return d.getTime();
+};
+export const isAltWeek = (alt, date) => !!alt?.anchor && Math.abs(Math.round((mondayOf(date) - mondayOf(alt.anchor)) / (7 * 86400000))) % 2 === 0;
 export const providerHoursFor = (practice, provider, date) => {
   const own = providerHours(provider);
-  return own ? own[weekday(date)] || [] : hoursFor(practice, date);
+  if (!own) return hoursFor(practice, date);
+  const week = own.alt && isAltWeek(own.alt, date) ? own.alt.hours : own;
+  return week[weekday(date)] || [];
 };
+
+// A provider's hours: a weekly pattern, optionally with a second pattern for alternate weeks.
+export function validateWorkingHours(hours) {
+  const out = validateHours(hours);
+  if (hours?.alt) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(hours.alt.anchor || '')) throw new HttpError(400, 'Alternate weeks need a start date');
+    out.alt = { anchor: hours.alt.anchor, hours: validateHours(hours.alt.hours) };
+  }
+  return out;
+}
 
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 export function validateHours(hours) {

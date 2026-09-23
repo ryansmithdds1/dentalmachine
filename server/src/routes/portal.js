@@ -170,7 +170,7 @@ export function portalRoutes({ db, secret, config, payments }) {
 
   r.post('/appointments/:aid/confirm', async (req, res) => {
     const a = await ownAppt(req);
-    if (a.status === 'scheduled') await db.run("UPDATE appointments SET status = 'confirmed', confirmed_at = datetime('now') WHERE id = ?", a.id);
+    if (a.status === 'scheduled') await db.run("UPDATE appointments SET status = 'confirmed', confirmed_at = datetime('now'), confirmed_via = 'portal' WHERE id = ?", a.id);
     publish(req.portal.practice.id, { type: 'schedule', dates: [a.start_time.slice(0, 10)], source: 'portal' });
     await pAudit(req, 'portal.confirm', 'appointments', a.id);
     res.json({ ok: true });

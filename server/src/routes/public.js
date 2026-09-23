@@ -126,7 +126,9 @@ export default function publicRoutes({ db }) {
     publish(a.practice_id, { type: 'schedule', dates: [a.start_time.slice(0, 10)], source: 'patient' });
     if (action === 'confirm') {
       if (!['scheduled', 'confirmed'].includes(a.status)) throw new HttpError(409, `This appointment is ${a.status.replace('_', ' ')}`);
-      await db.run("UPDATE appointments SET status = 'confirmed', confirmed_at = COALESCE(confirmed_at, datetime('now')) WHERE id = ?", a.id);
+      // Confirmed from the link in the last reminder: by text or by email.
+      const last = await db.get("SELECT channel FROM messages WHERE appointment_id = ? AND direction = 'outbound' ORDER BY id DESC LIMIT 1", a.id);
+      await db.run("UPDATE appointments SET status = 'confirmed', confirmed_at = COALESCE(confirmed_at, datetime('now')), confirmed_via = ? WHERE id = ?", last?.channel === 'email' ? 'email' : 'text', a.id);
     } else if (action === 'cancel') {
       if (!['scheduled', 'confirmed'].includes(a.status)) throw new HttpError(409, `This appointment is ${a.status.replace('_', ' ')}`);
       await db.run("UPDATE appointments SET status = 'cancelled' WHERE id = ?", a.id);

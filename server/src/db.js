@@ -658,6 +658,40 @@ CREATE TABLE IF NOT EXISTS portal_codes (
 );
 CREATE INDEX IF NOT EXISTS idx_portal_codes ON portal_codes(practice_id, contact);
 
+-- Recall types (prophy, perio maintenance, bitewings…): which codes reset them and how often they come due.
+CREATE TABLE IF NOT EXISTS recall_types (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  key TEXT NOT NULL,
+  name TEXT NOT NULL,
+  interval_months INTEGER NOT NULL DEFAULT 6,
+  codes TEXT NOT NULL DEFAULT '[]',
+  appointment_type_id INTEGER REFERENCES appointment_types(id),
+  active INTEGER NOT NULL DEFAULT 1,
+  UNIQUE (practice_id, key)
+);
+
+-- Each automated recall message sent (one per recall per sequence step).
+CREATE TABLE IF NOT EXISTS recall_contacts (
+  id INTEGER PRIMARY KEY,
+  recall_id INTEGER NOT NULL REFERENCES recalls(id),
+  step INTEGER NOT NULL,
+  message_id INTEGER,
+  sent_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (recall_id, step)
+);
+
+-- Each appointment reminder step sent (e.g. 2 weeks, 2 days, same day).
+CREATE TABLE IF NOT EXISTS appointment_reminders (
+  id INTEGER PRIMARY KEY,
+  appointment_id INTEGER NOT NULL REFERENCES appointments(id),
+  step INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'sent',
+  attempts INTEGER NOT NULL DEFAULT 1,
+  sent_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (appointment_id, step)
+);
+
 -- Note templates: text with merge fields ({tooth}, {code}...) and prompts ([[Anesthetic: Lidocaine|Articaine]]),
 -- offered when the listed procedures are completed.
 CREATE TABLE IF NOT EXISTS note_templates (
@@ -898,6 +932,15 @@ const COLUMNS = [
   ['preauths', 'reference_number', 'TEXT'],
   ['era_imports', 'provider_adjustments', 'TEXT'],
   ['tooth_conditions', 'resolved_at', 'TEXT'],
+  ['practices', 'reminder_steps', 'TEXT'],
+  ['practices', 'recall_steps', 'TEXT'],
+  ['practices', 'recall_auto', 'INTEGER NOT NULL DEFAULT 0'],
+  ['appointments', 'arrived_at', 'TEXT'],
+  ['appointments', 'seated_at', 'TEXT'],
+  ['appointments', 'dismissed_at', 'TEXT'],
+  ['appointments', 'confirmed_via', 'TEXT'],
+  ['appointments', 'checked_out_at', 'TEXT'],
+  ['appointments', 'checked_out_by', 'INTEGER'],
   ['practices', 'templates_seeded', 'INTEGER NOT NULL DEFAULT 0'],
   ['patients', 'medical_conditions', 'TEXT'],
   ['procedure_codes', 'area', 'TEXT'],

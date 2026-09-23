@@ -1,6 +1,7 @@
 import { HttpError } from './auth.js';
-import { insert, addMonths, practiceNow } from './util.js';
+import { insert, practiceNow } from './util.js';
 import { benefitYear, deductibleMet, estimateCoverage } from './benefits.js';
+import { resetRecalls } from './recalls.js';
 
 export { benefitYear, deductibleMet, benefitsUsed, estimateCoverage, withPlan, planFor } from './benefits.js';
 
@@ -35,7 +36,6 @@ export async function primaryPolicy(db, practiceId, patientId) {
   );
 }
 
-const RECALL_CODES = { D1110: 'prophy', D1120: 'prophy', D4910: 'perio_maint' };
 // Extractions (D7111-D7250): the tooth is charted missing once the extraction is done.
 export const isExtraction = (code) => /^D7(1[1-4]\d|2[0-5]\d)$/.test(String(code || ''));
 
@@ -71,17 +71,7 @@ export async function completeProcedure(db, user, procedure, { providerId, appoi
       });
     }
 
-    const recallType = RECALL_CODES[procedure.code];
-    if (recallType) {
-      const existing = await db.get('SELECT * FROM recalls WHERE practice_id = ? AND patient_id = ? AND type = ?', procedure.practice_id, procedure.patient_id, recallType);
-      const interval = existing?.interval_months ?? (recallType === 'perio_maint' ? 3 : 6);
-      const due = addMonths(today, interval);
-      if (existing) {
-        await db.run("UPDATE recalls SET due_date = ?, status = 'due' WHERE id = ?", due, existing.id);
-      } else {
-        await insert(db, 'recalls', { practice_id: procedure.practice_id, patient_id: procedure.patient_id, type: recallType, interval_months: interval, due_date: due });
-      }
-    }
+    await resetRecalls(db, procedure, today);
 
     // A treatment plan discount comes off the patient's share of this procedure.
     const plan = procedure.treatment_plan_id ? await db.get('SELECT name, discount_pct FROM treatment_plans WHERE id = ?', procedure.treatment_plan_id) : null;

@@ -487,7 +487,7 @@ function ResourceTable({ spec, canWrite }) {
     if (col === 'duration') return `${row.duration} min`;
     if (col === 'procedure_codes') return (row.procedure_codes ? JSON.parse(row.procedure_codes) : []).join(', ') || '—';
     if (col === 'online_bookable') return row.online_bookable ? 'Online' : '—';
-    if (col === 'working_hours') return row.working_hours ? summarizeHours(JSON.parse(row.working_hours)) : 'Office hours';
+    if (col === 'working_hours') return row.working_hours ? (() => { const h = JSON.parse(row.working_hours); return `${summarizeHours(h)}${h.alt ? ' · alternating weeks' : ''}`; })() : 'Office hours';
     return row[col] ?? '—';
   };
   return (
@@ -554,6 +554,7 @@ function ResourceForm({ spec, row, onDone }) {
                 <input type="checkbox" checked={!form[name]} onChange={(e) => set(e.target.checked ? null : practiceHours)} /> Same as office hours
               </label>
               {form[name] && <OfficeHours value={form[name]} onChange={set} note="Outside these hours the provider's column is shaded, online booking won't offer them, and staff are asked before booking." />}
+              {form[name] && <AltWeeks value={form[name]} onChange={set} />}
             </div>
           );
           if (type === 'select') return <label key={name}>{text}<select value={form[name]} onChange={(e) => set(e.target.value)}><option value="">—</option>{options.map((o) => <option key={o} value={o}>{label(o)}</option>)}</select></label>;
@@ -618,6 +619,29 @@ const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 
 const DEFAULT_HOURS = { 0: [], 1: [['08:00', '17:00']], 2: [['08:00', '17:00']], 3: [['08:00', '17:00']], 4: [['08:00', '17:00']], 5: [['08:00', '17:00']], 6: [] };
 
 // Weekly hours editor; used by the schedule shading and online booking.
+// A second weekly pattern for every other week (e.g. a hygienist in Mondays one week, Tuesdays the next).
+function AltWeeks({ value, onChange }) {
+  const { alt, ...week } = value;
+  const monday = () => {
+    const d = new Date();
+    d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+    return d.toLocaleDateString('en-CA');
+  };
+  return (
+    <div style={{ marginTop: 10 }}>
+      <label className="checkbox" style={{ color: 'var(--text)' }}>
+        <input type="checkbox" checked={!!alt} onChange={(e) => onChange(e.target.checked ? { ...week, alt: { anchor: monday(), hours: week } } : week)} /> Different hours every other week
+      </label>
+      {alt && (
+        <div className="alt-weeks">
+          <label>Alternate pattern starts the week of<input type="date" value={alt.anchor} onChange={(e) => onChange({ ...week, alt: { ...alt, anchor: e.target.value } })} style={{ width: 170 }} /></label>
+          <OfficeHours value={alt.hours} onChange={(h) => onChange({ ...week, alt: { ...alt, hours: h } })} note="Used that week and every second week after it; the hours above apply to the weeks in between." />
+        </div>
+      )}
+    </div>
+  );
+}
+
 function OfficeHours({ value, onChange, note }) {
   const hours = typeof value === 'string' ? JSON.parse(value) : value || DEFAULT_HOURS;
   const setDay = (d, ranges) => onChange({ ...hours, [d]: ranges });
@@ -768,7 +792,61 @@ const TEMPLATE_INFO = {
   review: ['Review request', 'Sent after a completed visit when review requests are on. Must include {link}.'],
 };
 
-// Message templates and the Google review request program.
+// Recall types: which procedures reset each one and how often it comes due.
+function RecallTypes() {
+  const { user } = useAuth();
+  const { data: types, reload } = useApi('/recall-types');
+  const apptTypes = useLookup('/appointment-types?active=true');
+  const [err, setErr] = useState(null);
+  const [adding, setAdding] = useState(false);
+  const save = async (t, patch) => {
+    setErr(null);
+    try {
+      if (t.id) await api.put(`/recall-types/${t.id}`, patch);
+      else await api.post('/recall-types', { ...t, ...patch });
+      setAdding(false);
+      reload();
+    } catch (e) {
+      setErr(e);
+    }
+  };
+  const admin = user.role === 'admin';
+  return (
+    <div style={{ marginTop: 16 }}>
+      <h3>Recall types</h3>
+      <ErrorBox error={err} />
+      <table className="compact-table">
+        <thead><tr><th>Type</th><th>Every</th><th>Reset by codes</th><th>Book as</th><th>On</th></tr></thead>
+        <tbody>
+          {types?.map((t) => (
+            <tr key={t.id}>
+              <td>{t.name}</td>
+              <td><input type="number" min="1" max="120" defaultValue={t.interval_months} disabled={!admin} style={{ width: 60 }} onBlur={(e) => Number(e.target.value) !== t.interval_months && save(t, { interval_months: Number(e.target.value) })} /> mo</td>
+              <td><input defaultValue={t.codes.join(', ')} disabled={!admin} onBlur={(e) => e.target.value !== t.codes.join(', ') && save(t, { codes: e.target.value })} /></td>
+              <td>
+                <select value={t.appointment_type_id || ''} disabled={!admin} onChange={(e) => save(t, { appointment_type_id: e.target.value ? Number(e.target.value) : null })}>
+                  <option value="">—</option>
+                  {apptTypes.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                </select>
+              </td>
+              <td><input type="checkbox" checked={!!t.active} disabled={!admin} onChange={(e) => save(t, { active: e.target.checked })} /></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {admin && (adding ? (
+        <form className="inline" style={{ marginTop: 8, gap: 6 }} onSubmit={(e) => { e.preventDefault(); const f = new FormData(e.target); save({}, { name: f.get('name'), interval_months: Number(f.get('months')), codes: f.get('codes') }); }}>
+          <input name="name" placeholder="e.g. Fluoride varnish" required />
+          <input name="months" type="number" min="1" defaultValue="6" style={{ width: 70 }} />
+          <input name="codes" placeholder="D1206" />
+          <button className="small primary">Add</button>
+        </form>
+      ) : <button type="button" className="small" style={{ marginTop: 8 }} onClick={() => setAdding(true)}>+ Recall type</button>)}
+    </div>
+  );
+}
+
+// Reminders, recall automation, message templates and the Google review request program.
 function Messaging() {
   const { data: practice } = useApi('/practice');
   const { data: defaults } = useApi('/message-templates/defaults');
@@ -776,17 +854,85 @@ function Messaging() {
   const [saved, setSaved] = useState(false);
   const { refresh } = useAuth();
   const { submit, busy, error } = useSubmit(async () => {
-    await api.put('/practice', { review_url: form.review_url || null, review_requests: form.review_requests, message_templates: form.templates });
+    await api.put('/practice', {
+      review_url: form.review_url || null, review_requests: form.review_requests, message_templates: form.templates,
+      reminder_steps: form.reminder_steps.map((s) => ({ ...s, hours: Number(s.hours) })), recall_auto: form.recall_auto, recall_steps: form.recall_steps.map((s) => ({ ...s, days: Number(s.days) })),
+    });
     setSaved(true);
     refresh();
   });
   if (!practice || !defaults) return null;
-  const cur = form || { review_url: practice.review_url || '', review_requests: !!practice.review_requests, templates: JSON.parse(practice.message_templates || '{}') };
+  const cur = form || {
+    review_url: practice.review_url || '', review_requests: !!practice.review_requests, templates: JSON.parse(practice.message_templates || '{}'),
+    reminder_steps: practice.reminder_steps ? JSON.parse(practice.reminder_steps) : (practice.reminder_hours > 0 ? [{ hours: practice.reminder_hours, channel: 'auto', confirmed: false }] : []),
+    recall_auto: !!practice.recall_auto,
+    recall_steps: practice.recall_steps ? JSON.parse(practice.recall_steps) : [{ days: -14, channel: 'auto' }, { days: 0, channel: 'auto' }, { days: 30, channel: 'auto' }, { days: 90, channel: 'auto' }],
+  };
+  const setStep = (list, i, patch) => change({ [list]: cur[list].map((s, j) => (j === i ? { ...s, ...patch } : s)) });
   const change = (patch) => { setSaved(false); setForm({ ...cur, ...patch }); };
   const sample = { first_name: 'Maria', practice: practice.name, when: 'Tue, Oct 6 at 9:00 AM', provider: 'Dr. Chen', link: 'https://…/c/abc123', phone: practice.phone || '' };
   const render = (t) => t.replace(/\{(\w+)\}/g, (_, k) => sample[k] ?? '');
   return (
     <>
+      <div className="card">
+        <h2>Appointment reminders</h2>
+        <p className="muted" style={{ fontSize: 13 }}>Each reminder goes out once, at the set time before the visit, with a one-tap confirm link. A visit booked late gets only the reminders still ahead of it. Confirmed patients are skipped unless you tick the box (useful for a same-day “see you soon”).</p>
+        <table className="compact-table">
+          <thead><tr><th>Before the visit</th><th>Send by</th><th>Also to confirmed patients</th><th /></tr></thead>
+          <tbody>
+            {cur.reminder_steps.map((s, i) => (
+              <tr key={i}>
+                <td>
+                  <select value={s.hours} onChange={(e) => setStep('reminder_steps', i, { hours: e.target.value })}>
+                    {[[336, '2 weeks'], [168, '1 week'], [72, '3 days'], [48, '2 days'], [24, '1 day'], [4, '4 hours'], [2, '2 hours']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                  </select>
+                </td>
+                <td>
+                  <select value={s.channel || 'auto'} onChange={(e) => setStep('reminder_steps', i, { channel: e.target.value })}>
+                    <option value="auto">Text, or email if no mobile</option><option value="sms">Text</option><option value="email">Email</option>
+                  </select>
+                </td>
+                <td><input type="checkbox" checked={!!s.confirmed} onChange={(e) => setStep('reminder_steps', i, { confirmed: e.target.checked })} /></td>
+                <td><button type="button" className="small" onClick={() => change({ reminder_steps: cur.reminder_steps.filter((_, j) => j !== i) })}>✕</button></td>
+              </tr>
+            ))}
+            {!cur.reminder_steps.length && <tr><td colSpan={4} className="muted">No automatic reminders.</td></tr>}
+          </tbody>
+        </table>
+        {cur.reminder_steps.length < 5 && <button type="button" className="small" onClick={() => change({ reminder_steps: [...cur.reminder_steps, { hours: 24, channel: 'auto', confirmed: false }] })}>+ Reminder</button>}
+      </div>
+      <div className="card">
+        <h2>Recall</h2>
+        <label className="checkbox"><input type="checkbox" checked={cur.recall_auto} onChange={(e) => change({ recall_auto: e.target.checked })} /> Automatically remind patients who are due and have nothing booked</label>
+        {cur.recall_auto && (
+          <>
+            <p className="muted" style={{ fontSize: 13 }}>One message per patient per step, covering all of their due recalls. Patients first found long overdue get only the latest step.</p>
+            <table className="compact-table">
+              <thead><tr><th>When</th><th>Send by</th><th /></tr></thead>
+              <tbody>
+                {cur.recall_steps.map((s, i) => (
+                  <tr key={i}>
+                    <td className="inline">
+                      <input type="number" value={Math.abs(s.days)} min="0" style={{ width: 70 }} onChange={(e) => setStep('recall_steps', i, { days: (Number(s.days) < 0 ? -1 : 1) * Math.abs(Number(e.target.value)) })} /> days
+                      <select value={Number(s.days) < 0 ? 'before' : 'after'} onChange={(e) => setStep('recall_steps', i, { days: (e.target.value === 'before' ? -1 : 1) * Math.abs(Number(s.days)) })}>
+                        <option value="before">before due</option><option value="after">after due</option>
+                      </select>
+                    </td>
+                    <td>
+                      <select value={s.channel || 'auto'} onChange={(e) => setStep('recall_steps', i, { channel: e.target.value })}>
+                        <option value="auto">Text, or email if no mobile</option><option value="sms">Text</option><option value="email">Email</option>
+                      </select>
+                    </td>
+                    <td><button type="button" className="small" onClick={() => change({ recall_steps: cur.recall_steps.filter((_, j) => j !== i) })}>✕</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {cur.recall_steps.length < 8 && <button type="button" className="small" onClick={() => change({ recall_steps: [...cur.recall_steps, { days: 60, channel: 'auto' }] })}>+ Step</button>}
+          </>
+        )}
+        <RecallTypes />
+      </div>
       <div className="card">
         <h2>Online reviews</h2>
         <p className="muted" style={{ fontSize: 13 }}>After a completed visit, patients get one friendly text asking for a review (at most once every 6 months). More 5-star reviews means more new patients.</p>

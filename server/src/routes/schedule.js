@@ -4,9 +4,11 @@ import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, no
 import { hoursFor, providerHours, providerHoursFor, providerHoursOn, validateHours } from '../hours.js';
 import { publish, eventStream } from '../events.js';
 import { completeProcedure } from '../services.js';
+import { recallTypes, typesForCode } from '../recalls.js';
 
 export const STATUSES = ['scheduled', 'confirmed', 'checked_in', 'in_chair', 'completed', 'cancelled', 'no_show'];
 export const INACTIVE = "('cancelled','no_show')";
+export const CONFIRM_METHODS = ['phone', 'text', 'email', 'in_person', 'portal', 'left_message'];
 
 const SELECT = `SELECT a.*, p.first_name, p.last_name, p.preferred_name, p.phone, p.medical_alerts, p.premed_required, p.dob,
   pr.name AS provider_name, pr.color AS provider_color, o.name AS operatory_name,
@@ -77,12 +79,12 @@ export async function validateAppt(db, practiceId, row, { overrideBlockout = fal
 
 // Recall visits: which recall a booked appointment takes care of. The visit's procedures decide
 // (prophy, perio maintenance); a hygiene visit with none on it covers the patient's due recalls.
-const RECALL_FOR_CODE = { D1110: 'prophy', D1120: 'prophy', D4910: 'perio_maint', D4346: 'prophy' };
 export async function linkRecalls(db, practiceId, apptId) {
   const appt = await db.get('SELECT a.*, pv.type AS provider_type FROM appointments a JOIN providers pv ON pv.id = a.provider_id WHERE a.id = ?', apptId);
   if (!appt) return;
   const codes = (await db.all("SELECT code FROM procedures WHERE appointment_id = ? AND status = 'planned'", apptId)).map((p) => p.code);
-  const types = [...new Set(codes.map((c) => RECALL_FOR_CODE[c]).filter(Boolean))];
+  const recallTypeList = await recallTypes(db, practiceId);
+  const types = [...new Set(codes.flatMap((c) => typesForCode(recallTypeList, c).map((t) => t.key)))];
   if (!types.length && appt.provider_type !== 'hygienist') return;
   await db.run(
     `UPDATE recalls SET status = 'scheduled', appointment_id = ? WHERE practice_id = ? AND patient_id = ? AND status IN ('due','contacted')${types.length ? ` AND type IN (${types.map(() => '?').join(',')})` : ''}`,
@@ -254,6 +256,47 @@ export default function scheduleRoutes({ db }) {
     res.status(201).json({ ...(await db.get(`${SELECT} WHERE a.id = ?`, id)), ...(series ? { series } : {}) });
   });
 
+  // Book several family members at once: back to back with the same provider and chair, or side by
+  // side at the same time in their own chairs. All of them are booked, or none are.
+  r.post('/appointments/family', requirePermission('schedule:write'), async (req, res) => {
+    const b = req.body || {};
+    const members = Array.isArray(b.members) ? b.members : [];
+    if (members.length < 2 || members.length > 8) throw new HttpError(400, 'Book 2 to 8 family members');
+    requireOneOf(b.mode, ['back_to_back', 'side_by_side'], 'mode');
+    let start = normalizeDateTime(b.start_time, 'start_time');
+    const pid = req.user.practice_id;
+    const ids = await db.tx(async () => {
+      const out = [];
+      for (const [i, m] of members.entries()) {
+        const type = m.appointment_type_id ? await findOr404(db, 'appointment_types', m.appointment_type_id, pid, 'Appointment type') : null;
+        const duration = Number(m.duration) || type?.duration || 60;
+        if (!Number.isInteger(duration) || duration < 5 || duration > 480) throw new HttpError(400, 'Each visit is 5-480 minutes');
+        const row = {
+          patient_id: m.patient_id, provider_id: m.provider_id || b.provider_id, operatory_id: m.operatory_id || b.operatory_id || null,
+          appointment_type_id: type?.id ?? null, reason: m.reason || type?.name || null, status: 'scheduled',
+          start_time: start, end_time: addMinutes(start, duration),
+        };
+        requireFields(row, ['patient_id', 'provider_id']);
+        try {
+          await validateAppt(db, pid, row, { overrideBlockout: !!b.override_blockout });
+        } catch (err) {
+          if (!(err instanceof HttpError)) throw err;
+          const p = await db.get('SELECT first_name FROM patients WHERE id = ?', row.patient_id);
+          throw new HttpError(err.status, `${p?.first_name || `Member ${i + 1}`}: ${err.message}`, err.details);
+        }
+        const id = await insert(db, 'appointments', { ...row, practice_id: pid });
+        await addTypeProcedures(req, type, id, row);
+        await linkRecalls(db, pid, id);
+        out.push(id);
+        if (b.mode === 'back_to_back') start = row.end_time;
+      }
+      return out;
+    });
+    await audit(db, req, 'appointment.family', 'appointments', ids[0], { count: ids.length, mode: b.mode });
+    changed(req, normalizeDateTime(b.start_time, 'start_time'));
+    res.status(201).json(await db.all(`${SELECT} WHERE a.id IN (${ids.map(() => '?').join(',')}) ORDER BY a.start_time, a.id`, ...ids));
+  });
+
   r.put('/appointments/:id', requirePermission('schedule:write'), async (req, res) => {
     const existing = await findOr404(db, 'appointments', req.params.id, req.user.practice_id, 'Appointment');
     const changes = pick(req.body, FIELDS);
@@ -263,7 +306,10 @@ export default function scheduleRoutes({ db }) {
     const row = pick(merged, FIELDS);
     const inactive = ['cancelled', 'no_show'];
     // A moved appointment needs a fresh reminder and confirmation.
-    if (row.start_time !== existing.start_time) Object.assign(row, { reminder_sent_at: null, confirmed_at: null });
+    if (row.start_time !== existing.start_time) {
+      Object.assign(row, { reminder_sent_at: null, confirmed_at: null, confirmed_via: null });
+      await db.run('DELETE FROM appointment_reminders WHERE appointment_id = ?', existing.id);
+    }
     await update(db, 'appointments', existing.id, req.user.practice_id, row);
     // Keep attached procedures with the provider the patient is now seeing.
     if (Number(row.provider_id) !== existing.provider_id) await db.run("UPDATE procedures SET provider_id = ? WHERE appointment_id = ? AND status = 'planned'", row.provider_id, existing.id);
@@ -286,7 +332,8 @@ export default function scheduleRoutes({ db }) {
         try {
           await validateAppt(db, req.user.practice_id, next);
           const moved = next.start_time !== occ.start_time;
-          await update(db, 'appointments', occ.id, req.user.practice_id, { ...pick(next, ['provider_id', 'operatory_id', 'appointment_type_id', 'reason', 'start_time', 'end_time']), ...(moved ? { reminder_sent_at: null, confirmed_at: null, status: 'scheduled' } : {}) });
+          await update(db, 'appointments', occ.id, req.user.practice_id, { ...pick(next, ['provider_id', 'operatory_id', 'appointment_type_id', 'reason', 'start_time', 'end_time']), ...(moved ? { reminder_sent_at: null, confirmed_at: null, confirmed_via: null, status: 'scheduled' } : {}) });
+          if (moved) await db.run('DELETE FROM appointment_reminders WHERE appointment_id = ?', occ.id);
           if (Number(next.provider_id) !== occ.provider_id) await db.run("UPDATE procedures SET provider_id = ? WHERE appointment_id = ? AND status = 'planned'", next.provider_id, occ.id);
           seriesUpdate.updated++;
           changed(req, occ.start_time, next.start_time);
@@ -309,10 +356,22 @@ export default function scheduleRoutes({ db }) {
     if (['cancelled', 'no_show'].includes(existing.status) && !['cancelled', 'no_show'].includes(status)) {
       await validateAppt(db, req.user.practice_id, { ...existing, status }, { overrideBlockout: true });
     }
+    const via = req.body.confirmed_via;
+    requireOneOf(via, CONFIRM_METHODS, 'confirmed_via');
     await db.run(
       "UPDATE appointments SET status = ?, confirmed_at = CASE WHEN ? = 'confirmed' THEN COALESCE(confirmed_at, datetime('now')) ELSE confirmed_at END WHERE id = ?",
       status, status, existing.id,
     );
+    // "Left a message" is a contact attempt, not a confirmation.
+    if (via) await db.run('UPDATE appointments SET confirmed_via = ? WHERE id = ?', via, existing.id);
+    else if (status === 'confirmed' && !existing.confirmed_via) await db.run("UPDATE appointments SET confirmed_via = 'phone' WHERE id = ?", existing.id);
+    // Patient flow: when they arrived, were seated and left (practice-local time, for wait and chair times).
+    const flow = { checked_in: 'arrived_at', in_chair: 'seated_at', completed: 'dismissed_at' }[status];
+    if (flow) {
+      const now = await practiceNow(db, req.user.practice_id);
+      await db.run(`UPDATE appointments SET ${flow} = COALESCE(${flow}, ?) WHERE id = ?`, now, existing.id);
+      if (status === 'in_chair') await db.run('UPDATE appointments SET arrived_at = COALESCE(arrived_at, ?) WHERE id = ?', now, existing.id);
+    }
     if (status === 'cancelled' || status === 'no_show') await releaseAppointment(db, existing.id);
     // Finishing the visit also completes the work planned for it (posting the charges), when the
     // person has clinical rights and asked for it.
@@ -480,12 +539,50 @@ export default function scheduleRoutes({ db }) {
 
   r.get('/events', eventStream);
 
+  // ---- Recall types ----
+  const RECALL_TYPE_FIELDS = ['name', 'interval_months', 'codes', 'appointment_type_id', 'active'];
+  const cleanRecallType = async (req, row) => {
+    if (row.interval_months != null) {
+      row.interval_months = Number(row.interval_months);
+      if (!Number.isInteger(row.interval_months) || row.interval_months < 1 || row.interval_months > 120) throw new HttpError(400, 'interval_months must be 1-120');
+    }
+    if (row.codes != null) {
+      const list = Array.isArray(row.codes) ? row.codes : String(row.codes).split(/[\s,]+/);
+      row.codes = JSON.stringify([...new Set(list.map((c) => String(c).trim().toUpperCase()).filter(Boolean))]);
+    }
+    if (row.appointment_type_id) await findOr404(db, 'appointment_types', row.appointment_type_id, req.user.practice_id, 'Appointment type');
+    else if ('appointment_type_id' in row) row.appointment_type_id = null;
+    if (row.active != null) row.active = row.active ? 1 : 0;
+    return row;
+  };
+  r.get('/recall-types', requirePermission('schedule:read'), async (req, res) => res.json(await recallTypes(db, req.user.practice_id)));
+  r.post('/recall-types', requirePermission('schedule:write'), async (req, res) => {
+    if (req.user.role !== 'admin') throw new HttpError(403, 'Only administrators can add recall types');
+    const row = await cleanRecallType(req, pick(req.body, RECALL_TYPE_FIELDS));
+    requireFields(row, ['name', 'interval_months']);
+    await recallTypes(db, req.user.practice_id);
+    const key = String(row.name).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 30) || 'recall';
+    if (await db.get('SELECT 1 AS x FROM recall_types WHERE practice_id = ? AND key = ?', req.user.practice_id, key)) throw new HttpError(409, 'There is already a recall type with that name');
+    const id = await insert(db, 'recall_types', { codes: '[]', ...row, key, practice_id: req.user.practice_id });
+    await audit(db, req, 'recall_type.create', 'recall_types', id);
+    res.status(201).json((await recallTypes(db, req.user.practice_id)).find((t) => t.id === id));
+  });
+  r.put('/recall-types/:tid', requirePermission('schedule:write'), async (req, res) => {
+    if (req.user.role !== 'admin') throw new HttpError(403, 'Only administrators can change recall types');
+    const existing = await findOr404(db, 'recall_types', req.params.tid, req.user.practice_id, 'Recall type');
+    await update(db, 'recall_types', existing.id, req.user.practice_id, await cleanRecallType(req, pick(req.body, RECALL_TYPE_FIELDS)));
+    await audit(db, req, 'recall_type.update', 'recall_types', existing.id);
+    res.json((await recallTypes(db, req.user.practice_id)).find((t) => t.id === existing.id));
+  });
+
   r.get('/recalls', requirePermission('schedule:read'), async (req, res) => {
     const pid = req.user.practice_id;
     const before = req.query.before || (await practiceNow(db, pid)).slice(0, 10);
     const statuses = String(req.query.status || 'due,contacted').split(',');
     res.json(await db.all(
-      `SELECT r.*, p.first_name, p.last_name, p.phone, p.email FROM recalls r JOIN patients p ON p.id = r.patient_id
+      `SELECT r.*, p.first_name, p.last_name, p.phone, p.email, rt.name AS type_name, rt.appointment_type_id,
+         (SELECT MAX(sent_at) FROM recall_contacts rc WHERE rc.recall_id = r.id) AS auto_contacted_at
+       FROM recalls r JOIN patients p ON p.id = r.patient_id LEFT JOIN recall_types rt ON rt.practice_id = r.practice_id AND rt.key = r.type
        WHERE r.practice_id = ? AND r.due_date <= ? AND r.status IN (${statuses.map(() => '?').join(',')}) AND p.status = 'active'
        ORDER BY r.due_date`,
       pid, before, ...statuses,

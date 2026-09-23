@@ -250,6 +250,12 @@ export default function CalendarGrid({
                           {STATUS_ICON[a.status] && <span className="cal-status" title={a.status}>{STATUS_ICON[a.status]}</span>}
                           {a.asap ? <span className="cal-asap" title="Wants an earlier time">ASAP</span> : null}
                           {a.series_id ? <span className="cal-repeat" title="Recurring visit">↻</span> : null}
+                          {col.isToday && nowMin != null && a.status === 'checked_in' && a.arrived_at && (
+                            <span className={`cal-flow${nowMin - toMin(a.arrived_at.slice(11, 16)) >= 15 ? ' long' : ''}`} title="Waiting since arrival">⏱ {Math.max(0, nowMin - toMin(a.arrived_at.slice(11, 16)))}m</span>
+                          )}
+                          {col.isToday && nowMin != null && ['scheduled', 'confirmed'].includes(a.status) && nowMin > s + 5 && nowMin < e && (
+                            <span className="cal-flow long" title="Not checked in yet">late</span>
+                          )}
                         </div>
                         {h >= 30 && <div className="cal-appt-meta">{label12(s)}–{label12(e)} · {a.type_name || a.reason || ''}</div>}
                         {h >= 46 && <div className="cal-appt-meta">{col.showProvider ? a.provider_name : a.operatory_name || a.provider_name}{a.production ? ` · $${Math.round(a.production / 100)}` : ''}</div>}

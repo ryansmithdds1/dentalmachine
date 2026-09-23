@@ -2,7 +2,9 @@ import { Router } from 'express';
 import { HttpError, hashPassword } from '../auth.js';
 import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, toCents, practiceNow, staffPractice, toCsv } from '../util.js';
 import { validatePassword } from './auth.js';
-import { validateHours } from '../hours.js';
+import { validateHours, validateWorkingHours } from '../hours.js';
+import { validateReminderSteps } from '../messaging.js';
+import { validateRecallSteps, recallTypes } from '../recalls.js';
 import { PROVIDERS, sealSecret } from '../sso.js';
 import { validateTemplates, DEFAULT_TEMPLATES } from '../templates.js';
 
@@ -71,7 +73,7 @@ export default function settingsRoutes({ db, secret, config = {} }) {
 
   r.get('/message-templates/defaults', (_req, res) => res.json(DEFAULT_TEMPLATES));
   r.put('/practice', requireAdmin, async (req, res) => {
-    const row = pick(req.body, ['name', 'address', 'city', 'state', 'zip', 'phone', 'email', 'tax_id', 'npi', 'timezone', 'slug', 'online_booking', 'reminder_hours', 'require_mfa', 'office_hours', 'daily_goal', 'sms_number', 'review_url', 'review_requests', 'idle_timeout_minutes', 'message_templates', 'hygiene_goal', 'portal_enabled', 'lock_date', 'adjustment_approval_limit']);
+    const row = pick(req.body, ['name', 'address', 'city', 'state', 'zip', 'phone', 'email', 'tax_id', 'npi', 'timezone', 'slug', 'online_booking', 'reminder_hours', 'require_mfa', 'office_hours', 'daily_goal', 'sms_number', 'review_url', 'review_requests', 'idle_timeout_minutes', 'message_templates', 'hygiene_goal', 'portal_enabled', 'lock_date', 'adjustment_approval_limit', 'reminder_steps', 'recall_steps', 'recall_auto']);
     if (row.message_templates != null) row.message_templates = validateTemplates(row.message_templates);
     if (row.review_url && !/^https:\/\/\S+$/.test(row.review_url)) throw new HttpError(400, 'Review link must start with https://');
     if (row.idle_timeout_minutes != null) {
@@ -95,6 +97,19 @@ export default function settingsRoutes({ db, secret, config = {} }) {
     if (row.online_booking && !(row.slug ?? (await db.get('SELECT slug FROM practices WHERE id = ?', req.user.practice_id)).slug)) {
       throw new HttpError(400, 'Choose a booking URL name before enabling online booking');
     }
+    // Multi-step reminders and automated recall sequences, stored as JSON.
+    if (row.reminder_steps !== undefined) {
+      if (row.reminder_steps === null) row.reminder_steps = null;
+      else {
+        try {
+          row.reminder_steps = JSON.stringify(validateReminderSteps(typeof row.reminder_steps === 'string' ? JSON.parse(row.reminder_steps) : row.reminder_steps));
+        } catch (err) {
+          throw new HttpError(400, err.message);
+        }
+      }
+    }
+    if (row.recall_steps !== undefined && row.recall_steps !== null) row.recall_steps = JSON.stringify(validateRecallSteps(typeof row.recall_steps === 'string' ? JSON.parse(row.recall_steps) : row.recall_steps));
+    if (row.recall_auto != null) row.recall_auto = row.recall_auto ? 1 : 0;
     if (row.reminder_hours != null) {
       row.reminder_hours = Number(row.reminder_hours);
       if (!Number.isInteger(row.reminder_hours) || row.reminder_hours < 0 || row.reminder_hours > 168) throw new HttpError(400, 'Reminder lead time must be 0-168 hours');
@@ -156,7 +171,7 @@ export default function settingsRoutes({ db, secret, config = {} }) {
     path: 'providers', table: 'providers', required: ['name'],
     fields: ['name', 'type', 'npi', 'license_number', 'dea_number', 'erx_user_id', 'color', 'active', 'user_id', 'working_hours'],
     validate: async (row, req) => {
-      if (row.working_hours != null) row.working_hours = JSON.stringify(validateHours(typeof row.working_hours === 'string' ? JSON.parse(row.working_hours) : row.working_hours));
+      if (row.working_hours != null) row.working_hours = JSON.stringify(validateWorkingHours(typeof row.working_hours === 'string' ? JSON.parse(row.working_hours) : row.working_hours));
       requireOneOf(row.type, ['dentist', 'hygienist', 'specialist'], 'type');
       if (row.npi && !/^\d{10}$/.test(row.npi)) throw new HttpError(400, 'NPI must be 10 digits');
       if (row.user_id) await findOr404(db, 'users', row.user_id, req.user.practice_id, 'User');

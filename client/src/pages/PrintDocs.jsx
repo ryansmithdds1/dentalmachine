@@ -143,3 +143,42 @@ export function LabSlipPrint() {
     </div>
   );
 }
+
+// Walkout statement: today's visit, what insurance is expected to pay, what was paid, and the next visit.
+export function WalkoutPrint() {
+  const { id } = useParams();
+  const { data: co } = useApi(`/appointments/${id}/checkout`);
+  useAutoPrint(!!co);
+  if (!co) return <div className="empty">Loading…</div>;
+  const a = co.appointment;
+  const est = Object.fromEntries((co.estimate.items || []).map((i) => [i.procedure_id, i]));
+  const done = co.procedures.filter((p) => p.status === 'completed');
+  const payments = co.ledger.filter((e) => e.type === 'payment');
+  return (
+    <div className="print-doc">
+      <div className="no-print" style={{ marginBottom: 12 }}><Link to={`/checkout/${a.id}`}>← Back</Link> <button onClick={() => window.print()}>Print</button></div>
+      <header className="doc-head">
+        <div><h1>{co.practice.name}</h1><div>{[co.practice.address, co.practice.city, co.practice.state, co.practice.zip].filter(Boolean).join(', ')}</div><div>{co.practice.phone}</div></div>
+        <div style={{ textAlign: 'right' }}><h2>Visit summary</h2><div>{fmtDate(a.start_time.slice(0, 10))}</div></div>
+      </header>
+      <p><strong>{a.first_name} {a.last_name}</strong> · seen by {a.provider_name}</p>
+      <table>
+        <thead><tr><th>Code</th><th>Service</th><th>Tooth</th><th className="num">Fee</th><th className="num">Est. insurance</th><th className="num">Your portion</th></tr></thead>
+        <tbody>
+          {done.map((p) => (
+            <tr key={p.id}><td>{p.code}</td><td>{p.description}</td><td>{p.tooth ? `#${p.tooth}` : ''} {p.surfaces || ''}{p.area || ''}</td>
+              <td className="num">{money(p.fee)}</td><td className="num">{money(est[p.id]?.insurance || 0)}</td><td className="num">{money(est[p.id]?.patient ?? p.fee)}</td></tr>
+          ))}
+          {!done.length && <tr><td colSpan={6}>No services completed.</td></tr>}
+          <tr className="totals-row"><td colSpan={3}>Today</td><td className="num">{money(co.estimate.total_fee)}</td><td className="num">{money(co.estimate.total_insurance)}</td><td className="num">{money(co.estimate.total_patient)}</td></tr>
+        </tbody>
+      </table>
+      {payments.length > 0 && (
+        <p>Paid today: {payments.map((p) => `${money(-p.amount)}${p.method ? ` (${p.method.replace(/_/g, ' ')})` : ''}`).join(', ')}</p>
+      )}
+      <p><strong>Account balance: {money(co.balance)}</strong>{co.policy ? ` · Insurance on file: ${co.policy.carrier_name}` : ''}</p>
+      {co.next_appointment && <p>Your next visit: <strong>{fmtDate(co.next_appointment.start_time.slice(0, 10))} at {co.next_appointment.start_time.slice(11, 16)}</strong></p>}
+      <p className="muted" style={{ fontSize: 12 }}>Insurance amounts are estimates, not a guarantee of payment. You are responsible for any amount insurance does not pay.</p>
+    </div>
+  );
+}

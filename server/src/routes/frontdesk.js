@@ -1,7 +1,8 @@
 import { Router } from 'express';
-import { requirePermission, HttpError } from '../auth.js';
+import { requirePermission, HttpError, can } from '../auth.js';
 import { requireFields, insert, update, findOr404, audit, practiceNow, mapSeq } from '../util.js';
-import { primaryPolicy } from '../services.js';
+import { primaryPolicy, patientBalance, estimateCoverage, completeProcedure } from '../services.js';
+import { recallTypes } from '../recalls.js';
 import { historyChanges } from '../forms.js';
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -11,6 +12,76 @@ const OUTCOMES = ['left_voicemail', 'texted', 'emailed', 'spoke_scheduled', 'spo
 // Front-office workflow: morning huddle, route slips, follow-up lists and quick search.
 export default function frontDeskRoutes({ db }) {
   const r = Router();
+
+  // ---- Check-out: everything for the end of a visit on one screen ----
+  async function checkoutSummary(pid, apptId) {
+    const a = await db.get(
+      `SELECT a.*, p.first_name, p.last_name, p.email, p.phone, pv.name AS provider_name, o.name AS operatory_name
+       FROM appointments a JOIN patients p ON p.id = a.patient_id JOIN providers pv ON pv.id = a.provider_id LEFT JOIN operatories o ON o.id = a.operatory_id
+       WHERE a.id = ? AND a.practice_id = ?`, apptId, pid,
+    );
+    if (!a) throw new HttpError(404, 'Appointment not found');
+    const today = (await practiceNow(db, pid)).slice(0, 10);
+    const procedures = await db.all(
+      `SELECT pr.*, (SELECT ci.claim_id FROM claim_items ci JOIN claims c ON c.id = ci.claim_id WHERE ci.procedure_id = pr.id AND c.status != 'void' LIMIT 1) AS claim_id
+       FROM procedures pr WHERE pr.appointment_id = ? AND pr.status != 'cancelled' ORDER BY pr.id`, a.id,
+    );
+    const done = procedures.filter((p) => p.status === 'completed');
+    const policy = await primaryPolicy(db, pid, a.patient_id);
+    const estimate = await estimateCoverage(db, policy, done);
+    // Today's ledger for the patient: the visit's charges and any payments taken.
+    const ledger = await db.all(
+      `SELECT id, type, amount, description, method, entry_date FROM ledger_entries
+       WHERE practice_id = ? AND patient_id = ? AND voided_at IS NULL AND reverses_id IS NULL AND (entry_date = ? OR procedure_id IN (SELECT id FROM procedures WHERE appointment_id = ?))
+       ORDER BY id`, pid, a.patient_id, today, a.id,
+    );
+    const paidToday = -ledger.filter((e) => e.type === 'payment' && e.entry_date === today).reduce((s, e) => s + e.amount, 0);
+    const balance = await patientBalance(db, pid, a.patient_id);
+    // What to ask for now: today's estimated patient share, less what they've paid today, never more than they owe.
+    const suggested = Math.max(0, Math.min(balance, estimate.total_patient - paidToday));
+    const types = await recallTypes(db, pid);
+    return {
+      appointment: a, procedures, estimate, ledger, paid_today: paidToday, balance, suggested_payment: suggested,
+      policy: policy ? { id: policy.id, carrier_name: policy.carrier_name } : null,
+      unclaimed: policy ? done.filter((p) => !p.claim_id && p.fee > 0).map((p) => p.id) : [],
+      recalls: (await db.all("SELECT * FROM recalls WHERE patient_id = ? AND practice_id = ? AND status != 'inactive' ORDER BY due_date", a.patient_id, pid))
+        .map((r) => ({ ...r, type_name: types.find((t) => t.key === r.type)?.name || r.type, appointment_type_id: types.find((t) => t.key === r.type)?.appointment_type_id ?? null })),
+      next_appointment: await db.get(
+        "SELECT id, start_time, reason FROM appointments WHERE patient_id = ? AND practice_id = ? AND start_time > ? AND status IN ('scheduled','confirmed') ORDER BY start_time LIMIT 1",
+        a.patient_id, pid, a.end_time,
+      ),
+      unscheduled: await db.all("SELECT id, code, description, tooth, surfaces, fee, treatment_plan_id FROM procedures WHERE patient_id = ? AND practice_id = ? AND status = 'planned' AND appointment_id IS NULL ORDER BY priority, id", a.patient_id, pid),
+      practice: await db.get('SELECT name, address, city, state, zip, phone, npi, tax_id FROM practices WHERE id = ?', pid),
+    };
+  }
+
+  r.get('/appointments/:id/checkout', requirePermission('schedule:read'), async (req, res) => {
+    res.json(await checkoutSummary(req.user.practice_id, Number(req.params.id)));
+  });
+
+  // Finish the visit: complete its planned work (when allowed) and mark the patient checked out.
+  r.post('/appointments/:id/checkout', requirePermission('schedule:write'), async (req, res) => {
+    const a = await findOr404(db, 'appointments', req.params.id, req.user.practice_id, 'Appointment');
+    if (['cancelled', 'no_show'].includes(a.status)) throw new HttpError(409, `This appointment is ${a.status.replace('_', ' ')}`);
+    let completed = 0;
+    if (req.body?.complete_procedures) {
+      if (!can(req.user, 'clinical:write')) throw new HttpError(403, 'Completing procedures needs clinical access');
+      for (const p of await db.all("SELECT * FROM procedures WHERE appointment_id = ? AND status = 'planned' ORDER BY id", a.id)) {
+        await completeProcedure(db, req.user, p, { providerId: p.provider_id || a.provider_id, appointmentId: a.id });
+        completed++;
+      }
+    }
+    // finish: false completes the work without checking the patient out yet.
+    if (req.body?.finish !== false) {
+      const now = await practiceNow(db, req.user.practice_id);
+      await db.run(
+        "UPDATE appointments SET status = 'completed', dismissed_at = COALESCE(dismissed_at, ?), checked_out_at = ?, checked_out_by = ? WHERE id = ?",
+        now, now, req.user.id, a.id,
+      );
+    }
+    await audit(db, req, 'appointment.checkout', 'appointments', a.id, { completed_procedures: completed });
+    res.json({ ...(await checkoutSummary(req.user.practice_id, a.id)), completed_procedures: completed });
+  });
 
   // Everything the team reviews in the morning huddle, per patient on today's schedule.
   r.get('/huddle', requirePermission('schedule:read'), async (req, res) => {

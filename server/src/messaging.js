@@ -104,26 +104,61 @@ export async function sendAppointmentReminder(db, messenger, { appointmentId, ap
   return msg;
 }
 
-// Finds unconfirmed appointments inside each practice's reminder window and reminds them once.
+// Reminder steps: how long before the visit each goes out, by which channel, and whether patients
+// who already confirmed get it too (e.g. a same-day "see you at 2pm"). The single "reminder_hours"
+// window is the default when a practice hasn't set steps.
+export function reminderSteps(practice) {
+  let steps = null;
+  try {
+    steps = practice.reminder_steps ? JSON.parse(practice.reminder_steps) : null;
+  } catch {
+    steps = null;
+  }
+  if (!Array.isArray(steps)) steps = practice.reminder_hours > 0 ? [{ hours: practice.reminder_hours, channel: 'auto', confirmed: false }] : [];
+  return steps.map((s) => ({ hours: Number(s.hours), channel: s.channel || 'auto', confirmed: !!s.confirmed })).sort((x, y) => y.hours - x.hours);
+}
+
+export function validateReminderSteps(steps) {
+  if (!Array.isArray(steps) || steps.length > 5) throw new Error('reminder_steps must be a list of up to 5 steps');
+  const out = steps.map((s) => {
+    const hours = Number(s?.hours);
+    if (!Number.isInteger(hours) || hours < 1 || hours > 24 * 30) throw new Error('Each reminder goes out 1 hour to 30 days before the visit');
+    if (s.channel && !['auto', 'sms', 'email'].includes(s.channel)) throw new Error('channel must be auto, sms or email');
+    return { hours, channel: s.channel || 'auto', confirmed: !!s.confirmed };
+  });
+  if (new Set(out.map((s) => s.hours)).size !== out.length) throw new Error('Two reminders are set for the same time');
+  return out.sort((a, b) => b.hours - a.hours);
+}
+
+const hoursUntil = (fromLocal, toLocal) => (Date.parse(`${toLocal.replace(' ', 'T')}Z`) - Date.parse(`${fromLocal.replace(' ', 'T')}Z`)) / 3600000;
+
+// Sends each appointment the latest reminder step it's inside the window for and hasn't had. A visit
+// booked the day before gets only the day-before reminder, not the two-week one.
 export async function runReminders(db, messenger, { appUrl, now = new Date() } = {}) {
   let sent = 0;
-  for (const practice of await db.all('SELECT id, timezone, reminder_hours FROM practices WHERE reminder_hours > 0')) {
+  for (const practice of await db.all('SELECT id, timezone, reminder_hours, reminder_steps FROM practices')) {
+    const steps = reminderSteps(practice);
+    if (!steps.length) continue;
     const from = localNow(practice.timezone, now);
-    const to = localNow(practice.timezone, new Date(now.getTime() + practice.reminder_hours * 3600_000));
-    const due = await db.all(
-      `SELECT id FROM appointments WHERE practice_id = ? AND status = 'scheduled' AND reminder_sent_at IS NULL
+    const to = localNow(practice.timezone, new Date(now.getTime() + steps[0].hours * 3600_000));
+    const upcoming = await db.all(
+      `SELECT id, status, start_time FROM appointments WHERE practice_id = ? AND status IN ('scheduled','confirmed')
        AND start_time > ? AND start_time <= ? ORDER BY start_time`, practice.id, from, to,
     );
-    for (const { id } of due) {
-      const msg = await sendAppointmentReminder(db, messenger, { appointmentId: id, appUrl });
-      if (msg?.status === 'sent') sent++;
+    for (const a of upcoming) {
+      const left = hoursUntil(from, a.start_time);
+      const step = [...steps].reverse().find((s) => s.hours >= left);
+      if (!step || (a.status === 'confirmed' && !step.confirmed)) continue;
+      const prior = await db.get('SELECT * FROM appointment_reminders WHERE appointment_id = ? AND step = ?', a.id, step.hours);
+      if (prior && (prior.status !== 'failed' || prior.attempts >= 3)) continue;
+      const msg = await sendAppointmentReminder(db, messenger, { appointmentId: a.id, appUrl, channel: step.channel === 'auto' ? undefined : step.channel });
       // No reachable channel: nothing to retry. A failed send (carrier or provider error) is retried on the
       // next cycles, up to three attempts.
-      else if (!msg) await db.run("UPDATE appointments SET reminder_sent_at = datetime('now') WHERE id = ?", id);
-      else {
-        await db.run('UPDATE appointments SET reminder_attempts = reminder_attempts + 1 WHERE id = ?', id);
-        await db.run("UPDATE appointments SET reminder_sent_at = datetime('now') WHERE id = ? AND reminder_attempts >= 3", id);
-      }
+      const status = !msg ? 'unreachable' : msg.status === 'sent' ? 'sent' : 'failed';
+      if (status === 'sent') sent++;
+      if (prior) await db.run('UPDATE appointment_reminders SET status = ?, attempts = attempts + 1, sent_at = datetime(\'now\') WHERE id = ?', status, prior.id);
+      else await db.run('INSERT INTO appointment_reminders (appointment_id, step, status) VALUES (?, ?, ?)', a.id, step.hours, status);
+      if (status !== 'failed') await db.run("UPDATE appointments SET reminder_sent_at = COALESCE(reminder_sent_at, datetime('now')) WHERE id = ?", a.id);
     }
   }
   return sent + (await runReviewRequests(db, messenger, { now }));

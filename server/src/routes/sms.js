@@ -75,7 +75,7 @@ export function smsWebhook({ db, config }) {
          AND status = 'scheduled' AND start_time > ? ORDER BY start_time LIMIT 1`, practice.id, ...candidates.map((p) => p.id), now,
       );
       if (appt) {
-        await db.run("UPDATE appointments SET status = 'confirmed', confirmed_at = datetime('now') WHERE id = ?", appt.id);
+        await db.run("UPDATE appointments SET status = 'confirmed', confirmed_at = datetime('now'), confirmed_via = 'text' WHERE id = ?", appt.id);
         publish(practice.id, { type: 'schedule', dates: [appt.start_time.slice(0, 10)], source: 'sms' });
         reply = `Thanks! You're confirmed for ${friendlyDateTime(appt.start_time)} at ${practice.name}.`;
       }
