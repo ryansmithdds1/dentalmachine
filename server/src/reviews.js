@@ -23,6 +23,7 @@ export function createGoogleBusiness({ config, fetchImpl = globalThis.fetch }) {
         sample(4, 5, 'Anonymous', '', 20),
       ],
       reply: async (_loc, reviewId, text) => { replies.set(reviewId, { comment: text, updateTime: new Date().toISOString() }); },
+      bookingLink: async () => ({ name: 'locations/1/placeActionLinks/sbx' }),
     };
   }
   if (!config.googleClientId || !config.googleClientSecret) return null;
@@ -64,6 +65,8 @@ export function createGoogleBusiness({ config, fetchImpl = globalThis.fetch }) {
       return out;
     },
     reply: (access, location, reviewId, text) => get(`https://mybusiness.googleapis.com/v4/${location}/reviews/${reviewId}/reply`, access, { method: 'PUT', body: JSON.stringify({ comment: text }) }),
+    // The "Book" button on the listing in Google Search and Maps.
+    bookingLink: (access, location, uri) => get(`https://mybusinessplaceactions.googleapis.com/v1/${location.replace(/^accounts\/[^/]+\//, '')}/placeActionLinks`, access, { method: 'POST', body: JSON.stringify({ uri, placeActionType: 'APPOINTMENT', isPreferred: true }) }),
   };
 }
 
@@ -104,6 +107,12 @@ export async function postReply(db, gbp, secret, review, text) {
   if (!conn || !gbp) throw new Error('Connect Google Business Profile first');
   await gbp.reply(await accessFor(db, gbp, secret, conn), conn.location, review.external_id, text);
   await db.run("UPDATE reviews SET reply = ?, reply_status = 'posted', replied_at = datetime('now') WHERE id = ?", text, review.id);
+}
+
+export async function setBookingLink(db, gbp, secret, pid, uri) {
+  const conn = await db.get('SELECT * FROM review_connections WHERE practice_id = ?', pid);
+  if (!conn || !gbp) throw new Error('Connect Google Business Profile first (Reviews)');
+  return gbp.bookingLink(await accessFor(db, gbp, secret, conn), conn.location, uri);
 }
 
 export const sealGbp = (v, secret) => sealSecret(v, secret, 'gbp');

@@ -59,7 +59,7 @@ export default function BookingPage() {
   }, [practice, slug, date, reason, providerId, locationId]);
 
   const { submit, busy, error } = useSubmit(async () => {
-    const r = await api.post(`/public/practices/${slug}/booking-requests`, { ...form, reason, start: slot.start, provider_id: slot.provider_id, language: lang, ...(locationId ? { location_id: Number(locationId) } : {}) });
+    const r = await api.post(`/public/practices/${slug}/booking-requests`, { ...form, reason, start: slot.start, provider_id: slot.provider_id, language: lang, ...(params.get('src') ? { source: params.get('src') } : {}), ...(locationId ? { location_id: Number(locationId) } : {}) });
     // A deposit is paid on the secure card page, which brings the patient back here.
     if (r.checkout_url) { window.location.assign(r.checkout_url); return; }
     setDone(r.booked ? 'booked' : 'requested');

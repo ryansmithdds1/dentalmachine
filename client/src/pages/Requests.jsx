@@ -57,7 +57,7 @@ export default function Requests() {
                     {b.matches.length > 0 && b.status === 'pending' && <div className="badge warn">Possible existing patient</div>}
                   </td>
                   <td>{b.phone}<div className="muted">{b.email}</div></td>
-                  <td>{b.reason}{b.notes && <div className="muted" style={{ maxWidth: 260 }}>“{b.notes}”</div>}{b.referral_source && <div className="muted" style={{ fontSize: 12 }}>Heard about us: {b.referral_source}</div>}</td>
+                  <td>{b.reason}{b.notes && <div className="muted" style={{ maxWidth: 260 }}>“{b.notes}”</div>}{b.referral_source && <div className="muted" style={{ fontSize: 12 }}>Heard about us: {b.referral_source}</div>}{b.source && <div className="muted" style={{ fontSize: 12 }}>Booked from: {b.source === 'google' ? 'Google' : b.source}</div>}</td>
                   <td>{b.provider_name}</td>
                   <td className="muted">{fmtDate(b.created_at)}</td>
                   <td>

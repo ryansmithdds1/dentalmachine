@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { requirePermission, HttpError, signToken, verifyToken } from '../auth.js';
 import { findOr404, audit, insert, practiceNow } from '../util.js';
 import { structured } from '../ai.js';
-import { syncReviews, postReply, sealGbp } from '../reviews.js';
+import { syncReviews, postReply, sealGbp, setBookingLink } from '../reviews.js';
 import { publish } from '../events.js';
 
 const requireAdmin = (req, _res, next) => (req.user.role === 'admin' ? next() : next(new HttpError(403, 'Only administrators can do this')));
@@ -72,6 +72,15 @@ export default function reputationRoutes({ db, config, secret, gbp }) {
     const out = await syncReviews(db, gbp, secret, req.user.practice_id);
     await newReviewTasks(db, req.user.practice_id, since);
     res.json(out);
+  });
+  // Online booking from the Google listing ("Book" in Search and Maps), tagged so bookings show it came from Google.
+  r.post('/reputation/google/booking-link', requireAdmin, async (req, res) => {
+    const p = await db.get('SELECT slug, online_booking FROM practices WHERE id = ?', req.user.practice_id);
+    if (!p.slug || !p.online_booking) throw new HttpError(400, 'Turn on online booking (Settings → Practice) first');
+    const uri = `${config.appUrl}/book/${p.slug}?src=google`;
+    await setBookingLink(db, gbp, secret, req.user.practice_id, uri).catch((err) => { throw new HttpError(502, err.message); });
+    await audit(db, req, 'reputation.booking_link', 'practices', req.user.practice_id);
+    res.json({ ok: true, uri });
   });
   r.delete('/reputation/google', requireAdmin, async (req, res) => {
     await db.run('DELETE FROM review_connections WHERE practice_id = ?', req.user.practice_id);

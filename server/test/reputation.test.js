@@ -41,6 +41,12 @@ test('reputation: connect Google, pull reviews, AI drafts a HIPAA-safe reply, po
   const posted = await api.post(`/reviews/${bad.id}/reply`, { text: draft.data.reply });
   assert.equal(posted.data.reply_status, 'posted');
   assert.equal((await api.get('/reputation')).data.summary.unanswered_negative, 0);
+  // The "Book" button on the Google listing, once online booking is on.
+  assert.equal((await api.post('/reputation/google/booking-link')).status, 400);
+  await api.put('/practice', { slug: `smile${Date.now()}`, online_booking: true });
+  const link = await api.post('/reputation/google/booking-link');
+  assert.equal(link.status, 200, JSON.stringify(link.data));
+  assert.match(link.data.uri, /\/book\/smile\d+\?src=google$/);
   // The sandbox listing now shows the reply; a sync keeps it.
   await api.post('/reputation/sync');
   assert.equal((await h.db.get('SELECT reply_status FROM reviews WHERE id = ?', bad.id)).reply_status, 'posted');

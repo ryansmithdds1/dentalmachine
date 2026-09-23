@@ -175,6 +175,8 @@ export default function publicRoutes({ db, storage, payments, messenger, config,
       phone: clip(b.phone, 30), email: clip(b.email, 200),
       reason: reason.label, duration: visitLength, provider_id: providerId, requested_start: start,
       new_patient: b.new_patient === false ? 0 : 1, notes: clip(b.notes, 1000), ip: req.ip, language: b.language === 'es' ? 'es' : null, location_id: location?.id ?? null,
+      // Where the booking came from (?src= on the link: google, website, facebook…).
+      source: /^[a-z0-9_-]{2,30}$/.test(String(b.source || '')) ? b.source : null,
       referral_source: clip(b.referral_source, 100), insurance_carrier: clip(b.insurance_carrier, 100), insurance_member_id: clip(b.insurance_member_id, 40), insurance_subscriber: clip(b.insurance_subscriber, 120),
       ...(deposit ? { deposit_amount: deposit, deposit_status: 'awaiting', hold_until: new Date(Date.now() + 35 * 60_000).toISOString() } : {}),
     });
