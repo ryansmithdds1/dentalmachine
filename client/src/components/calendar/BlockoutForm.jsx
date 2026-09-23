@@ -19,7 +19,7 @@ export default function BlockoutForm({ blockout, defaults = {}, onDone }) {
     provider_id: blockout.provider_id || '', operatory_id: blockout.operatory_id || '', repeat_weeks: 1,
   } : {
     reason: 'Lunch', date: defaults.date, start, end: defaults.end || plus(start, 60),
-    provider_id: defaults.provider_id || '', operatory_id: defaults.operatory_id || '', repeat_weeks: 1,
+    provider_id: defaults.provider_id || '', operatory_id: defaults.operatory_id || '', repeat_weeks: 1, through: '',
   }));
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
   const body = () => ({
@@ -28,17 +28,21 @@ export default function BlockoutForm({ blockout, defaults = {}, onDone }) {
   });
   const save = useSubmit(async () => {
     if (blockout) await api.put(`/blockouts/${blockout.id}`, body());
-    else await api.post('/blockouts', { ...body(), repeat_weeks: Number(form.repeat_weeks) });
+    else await api.post('/blockouts', { ...body(), ...(form.repeat_weeks === 'range' ? { through_date: form.through } : { repeat_weeks: Number(form.repeat_weeks) }) });
     onDone();
   });
-  const remove = useSubmit(async () => {
-    await api.del(`/blockouts/${blockout.id}`);
+  const remove = useSubmit(async (scope) => {
+    await api.del(`/blockouts/${blockout.id}${scope === 'series' ? '?scope=series' : ''}`);
+    onDone();
+  });
+  const saveSeries = useSubmit(async () => {
+    await api.put(`/blockouts/${blockout.id}`, { ...body(), scope: 'series' });
     onDone();
   });
 
   return (
     <form onSubmit={(e) => { e.preventDefault(); save.submit(); }}>
-      <ErrorBox error={save.error || remove.error} />
+      <ErrorBox error={save.error || remove.error || saveSeries.error} />
       <div className="inline" style={{ flexWrap: 'wrap', marginBottom: 12 }}>
         {PRESETS.map((p) => <button type="button" key={p} className={`small${form.reason === p ? ' primary' : ''}`} onClick={() => setForm({ ...form, reason: p })}>{p}</button>)}
       </div>
@@ -66,14 +70,20 @@ export default function BlockoutForm({ blockout, defaults = {}, onDone }) {
             Repeat
             <select value={form.repeat_weeks} onChange={set('repeat_weeks')}>
               <option value={1}>Just this day</option>
+              <option value="range">Every day through…</option>
               {[4, 8, 12, 26, 52].map((n) => <option key={n} value={n}>Weekly for {n} weeks</option>)}
             </select>
           </label>
+        )}
+        {!blockout && form.repeat_weeks === 'range' && (
+          <label>Through<input type="date" required min={form.date} value={form.through} onChange={set('through')} /></label>
         )}
       </div>
       <p className="muted" style={{ fontSize: 12 }}>Leave provider and chair empty to block the whole office. Booking into blocked time asks for confirmation.</p>
       <div className="form-actions">
         {blockout && <button type="button" className="danger" disabled={remove.busy} onClick={() => confirm('Remove this blocked time?') && remove.submit()}>Remove</button>}
+        {blockout?.series_key && <button type="button" className="danger" disabled={remove.busy} onClick={() => confirm('Remove every day in this series?') && remove.submit('series')}>Remove whole series</button>}
+        {blockout?.series_key && <button type="button" disabled={saveSeries.busy} onClick={() => saveSeries.submit()} title="Apply the reason, provider and chair to every day in the series">Save for whole series</button>}
         <button className="primary" disabled={save.busy}>{blockout ? 'Save' : 'Block time'}</button>
       </div>
     </form>

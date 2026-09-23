@@ -280,7 +280,7 @@ button.active, .seg button.active { background: var(--primary-soft); color: var(
 .cal-gutter { position: sticky; left: 0; z-index: 5; background: #fff; border-right: 1px solid var(--border); }
 .cal-hour-label { position: absolute; right: 6px; transform: translateY(-50%); font-size: 11px; color: var(--muted); background: #fff; padding: 0 2px; }
 .cal-hour-label:first-child { transform: none; }
-.cal-body { display: grid; position: relative; background-image: repeating-linear-gradient(to bottom, #e7ebf0 0, #e7ebf0 1px, transparent 1px, transparent calc(var(--hour) / 2)), repeating-linear-gradient(to bottom, #d5dbe3 0, #d5dbe3 1px, transparent 1px, transparent var(--hour)); }
+.cal-body { display: grid; position: relative; background-image: repeating-linear-gradient(to bottom, #f1f4f7 0, #f1f4f7 1px, transparent 1px, transparent var(--step, calc(var(--hour) / 2))), repeating-linear-gradient(to bottom, #d5dbe3 0, #d5dbe3 1px, transparent 1px, transparent var(--hour)); }
 .cal-col { position: relative; border-left: 1px solid var(--border); cursor: cell; touch-action: pan-x pan-y; }
 .cal-col.placing { cursor: copy; background: rgba(15, 118, 110, 0.04); }
 .cal-closed { position: absolute; left: 0; right: 0; background: rgba(100, 116, 139, 0.09); pointer-events: none; }
@@ -598,3 +598,5 @@ span.perio-site { border-color: transparent; }
 .avatar.photo { object-fit: cover; padding: 0; }
 .avatar-edit { position: relative; cursor: pointer; display: inline-block; }
 .avatar-edit:hover .avatar { outline: 2px solid var(--primary); }
+.appt-history { list-style: none; padding: 0; margin: 6px 0 0; font-size: 12px; display: flex; flex-direction: column; gap: 4px; }
+.waitlist-offer { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border); }

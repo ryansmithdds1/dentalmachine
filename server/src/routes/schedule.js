@@ -138,20 +138,45 @@ export async function openSlots(db, practiceId, providerId, date, { duration = 6
 
 // ---- Recurring visits ----
 // repeat: { every: 1-12, unit: 'week' | 'month', count: 2-52 }
-export function parseRepeat(repeat) {
+// Repeats: every N weeks or months, for a number of visits or until a date. Monthly repeats land on
+// the same date, or on the same weekday of the month ("2nd Tuesday", "last Friday").
+export function parseRepeat(repeat, start) {
   if (!repeat) return null;
   const every = Number(repeat.every || 1);
-  const count = Number(repeat.count);
   if (!['week', 'month'].includes(repeat.unit)) throw new HttpError(400, "repeat.unit must be 'week' or 'month'");
   if (!Number.isInteger(every) || every < 1 || every > 12) throw new HttpError(400, 'repeat.every must be 1-12');
-  if (!Number.isInteger(count) || count < 2 || count > 52) throw new HttpError(400, 'repeat.count must be 2-52 visits');
-  return { every, unit: repeat.unit, count };
+  const monthlyBy = repeat.unit === 'month' ? repeat.monthly_by || 'date' : null;
+  if (monthlyBy && !['date', 'weekday'].includes(monthlyBy)) throw new HttpError(400, "repeat.monthly_by must be 'date' or 'weekday'");
+  let count = Number(repeat.count);
+  let until = null;
+  if (repeat.until) {
+    until = String(repeat.until);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(until)) throw new HttpError(400, 'repeat.until must be YYYY-MM-DD');
+    if (!start) throw new HttpError(400, 'start_time is required');
+    count = 0;
+    while (count < 52 && shiftVisit(start, { every, unit: repeat.unit, monthly_by: monthlyBy }, count).slice(0, 10) <= until) count++;
+  }
+  if (!Number.isInteger(count) || count < 2 || count > 52) throw new HttpError(400, until ? 'The end date must allow 2 to 52 visits' : 'repeat.count must be 2-52 visits');
+  return { every, unit: repeat.unit, count, ...(monthlyBy ? { monthly_by: monthlyBy } : {}), ...(until ? { until_date: until } : {}) };
 }
-// The i-th visit: weekly steps, or the same day of the month (clamped to the month's last day).
-export function shiftVisit(dateTime, { every, unit }, i) {
+// The i-th visit: weekly steps, or monthly on the same date (clamped to the month's last day) or on
+// the same nth weekday (a 5th weekday becomes that month's last).
+export function shiftVisit(dateTime, { every, unit, monthly_by: monthlyBy }, i) {
   const d = new Date(`${dateTime.slice(0, 10)}T12:00:00Z`);
   if (unit === 'week') d.setUTCDate(d.getUTCDate() + 7 * every * i);
-  else {
+  else if (monthlyBy === 'weekday') {
+    const weekday = d.getUTCDay();
+    const nth = Math.ceil(d.getUTCDate() / 7);
+    const lastOfStart = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
+    const isLast = d.getUTCDate() + 7 > lastOfStart;
+    d.setUTCDate(1);
+    d.setUTCMonth(d.getUTCMonth() + every * i);
+    const last = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
+    const first = 1 + ((weekday - d.getUTCDay() + 7) % 7);
+    let day = first + (nth - 1) * 7;
+    if (isLast || day > last) day = first + Math.floor((last - first) / 7) * 7;
+    d.setUTCDate(day);
+  } else {
     const day = d.getUTCDate();
     d.setUTCDate(1);
     d.setUTCMonth(d.getUTCMonth() + every * i);
@@ -174,7 +199,7 @@ export default function scheduleRoutes({ db }) {
   const r = Router();
   const FIELDS = ['patient_id', 'provider_id', 'operatory_id', 'start_time', 'end_time', 'status', 'reason', 'notes', 'appointment_type_id', 'asap'];
   const seriesInfo = async (appt) => {
-    const s = await db.get('SELECT id, every, unit, count FROM appointment_series WHERE id = ?', appt.series_id);
+    const s = await db.get('SELECT id, every, unit, count, monthly_by, until_date FROM appointment_series WHERE id = ?', appt.series_id);
     const visits = await db.all('SELECT id, start_time, status FROM appointments WHERE series_id = ? ORDER BY start_time', appt.series_id);
     const active = visits.filter((v) => !['cancelled', 'no_show'].includes(v.status));
     return { ...s, position: active.findIndex((v) => v.id === appt.id) + 1, total: active.length, remaining: active.filter((v) => v.start_time > appt.start_time).length };
@@ -224,7 +249,7 @@ export default function scheduleRoutes({ db }) {
     if (type && row.start_time && !row.end_time) row.end_time = addMinutes(normalizeDateTime(row.start_time, 'start_time'), type.duration);
     if (type && !row.reason) row.reason = type.name;
     requireFields(row, ['patient_id', 'provider_id', 'start_time', 'end_time']);
-    const repeat = parseRepeat(req.body.repeat);
+    const repeat = parseRepeat(req.body.repeat, row.start_time && normalizeDateTime(row.start_time, 'start_time'));
     await validateAppt(db, req.user.practice_id, row, { overrideBlockout: !!req.body.override_blockout });
     const withTypeProcs = req.body.add_type_procedures !== false && !(req.body.procedure_ids || []).length;
     let series = null;
@@ -256,7 +281,9 @@ export default function scheduleRoutes({ db }) {
       await db.run("UPDATE procedures SET appointment_id = ? WHERE id = ? AND practice_id = ? AND patient_id = ? AND status = 'planned'", id, Number(procId), req.user.practice_id, row.patient_id);
     }
     await linkRecalls(db, req.user.practice_id, id);
-    await audit(db, req, 'appointment.create', 'appointments', id);
+    // Booked: off the waitlist.
+    await db.run("UPDATE waitlist SET status = 'booked' WHERE practice_id = ? AND patient_id = ? AND status = 'waiting'", req.user.practice_id, row.patient_id);
+    await audit(db, req, 'appointment.create', 'appointments', id, { start: row.start_time });
     changed(req, row.start_time, ...(series ? Array.from({ length: repeat.count }, (_, i) => shiftVisit(row.start_time, repeat, i)) : []));
     res.status(201).json({ ...(await db.get(`${SELECT} WHERE a.id = ?`, id)), ...(series ? { series } : {}) });
   });
@@ -320,7 +347,11 @@ export default function scheduleRoutes({ db }) {
     if (Number(row.provider_id) !== existing.provider_id) await db.run("UPDATE procedures SET provider_id = ? WHERE appointment_id = ? AND status = 'planned'", row.provider_id, existing.id);
     // Cancelling from the edit form releases procedures and recalls, same as the status buttons.
     if (inactive.includes(row.status) && !inactive.includes(existing.status)) await releaseAppointment(db, existing.id);
-    await audit(db, req, 'appointment.update', 'appointments', existing.id, { fields: Object.keys(changes) });
+    await audit(db, req, 'appointment.update', 'appointments', existing.id, {
+      fields: Object.keys(changes),
+      ...(row.start_time !== existing.start_time ? { from: existing.start_time, to: row.start_time } : {}),
+      ...(Number(row.provider_id) !== existing.provider_id ? { provider_id: Number(row.provider_id) } : {}),
+    });
     // "This and following": apply the same shift (and provider/chair/length changes) to later visits in the series.
     let seriesUpdate = null;
     if (req.body.scope === 'following' && existing.series_id) {
@@ -515,11 +546,18 @@ export default function scheduleRoutes({ db }) {
     const row = pick(req.body, BLOCK_FIELDS);
     requireFields(row, ['start_time', 'end_time', 'reason']);
     await validateBlockout(req, row);
-    // Repeat weekly for N weeks (e.g. lunch every Tuesday).
+    // Repeat weekly for N weeks (e.g. lunch every Tuesday), or every day through a date (a holiday
+    // week, a conference). Repeats are linked so the whole series can be changed or removed at once.
     const repeat = Math.min(Math.max(Number(req.body.repeat_weeks) || 1, 1), 52);
-    const ids = await db.tx(() => mapSeq(Array.from({ length: repeat }, (_, i) => i), async (i) => {
-      const shift = (v) => `${new Date(Date.parse(`${v.slice(0, 10)}T12:00:00Z`) + i * 7 * 86400_000).toISOString().slice(0, 10)} ${v.slice(11)}`;
-      return await insert(db, 'blockouts', { ...row, start_time: shift(row.start_time), end_time: shift(row.end_time), practice_id: req.user.practice_id, created_by: req.user.id });
+    const through = req.body.through_date ? String(req.body.through_date) : null;
+    if (through && (!/^\d{4}-\d{2}-\d{2}$/.test(through) || through < row.start_time.slice(0, 10))) throw new HttpError(400, 'through_date must be on or after the start date');
+    const days = through ? Math.round((Date.parse(`${through}T12:00:00Z`) - Date.parse(`${row.start_time.slice(0, 10)}T12:00:00Z`)) / 86400_000) + 1 : 1;
+    if (days > 62) throw new HttpError(400, 'Block at most 62 days at a time');
+    const offsets = through ? Array.from({ length: days }, (_, i) => i) : Array.from({ length: repeat }, (_, i) => i * 7);
+    const seriesKey = offsets.length > 1 ? `b${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}` : null;
+    const ids = await db.tx(() => mapSeq(offsets, async (n) => {
+      const shift = (v) => `${new Date(Date.parse(`${v.slice(0, 10)}T12:00:00Z`) + n * 86400_000).toISOString().slice(0, 10)} ${v.slice(11)}`;
+      return await insert(db, 'blockouts', { ...row, start_time: shift(row.start_time), end_time: shift(row.end_time), practice_id: req.user.practice_id, created_by: req.user.id, series_key: seriesKey });
     }));
     await audit(db, req, 'blockout.create', 'blockouts', ids[0], { count: ids.length });
     changed(req, row.start_time);
@@ -529,6 +567,13 @@ export default function scheduleRoutes({ db }) {
     const existing = await findOr404(db, 'blockouts', req.params.bid, req.user.practice_id, 'Blockout');
     const row = { ...pick(existing, BLOCK_FIELDS), ...pick(req.body, BLOCK_FIELDS) };
     await validateBlockout(req, row);
+    // The whole series: the reason, provider and chair (each keeps its own day).
+    if (req.body?.scope === 'series' && existing.series_key) {
+      await db.run('UPDATE blockouts SET reason = ?, provider_id = ?, operatory_id = ? WHERE practice_id = ? AND series_key = ?',
+        row.reason, row.provider_id ?? null, row.operatory_id ?? null, req.user.practice_id, existing.series_key);
+      delete row.start_time;
+      delete row.end_time;
+    }
     await update(db, 'blockouts', existing.id, req.user.practice_id, row);
     await audit(db, req, 'blockout.update', 'blockouts', existing.id);
     changed(req, existing.start_time, row.start_time);
@@ -536,8 +581,9 @@ export default function scheduleRoutes({ db }) {
   });
   r.delete('/blockouts/:bid', requirePermission('schedule:write'), async (req, res) => {
     const existing = await findOr404(db, 'blockouts', req.params.bid, req.user.practice_id, 'Blockout');
-    await db.run('DELETE FROM blockouts WHERE id = ?', existing.id);
-    await audit(db, req, 'blockout.delete', 'blockouts', existing.id);
+    if (req.query.scope === 'series' && existing.series_key) await db.run('DELETE FROM blockouts WHERE practice_id = ? AND series_key = ?', req.user.practice_id, existing.series_key);
+    else await db.run('DELETE FROM blockouts WHERE id = ?', existing.id);
+    await audit(db, req, 'blockout.delete', 'blockouts', existing.id, { scope: req.query.scope === 'series' ? 'series' : 'one' });
     changed(req, existing.start_time);
     res.json({ ok: true });
   });

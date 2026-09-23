@@ -118,3 +118,58 @@ test('inbox: unknown numbers, reply, attach, assign, archive, quick replies', as
   const q = await api.put('/quick-replies', { replies: ['See you soon!', '  ', 'Call us at {phone}'] });
   assert.deepEqual(q.data, ['See you soon!', 'Call us at {phone}']);
 });
+
+test('schedule: monthly nth weekday and end dates, blockout ranges, chairs, waitlist, history', async () => {
+  const { shiftVisit, parseRepeat } = await import('../src/routes/schedule.js');
+  // 2026-01-13 is the 2nd Tuesday of January.
+  const second = { every: 1, unit: 'month', monthly_by: 'weekday' };
+  assert.deepEqual([1, 2, 3].map((i) => shiftVisit('2026-01-13 09:00', second, i)), ['2026-02-10 09:00', '2026-03-10 09:00', '2026-04-14 09:00']);
+  // The last Friday stays the last Friday.
+  assert.equal(shiftVisit('2026-01-30 09:00', second, 1), '2026-02-27 09:00');
+  assert.equal(parseRepeat({ unit: 'week', every: 2, until: '2026-03-01' }, '2026-01-05 09:00').count, 4);
+  assert.throws(() => parseRepeat({ unit: 'week', until: '2026-01-06' }, '2026-01-05 09:00'), /end date/);
+
+  const ALL = Object.fromEntries([0, 1, 2, 3, 4, 5, 6].map((d) => [d, [['07:00', '19:00']]]));
+  const { api, patient, provider } = await h.practice({ office_hours: ALL });
+  const series = await api.post('/appointments', { patient_id: patient.id, provider_id: provider.id, start_time: '2031-01-14 09:00', end_time: '2031-01-14 10:00', repeat: { unit: 'month', every: 1, monthly_by: 'weekday', until: '2031-04-30' } });
+  assert.equal(series.status, 201);
+  assert.equal(series.data.series.created, 4);
+  const visits = await h.db.all('SELECT start_time FROM appointments WHERE series_id = ? ORDER BY start_time', series.data.series_id ?? series.data.series.id);
+  assert.deepEqual(visits.map((v) => v.start_time.slice(0, 10)), ['2031-01-14', '2031-02-11', '2031-03-11', '2031-04-08']);
+
+  // A holiday week as one linked blockout; delete it in one go.
+  const blk = (await api.post('/blockouts', { start_time: '2031-07-01 00:00', end_time: '2031-07-01 23:59', reason: 'Closed — July 4th week', through_date: '2031-07-05' })).data;
+  assert.equal(blk.length, 5);
+  assert.equal(new Set(blk.map((b) => b.series_key)).size, 1);
+  await api.put(`/blockouts/${blk[0].id}`, { reason: 'Office closed', scope: 'series' });
+  assert.ok((await api.get('/blockouts?from=2031-07-01&to=2031-07-05')).data.every((b) => b.reason === 'Office closed'));
+  await api.del(`/blockouts/${blk[0].id}?scope=series`);
+  assert.equal((await api.get('/blockouts?from=2031-07-01&to=2031-07-05')).data.length, 0);
+
+  // Chair settings.
+  const ops = (await api.get('/operatories')).data;
+  const hyg = await api.put(`/operatories/${ops[0].id}`, { is_hygiene: true, sort: 5, default_provider_id: provider.id });
+  assert.deepEqual([hyg.data.is_hygiene, hyg.data.sort, hyg.data.default_provider_id], [1, 5, provider.id]);
+  assert.equal((await api.get('/operatories')).data.at(-1).id, ops[0].id, 'ordered by sort');
+
+  // Waitlist: match an opening, offer it, and booking takes them off.
+  const kid = (await api.post('/patients', { first_name: 'Early', last_name: 'Bird', phone: '(512) 555-0188' })).data;
+  const w = await api.post('/waitlist', { patient_id: kid.id, reason: 'Cleaning', duration: 60, days: [2, 4], times: 'morning' });
+  assert.equal(w.status, 201);
+  assert.equal((await api.post('/waitlist', { patient_id: kid.id })).status, 409);
+  assert.equal((await api.get('/waitlist?date=2031-01-21&time=09:00&minutes=60')).data.length, 1, 'Tuesday morning fits');
+  assert.equal((await api.get('/waitlist?date=2031-01-21&time=14:00&minutes=60')).data.length, 0, 'not the afternoon');
+  assert.equal((await api.get('/waitlist?date=2031-01-22&time=09:00&minutes=60')).data.length, 0, 'not Wednesday');
+  const offer = await api.post('/waitlist/offer', { date: '2031-01-21', time: '09:00', minutes: 60 });
+  assert.equal(offer.data.sent.length, 1);
+  assert.match(h.sent.at(-1).body, /just opened/);
+  const booked = (await api.post('/appointments', { patient_id: kid.id, provider_id: provider.id, start_time: '2031-01-21 09:00', end_time: '2031-01-21 10:00' })).data;
+  assert.equal((await api.get('/waitlist')).data.length, 0);
+
+  // History shows the move.
+  await api.put(`/appointments/${booked.id}`, { start_time: '2031-01-21 10:00', end_time: '2031-01-21 11:00' });
+  await api.patch(`/appointments/${booked.id}/status`, { status: 'confirmed', confirmed_via: 'text' });
+  const hist = (await api.get(`/appointments/${booked.id}/history`)).data;
+  assert.deepEqual(hist.map((x) => x.action), ['appointment.create', 'appointment.update', 'appointment.status']);
+  assert.match(hist[1].details, /2031-01-21 09:00/);
+});

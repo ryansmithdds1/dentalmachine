@@ -118,7 +118,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(ediRoutes({ db, config, clearinghouse }));
   api.use(officeRoutes({ db }));
   api.use(ppoRoutes({ db, config }));
-  api.use(frontDeskRoutes({ db }));
+  api.use(frontDeskRoutes({ db, messenger }));
   api.use(casePresentationRoutes({ db, messenger, config, erx }));
   api.use(growthRoutes({ db, messenger, config, mailer }));
   api.use(imagingRoutes({ db }));

@@ -11,6 +11,7 @@ export const REPEATS = [
   { value: 'w3', label: 'Every 3 weeks', every: 3, unit: 'week' },
   { value: 'w4', label: 'Every 4 weeks', every: 4, unit: 'week' },
   { value: 'm1', label: 'Every month (same date)', every: 1, unit: 'month' },
+  { value: 'mw', label: 'Every month (same weekday, e.g. 2nd Tuesday)', every: 1, unit: 'month', monthly_by: 'weekday' },
   { value: 'm3', label: 'Every 3 months', every: 3, unit: 'month' },
   { value: 'm6', label: 'Every 6 months', every: 6, unit: 'month' },
 ];
@@ -49,7 +50,7 @@ export default function AppointmentForm({ appointment, defaults = {}, patient: i
   const [selectedProcs, setSelectedProcs] = useState(defaults.procedure_ids || []);
   const [slots, setSlots] = useState(null);
   const [override, setOverride] = useState(null);
-  const [repeat, setRepeat] = useState({ rule: '', count: 6 });
+  const [repeat, setRepeat] = useState({ rule: '', count: 6, end: 'count', until: '' });
   const [scope, setScope] = useState('this');
   const chooseType = (id) => {
     const t = types.find((x) => String(x.id) === String(id));
@@ -86,7 +87,7 @@ export default function AppointmentForm({ appointment, defaults = {}, patient: i
     try {
       const saved = appointment
         ? await api.put(`/appointments/${appointment.id}`, { ...body, ...(appointment.series_id && scope === 'following' ? { scope: 'following' } : {}) })
-        : await api.post('/appointments', { ...body, procedure_ids: selectedProcs, ...(rule ? { repeat: { every: rule.every, unit: rule.unit, count: Number(repeat.count) } } : {}) });
+        : await api.post('/appointments', { ...body, procedure_ids: selectedProcs, ...(rule ? { repeat: { every: rule.every, unit: rule.unit, ...(rule.monthly_by ? { monthly_by: rule.monthly_by } : {}), ...(repeat.end === 'until' ? { until: repeat.until } : { count: Number(repeat.count) }) } } : {}) });
       const report = saved.series || saved.series_update;
       if (report?.skipped?.length) {
         alert(`${saved.series ? `Booked ${report.created} visits.` : `Updated ${report.updated} later visits.`} These couldn't be booked:\n\n${report.skipped.map((s) => `• ${s.start_time.slice(0, 10)} ${fmtTime(s.start_time)} — ${s.reason}`).join('\n')}`);
@@ -165,8 +166,23 @@ export default function AppointmentForm({ appointment, defaults = {}, patient: i
             </label>
             {repeat.rule && (
               <label>
+                Ends
+                <select value={repeat.end} onChange={(e) => setRepeat({ ...repeat, end: e.target.value })}>
+                  <option value="count">After a number of visits</option>
+                  <option value="until">On a date</option>
+                </select>
+              </label>
+            )}
+            {repeat.rule && repeat.end === 'count' && (
+              <label>
                 Number of visits
                 <input type="number" min={2} max={52} value={repeat.count} onChange={(e) => setRepeat({ ...repeat, count: e.target.value })} />
+              </label>
+            )}
+            {repeat.rule && repeat.end === 'until' && (
+              <label>
+                Last visit by
+                <input type="date" required min={form.date} value={repeat.until} onChange={(e) => setRepeat({ ...repeat, until: e.target.value })} />
               </label>
             )}
             {repeat.rule && <span className="muted repeat-hint">Times that are taken are skipped and listed after booking.</span>}

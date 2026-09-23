@@ -659,6 +659,23 @@ CREATE TABLE IF NOT EXISTS portal_codes (
 );
 CREATE INDEX IF NOT EXISTS idx_portal_codes ON portal_codes(practice_id, contact);
 
+-- Patients without an appointment who want one (or an earlier one), and when they can come.
+CREATE TABLE IF NOT EXISTS waitlist (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  reason TEXT,
+  duration INTEGER NOT NULL DEFAULT 60,
+  provider_id INTEGER REFERENCES providers(id),
+  days TEXT,
+  times TEXT NOT NULL DEFAULT 'any',
+  notes TEXT,
+  status TEXT NOT NULL DEFAULT 'waiting' CHECK (status IN ('waiting','booked','removed')),
+  last_offered_at TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Inbox state per conversation ('p<patient id>' or 'n<10-digit number>'): who's handling it, and archiving.
 CREATE TABLE IF NOT EXISTS conversation_state (
   id INTEGER PRIMARY KEY,
@@ -978,6 +995,12 @@ const COLUMNS = [
   ['era_imports', 'provider_adjustments', 'TEXT'],
   ['tooth_conditions', 'resolved_at', 'TEXT'],
   ['practices', 'reminder_steps', 'TEXT'],
+  ['appointment_series', 'monthly_by', 'TEXT'],
+  ['appointment_series', 'until_date', 'TEXT'],
+  ['blockouts', 'series_key', 'TEXT'],
+  ['operatories', 'default_provider_id', 'INTEGER'],
+  ['operatories', 'is_hygiene', 'INTEGER NOT NULL DEFAULT 0'],
+  ['operatories', 'sort', 'INTEGER NOT NULL DEFAULT 0'],
   ['practices', 'quick_replies', 'TEXT'],
   ['patients', 'phone_home', 'TEXT'],
   ['patients', 'phone_work', 'TEXT'],

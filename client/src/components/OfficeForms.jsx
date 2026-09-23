@@ -108,3 +108,39 @@ export function TaskForm({ task, patient: fixedPatient, onDone }) {
     </form>
   );
 }
+
+const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+// Put a patient on the waitlist with when they can come.
+export function WaitlistForm({ patient, entry, onDone }) {
+  const providers = useLookup('/providers?active=true');
+  const [form, setForm] = useState(() => ({
+    reason: entry?.reason || '', duration: entry?.duration || 60, provider_id: entry?.provider_id || '', times: entry?.times || 'any',
+    days: entry?.days ? JSON.parse(entry.days) : [1, 2, 3, 4, 5], notes: entry?.notes || '',
+  }));
+  const { submit, busy, error } = useSubmit(async () => {
+    const body = { ...form, provider_id: form.provider_id ? Number(form.provider_id) : null, duration: Number(form.duration) };
+    if (entry) await api.put(`/waitlist/${entry.id}`, body);
+    else await api.post('/waitlist', { ...body, patient_id: patient.id });
+    onDone();
+  });
+  const toggleDay = (d) => setForm({ ...form, days: form.days.includes(d) ? form.days.filter((x) => x !== d) : [...form.days, d] });
+  return (
+    <form onSubmit={(e) => { e.preventDefault(); submit(); }}>
+      <ErrorBox error={error} />
+      <div className="form-grid">
+        <label className="full">Visit for<input value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} placeholder="e.g. Cleaning, crown seat" /></label>
+        <label>Minutes needed<input type="number" min="10" step="5" value={form.duration} onChange={(e) => setForm({ ...form, duration: e.target.value })} /></label>
+        <label>With<select value={form.provider_id} onChange={(e) => setForm({ ...form, provider_id: e.target.value })}><option value="">Anyone</option>{providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
+        <div className="full">
+          <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>Days they can come</div>
+          <div className="inline" style={{ flexWrap: 'wrap', gap: 4 }}>
+            {DAYS.map((d, i) => <button type="button" key={d} className={`small${form.days.includes(i) ? ' primary' : ''}`} onClick={() => toggleDay(i)}>{d}</button>)}
+          </div>
+        </div>
+        <label>Time of day<select value={form.times} onChange={(e) => setForm({ ...form, times: e.target.value })}><option value="any">Any time</option><option value="morning">Mornings</option><option value="afternoon">Afternoons</option></select></label>
+        <label className="full">Notes<input value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="e.g. needs 2 hours' notice" /></label>
+      </div>
+      <div className="form-actions"><button className="primary" disabled={busy}>{entry ? 'Save' : 'Add to waitlist'}</button></div>
+    </form>
+  );
+}

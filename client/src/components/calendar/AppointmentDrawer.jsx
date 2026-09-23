@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../../api.js';
-import { fmtTime, fmtDateTime, money } from '../../format.js';
+import { fmtTime, fmtDateTime, fmtUtcDateTime, money } from '../../format.js';
+import { useAuth } from '../../auth.jsx';
 import { Badge } from '../ui.jsx';
 
 const FLOW = {
@@ -114,6 +115,7 @@ export default function AppointmentDrawer({ appt: a, can, onClose, onStatus, onE
           {w && active && ['scheduled', 'confirmed'].includes(a.status) && <button onClick={onReminder}>Send reminder</button>}
           {w && active && <button onClick={onToggleAsap}>{a.asap ? 'Remove from ASAP' : 'Add to ASAP list'}</button>}
         </div>
+        <ApptHistory id={a.id} />
         {w && active && (
           <div className="drawer-actions" style={{ marginTop: 16, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
             <button className="danger" onClick={() => onStatus('no_show')}>No-show</button>
@@ -132,5 +134,43 @@ export default function AppointmentDrawer({ appt: a, can, onClose, onStatus, onE
         )}
       </div>
     </aside>
+  );
+}
+
+const HISTORY_LABEL = { 'appointment.create': 'Booked', 'appointment.update': 'Changed', 'appointment.status': 'Status', 'appointment.checkout': 'Checked out', 'appointment.family': 'Booked (family)' };
+// Who booked, moved and changed this visit, and when.
+function ApptHistory({ id }) {
+  const tz = useAuth().practice?.timezone;
+  const [open, setOpen] = useState(false);
+  const [rows, setRows] = useState(null);
+  useEffect(() => {
+    setRows(null);
+    setOpen(false);
+  }, [id]);
+  const toggle = async () => {
+    setOpen(!open);
+    if (!rows) setRows(await api.get(`/appointments/${id}/history`).catch(() => []));
+  };
+  const describe = (r) => {
+    let d = {};
+    try {
+      d = JSON.parse(r.details || '{}') || {};
+    } catch { /* plain text */ }
+    if (r.action === 'appointment.status') return `${String(d.from || '').replace('_', ' ')} → ${String(d.to || '').replace('_', ' ')}`;
+    if (d.from && d.to) return `moved ${fmtDateTime(d.from)} → ${fmtDateTime(d.to)}`;
+    if (d.fields) return d.fields.filter((f) => !['override_blockout', 'scope'].includes(f)).join(', ');
+    return '';
+  };
+  return (
+    <div style={{ marginTop: 12 }}>
+      <button className="link-button" onClick={toggle}>{open ? 'Hide history' : 'History'}</button>
+      {open && (
+        <ul className="appt-history">
+          {rows?.map((r, i) => <li key={i}><strong>{HISTORY_LABEL[r.action] || r.action}</strong> {describe(r)}<span className="muted"> · {r.user_name || 'patient/system'} · {fmtUtcDateTime(r.created_at, tz)}</span></li>)}
+          {rows?.length === 0 && <li className="muted">No changes recorded.</li>}
+          {!rows && <li className="muted">Loading…</li>}
+        </ul>
+      )}
+    </div>
   );
 }

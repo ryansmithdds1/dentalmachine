@@ -60,6 +60,11 @@ export default function Schedule() {
   const [providerFilter, setProviderFilter] = useState('');
   const setMode = (m) => { setModeState(m); savePref('mode', m); };
   const setZoom = (z) => { setZoomState(z); savePref('zoom', z); };
+  // Grid step (5/10/15 min) and how the week view splits each day.
+  const [step, setStepState] = useState(() => Number(pref('step', 10)));
+  const setStep = (v) => { setStepState(v); savePref('step', v); };
+  const [weekSplit, setWeekSplitState] = useState(() => pref('week_split', 'days'));
+  const setWeekSplit = (v) => { setWeekSplitState(v); savePref('week_split', v); };
   const go = (patch) => {
     const next = new URLSearchParams(params);
     for (const [k, v] of Object.entries(patch)) next.set(k, v);
@@ -191,8 +196,10 @@ export default function Schedule() {
   const onResize = useCallback((appt, end) => saveMove(appt, { end_time: `${appt.start_time.slice(0, 10)} ${end}` }), [saveMove]);
   const onSelectRange = useCallback((col, start, end) => {
     if (!can('schedule:write')) return;
-    setModal({ type: 'new', defaults: { date: col.date, time: start, end, ...col.assign, provider_id: col.assign.provider_id || (providerFilter ? Number(providerFilter) : undefined) } });
-  }, [can, providerFilter]);
+    // A chair's usual provider is the default for visits booked into it.
+    const chairDefault = col.assign.operatory_id ? operatories.find((o) => o.id === col.assign.operatory_id)?.default_provider_id : null;
+    setModal({ type: 'new', defaults: { date: col.date, time: start, end, ...col.assign, provider_id: col.assign.provider_id || (providerFilter ? Number(providerFilter) : undefined) || chairDefault || undefined } });
+  }, [can, providerFilter, operatories]);
   const onPlace = useCallback((col, start) => {
     const appt = placing;
     setPlacing(null);
@@ -251,6 +258,24 @@ export default function Schedule() {
     if (view === 'week') {
       const days = Array.from({ length: 7 }, (_, i) => shiftDate(from, i))
         .filter((d) => (data.hours[d] || []).length || appts.some((a) => a.start_time.startsWith(d)));
+      // A condensed week: each day split into its providers (those working or booked) or its chairs.
+      if (weekSplit !== 'days') {
+        const dayLabel = (d) => dayName(d, { weekday: 'short', day: 'numeric' });
+        return days.flatMap((d) => (weekSplit === 'provider'
+          ? providers
+            .filter((p) => (!providerFilter || p.id === Number(providerFilter)) && ((data.provider_hours?.[p.id]?.[d] ?? data.hours[d] ?? []).length || appts.some((a) => a.provider_id === p.id && a.start_time.startsWith(d))))
+            .map((p) => ({
+              key: `${d}-p${p.id}`, date: d, isToday: d === today, label: `${dayLabel(d)} · ${p.name.split(/[ ,]/).filter(Boolean).slice(0, 2).join(' ')}`, color: p.color,
+              hours: data.provider_hours?.[p.id]?.[d] ?? data.hours[d], assign: { provider_id: p.id }, showProvider: false,
+              accepts: (a) => a.start_time.startsWith(d) && a.provider_id === p.id,
+              blockouts: blockouts.filter((b) => onDate(b, d) && (officeWide(b) || b.provider_id === p.id)),
+            }))
+          : operatories.map((o) => ({
+            key: `${d}-o${o.id}`, date: d, isToday: d === today, label: `${dayLabel(d)} · ${o.name}`, hours: data.hours[d], assign: { operatory_id: o.id }, showProvider: true,
+            accepts: (a) => a.start_time.startsWith(d) && a.operatory_id === o.id && (!providerFilter || a.provider_id === Number(providerFilter)),
+            blockouts: blockouts.filter((b) => onDate(b, d) && (officeWide(b) || b.operatory_id === o.id)),
+          }))));
+      }
       return days.map((d) => ({
         key: d, date: d, label: dayName(d, { weekday: 'short', month: 'numeric', day: 'numeric' }), isToday: d === today,
         sub: `${short(data.production[d] || 0)} · ${appts.filter((a) => a.start_time.startsWith(d)).length} appts`,
@@ -282,7 +307,7 @@ export default function Schedule() {
       });
     }
     return cols;
-  }, [data, view, mode, date, from, today, providers, operatories, providerFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [data, view, mode, date, from, today, providers, operatories, providerFilter, weekSplit]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const timeRange = useMemo(() => {
     let open = 24 * 60;
@@ -342,6 +367,11 @@ export default function Schedule() {
               <button className={mode === 'provider' ? 'active' : ''} onClick={() => setMode('provider')}>Providers</button>
             </div>
           )}
+          {view === 'week' && (
+            <div className="seg" title="Week layout">
+              {[['days', 'Days'], ['provider', 'By provider'], ['operatory', 'By chair']].map(([k, l]) => <button key={k} className={weekSplit === k ? 'active' : ''} onClick={() => setWeekSplit(k)}>{l}</button>)}
+            </div>
+          )}
           {view !== 'day' && (
             <select value={providerFilter} onChange={(e) => setProviderFilter(e.target.value)} aria-label="Provider filter" style={{ width: 'auto' }}>
               <option value="">All providers</option>
@@ -353,7 +383,12 @@ export default function Schedule() {
               {ZOOMS.map((z) => <button key={z.label} className={zoom === z.px ? 'active' : ''} onClick={() => setZoom(z.px)}>{z.label}</button>)}
             </div>
           )}
-          <button onClick={() => setShowAsap(!showAsap)} className={showAsap ? 'active' : ''}>ASAP</button>
+          {view !== 'agenda' && (
+            <select value={step} onChange={(e) => setStep(Number(e.target.value))} aria-label="Grid step" title="Time grid" style={{ width: 'auto' }}>
+              {[5, 10, 15].map((m) => <option key={m} value={m}>{m} min</option>)}
+            </select>
+          )}
+          <button onClick={() => setShowAsap(!showAsap)} className={showAsap ? 'active' : ''}>Waitlist</button>
           {can('schedule:write') && <button onClick={() => setModal({ type: 'block', defaults: { date } })}>Block time</button>}
           {can('schedule:write') && <button className="primary" onClick={() => setModal({ type: 'new', defaults: { date } })}>+ Appointment</button>}
         </div>
@@ -376,7 +411,7 @@ export default function Schedule() {
           </div>
         ) : (
           <CalendarGrid
-            columns={columns} appointments={appts} range={timeRange} pxPerMin={zoom} nowMin={nowMin}
+            columns={columns} appointments={appts} range={timeRange} pxPerMin={zoom} nowMin={nowMin} step={step}
             onMove={onMove} onResize={onResize} readOnly={!can('schedule:write')}
             onSelectRange={onSelectRange} onOpen={(a) => setSelectedId(a.id)}
             onOpenBlockout={(b) => can('schedule:write') && setModal({ type: 'block', blockout: b })}
@@ -386,7 +421,9 @@ export default function Schedule() {
 
         {showAsap && (
           <aside className="asap-panel">
-            <div className="inline" style={{ justifyContent: 'space-between' }}><h3 style={{ margin: 0 }}>ASAP list</h3><button className="small" onClick={() => setShowAsap(false)} aria-label="Close">✕</button></div>
+            <div className="inline" style={{ justifyContent: 'space-between' }}><h3 style={{ margin: 0 }}>Waitlist & ASAP</h3><button className="small" onClick={() => setShowAsap(false)} aria-label="Close">✕</button></div>
+            <WaitlistPanel date={date} providers={providers} canWrite={can('schedule:write')} onOpenPatient={(id) => nav(`/patients/${id}`)} />
+            <h3 style={{ margin: '14px 0 0' }}>Booked, want earlier</h3>
             <p className="muted" style={{ fontSize: 12 }}>Patients who&apos;d take an earlier opening. Open one, choose <em>Move…</em>, then tap a gap.</p>
             {asap.length === 0 && <div className="muted">Nobody on the list.</div>}
             {asap.map((a) => (
@@ -493,6 +530,58 @@ function Agenda({ from, to, appts, blockouts, providerFilter, onOpen, today }) {
         );
       })}
       {!shown.length && from !== to && <div className="empty">No appointments this week.</div>}
+    </div>
+  );
+}
+
+// Waitlist: patients with nothing booked (or wanting sooner), and texting an opening to the first who fit.
+function WaitlistPanel({ date, providers, canWrite, onOpenPatient }) {
+  const [list, setList] = useState(null);
+  const [offer, setOffer] = useState({ date, time: '09:00', minutes: 60, provider_id: '' });
+  const [result, setResult] = useState(null);
+  const [err, setErr] = useState(null);
+  const load = () => api.get('/waitlist').then(setList).catch(() => setList([]));
+  useEffect(() => { load(); }, []);
+  useEffect(() => setOffer((o) => ({ ...o, date })), [date]);
+  const send = async () => {
+    setErr(null);
+    try {
+      setResult(await api.post('/waitlist/offer', { ...offer, minutes: Number(offer.minutes), provider_id: offer.provider_id ? Number(offer.provider_id) : null }));
+      load();
+    } catch (e) {
+      setErr(e);
+    }
+  };
+  const remove = async (w) => { await api.put(`/waitlist/${w.id}`, { status: 'removed' }); load(); };
+  return (
+    <div>
+      <h3 style={{ margin: '10px 0 4px', fontSize: 15 }}>Not booked yet ({list?.length ?? '…'})</h3>
+      {list?.length === 0 && <div className="muted" style={{ fontSize: 12 }}>Nobody waiting. Add patients from their chart.</div>}
+      {list?.map((w) => (
+        <div key={w.id} className="asap-item" style={{ cursor: 'default' }}>
+          <button className="link-button" onClick={() => onOpenPatient(w.patient_id)}><strong>{w.first_name} {w.last_name}</strong></button>
+          <span className="muted">{w.reason || 'Visit'} · {w.duration} min{w.provider_name ? ` · ${w.provider_name}` : ''}</span>
+          <span className="muted">{w.days ? JSON.parse(w.days).map((d) => 'SMTWTFS'[d]).join('') : 'Any day'} · {w.times === 'any' ? 'any time' : w.times}{w.last_offered_at ? ' · offered' : ''}</span>
+          {canWrite && <button className="small" style={{ alignSelf: 'flex-start' }} onClick={() => remove(w)}>Remove</button>}
+        </div>
+      ))}
+      {canWrite && list?.length > 0 && (
+        <div className="waitlist-offer">
+          <strong style={{ fontSize: 13 }}>Offer an opening</strong>
+          <div className="inline" style={{ flexWrap: 'wrap', gap: 4 }}>
+            <input type="date" value={offer.date} onChange={(e) => setOffer({ ...offer, date: e.target.value })} style={{ width: 140 }} />
+            <input type="time" value={offer.time} step={300} onChange={(e) => setOffer({ ...offer, time: e.target.value })} style={{ width: 110 }} />
+            <input type="number" value={offer.minutes} min="10" step="10" onChange={(e) => setOffer({ ...offer, minutes: e.target.value })} style={{ width: 70 }} title="Minutes available" />
+            <select value={offer.provider_id} onChange={(e) => setOffer({ ...offer, provider_id: e.target.value })} style={{ width: 'auto' }}>
+              <option value="">Any provider</option>
+              {providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          </div>
+          <button className="small primary" onClick={send}>Text the first 5 who fit</button>
+          {err && <div className="error">{err.message}</div>}
+          {result && <div className="muted" style={{ fontSize: 12 }}>{result.sent.length ? `Texted ${result.sent.map((s) => s.name).join(', ')}.` : 'Nobody on the list fits that time.'}</div>}
+        </div>
+      )}
     </div>
   );
 }

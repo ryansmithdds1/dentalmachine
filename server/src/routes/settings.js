@@ -178,7 +178,16 @@ export default function settingsRoutes({ db, secret, config = {} }) {
     },
   });
 
-  resource(r, db, { path: 'operatories', table: 'operatories', required: ['name'], fields: ['name', 'active'], order: 'id' });
+  // Chairs: display order, whether it's a hygiene chair, and who usually works in it (new visits dragged there default to them).
+  resource(r, db, {
+    path: 'operatories', table: 'operatories', required: ['name'], fields: ['name', 'active', 'sort', 'is_hygiene', 'default_provider_id'], order: 'sort, id',
+    validate: async (row, req) => {
+      if (row.default_provider_id) await findOr404(db, 'providers', row.default_provider_id, req.user.practice_id, 'Provider');
+      else if ('default_provider_id' in row) row.default_provider_id = null;
+      if (row.sort != null) row.sort = Number(row.sort) || 0;
+      if (row.is_hygiene != null) row.is_hygiene = row.is_hygiene ? 1 : 0;
+    },
+  });
 
   resource(r, db, {
     path: 'procedure-codes', table: 'procedure_codes', required: ['code', 'description', 'category'], order: 'code',

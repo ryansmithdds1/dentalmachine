@@ -120,19 +120,19 @@ The "OD / Curve" column shows which competitor has the feature: ✓ = has it, ~ 
 
 | # | Feature | Why | OD / Curve | Pri | Size |
 |---|---|---|---|---|---|
-| 32 | **Waitlist** for patients without appointments, with preferred days and times, auto-matching when a slot opens, and a "text the first 5" blast. | Fills cancellations; high ROI. | ✓ / ✓ | P1 | M |
+| 32 | ✅ **Waitlist** for patients without appointments, with preferred days and times, auto-matching when a slot opens, and a "text the first 5" blast. | Fills cancellations; high ROI. | ✓ / ✓ | P1 | M |
 | 33 | **Schedule templates / block scheduling.** Reserve blocks by appointment type ("crowns 8–10"), with per-provider daily production goals. | How productive offices run. | ✓ / ✓ | P2 | M |
 | 34 | **Pinboard / clipboard.** Drag an appointment off the schedule and drop it elsewhere or on another day. | Open Dental staff live on it. | ✓ / ~ | P2 | S |
-| 35 | **Multi-step reminders** (e.g. 2 weeks, 2 days and same day; text and email) with confirmation levels. | No-show reduction. | ✓ / ✓ | P1 | M |
-| 36 | **Recall types:** configurable (prophy, perio, BWX, FMX, pano, custom), with automated multi-touch recall sequences. | Hygiene revenue. | ✓ / ✓ | P1 | M |
-| 37 | **Check-out workflow.** Collect payment, book the next visit or recall, print a walkout, all in one step. | Front-desk speed and reappointment rate. | ✓ / ✓ | P1 | M |
-| 38 | **Patient flow timestamps** (arrived, seated, dismissed), with wait-time and running-late indicators. | Chair utilization. | ✓ / ✓ | P2 | S |
+| 35 | ✅ **Multi-step reminders** (e.g. 2 weeks, 2 days and same day; text and email) with confirmation levels. | No-show reduction. | ✓ / ✓ | P1 | M |
+| 36 | ✅ **Recall types:** configurable (prophy, perio, BWX, FMX, pano, custom), with automated multi-touch recall sequences. | Hygiene revenue. | ✓ / ✓ | P1 | M |
+| 37 | ✅ **Check-out workflow.** Collect payment, book the next visit or recall, print a walkout, all in one step. | Front-desk speed and reappointment rate. | ✓ / ✓ | P1 | M |
+| 38 | ✅ **Patient flow timestamps** (arrived, seated, dismissed), with wait-time and running-late indicators. | Chair utilization. | ✓ / ✓ | P2 | S |
 | 39 | ✅ **Complete appointment → complete its procedures** (and post charges) in one click. | The normal end-of-visit flow. | ✓ / ✓ | P1 | S |
-| 40 | ✅ (alternating weeks still to do) **Provider schedule exceptions:** date-specific hours, time off, alternating weeks. | Real provider schedules. | ✓ / ✓ | P1 | S |
-| 41 | **Book the whole family** into back-to-back or side-by-side slots. | Common for kids. | ✓ / ✓ | P2 | M |
-| 42 | **Instant online booking** into approved slots (optional), holding the slot while a request is pending; collect insurance and a deposit. | Curve and NexHealth-style self-scheduling. | ✓ / ✓ | P2 | M |
-| 43 | **Referral tracking.** Referring doctors and referred-out, with referral letters and a report. | Specialists depend on it; GPs track sources. | ✓ / ✓ | P2 | M |
-| 44 | **Texting inbox upgrades.** Unknown numbers (attach to patient), email threads, assignment, archiving, editable quick replies, MMS photos. | Front-desk communication hub. | ✓ / ✓ | P2 | M |
+| 40 | ✅ **Provider schedule exceptions:** date-specific hours, time off, alternating weeks. | Real provider schedules. | ✓ / ✓ | P1 | S |
+| 41 | ✅ **Book the whole family** into back-to-back or side-by-side slots. | Common for kids. | ✓ / ✓ | P2 | M |
+| 42 | ✅ (slot hold done; instant booking and deposits still to do) **Instant online booking** into approved slots (optional), holding the slot while a request is pending; collect insurance and a deposit. | Curve and NexHealth-style self-scheduling. | ✓ / ✓ | P2 | M |
+| 43 | ✅ **Referral tracking.** Referring doctors and referred-out, with referral letters and a report. | Specialists depend on it; GPs track sources. | ✓ / ✓ | P2 | M |
+| 44 | ✅ **Texting inbox upgrades.** Unknown numbers (attach to patient), email threads, assignment, archiving, editable quick replies, MMS photos. | Front-desk communication hub. | ✓ / ✓ | P2 | M |
 | 45 | **Custom forms builder:** consents (extraction, endo, sedation), HIPAA, financial policy, COVID/pre-op; auto-sent before visits; insurance card and ID photo upload. | Paperless office, Curve Forms. | ✓ / ✓ | P1 | L |
 | 46 | ✅ **Patient appointment history** on the chart (past visits, no-shows, cancellations). | Basic context. | ✓ / ✓ | P1 | S |
 | 47 | **Command palette actions** ("book for…", "text…", "take payment…"). | Speed. | ~ / ~ | P3 | S |
@@ -188,27 +188,27 @@ Each area lists what works, then the improvements, in priority order.
 
 ### Schedule / calendar
 Works well: drag, resize and create; undo; live updates; conflict checks; open-time finder; production vs goal.
-1. **P1** Week view with provider or chair columns (or a condensed multi-column week).
-2. **P1** Configurable time grid: 5, 10 or 15 minutes.
-3. **P1** Chair settings: default provider, hygiene flag, display order.
+1. ✅ **P1** Week view with provider or chair columns (or a condensed multi-column week).
+2. ✅ **P1** Configurable time grid: 5, 10 or 15 minutes.
+3. ✅ **P1** Chair settings: default provider, hygiene flag, display order.
 4. **P2** Appointment types with provider/assistant time patterns (e.g. `X//XX//`) and per-provider durations.
-5. **P2** Blockouts: linked repeats (edit or delete the series), date ranges (holiday week), drag and resize, and rules like "only crown seats here" instead of hard blocks.
-6. **P2** Per-appointment history (moved, rescheduled, who changed it) in the drawer.
-7. **P2** Recurring series: "every 2nd Tuesday", an end date, and adding visits to an existing series.
+5. ✅ **P2** Blockouts: linked repeats (edit or delete the series), date ranges (holiday week), drag and resize, and rules like "only crown seats here" instead of hard blocks.
+6. ✅ **P2** Per-appointment history (moved, rescheduled, who changed it) in the drawer.
+7. ✅ **P2** Recurring series: "every 2nd Tuesday", an end date, and adding visits to an existing series.
 8. **P3** Colour by provider, type or status as a toggle; print the day's schedule per provider.
 
 ### Front desk: huddle, route slip, follow-ups, requests
 1. ✅ **P1** Follow-ups "Book" should carry the patient and their planned procedures into the booking form.
 2. ✅ **P1** Recall tab gets a Book action, with the recall's due window pre-selected.
-3. **P1** Online-booking Accept can change the time and chair; a pending request holds the slot.
+3. ✅ **P1** Online-booking Accept can change the time and chair; a pending request holds the slot.
 4. **P2** Huddle performance: batch its queries (it runs about 8 per patient now).
 5. ✅ **P2** Declined/hidden follow-ups should be stored on the server, not just hidden in the browser.
 6. **P2** Referral source captured on online requests and on intake.
 
 ### Patients and families
-1. **P1** Multiple phones (cell, home, work) with a preferred contact method and language.
-2. **P1** Primary provider and primary hygienist on the patient.
-3. **P2** Patient photo.
+1. ✅ **P1** Multiple phones (cell, home, work) with a preferred contact method and language.
+2. ✅ **P1** Primary provider and primary hygienist on the patient.
+3. ✅ **P2** Patient photo.
 4. **P2** Relationship types in the family (spouse, child, dependent) and a second responsible party.
 5. **P2** Unlinking a member moves or warns about their payment plans and cards.
 

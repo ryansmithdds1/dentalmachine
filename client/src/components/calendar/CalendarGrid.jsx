@@ -1,10 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
-export const SNAP = 10; // minutes
 export const toMin = (t) => Number(t.slice(-5, -3)) * 60 + Number(t.slice(-2));
 export const fmtMin = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 export const label12 = (m) => `${((Math.floor(m / 60) + 11) % 12) + 1}${m % 60 ? `:${String(m % 60).padStart(2, '0')}` : ''}${m < 720 ? 'a' : 'p'}`;
-const snap = (m) => Math.round(m / SNAP) * SNAP;
 const STATUS_ICON = { confirmed: '✓', checked_in: '➜', in_chair: '●', completed: '✔', scheduled: '' };
 
 // Side-by-side lanes for overlapping events within one column.
@@ -39,8 +37,11 @@ function layoutLanes(items) {
  */
 export default function CalendarGrid({
   columns, appointments, range, pxPerMin, nowMin, onMove, onResize, onSelectRange, onOpen, onOpenBlockout,
-  placing, onPlace, selectedId, scrollKey, headerExtra, readOnly = false,
+  placing, onPlace, selectedId, scrollKey, headerExtra, readOnly = false, step = 10,
 }) {
+  // The grid step (5, 10 or 15 minutes) is what drags and new appointments snap to.
+  const SNAP = step;
+  const snap = (m) => Math.round(m / SNAP) * SNAP;
   const scroller = useRef(null);
   const body = useRef(null);
   const [drag, setDrag] = useState(null); // { kind: 'move'|'resize'|'select', ... }
@@ -195,7 +196,7 @@ export default function CalendarGrid({
           <div className="cal-gutter">
             {hours.map((m) => <div key={m} className="cal-hour-label" style={{ top: (m - range.start) * pxPerMin }}>{label12(m)}</div>)}
           </div>
-          <div className="cal-body" ref={body} style={{ gridColumn: `2 / span ${columns.length}`, gridTemplateColumns: `repeat(${columns.length}, minmax(var(--cal-col-min), 1fr))`, '--hour': `${60 * pxPerMin}px` }}>
+          <div className="cal-body" ref={body} style={{ gridColumn: `2 / span ${columns.length}`, gridTemplateColumns: `repeat(${columns.length}, minmax(var(--cal-col-min), 1fr))`, '--hour': `${60 * pxPerMin}px`, '--step': `${step * pxPerMin}px` }}>
             {columns.map((col, ci) => {
               const closed = [];
               let cursor = range.start;

@@ -16,7 +16,7 @@ import DocumentsTab from '../components/patient/DocumentsTab.jsx';
 import CommsTab from '../components/patient/CommsTab.jsx';
 import FamilyTab from '../components/patient/FamilyTab.jsx';
 import RxTab from '../components/patient/RxTab.jsx';
-import { LabCaseForm, TaskForm, LAB_STATUSES } from '../components/OfficeForms.jsx';
+import { LabCaseForm, TaskForm, WaitlistForm, LAB_STATUSES } from '../components/OfficeForms.jsx';
 import { api } from '../api.js';
 
 export default function PatientDetail() {
@@ -138,8 +138,8 @@ function Overview({ p, reload }) {
   return (
     <>
     {modal && (
-      <Modal title={modal.type === 'lab' ? (modal.item ? 'Lab case' : 'New lab case') : 'New task'} onClose={() => setModal(null)}>
-        {modal.type === 'lab'
+      <Modal title={modal.type === 'lab' ? (modal.item ? 'Lab case' : 'New lab case') : modal.type === 'waitlist' ? `Add ${p.first_name} to the waitlist` : 'New task'} onClose={() => setModal(null)}>
+        {modal.type === 'waitlist' ? <WaitlistForm patient={p} onDone={() => setModal(null)} /> : modal.type === 'lab'
           ? <LabCaseForm patient={p} labCase={modal.item} onDone={() => { setModal(null); reload(); }} />
           : <TaskForm patient={p} onDone={() => { setModal(null); reloadTasks(); }} />}
       </Modal>
@@ -180,7 +180,10 @@ function Overview({ p, reload }) {
       </div>
       <div>
         <div className="card">
-          <h2>Upcoming appointments</h2>
+          <div className="inline" style={{ justifyContent: 'space-between' }}>
+            <h2 style={{ margin: 0 }}>Upcoming appointments</h2>
+            {can('schedule:write') && <button className="small" onClick={() => setModal({ type: 'waitlist' })}>Add to waitlist</button>}
+          </div>
           {p.upcoming_appointments.length === 0 ? <div className="muted">None scheduled.</div> : (
             <table>
               <tbody>

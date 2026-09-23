@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { requirePermission, HttpError, can } from '../auth.js';
-import { requireFields, insert, update, findOr404, audit, practiceNow, mapSeq } from '../util.js';
+import { pick, requireFields, insert, update, findOr404, audit, practiceNow, mapSeq, friendlyDateTime } from '../util.js';
+import { sendMessage, preferredChannel } from '../messaging.js';
 import { primaryPolicy, patientBalance, estimateCoverage, completeProcedure } from '../services.js';
 import { recallTypes } from '../recalls.js';
 import { historyChanges } from '../forms.js';
@@ -10,7 +11,7 @@ const addDays = (d, n) => new Date(Date.parse(`${d}T12:00:00Z`) + n * 86400_000)
 const OUTCOMES = ['left_voicemail', 'texted', 'emailed', 'spoke_scheduled', 'spoke_will_call', 'declined', 'wrong_number', 'note'];
 
 // Front-office workflow: morning huddle, route slips, follow-up lists and quick search.
-export default function frontDeskRoutes({ db }) {
+export default function frontDeskRoutes({ db, messenger }) {
   const r = Router();
 
   // ---- Check-out: everything for the end of a visit on one screen ----
@@ -81,6 +82,96 @@ export default function frontDeskRoutes({ db }) {
     }
     await audit(db, req, 'appointment.checkout', 'appointments', a.id, { completed_procedures: completed });
     res.json({ ...(await checkoutSummary(req.user.practice_id, a.id)), completed_procedures: completed });
+  });
+
+  // ---- Appointment history: every change, by whom and when ----
+  r.get('/appointments/:id/history', requirePermission('schedule:read'), async (req, res) => {
+    const a = await findOr404(db, 'appointments', req.params.id, req.user.practice_id, 'Appointment');
+    res.json(await db.all(
+      `SELECT l.action, l.details, l.created_at, u.name AS user_name FROM audit_log l LEFT JOIN users u ON u.id = l.user_id
+       WHERE l.practice_id = ? AND l.entity = 'appointments' AND l.entity_id = ? ORDER BY l.id`, req.user.practice_id, a.id,
+    ));
+  });
+
+  // ---- Waitlist: patients who want to come in (or sooner), and when they can ----
+  const WL_FIELDS = ['patient_id', 'reason', 'duration', 'provider_id', 'days', 'times', 'notes', 'status'];
+  const validateWaitlist = async (req, row) => {
+    if (row.patient_id) await findOr404(db, 'patients', row.patient_id, req.user.practice_id, 'Patient');
+    if (row.provider_id) await findOr404(db, 'providers', row.provider_id, req.user.practice_id, 'Provider');
+    else if ('provider_id' in row) row.provider_id = null;
+    if (row.duration != null) {
+      row.duration = Number(row.duration);
+      if (!Number.isInteger(row.duration) || row.duration < 10 || row.duration > 480) throw new HttpError(400, 'duration must be 10-480 minutes');
+    }
+    if (row.days != null) {
+      const days = (Array.isArray(row.days) ? row.days : JSON.parse(row.days || '[]')).map(Number);
+      if (days.some((d) => !Number.isInteger(d) || d < 0 || d > 6)) throw new HttpError(400, 'days are 0 (Sunday) to 6 (Saturday)');
+      row.days = days.length ? JSON.stringify([...new Set(days)].sort()) : null;
+    }
+    if (row.times && !['any', 'morning', 'afternoon'].includes(row.times)) throw new HttpError(400, 'times must be any, morning or afternoon');
+    if (row.status && !['waiting', 'booked', 'removed'].includes(row.status)) throw new HttpError(400, 'Invalid status');
+  };
+  const WL_SELECT = `SELECT w.*, p.first_name, p.last_name, p.phone, p.email, p.sms_opt_in, p.email_opt_in, pv.name AS provider_name
+    FROM waitlist w JOIN patients p ON p.id = w.patient_id LEFT JOIN providers pv ON pv.id = w.provider_id`;
+  // Who fits an opening: they can come that weekday and time of day, want that provider (or anyone), and the visit fits.
+  const fits = (w, { date, time, minutes, providerId }) => {
+    const days = w.days ? JSON.parse(w.days) : null;
+    if (date && days && !days.includes(new Date(`${date}T12:00:00Z`).getUTCDay())) return false;
+    if (time && w.times === 'morning' && time >= '12:00') return false;
+    if (time && w.times === 'afternoon' && time < '12:00') return false;
+    if (minutes && w.duration > minutes) return false;
+    if (providerId && w.provider_id && w.provider_id !== providerId) return false;
+    return true;
+  };
+
+  r.get('/waitlist', requirePermission('schedule:read'), async (req, res) => {
+    const list = await db.all(`${WL_SELECT} WHERE w.practice_id = ? AND w.status = 'waiting' ORDER BY w.created_at, w.id`, req.user.practice_id);
+    const q = req.query;
+    const opening = q.date ? { date: q.date, time: q.time, minutes: q.minutes ? Number(q.minutes) : null, providerId: q.provider_id ? Number(q.provider_id) : null } : null;
+    res.json(opening ? list.filter((w) => fits(w, opening)) : list);
+  });
+  r.post('/waitlist', requirePermission('schedule:write'), async (req, res) => {
+    const row = pick(req.body, WL_FIELDS);
+    requireFields(row, ['patient_id']);
+    await validateWaitlist(req, row);
+    if (await db.get("SELECT 1 AS x FROM waitlist WHERE practice_id = ? AND patient_id = ? AND status = 'waiting'", req.user.practice_id, row.patient_id)) throw new HttpError(409, 'That patient is already on the waitlist');
+    const id = await insert(db, 'waitlist', { ...row, practice_id: req.user.practice_id, created_by: req.user.id });
+    await audit(db, req, 'waitlist.add', 'waitlist', id);
+    res.status(201).json(await db.get(`${WL_SELECT} WHERE w.id = ?`, id));
+  });
+  r.put('/waitlist/:wid', requirePermission('schedule:write'), async (req, res) => {
+    const existing = await findOr404(db, 'waitlist', req.params.wid, req.user.practice_id, 'Waitlist entry');
+    const row = pick(req.body, WL_FIELDS.filter((f) => f !== 'patient_id'));
+    await validateWaitlist(req, row);
+    await update(db, 'waitlist', existing.id, req.user.practice_id, row);
+    await audit(db, req, 'waitlist.update', 'waitlist', existing.id, row.status ? { status: row.status } : undefined);
+    res.json(await db.get(`${WL_SELECT} WHERE w.id = ?`, existing.id));
+  });
+
+  // Text an opening to the first few who fit; whoever calls or replies first gets it.
+  r.post('/waitlist/offer', requirePermission('schedule:write'), async (req, res) => {
+    const { date, time, minutes, provider_id: providerId } = req.body || {};
+    if (!DATE.test(date || '') || !/^\d{2}:\d{2}$/.test(time || '')) throw new HttpError(400, 'date and time are required');
+    const limit = Math.min(Math.max(Number(req.body.limit) || 5, 1), 20);
+    const practice = await db.get('SELECT name, phone FROM practices WHERE id = ?', req.user.practice_id);
+    const list = (await db.all(`${WL_SELECT} WHERE w.practice_id = ? AND w.status = 'waiting' ORDER BY w.created_at, w.id`, req.user.practice_id))
+      .filter((w) => fits(w, { date, time, minutes: minutes ? Number(minutes) : null, providerId: providerId ? Number(providerId) : null }));
+    const when = friendlyDateTime(`${date} ${time}`);
+    const sent = [];
+    for (const w of list) {
+      if (sent.length >= limit) break;
+      const target = preferredChannel(w);
+      if (!target) continue;
+      const msg = await sendMessage(db, messenger, {
+        practiceId: req.user.practice_id, patientId: w.patient_id, userId: req.user.id, kind: 'waitlist_offer', channel: target.channel, to: target.to,
+        subject: `An opening at ${practice.name}`,
+        body: `Hi ${w.first_name}, an appointment just opened at ${practice.name}: ${when}. Reply or call ${practice.phone || 'us'} to take it — first come, first served.`,
+      });
+      await db.run("UPDATE waitlist SET last_offered_at = datetime('now') WHERE id = ?", w.id);
+      sent.push({ waitlist_id: w.id, patient_id: w.patient_id, name: `${w.first_name} ${w.last_name}`, status: msg.status });
+    }
+    await audit(db, req, 'waitlist.offer', 'waitlist', null, { date, time, sent: sent.length });
+    res.json({ sent, matched: list.length });
   });
 
   // Everything the team reviews in the morning huddle, per patient on today's schedule.

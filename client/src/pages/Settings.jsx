@@ -16,7 +16,7 @@ const RESOURCES = {
     title: 'Providers', singular: 'provider', path: '/providers', columns: ['name', 'type', 'npi', 'color', 'working_hours'],
     fields: [['name', 'Name', 'text'], ['type', 'Type', 'select', ['dentist', 'hygienist', 'specialist']], ['npi', 'NPI (10 digits)', 'text'], ['license_number', 'License #', 'text'], ['dea_number', 'DEA # (controlled substances)', 'text'], ['erx_user_id', 'e-Rx user ID (DoseSpot)', 'text'], ['color', 'Schedule color', 'color'], ['active', 'Active', 'checkbox'], ['working_hours', 'Working hours', 'hours']],
   },
-  operatories: { title: 'Operatories', singular: 'operatory', path: '/operatories', columns: ['name'], fields: [['name', 'Name', 'text'], ['active', 'Active', 'checkbox']] },
+  operatories: { title: 'Operatories', singular: 'operatory', path: '/operatories', columns: ['name', 'sort', 'is_hygiene'], fields: [['name', 'Name', 'text'], ['sort', 'Display order', 'number'], ['default_provider_id', 'Usually works here', 'provider'], ['is_hygiene', 'Hygiene chair', 'checkbox'], ['active', 'Active', 'checkbox']] },
   codes: {
     title: 'Fee schedule', singular: 'procedure code', path: '/procedure-codes', columns: ['code', 'description', 'category', 'fee'],
     fields: [['code', 'Code', 'text'], ['description', 'Description', 'text'], ['category', 'Category', 'select', CATEGORIES], ['fee', 'Fee ($)', 'money'], ['area', 'Charted by (blank = automatic)', 'select', ['tooth', 'quadrant', 'arch', 'mouth']], ['time_units', 'Time units (10 min each)', 'number'], ['requires_tooth', 'Requires tooth', 'checkbox'], ['requires_surface', 'Requires surfaces', 'checkbox'], ['active', 'Active', 'checkbox']],
@@ -524,6 +524,7 @@ function ResourceTable({ spec, canWrite }) {
 }
 
 function ResourceForm({ spec, row, onDone }) {
+  const providerList = useLookup('/providers?active=true');
   const { data: practice } = useApi(spec.fields.some((f) => f[2] === 'hours') ? '/practice' : null);
   const practiceHours = practice?.office_hours ? JSON.parse(practice.office_hours) : DEFAULT_HOURS;
   const [form, setForm] = useState(() => Object.fromEntries(spec.fields.map(([name, , type]) => {
@@ -561,6 +562,7 @@ function ResourceForm({ spec, row, onDone }) {
               {form[name] && <AltWeeks value={form[name]} onChange={set} />}
             </div>
           );
+          if (type === 'provider') return <label key={name}>{text}<select value={form[name] || ''} onChange={(e) => set(e.target.value ? Number(e.target.value) : null)}><option value="">—</option>{providerList.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>;
           if (type === 'select') return <label key={name}>{text}<select value={form[name]} onChange={(e) => set(e.target.value)}><option value="">—</option>{options.map((o) => <option key={o} value={o}>{label(o)}</option>)}</select></label>;
           return <label key={name} className={type === 'codes' ? 'full' : ''}>{text}<input type={type === 'money' || type === 'number' ? 'number' : type === 'codes' ? 'text' : type} step={type === 'money' ? '0.01' : undefined} value={form[name]} onChange={(e) => set(e.target.value)} /></label>;
         })}
