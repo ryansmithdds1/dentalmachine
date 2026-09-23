@@ -25,6 +25,7 @@ const UnsubscribePage = lazy(() => import('./pages/public/UnsubscribePage.jsx'))
 const RouteSlip = lazy(() => import('./pages/RouteSlip.jsx'));
 const SchedulePrint = lazy(() => import('./pages/SchedulePrint.jsx'));
 const NotesPrint = lazy(() => import('./pages/NotesPrint.jsx'));
+const AdaClaimForm = lazy(() => import('./pages/AdaClaimForm.jsx'));
 const TreatmentPlanPrint = lazy(() => import('./pages/PrintDocs.jsx').then((m) => ({ default: m.TreatmentPlanPrint })));
 const PrescriptionPrint = lazy(() => import('./pages/PrintDocs.jsx').then((m) => ({ default: m.PrescriptionPrint })));
 const WalkoutPrint = lazy(() => import('./pages/PrintDocs.jsx').then((m) => ({ default: m.WalkoutPrint })));
@@ -159,6 +160,7 @@ function StaffApp() {
       <Route path="/prescriptions/:id/print" element={<PrescriptionPrint />} />
       <Route path="/lab-cases/:id/slip" element={<LabSlipPrint />} />
       <Route path="/claims/:id/attachments/print" element={<AttachmentCoverPrint />} />
+      <Route path="/claims/:id/ada" element={<AdaClaimForm />} />
       <Route path="/collections/:id/letter" element={<CollectionLetterPrint />} />
       <Route path="/deposits/:id/slip" element={<DepositSlipPrint />} />
       <Route path="/appointments/:id/walkout" element={<WalkoutPrint />} />

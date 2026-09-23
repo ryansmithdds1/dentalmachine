@@ -9,6 +9,7 @@ import { benefitYear } from '../services.js';
 import { savePolicy, withPlan } from '../benefits.js';
 import { importEra, parseControl } from '../era.js';
 import { attachmentHints } from '../attachments.js';
+import { adaForm } from '../adaform.js';
 import { createEligibility, mergeFrequencies } from '../eligibility.js';
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -78,6 +79,34 @@ export default function ediRoutes({ db, config, clearinghouse: ch }) {
     if (bundle.attachments.some((a) => !a.control_number)) p.push('Send the claim’s attachments first (they need control numbers for the claim to reference)');
     return p;
   }
+
+  // The claim laid out as the ADA Dental Claim Form, for payers that need paper.
+  r.get('/claims/:cid/ada', requirePermission('billing:read'), async (req, res) => {
+    const pid = req.user.practice_id;
+    const practice = await db.get('SELECT * FROM practices WHERE id = ?', pid);
+    const b = await claimBundle(req.params.cid, pid);
+    // Other coverage: the patient's other active policy, whichever way round.
+    const other = await db.get(
+      `SELECT pi.*, ic.name AS carrier_name, ic.address AS carrier_address FROM patient_insurance pi JOIN insurance_carriers ic ON ic.id = pi.carrier_id
+       WHERE pi.patient_id = ? AND pi.id != ? AND pi.active = 1 ORDER BY CASE pi.priority WHEN 'primary' THEN 0 ELSE 1 END LIMIT 1`, b.patient.id, b.policy.id,
+    );
+    // The subscriber, when it's someone else in the family (for their address).
+    const subscriber = b.policy.relationship === 'self' ? null
+      : b.patient.guarantor_id ? await db.get('SELECT * FROM patients WHERE id = ?', b.patient.guarantor_id) : null;
+    // One treating dentist per form: the dentist on most of the lines (a hygienist only if no dentist is).
+    const provs = await db.all(`SELECT pv.id, pv.name, pv.npi, pv.license_number, pv.type, COUNT(*) AS n FROM claim_items ci JOIN procedures pr ON pr.id = ci.procedure_id
+      JOIN providers pv ON pv.id = pr.provider_id WHERE ci.claim_id = ? GROUP BY pv.id, pv.name, pv.npi, pv.license_number, pv.type`, b.claim.id);
+    const treating = provs.sort((x, y) => ((y.type === 'dentist') - (x.type === 'dentist')) || (y.n - x.n))[0] || null;
+    const missing = (await db.all("SELECT tooth FROM tooth_conditions WHERE patient_id = ? AND condition = 'missing' AND resolved = 0", b.patient.id)).map((t) => t.tooth);
+    const plan = b.policy.plan_id ? await db.get('SELECT name FROM insurance_plans WHERE id = ?', b.policy.plan_id) : null;
+    const descriptions = new Map((await db.all('SELECT pr.id, pr.description FROM procedures pr JOIN claim_items ci ON ci.procedure_id = pr.id WHERE ci.claim_id = ?', b.claim.id)).map((p) => [p.id, p.description]));
+    await audit(db, req, 'claim.print_ada', 'claims', b.claim.id);
+    res.json(adaForm({
+      ...b, practice, other, subscriber, treating, missing, policy: { ...b.policy, plan_name: plan?.name || null },
+      items: b.items.map((i) => ({ ...i, description: descriptions.get(i.procedure_id) })),
+      printedOn: (await practiceNow(db, pid)).slice(0, 10),
+    }));
+  });
 
   r.get('/claims/:cid/validate', requirePermission('billing:read'), async (req, res) => {
     const practice = await db.get('SELECT * FROM practices WHERE id = ?', req.user.practice_id);

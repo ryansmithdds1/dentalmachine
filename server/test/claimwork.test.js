@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { harness } from './helpers.js';
+import { adaForm } from '../src/adaform.js';
 
 const h = harness();
 
@@ -112,4 +113,39 @@ test('insurance follow-up calls: logged on the claim, and the worklist waits unt
   // A call with no follow-up date goes back to the usual rule.
   await api.post(`/claims/${stale.id}/calls`, { outcome: 'in_process' });
   assert.match((await api.get('/claims')).data.find((c) => c.id === stale.id).attention, /No payment after 45 days/);
+});
+
+test('ADA claim form: numbered boxes from the claim, other coverage, missing teeth, ten lines a page', async () => {
+  const { api, patient, provider, other: otherCarrier, claimFor } = await setup();
+  await api.put(`/providers/${provider.id}`, { license_number: 'TX-12345' });
+  await api.post(`/patients/${patient.id}/insurance`, { carrier_id: otherCarrier.id, priority: 'secondary', subscriber_name: 'John Doe', subscriber_id: 'M2', relationship: 'spouse', annual_max: 100000 });
+  await api.post(`/patients/${patient.id}/conditions`, { tooth: '1', condition: 'missing' });
+  const claim = await claimFor('D2392', '30', 'MO');
+  const form = await api.get(`/claims/${claim.id}/ada`);
+  assert.equal(form.status, 200, JSON.stringify(form.data));
+  const f = form.data;
+  assert.equal(f.box3.name, 'Delta Dental');
+  assert.deepEqual([f.box4.dental, f.box5, f.box8, f.box10, f.box11.name], [true, 'John Doe', 'M2', 'spouse', 'MetLife']);
+  assert.deepEqual([f.box12.name, f.box15, f.box18], ['Jane Doe', 'W1', 'self']);
+  assert.equal(f.box20.name, 'Doe, Jane');
+  assert.equal(f.box21, '1985-04-12');
+  assert.equal(f.lines.length, 1);
+  assert.deepEqual([f.lines[0].code, f.lines[0].tooth, f.lines[0].surfaces, f.lines[0].tooth_system], ['D2392', '30', 'MO', 'JP']);
+  assert.ok(f.lines[0].description);
+  assert.equal(f.box32, f.lines[0].fee);
+  assert.deepEqual(f.box33, ['1']);
+  assert.deepEqual([f.box49, f.box51], ['1234567893', '74-1234567']);
+  assert.deepEqual([f.box53.name, f.box54, f.box55], ['Dr. Ann Lee, DDS', '1987654321', 'TX-12345']);
+  assert.equal(f.pages, 1);
+  assert.equal((await (await h.practice()).api.get(`/claims/${claim.id}/ada`)).status, 404);
+});
+
+test('ADA form: more than ten services spill onto a second page; only real tooth numbers count as missing', () => {
+  const items = Array.from({ length: 12 }, (_, i) => ({ code: 'D1110', fee: 1000, completed_at: '2026-01-02', area: i === 0 ? 'UR' : null }));
+  const f = adaForm({ claim: { id: 1 }, policy: { relationship: 'child', subscriber_name: 'Pat Doe' }, carrier: { name: 'X' }, patient: { id: 2, first_name: 'Kid', last_name: 'Doe' }, items, practice: { name: 'P' }, missing: ['3', 'AB', '', 'K', '33'] });
+  assert.equal(f.pages, 2);
+  assert.equal(f.box32, 12000);
+  assert.equal(f.lines[0].area, '10');
+  assert.deepEqual(f.box33, ['3', 'K']);
+  assert.equal(f.box18, 'dependent child');
 });

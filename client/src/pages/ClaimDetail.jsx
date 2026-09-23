@@ -41,6 +41,7 @@ export default function ClaimDetail() {
         </div>
         <div className="actions no-print">
           <button onClick={() => window.print()}>Print</button>
+          <button title="The ADA Dental Claim Form on plain paper, for payers that need a paper claim" onClick={() => window.open(`/claims/${c.id}/ada`, '_blank')}>ADA claim form</button>
           {w && ['draft', 'denied'].includes(c.status) && <button className="primary" onClick={sendElectronic}>{ch?.batch ? 'Send to clearinghouse' : 'Download 837'}</button>}
           {w && ['draft', 'denied'].includes(c.status) && <button onClick={() => act(() => api.post(`/claims/${c.id}/submit`))}>{c.status === 'denied' ? 'Resubmitted on paper' : 'Mark sent on paper'}</button>}
           {w && ['submitted', 'partially_paid'].includes(c.status) && <button className="primary" onClick={() => setModal('pay')}>Enter EOB payment</button>}

@@ -723,3 +723,35 @@ p a, .muted a, li a, .public-notice a { text-decoration: underline; }
 .reader-amount { font-size: 28px; font-weight: 700; }
 .spinner { width: 28px; height: 28px; border-radius: 50%; border: 3px solid #d1d5db; border-top-color: var(--primary, #0f766e); animation: spin 0.9s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* ADA Dental Claim Form on plain letter paper */
+.ada-doc { background: #fff; color: #000; }
+.ada-page { width: 8.5in; min-height: 11in; margin: 0 auto 16px; padding: 0.3in 0.3in; box-sizing: border-box; font: 7.5pt/1.2 Arial, Helvetica, sans-serif; color: #000; background: #fff; }
+.ada-title { display: flex; justify-content: space-between; align-items: baseline; border-bottom: 2px solid #000; padding-bottom: 2px; margin-bottom: 3px; }
+.ada-title strong { font-size: 12pt; }
+.ada-cols { display: flex; gap: 6px; }
+.ada-col { flex: 1; min-width: 0; }
+.ada-row { display: flex; }
+.ada-row > * { flex: 1; min-width: 0; }
+.ada-section { background: #000; color: #fff; font-weight: 700; font-size: 6.5pt; padding: 1px 3px; margin-top: 3px; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+.ada-box { border: 0.5pt solid #000; margin: -0.5pt 0 0 -0.5pt; padding: 1px 3px; min-height: 0.3in; box-sizing: border-box; }
+.ada-box.tall { min-height: 0.55in; }
+.ada-label { font-size: 5.8pt; line-height: 1.1; }
+.ada-value { font: 9pt/1.25 'Courier New', Courier, monospace; font-weight: 700; padding-top: 1px; overflow-wrap: anywhere; }
+.ada-check { font-size: 6.5pt; font-weight: 400; font-family: Arial, sans-serif; margin-right: 6px; white-space: nowrap; }
+.ada-check i { display: inline-block; width: 8px; height: 8px; border: 0.5pt solid #000; margin-right: 2px; font: 700 7pt/8px 'Courier New', monospace; text-align: center; font-style: normal; vertical-align: -1px; }
+table.ada-services { width: 100%; border-collapse: collapse; margin: 0; }
+table.ada-services th { font-size: 5.6pt; font-weight: 400; border: 0.5pt solid #000; padding: 1px; vertical-align: bottom; background: #fff; color: #000; text-transform: none; letter-spacing: 0; }
+table.ada-services td { border: 0.5pt solid #000; height: 0.2in; padding: 0 3px; font: 700 8.5pt 'Courier New', Courier, monospace; text-align: center; }
+table.ada-services td.left { text-align: left; }
+table.ada-services td.num { text-align: right; }
+table.ada-services td:first-child { font: 400 6.5pt Arial, sans-serif; width: 12px; }
+.ada-teeth { font: 400 7pt Arial, sans-serif; }
+.ada-teeth > div { display: flex; }
+.ada-teeth span { width: 16px; text-align: center; position: relative; }
+.ada-teeth span.x::after { content: 'X'; position: absolute; left: 0; right: 0; top: -2px; font: 700 10pt 'Courier New', monospace; }
+.ada-sig { font-style: italic; }
+@media print {
+  .ada-page { width: auto; min-height: 0; margin: 0; padding: 0; page-break-after: always; }
+  .ada-page:last-child { page-break-after: auto; }
+}
