@@ -35,6 +35,7 @@ db.tx(() => {
   const practiceId = insert(db, 'practices', {
     name: 'Bright Smiles Family Dentistry', address: '1200 Main Street, Suite 200', city: 'Austin', state: 'TX', zip: '78701',
     phone: '(512) 555-0142', email: 'office@brightsmiles.example', npi: '1987654321', tax_id: '74-1234567', timezone: 'America/Chicago',
+    slug: 'bright-smiles', online_booking: 1, reminder_hours: 48,
   });
   seedPracticeDefaults(db, practiceId);
 
@@ -173,6 +174,29 @@ db.tx(() => {
         status: d === 0 ? pickOne(['confirmed', 'checked_in', 'scheduled']) : pickOne(['scheduled', 'confirmed']), reason,
       });
     }
+  }
+  // Online booking requests waiting for the front desk.
+  const requests = [
+    ['Harper', 'Quinn', '1994-06-12', '(512) 555-0188', 'harper.q@example.com', 'New patient exam & cleaning', 60, 2, '15:00', 'Moving from Dallas, last cleaning ~1 year ago.'],
+    ['Diego', 'Ramirez', '1981-11-03', '(512) 555-0177', null, 'Tooth pain / emergency', 30, 1, '16:00', 'Lower left molar sensitive to cold.'],
+  ];
+  for (const [first_name, last_name, dob, phone, email, reason, duration, offset, time, notes] of requests) {
+    let day = dayOffset(offset);
+    while ([0, 6].includes(new Date(`${day}T12:00:00Z`).getUTCDay())) day = dayOffset(++offset);
+    insert(db, 'booking_requests', {
+      practice_id: practiceId, first_name, last_name, dob, phone, email, reason, duration, provider_id: drRivera,
+      requested_start: `${day} ${time}`, notes, ip: '203.0.113.7',
+    });
+  }
+
+  // Message history so the communication log isn't empty.
+  for (const pid of patients.slice(0, 6)) {
+    const p = db.get('SELECT * FROM patients WHERE id = ?', pid);
+    insert(db, 'messages', {
+      practice_id: practiceId, patient_id: pid, channel: 'sms', kind: 'reminder', to_address: p.phone, status: 'sent', provider_id: 'log',
+      body: `Hi ${p.first_name}, this is Bright Smiles Family Dentistry reminding you of your appointment. Please confirm: (demo link)`,
+      sent_at: `${dayOffset(-2)} 09:00:00`, created_at: `${dayOffset(-2)} 09:00:00`,
+    });
   }
 });
 

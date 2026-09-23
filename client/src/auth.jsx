@@ -24,8 +24,8 @@ export function AuthProvider({ children }) {
     return () => window.removeEventListener('dm:logout', onLogout);
   }, [refresh]);
 
-  const login = async (email, password) => {
-    const res = await api.post('/auth/login', { email, password });
+  const login = async (email, password, mfa_code) => {
+    const res = await api.post('/auth/login', { email, password, ...(mfa_code ? { mfa_code } : {}) });
     setToken(res.token);
     await refresh();
   };

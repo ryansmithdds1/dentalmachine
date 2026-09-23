@@ -76,6 +76,13 @@ async function setup() {
   return { api, provider, patient, email: `eng${n}@example.com` };
 }
 
+const nextWeekday = () => {
+  for (let i = 1; ; i++) {
+    const day = localNow('America/New_York', new Date(Date.now() + i * 86400_000)).slice(0, 10);
+    if (![0, 6].includes(new Date(`${day}T12:00:00Z`).getUTCDay())) return day;
+  }
+};
+
 const tomorrow = () => {
   const d = new Date(Date.now() + 86400_000);
   return localNow('America/New_York', d).slice(0, 10);
@@ -144,10 +151,13 @@ test('online booking: public request → front desk accepts → patient + appoin
   const info = (await pub.get('/public/practices/eng-booking')).data;
   assert.equal(info.providers[0].name, 'Dr. Who');
   assert.equal(info.providers[0].npi, undefined);
-  const day = tomorrow();
+  const day = nextWeekday();
   const avail = (await pub.get(`/public/practices/eng-booking/availability?date=${day}&reason=${encodeURIComponent('Checkup & cleaning')}`)).data;
   const slot = avail.slots.find((s) => s.start.endsWith('10:00'));
   assert.ok(slot);
+  let weekend = day;
+  while (![0, 6].includes(new Date(`${weekend}T12:00:00Z`).getUTCDay())) weekend = localNow('UTC', new Date(Date.parse(`${weekend}T12:00:00Z`) + 86400_000)).slice(0, 10);
+  assert.equal((await pub.get(`/public/practices/eng-booking/availability?date=${weekend}`)).data.slots.length, 0, 'closed weekends');
 
   assert.equal((await pub.post('/public/practices/eng-booking/booking-requests', { first_name: 'New', last_name: 'Person', start: slot.start, provider_id: provider.id })).status, 400, 'needs contact');
   const reqd = await pub.post('/public/practices/eng-booking/booking-requests', {

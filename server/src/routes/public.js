@@ -43,6 +43,7 @@ export default function publicRoutes({ db }) {
     if (!DATE.test(date || '')) throw new HttpError(400, 'date must be YYYY-MM-DD');
     const duration = REASONS.find((x) => x.label === req.query.reason)?.duration || 60;
     const now = practiceNow(db, p.id);
+    if ([0, 6].includes(new Date(`${date}T12:00:00Z`).getUTCDay())) return res.json({ date, duration, slots: [] });
     const providers = publicProviders(p.id).filter((pv) => !req.query.provider_id || pv.id === Number(req.query.provider_id));
     const slots = [];
     for (const pv of providers) {

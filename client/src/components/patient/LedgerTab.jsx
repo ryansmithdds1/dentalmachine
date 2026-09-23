@@ -11,6 +11,8 @@ const METHODS = ['credit_card', 'debit_card', 'cash', 'check', 'ach', 'care_cred
 export default function LedgerTab({ patient, onChange }) {
   const { can } = useAuth();
   const { data, reload } = useApi(`/patients/${patient.id}/ledger`);
+  const { data: payConfig } = useApi('/payments/config');
+  const { data: payRequests, reload: reloadRequests } = useApi(`/patients/${patient.id}/payment-requests`);
   const [modal, setModal] = useState(null);
   const done = () => { setModal(null); reload(); onChange?.(); };
   if (!data) return <div className="empty">Loading…</div>;
@@ -29,6 +31,7 @@ export default function LedgerTab({ patient, onChange }) {
             <Link to={`/patients/${patient.id}/statement`}><button>Print statement</button></Link>
             {can('billing:write') && (
               <>
+                {payConfig?.enabled && <button onClick={() => setModal('paylink')}>Send card payment link</button>}
                 <button onClick={() => setModal('adjustment')}>Adjustment</button>
                 <button className="primary" onClick={() => setModal('payment')}>Take payment</button>
               </>
@@ -56,6 +59,24 @@ export default function LedgerTab({ patient, onChange }) {
         </div>
       </div>
       {modal === 'payment' && <Modal title="Take payment" onClose={() => setModal(null)}><PaymentForm patient={patient} balance={data.patient_portion} onDone={done} /></Modal>}
+      {payRequests?.length > 0 && (
+        <div className="card">
+          <h3>Online payment requests</h3>
+          <table>
+            <tbody>
+              {payRequests.map((r) => (
+                <tr key={r.id}>
+                  <td>{fmtDate(r.created_at)}</td>
+                  <td className="num">{money(r.amount)}</td>
+                  <td><span className={`badge ${r.status === 'paid' ? 'ok' : r.status === 'pending' ? 'info' : 'danger'}`}>{r.status}</span></td>
+                  <td>{r.status === 'pending' && r.url && <a href={r.url} target="_blank" rel="noreferrer">Open checkout</a>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {modal === 'paylink' && <Modal title="Send card payment link" onClose={() => setModal(null)}><PayLinkForm patient={patient} balance={data.patient_portion} onDone={() => { setModal(null); reloadRequests(); }} /></Modal>}
       {modal === 'adjustment' && <Modal title="Ledger adjustment" onClose={() => setModal(null)}><AdjustmentForm patient={patient} onDone={done} /></Modal>}
     </>
   );
@@ -81,6 +102,42 @@ function PaymentForm({ patient, balance, onDone }) {
         <label className="full">Reference (check #, last 4, auth code)<input value={form.reference} onChange={(e) => setForm({ ...form, reference: e.target.value })} /></label>
       </div>
       <div className="form-actions"><button className="primary" disabled={busy}>Post payment</button></div>
+    </form>
+  );
+}
+
+function PayLinkForm({ patient, balance, onDone }) {
+  const [amount, setAmount] = useState(balance > 0 ? (balance / 100).toFixed(2) : '');
+  const [send, setSend] = useState(patient.phone && patient.sms_opt_in ? 'sms' : patient.email && patient.email_opt_in ? 'email' : '');
+  const [result, setResult] = useState(null);
+  const { submit, busy, error } = useSubmit(async () => {
+    setResult(await api.post(`/patients/${patient.id}/payment-requests`, { amount: toCents(amount), send: send || null }));
+  });
+  if (result) {
+    return (
+      <div>
+        <p>{result.message ? `Link ${result.message.status === 'sent' ? 'sent' : 'could not be sent'} to ${result.message.to_address}.` : 'Link created.'}</p>
+        <p><a href={result.url} target="_blank" rel="noreferrer">{result.url}</a></p>
+        <p className="muted">The payment posts to the ledger automatically when the patient pays.</p>
+        <div className="form-actions"><button className="primary" onClick={onDone}>Done</button></div>
+      </div>
+    );
+  }
+  return (
+    <form onSubmit={(e) => { e.preventDefault(); submit(); }}>
+      <ErrorBox error={error} />
+      <div className="form-grid">
+        <label>Amount ($)<input type="number" step="0.01" min="0.50" required value={amount} onChange={(e) => setAmount(e.target.value)} /></label>
+        <label>
+          Send link by
+          <select value={send} onChange={(e) => setSend(e.target.value)}>
+            <option value="sms">Text {patient.phone ? `(${patient.phone})` : '(no phone)'}</option>
+            <option value="email">Email {patient.email ? `(${patient.email})` : '(no email)'}</option>
+            <option value="">Don&apos;t send, just create the link</option>
+          </select>
+        </label>
+      </div>
+      <div className="form-actions"><button className="primary" disabled={busy}>Create secure payment link</button></div>
     </form>
   );
 }

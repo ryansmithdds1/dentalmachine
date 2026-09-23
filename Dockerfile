@@ -9,7 +9,7 @@ COPY . .
 RUN npm run build
 
 FROM node:22-alpine
-ENV NODE_ENV=production PORT=4000 DATABASE_PATH=/data/dentalmachine.db
+ENV NODE_ENV=production PORT=4000 DATABASE_PATH=/data/dentalmachine.db UPLOAD_DIR=/data/uploads
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY server/package.json server/

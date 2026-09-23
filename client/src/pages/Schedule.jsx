@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useApi, useLookup } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
 import { api } from '../api.js';
-import { fmtTime, shiftDate } from '../format.js';
+import { fmtTime, fmtDateTime, shiftDate, practiceToday } from '../format.js';
 import { Modal, Badge } from '../components/ui.jsx';
 import AppointmentForm from '../components/AppointmentForm.jsx';
 
@@ -12,10 +12,6 @@ const CLOSE = 18;
 const PX_PER_MIN = 1; // 60px per hour
 const minutes = (s) => Number(s.slice(11, 13)) * 60 + Number(s.slice(14, 16));
 
-function practiceToday(tz) {
-  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date()).map((x) => [x.type, x.value]));
-  return `${p.year}-${p.month}-${p.day}`;
-}
 
 export default function Schedule() {
   const { practice, can } = useAuth();
@@ -31,6 +27,17 @@ export default function Schedule() {
     ? [...operatories.map((o) => ({ id: o.id, name: o.name, key: 'operatory_id' })), { id: null, name: 'Unassigned', key: 'operatory_id' }]
     : providers.map((p) => ({ id: p.id, name: p.name, key: 'provider_id', color: p.color }));
   const visibleColumns = columns.filter((c) => c.id !== null || appts?.some((a) => !a.operatory_id));
+
+  const [notice, setNotice] = useState(null);
+  const remind = async (a) => {
+    setNotice(null);
+    try {
+      const m = await api.post(`/appointments/${a.id}/remind`);
+      setNotice(`Reminder ${m.status === 'sent' ? 'sent' : 'failed'} by ${m.channel === 'sms' ? 'text' : 'email'} to ${m.to_address}.`);
+    } catch (e) {
+      setNotice(e.message);
+    }
+  };
 
   const setStatus = async (a, status) => {
     await api.patch(`/appointments/${a.id}/status`, { status });
@@ -106,7 +113,7 @@ export default function Schedule() {
         </Modal>
       )}
       {modal?.type === 'view' && (
-        <Modal title={`${modal.appt.first_name} ${modal.appt.last_name}`} onClose={() => setModal(null)}>
+        <Modal title={`${modal.appt.first_name} ${modal.appt.last_name}`} onClose={() => { setModal(null); setNotice(null); }}>
           {modal.appt.medical_alerts && <div className="error">⚠ Medical alert: {modal.appt.medical_alerts}</div>}
           <dl className="kv">
             <dt>When</dt><dd>{fmtTime(modal.appt.start_time)} – {fmtTime(modal.appt.end_time)}</dd>
@@ -115,10 +122,13 @@ export default function Schedule() {
             <dt>Reason</dt><dd>{modal.appt.reason || '—'}</dd>
             <dt>Phone</dt><dd>{modal.appt.phone || '—'}</dd>
             <dt>Status</dt><dd><Badge value={modal.appt.status} /></dd>
+            <dt>Reminder</dt><dd>{modal.appt.confirmed_at ? `Patient confirmed ${fmtDateTime(modal.appt.confirmed_at.replace('T', ' '))}` : modal.appt.reminder_sent_at ? `Sent ${fmtDateTime(modal.appt.reminder_sent_at)}` : 'Not sent yet'}</dd>
             {modal.appt.notes && (<><dt>Notes</dt><dd>{modal.appt.notes}</dd></>)}
           </dl>
           <div className="form-actions" style={{ flexWrap: 'wrap', justifyContent: 'flex-start' }}>
+            {notice && <div className="muted" style={{ width: '100%' }}>{notice}</div>}
             <button onClick={() => nav(`/patients/${modal.appt.patient_id}`)}>Open chart</button>
+            {can('schedule:write') && ['scheduled', 'confirmed'].includes(modal.appt.status) && <button onClick={() => remind(modal.appt)}>Send reminder</button>}
             {can('schedule:write') && (
               <>
                 <button onClick={() => setModal({ type: 'edit', appt: modal.appt })}>Edit / reschedule</button>

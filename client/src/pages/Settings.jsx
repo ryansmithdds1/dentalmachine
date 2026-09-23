@@ -4,6 +4,7 @@ import { useApi, invalidateLookup } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
 import { money, fmtDateTime, label, toCents, fromCents } from '../format.js';
 import { ErrorBox, Modal, useSubmit } from '../components/ui.jsx';
+import MfaSetup from '../components/MfaSetup.jsx';
 
 const ROLES = ['admin', 'dentist', 'hygienist', 'assistant', 'front_desk', 'billing'];
 const CATEGORIES = ['diagnostic', 'preventive', 'restorative', 'endodontics', 'periodontics', 'prosthodontics', 'oral_surgery', 'orthodontics', 'implants', 'adjunctive'];
@@ -54,6 +55,51 @@ export default function Settings() {
 }
 
 function Account() {
+  return (
+    <div className="grid grid-2">
+      <PasswordCard />
+      <TwoFactorCard />
+    </div>
+  );
+}
+
+function TwoFactorCard() {
+  const { user, refresh } = useAuth();
+  const [mode, setMode] = useState(null);
+  const [password, setPassword] = useState('');
+  const disable = useSubmit(async () => {
+    await api.post('/auth/mfa/disable', { password });
+    setMode(null);
+    setPassword('');
+    refresh();
+  });
+  return (
+    <div className="card">
+      <h2>Two-factor authentication</h2>
+      {user.mfa_enabled ? (
+        <>
+          <p><span className="badge ok">On</span> Sign-ins require a code from your authenticator app.</p>
+          {mode === 'disable' ? (
+            <form onSubmit={(e) => { e.preventDefault(); disable.submit(); }}>
+              <ErrorBox error={disable.error} />
+              <label>Confirm your password<input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} /></label>
+              <div className="form-actions"><button type="button" onClick={() => setMode(null)}>Cancel</button><button className="danger" disabled={disable.busy}>Turn off</button></div>
+            </form>
+          ) : <button className="danger" onClick={() => setMode('disable')}>Turn off</button>}
+        </>
+      ) : mode === 'setup' ? (
+        <MfaSetup onDone={() => { setMode(null); refresh(); }} />
+      ) : (
+        <>
+          <p className="muted">Protect patient data with a second step at sign-in. Strongly recommended for everyone with chart access.</p>
+          <button className="primary" onClick={() => setMode('setup')}>Set up authenticator app</button>
+        </>
+      )}
+    </div>
+  );
+}
+
+function PasswordCard() {
   const [form, setForm] = useState({ current_password: '', new_password: '' });
   const [ok, setOk] = useState(false);
   const { submit, busy, error } = useSubmit(async () => {
@@ -62,7 +108,7 @@ function Account() {
     setOk(true);
   });
   return (
-    <div className="card" style={{ maxWidth: 480 }}>
+    <div className="card">
       <h2>Change password</h2>
       <ErrorBox error={error} />
       {ok && <div className="badge ok" style={{ marginBottom: 10 }}>Password updated</div>}
@@ -87,20 +133,45 @@ function Practice() {
     refresh();
   });
   if (!current) return null;
-  const f = (k, t) => <label>{t}<input value={current[k] || ''} onChange={(e) => { setSaved(false); setForm({ ...current, [k]: e.target.value }); }} /></label>;
+  const change = (k, v) => { setSaved(false); setForm({ ...current, [k]: v }); };
+  const f = (k, t) => <label>{t}<input value={current[k] ?? ''} onChange={(e) => change(k, e.target.value)} /></label>;
+  const bookingUrl = current.slug ? `${window.location.origin}/book/${current.slug}` : null;
   return (
-    <div className="card">
-      <ErrorBox error={error} />
-      <div className="form-grid">
-        {f('name', 'Practice name')}{f('phone', 'Phone')}{f('email', 'Email')}
-        {f('address', 'Address')}{f('city', 'City')}{f('state', 'State')}{f('zip', 'ZIP')}
-        {f('npi', 'Group NPI')}{f('tax_id', 'Tax ID')}{f('timezone', 'Time zone (IANA, e.g. America/Chicago)')}
+    <>
+      <div className="card">
+        <h2>Practice details</h2>
+        <div className="form-grid">
+          {f('name', 'Practice name')}{f('phone', 'Phone')}{f('email', 'Email')}
+          {f('address', 'Address')}{f('city', 'City')}{f('state', 'State')}{f('zip', 'ZIP')}
+          {f('npi', 'Group NPI')}{f('tax_id', 'Tax ID')}{f('timezone', 'Time zone (IANA, e.g. America/Chicago)')}
+        </div>
       </div>
+      <div className="card">
+        <h2>Patient engagement</h2>
+        <div className="form-grid">
+          <label>
+            Booking page address
+            <input value={current.slug ?? ''} placeholder="e.g. bright-smiles" onChange={(e) => change('slug', e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '-'))} />
+            {bookingUrl && <span className="muted">{bookingUrl}</span>}
+          </label>
+          <label>
+            Appointment reminders
+            <select value={current.reminder_hours} onChange={(e) => change('reminder_hours', Number(e.target.value))}>
+              <option value={0}>Off</option>
+              {[24, 48, 72].map((h) => <option key={h} value={h}>{h} hours before</option>)}
+            </select>
+          </label>
+          <label className="checkbox full"><input type="checkbox" checked={!!current.online_booking} onChange={(e) => change('online_booking', e.target.checked)} /> Allow patients to request appointments online</label>
+          <label className="checkbox full"><input type="checkbox" checked={!!current.require_mfa} onChange={(e) => change('require_mfa', e.target.checked)} /> Require two-factor authentication for all staff</label>
+        </div>
+        <MessagingStatus />
+      </div>
+      <ErrorBox error={error} />
       <div className="form-actions">
         {saved && <span className="badge ok">Saved</span>}
         <button className="primary" disabled={busy} onClick={submit}>Save</button>
       </div>
-    </div>
+    </>
   );
 }
 
@@ -115,7 +186,7 @@ function Users() {
         <button className="primary" onClick={() => setModal({})}>+ Invite user</button>
       </div>
       <table>
-        <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Last login</th><th /></tr></thead>
+        <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>2FA</th><th>Last login</th><th /></tr></thead>
         <tbody>
           {users?.map((u) => (
             <tr key={u.id}>
@@ -123,6 +194,7 @@ function Users() {
               <td>{u.email}</td>
               <td>{label(u.role)}</td>
               <td><span className={`badge ${u.active ? 'ok' : 'danger'}`}>{u.active ? 'Active' : 'Disabled'}</span></td>
+              <td>{u.mfa_enabled ? <span className="badge ok">On</span> : <span className="muted">Off</span>}</td>
               <td>{u.last_login_at ? fmtDateTime(u.last_login_at) : 'Never'}</td>
               <td><button className="small" onClick={() => setModal({ user: u })}>Edit</button></td>
             </tr>
@@ -156,6 +228,7 @@ function UserForm({ user, onDone }) {
         <label>Role<select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>{ROLES.map((r) => <option key={r} value={r}>{label(r)}</option>)}</select></label>
         <label>{user ? 'Reset password (optional)' : 'Temporary password'}<input type="password" minLength={10} required={!user} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></label>
         {user && <label className="checkbox"><input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} /> Active</label>}
+        {user?.mfa_enabled ? <label className="checkbox"><input type="checkbox" checked={!!form.reset_mfa} onChange={(e) => setForm({ ...form, reset_mfa: e.target.checked })} /> Reset 2FA (lost phone)</label> : null}
       </div>
       <div className="form-actions"><button className="primary" disabled={busy}>Save</button></div>
     </form>
@@ -261,5 +334,21 @@ function AuditLog() {
         </table>
       </div>
     </div>
+  );
+}
+
+function MessagingStatus() {
+  const { data } = useApi('/messaging/status');
+  const { data: pay } = useApi('/payments/config');
+  if (!data) return null;
+  const row = (name, on, hint) => (
+    <li>{name}: {on ? <span className="badge ok">Connected</span> : <span className="badge warn">Not configured</span>} {!on && <span className="muted">{hint}</span>}</li>
+  );
+  return (
+    <ul style={{ marginTop: 14, lineHeight: 1.9, paddingLeft: 18 }}>
+      {row('Text messages', data.sms !== 'log', 'Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN and TWILIO_FROM on the server. Messages are logged but not sent.')}
+      {row('Email', data.email !== 'log', 'Set SENDGRID_API_KEY and EMAIL_FROM on the server. Messages are logged but not sent.')}
+      {row('Card payments', pay?.enabled, 'Set STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET on the server.')}
+    </ul>
   );
 }

@@ -3,16 +3,27 @@ import { Link } from 'react-router-dom';
 import { api } from '../api.js';
 import { useApi } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
-import { fmtDate, label, shiftDate, todayLocal } from '../format.js';
+import { fmtDate, label, shiftDate, practiceToday } from '../format.js';
 import { Badge } from '../components/ui.jsx';
 
 export default function Recalls() {
-  const { can } = useAuth();
+  const { can, practice } = useAuth();
   const [window_, setWindow] = useState(30);
-  const before = shiftDate(todayLocal(), window_);
+  const today = practiceToday(practice?.timezone);
+  const before = shiftDate(today, window_);
   const { data: recalls, reload } = useApi(`/recalls?before=${before}&status=due,contacted`);
-  const today = todayLocal();
 
+  const [notice, setNotice] = useState(null);
+  const remind = async (r) => {
+    setNotice(null);
+    try {
+      const m = await api.post(`/recalls/${r.id}/remind`);
+      setNotice(`${r.first_name} ${r.last_name}: reminder ${m.status === 'sent' ? 'sent' : 'failed'} by ${m.channel === 'sms' ? 'text' : 'email'}.`);
+      reload();
+    } catch (e) {
+      setNotice(`${r.first_name} ${r.last_name}: ${e.message}`);
+    }
+  };
   const mark = async (r, status) => {
     await api.put(`/recalls/${r.id}`, { status });
     reload();
@@ -34,6 +45,7 @@ export default function Recalls() {
           </select>
         </div>
       </div>
+      {notice && <div className="public-notice" style={{ marginBottom: 12 }}>{notice}</div>}
       <div className="card" style={{ padding: 0 }}>
         <div className="table-wrap">
           <table>
@@ -50,6 +62,7 @@ export default function Recalls() {
                   <td style={{ whiteSpace: 'nowrap' }}>
                     {can('schedule:write') && (
                       <>
+                        <button className="small primary" onClick={() => remind(r)}>Send reminder</button>{' '}
                         <button className="small" onClick={() => mark(r, 'contacted')}>Contacted</button>{' '}
                         <button className="small" onClick={() => mark(r, 'inactive')}>Remove</button>
                       </>

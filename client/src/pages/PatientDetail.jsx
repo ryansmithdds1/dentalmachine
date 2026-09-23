@@ -12,6 +12,8 @@ import NotesTab from '../components/patient/NotesTab.jsx';
 import LedgerTab from '../components/patient/LedgerTab.jsx';
 import InsuranceTab from '../components/patient/InsuranceTab.jsx';
 import PerioTab from '../components/patient/PerioTab.jsx';
+import DocumentsTab from '../components/patient/DocumentsTab.jsx';
+import CommsTab from '../components/patient/CommsTab.jsx';
 
 export default function PatientDetail() {
   const { id } = useParams();
@@ -29,8 +31,10 @@ export default function PatientDetail() {
     ['treatment', 'Treatment plans', can('clinical:read')],
     ['perio', 'Perio', can('clinical:read')],
     ['notes', 'Clinical notes', can('clinical:read')],
+    ['documents', 'Documents & x-rays', can('clinical:read')],
     ['ledger', 'Ledger', can('billing:read')],
     ['insurance', 'Insurance', true],
+    ['comms', 'Messages & forms', true],
   ].filter((t) => t[2]);
 
   return (
@@ -74,6 +78,8 @@ export default function PatientDetail() {
       {tab === 'notes' && <NotesTab patient={p} />}
       {tab === 'ledger' && <LedgerTab patient={p} onChange={reload} />}
       {tab === 'insurance' && <InsuranceTab patient={p} onChange={reload} />}
+      {tab === 'documents' && <DocumentsTab patient={p} />}
+      {tab === 'comms' && <CommsTab patient={p} onChange={reload} />}
 
       {modal === 'edit' && (
         <Modal title="Edit patient" wide onClose={() => setModal(null)}>

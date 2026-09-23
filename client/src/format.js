@@ -41,3 +41,9 @@ export function shiftDate(date, days) {
 }
 
 export const label = (s) => (s ? s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) : '');
+
+// Today's date in the practice's time zone (which may differ from the browser's).
+export function practiceToday(tz = 'America/New_York') {
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date()).map((x) => [x.type, x.value]));
+  return `${p.year}-${p.month}-${p.day}`;
+}

@@ -12,9 +12,28 @@ import Recalls from './pages/Recalls.jsx';
 import Reports from './pages/Reports.jsx';
 import Settings from './pages/Settings.jsx';
 import Statement from './pages/Statement.jsx';
+import Requests from './pages/Requests.jsx';
+import MfaSetup from './components/MfaSetup.jsx';
+import BookingPage from './pages/public/BookingPage.jsx';
+import ConfirmPage from './pages/public/ConfirmPage.jsx';
+import IntakePage from './pages/public/IntakePage.jsx';
+import PayResult from './pages/public/PayResult.jsx';
 
+// Patient-facing pages work without a staff login.
 export default function App() {
-  const { user, practice, loading, logout, can } = useAuth();
+  return (
+    <Routes>
+      <Route path="/book/:slug" element={<BookingPage />} />
+      <Route path="/c/:token" element={<ConfirmPage />} />
+      <Route path="/f/:token" element={<IntakePage />} />
+      <Route path="/pay/:result" element={<PayResult />} />
+      <Route path="*" element={<StaffApp />} />
+    </Routes>
+  );
+}
+
+function StaffApp() {
+  const { user, practice, loading, logout, can, refresh } = useAuth();
   if (loading) return <div className="empty">Loading…</div>;
   if (!user) {
     return (
@@ -24,10 +43,24 @@ export default function App() {
     );
   }
 
+  if (user.mfa_setup_required) {
+    return (
+      <div className="auth-page">
+        <div className="card auth-card" style={{ maxWidth: 480 }}>
+          <h1>Secure your account</h1>
+          <p className="muted">{practice?.name} requires two-factor authentication. Set it up to continue.</p>
+          <MfaSetup onDone={refresh} />
+          <button className="link" style={{ marginTop: 12 }} onClick={logout}>Sign out</button>
+        </div>
+      </div>
+    );
+  }
+
   const nav = [
     ['/', '📊', 'Dashboard', true],
     ['/schedule', '📅', 'Schedule', can('schedule:read')],
     ['/patients', '🧑‍⚕️', 'Patients', can('patients:read')],
+    ['/requests', '📥', 'Online requests', can('schedule:read')],
     ['/recalls', '🔔', 'Recall', can('schedule:read')],
     ['/claims', '🧾', 'Claims', can('billing:read')],
     ['/reports', '📈', 'Reports', can('reports:read')],
@@ -65,6 +98,7 @@ export default function App() {
           <Route path="/patients/:id" element={<PatientDetail />} />
           <Route path="/patients/:id/statement" element={<Statement />} />
           <Route path="/recalls" element={<Recalls />} />
+          <Route path="/requests" element={<Requests />} />
           <Route path="/claims" element={<Claims />} />
           <Route path="/claims/:id" element={<ClaimDetail />} />
           <Route path="/reports" element={<Reports />} />
