@@ -4,6 +4,7 @@ import { insert, update, hashToken, practiceNow, normalizeDateTime, audit } from
 import { MEDICAL_CONDITIONS, parseMedicalHistory, patientUpdatesFromHistory } from '../forms.js';
 import { openSlots } from './schedule.js';
 import { publish } from '../events.js';
+import { officeHours } from '../hours.js';
 
 // Used only for practices that haven't marked any appointment types as bookable online.
 const FALLBACK_REASONS = [
@@ -40,6 +41,7 @@ export default function publicRoutes({ db }) {
     res.json({
       name: p.name, phone: p.phone, address: p.address, city: p.city, state: p.state, zip: p.zip,
       today: practiceNow(db, p.id).slice(0, 10), providers: publicProviders(p.id), reasons: reasonsFor(p.id),
+      open_days: Object.entries(officeHours(p)).filter(([, r]) => r.length).map(([d]) => Number(d)),
     });
   });
 
@@ -55,12 +57,19 @@ export default function publicRoutes({ db }) {
     const providers = publicProviders(p.id)
       .filter((pv) => !req.query.provider_id || pv.id === Number(req.query.provider_id))
       .filter((pv) => req.query.provider_id || !reason.provider_type || pv.type === reason.provider_type || !publicProviders(p.id).some((x) => x.type === reason.provider_type));
-    const slots = [];
-    for (const pv of providers) {
-      for (const s of openSlots(db, p.id, pv.id, date, { duration, step: 30, after: now })) slots.push({ start: s, provider_id: pv.id, provider_name: pv.name });
+    const slotsOn = (d) => providers
+      .flatMap((pv) => openSlots(db, p.id, pv.id, d, { duration, step: 30, after: now }).map((s) => ({ start: s, provider_id: pv.id, provider_name: pv.name })))
+      .sort((x, y) => x.start.localeCompare(y.start));
+    const slots = slotsOn(date);
+    // Point patients at the next day with openings instead of making them click through full days.
+    let nextAvailable = null;
+    if (!slots.length || req.query.next === '1') {
+      for (let i = 1; i <= 45 && !nextAvailable; i++) {
+        const d = new Date(Date.parse(`${date}T12:00:00Z`) + i * 86400_000).toISOString().slice(0, 10);
+        if (slotsOn(d).length) nextAvailable = d;
+      }
     }
-    slots.sort((a, b) => a.start.localeCompare(b.start));
-    res.json({ date, duration, slots });
+    res.json({ date, duration, slots, next_available: nextAvailable });
   });
 
   r.post('/practices/:slug/booking-requests', limiter, (req, res) => {

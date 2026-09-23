@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { api } from '../api.js';
+import { api, getToken } from '../api.js';
 import { useApi } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
 import { money, fmtDate, toCents, fromCents } from '../format.js';
@@ -24,6 +24,13 @@ export default function ClaimDetail() {
   if (loadErr) return <div className="error">{loadErr.message}</div>;
   if (!c) return <div className="empty">Loading…</div>;
   const w = can('billing:write');
+  const sendElectronic = async () => {
+    setErr(null);
+    const res = await fetch('/api/claims/837', { method: 'POST', headers: { Authorization: `Bearer ${getToken()}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ claim_ids: [c.id] }) });
+    if (!res.ok) return setErr(new Error((await res.json()).error));
+    Object.assign(document.createElement('a'), { href: URL.createObjectURL(await res.blob()), download: `claim-${c.id}.837` }).click();
+    reload();
+  };
 
   return (
     <>
@@ -34,7 +41,8 @@ export default function ClaimDetail() {
         </div>
         <div className="actions no-print">
           <button onClick={() => window.print()}>Print</button>
-          {w && ['draft', 'denied'].includes(c.status) && <button className="primary" onClick={() => act(() => api.post(`/claims/${c.id}/submit`))}>{c.status === 'denied' ? 'Resubmit' : 'Mark submitted'}</button>}
+          {w && ['draft', 'denied'].includes(c.status) && <button className="primary" onClick={sendElectronic}>Send electronically (837)</button>}
+          {w && ['draft', 'denied'].includes(c.status) && <button onClick={() => act(() => api.post(`/claims/${c.id}/submit`))}>{c.status === 'denied' ? 'Resubmitted on paper' : 'Mark sent on paper'}</button>}
           {w && ['submitted', 'partially_paid'].includes(c.status) && <button className="primary" onClick={() => setModal('pay')}>Enter EOB payment</button>}
           {w && c.status === 'submitted' && <button className="danger" onClick={() => setModal('deny')}>Denied</button>}
           {w && ['draft', 'denied'].includes(c.status) && <button className="danger" onClick={() => confirm('Void this claim? Procedures become billable again.') && act(() => api.post(`/claims/${c.id}/void`))}>Void</button>}
@@ -42,6 +50,8 @@ export default function ClaimDetail() {
       </div>
       <ErrorBox error={err} />
       {c.denial_reason && <div className="error">Denial reason: {c.denial_reason}</div>}
+      {c.payer_claim_number && <div className="muted" style={{ marginBottom: 8 }}>Payer claim # {c.payer_claim_number}</div>}
+      <ClaimChecks id={c.id} status={c.status} />
 
       <div className="grid grid-2">
         <div className="card">
@@ -122,5 +132,17 @@ function DenyForm({ claim, onDone }) {
       <label>Reason<textarea required value={reason} onChange={(e) => setReason(e.target.value)} /></label>
       <div className="form-actions"><button className="primary danger" disabled={busy}>Record denial</button></div>
     </form>
+  );
+}
+
+function ClaimChecks({ id, status }) {
+  const { data } = useApi(['draft', 'denied'].includes(status) ? `/claims/${id}/validate` : null);
+  if (!data) return null;
+  if (!data.problems.length) return <div className="badge ok" style={{ marginBottom: 12 }}>✓ Ready to send electronically</div>;
+  return (
+    <div className="error">
+      <strong>Fix before sending electronically:</strong>
+      <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>{data.problems.map((p) => <li key={p}>{p}</li>)}</ul>
+    </div>
   );
 }

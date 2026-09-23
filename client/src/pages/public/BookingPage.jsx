@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { api } from '../../api.js';
 import { fmtTime, shiftDate } from '../../format.js';
@@ -13,6 +13,8 @@ export default function BookingPage() {
   const [providerId, setProviderId] = useState('');
   const [date, setDate] = useState('');
   const [slots, setSlots] = useState(null);
+  const [nextAvailable, setNextAvailable] = useState(null);
+  const jumped = useRef(false);
   const [slot, setSlot] = useState(null);
   const [form, setForm] = useState({ first_name: '', last_name: '', dob: '', phone: '', email: '', notes: '', new_patient: true, website: '' });
   const [done, setDone] = useState(false);
@@ -22,7 +24,7 @@ export default function BookingPage() {
       setPractice(p);
       setReason(p.reasons[0].label);
       let first = shiftDate(p.today, 1);
-      while ([0, 6].includes(new Date(`${first}T12:00:00Z`).getUTCDay())) first = shiftDate(first, 1);
+      for (let i = 0; i < 14 && !(p.open_days || [1, 2, 3, 4, 5]).includes(new Date(`${first}T12:00:00Z`).getUTCDay()); i++) first = shiftDate(first, 1);
       setDate(first);
     }).catch(setLoadError);
   }, [slug]);
@@ -32,7 +34,17 @@ export default function BookingPage() {
     setSlots(null);
     setSlot(null);
     const q = new URLSearchParams({ date, reason, ...(providerId ? { provider_id: providerId } : {}) });
-    api.get(`/public/practices/${slug}/availability?${q}`).then((r) => setSlots(r.slots)).catch(() => setSlots([]));
+    api.get(`/public/practices/${slug}/availability?${q}`).then((r) => {
+      // First load: jump straight to the first day with openings.
+      if (!r.slots.length && r.next_available && !jumped.current) {
+        jumped.current = true;
+        setDate(r.next_available);
+        return;
+      }
+      jumped.current = true;
+      setSlots(r.slots);
+      setNextAvailable(r.next_available);
+    }).catch(() => setSlots([]));
   }, [practice, slug, date, reason, providerId]);
 
   const { submit, busy, error } = useSubmit(async () => {
@@ -55,9 +67,9 @@ export default function BookingPage() {
     );
   }
 
-  // Office is closed weekends (the server enforces this too).
-  const days = Array.from({ length: 20 }, (_, i) => shiftDate(practice.today, i + 1))
-    .filter((d) => ![0, 6].includes(new Date(`${d}T12:00:00Z`).getUTCDay())).slice(0, 14);
+  // Only days the office is open (from Settings → Office hours).
+  const openDay = (d) => (practice.open_days || [1, 2, 3, 4, 5]).includes(new Date(`${d}T12:00:00Z`).getUTCDay());
+  const days = Array.from({ length: 45 }, (_, i) => shiftDate(practice.today, i + 1)).filter(openDay).slice(0, 25);
 
   return (
     <PublicLayout title="Book an appointment" practice={practice}>
@@ -96,7 +108,12 @@ export default function BookingPage() {
           })}
         </div>
         {slots === null && <p className="muted">Checking availability…</p>}
-        {slots?.length === 0 && <p className="muted">No openings this day. Try another date.</p>}
+        {slots?.length === 0 && (
+          <p className="muted">
+            No openings this day.{' '}
+            {nextAvailable && <button className="link" onClick={() => setDate(nextAvailable)}>Next available: {new Date(`${nextAvailable}T12:00:00`).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}</button>}
+          </p>
+        )}
         <div className="slot-grid">
           {slots?.map((s) => (
             <button key={`${s.start}-${s.provider_id}`} className={`choice${slot === s ? ' selected' : ''}`} onClick={() => setSlot(s)}>

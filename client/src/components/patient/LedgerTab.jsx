@@ -5,6 +5,7 @@ import { useApi } from '../../hooks.js';
 import { useAuth } from '../../auth.jsx';
 import { money, fmtDate, label, toCents } from '../../format.js';
 import { ErrorBox, Modal, useSubmit } from '../ui.jsx';
+import PaymentPlans from './PaymentPlans.jsx';
 
 const METHODS = ['credit_card', 'debit_card', 'cash', 'check', 'ach', 'care_credit', 'other'];
 
@@ -29,6 +30,7 @@ export default function LedgerTab({ patient, onChange }) {
           <h2 style={{ margin: 0 }}>Ledger</h2>
           <div className="actions">
             <Link to={`/patients/${patient.id}/statement`}><button>Print statement</button></Link>
+            {(patient.guarantor || patient.family_size > 1) && <Link to={`/patients/${patient.id}/statement?family=1`}><button>Family statement</button></Link>}
             {can('billing:write') && (
               <>
                 {payConfig?.enabled && <button onClick={() => setModal('paylink')}>Send card payment link</button>}
@@ -59,6 +61,7 @@ export default function LedgerTab({ patient, onChange }) {
         </div>
       </div>
       {modal === 'payment' && <Modal title="Take payment" onClose={() => setModal(null)}><PaymentForm patient={patient} balance={data.patient_portion} onDone={done} /></Modal>}
+      <PaymentPlans patient={patient} onChange={reload} />
       {payRequests?.length > 0 && (
         <div className="card">
           <h3>Online payment requests</h3>
@@ -83,9 +86,11 @@ export default function LedgerTab({ patient, onChange }) {
 }
 
 function PaymentForm({ patient, balance, onDone }) {
-  const [form, setForm] = useState({ amount: balance > 0 ? (balance / 100).toFixed(2) : '', method: 'credit_card', reference: '' });
+  const { data: plans } = useApi(`/patients/${patient.id}/payment-plans`);
+  const active = (plans || []).filter((p) => p.status === 'active');
+  const [form, setForm] = useState({ amount: balance > 0 ? (balance / 100).toFixed(2) : '', method: 'credit_card', reference: '', payment_plan_id: '' });
   const { submit, busy, error } = useSubmit(async () => {
-    await api.post(`/patients/${patient.id}/payments`, { ...form, amount: toCents(form.amount) });
+    await api.post(`/patients/${patient.id}/payments`, { ...form, amount: toCents(form.amount), payment_plan_id: form.payment_plan_id ? Number(form.payment_plan_id) : null });
     onDone();
   });
   return (
@@ -100,6 +105,18 @@ function PaymentForm({ patient, balance, onDone }) {
           </select>
         </label>
         <label className="full">Reference (check #, last 4, auth code)<input value={form.reference} onChange={(e) => setForm({ ...form, reference: e.target.value })} /></label>
+        {active.length > 0 && (
+          <label className="full">
+            Apply to payment plan
+            <select value={form.payment_plan_id} onChange={(e) => {
+              const plan = active.find((p) => String(p.id) === e.target.value);
+              setForm({ ...form, payment_plan_id: e.target.value, ...(plan ? { amount: ((plan.past_due || plan.next_due_amount) / 100).toFixed(2) } : {}) });
+            }}>
+              <option value="">No plan</option>
+              {active.map((p) => <option key={p.id} value={p.id}>{money(p.total)} plan — {p.past_due ? `${money(p.past_due)} past due` : `next ${money(p.next_due_amount)}`}</option>)}
+            </select>
+          </label>
+        )}
       </div>
       <div className="form-actions"><button className="primary" disabled={busy}>Post payment</button></div>
     </form>

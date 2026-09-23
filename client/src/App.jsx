@@ -13,6 +13,11 @@ import Reports from './pages/Reports.jsx';
 import Settings from './pages/Settings.jsx';
 import Statement from './pages/Statement.jsx';
 import Requests from './pages/Requests.jsx';
+import Inbox from './pages/Inbox.jsx';
+import Office from './pages/Office.jsx';
+import { useEffect, useState } from 'react';
+import { api } from './api.js';
+import { useLiveEvents } from './live.js';
 import MfaSetup from './components/MfaSetup.jsx';
 import BookingPage from './pages/public/BookingPage.jsx';
 import ConfirmPage from './pages/public/ConfirmPage.jsx';
@@ -30,6 +35,16 @@ export default function App() {
       <Route path="*" element={<StaffApp />} />
     </Routes>
   );
+}
+
+function UnreadBadge() {
+  const [n, setN] = useState(0);
+  const load = () => api.get('/conversations/unread').then((r) => setN(r.unread)).catch(() => {});
+  useEffect(() => {
+    load();
+  }, []);
+  useLiveEvents((e) => e.type === 'message' && load());
+  return n > 0 ? <span className="nav-badge">{n}</span> : null;
 }
 
 function StaffApp() {
@@ -60,9 +75,11 @@ function StaffApp() {
     ['/', '📊', 'Dashboard', true],
     ['/schedule', '📅', 'Schedule', can('schedule:read')],
     ['/patients', '🧑‍⚕️', 'Patients', can('patients:read')],
+    ['/messages', '💬', 'Messages', can('patients:read')],
     ['/requests', '📥', 'Online requests', can('schedule:read')],
     ['/recalls', '🔔', 'Recall', can('schedule:read')],
-    ['/claims', '🧾', 'Claims', can('billing:read')],
+    ['/claims', '🧾', 'Billing', can('billing:read')],
+    ['/office', '✅', 'To-do & labs', true],
     ['/reports', '📈', 'Reports', can('reports:read')],
     ['/settings', '⚙️', 'Settings', true],
   ];
@@ -81,6 +98,7 @@ function StaffApp() {
           {nav.filter((n) => n[3]).map(([to, icon, text]) => (
             <NavLink key={to} to={to} end={to === '/'}>
               <span aria-hidden>{icon}</span> {text}
+              {to === '/messages' && <UnreadBadge />}
             </NavLink>
           ))}
         </nav>
@@ -99,6 +117,8 @@ function StaffApp() {
           <Route path="/patients/:id/statement" element={<Statement />} />
           <Route path="/recalls" element={<Recalls />} />
           <Route path="/requests" element={<Requests />} />
+          <Route path="/messages" element={<Inbox />} />
+          <Route path="/office" element={<Office />} />
           <Route path="/claims" element={<Claims />} />
           <Route path="/claims/:id" element={<ClaimDetail />} />
           <Route path="/reports" element={<Reports />} />

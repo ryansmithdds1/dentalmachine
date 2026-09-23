@@ -16,15 +16,18 @@ const diffMinutes = (a, b) => {
   return bh * 60 + bm - (ah * 60 + am);
 };
 
-export default function AppointmentForm({ appointment, defaults = {}, patient: initialPatient, onSaved, onCancel }) {
+export default function AppointmentForm({ appointment, defaults = {}, patient: initialPatient, onSaved, onCancel, onBlock }) {
   const providers = useLookup('/providers?active=true');
   const operatories = useLookup('/operatories?active=true');
+  const types = useLookup('/appointment-types?active=true');
   const [patient, setPatient] = useState(initialPatient || (appointment ? { id: appointment.patient_id, first_name: appointment.first_name, last_name: appointment.last_name } : null));
   const startTime = appointment?.start_time.slice(11, 16) || defaults.time || '09:00';
   const [form, setForm] = useState({
     date: appointment?.start_time.slice(0, 10) || defaults.date,
     time: startTime,
-    duration: appointment ? diffMinutes(startTime, appointment.end_time.slice(11, 16)) : 60,
+    duration: appointment ? diffMinutes(startTime, appointment.end_time.slice(11, 16)) : defaults.end ? diffMinutes(startTime, defaults.end) : 60,
+    appointment_type_id: appointment?.appointment_type_id || '',
+    asap: !!appointment?.asap,
     provider_id: appointment?.provider_id || defaults.provider_id || '',
     operatory_id: appointment?.operatory_id || defaults.operatory_id || '',
     status: appointment?.status || 'scheduled',
@@ -34,6 +37,12 @@ export default function AppointmentForm({ appointment, defaults = {}, patient: i
   const [planned, setPlanned] = useState([]);
   const [selectedProcs, setSelectedProcs] = useState([]);
   const [slots, setSlots] = useState(null);
+  const [override, setOverride] = useState(null);
+  const chooseType = (id) => {
+    const t = types.find((x) => String(x.id) === String(id));
+    // A dragged selection keeps its length; otherwise the type sets it.
+    setForm((f) => ({ ...f, appointment_type_id: id, ...(t && !(defaults.end && !appointment) ? { duration: t.duration } : {}), ...(t && !f.reason ? { reason: '' } : {}) }));
+  };
 
   useEffect(() => {
     if (!form.provider_id && providers.length) setForm((f) => ({ ...f, provider_id: providers[0].id }));
@@ -44,9 +53,13 @@ export default function AppointmentForm({ appointment, defaults = {}, patient: i
     api.get(`/patients/${patient.id}/procedures?status=planned`).then((rows) => setPlanned(rows.filter((p) => !p.appointment_id))).catch(() => setPlanned([]));
   }, [patient, appointment]);
 
-  const { submit, busy, error } = useSubmit(async () => {
+  const { submit, busy, error } = useSubmit(async (forceBlockout = false) => {
     if (!patient) throw new Error('Select a patient');
+    setOverride(null);
     const body = {
+      appointment_type_id: form.appointment_type_id ? Number(form.appointment_type_id) : null,
+      asap: form.asap,
+      ...(forceBlockout ? { override_blockout: true } : {}),
       patient_id: patient.id,
       provider_id: Number(form.provider_id),
       operatory_id: form.operatory_id ? Number(form.operatory_id) : null,
@@ -56,10 +69,15 @@ export default function AppointmentForm({ appointment, defaults = {}, patient: i
       reason: form.reason,
       notes: form.notes,
     };
-    const saved = appointment
-      ? await api.put(`/appointments/${appointment.id}`, body)
-      : await api.post('/appointments', { ...body, procedure_ids: selectedProcs });
-    onSaved(saved);
+    try {
+      const saved = appointment
+        ? await api.put(`/appointments/${appointment.id}`, body)
+        : await api.post('/appointments', { ...body, procedure_ids: selectedProcs });
+      onSaved(saved);
+    } catch (e) {
+      if (e.details?.can_override) setOverride(e.message);
+      throw e;
+    }
   });
 
   const findSlots = async () => {
@@ -72,17 +90,29 @@ export default function AppointmentForm({ appointment, defaults = {}, patient: i
   return (
     <form onSubmit={(e) => { e.preventDefault(); submit(); }}>
       <ErrorBox error={error} />
+      {override && (
+        <div className="inline" style={{ marginTop: -6, marginBottom: 12 }}>
+          <button type="button" className="small" onClick={() => submit(true)}>Book into blocked time anyway</button>
+        </div>
+      )}
       <div className="form-grid">
         <label className="full">
           Patient
           {appointment ? <strong style={{ color: 'var(--text)' }}>{patient.first_name} {patient.last_name}</strong> : <PatientPicker value={patient} onChange={setPatient} />}
+        </label>
+        <label className="full">
+          Appointment type
+          <select value={form.appointment_type_id} onChange={(e) => chooseType(e.target.value)}>
+            <option value="">— None —</option>
+            {types.map((t) => <option key={t.id} value={t.id}>{t.name} ({t.duration} min)</option>)}
+          </select>
         </label>
         <label>Date<input type="date" required value={form.date} onChange={set('date')} /></label>
         <label>Start time<input type="time" required step={600} value={form.time} onChange={set('time')} /></label>
         <label>
           Length
           <select value={form.duration} onChange={set('duration')}>
-            {[10, 15, 20, 30, 40, 45, 60, 75, 90, 120, 150, 180].map((m) => <option key={m} value={m}>{m} min</option>)}
+            {[...new Set([10, 15, 20, 30, 40, 45, 60, 75, 90, 120, 150, 180, Number(form.duration)])].sort((a, b) => a - b).map((m) => <option key={m} value={m}>{m} min</option>)}
           </select>
         </label>
         <label>
@@ -106,6 +136,7 @@ export default function AppointmentForm({ appointment, defaults = {}, patient: i
         </label>
         <label className="full">Reason<input value={form.reason} onChange={set('reason')} placeholder="e.g. Recall exam & cleaning" /></label>
         <label className="full">Notes<textarea rows={2} value={form.notes} onChange={set('notes')} /></label>
+        <label className="checkbox full"><input type="checkbox" checked={form.asap} onChange={(e) => setForm({ ...form, asap: e.target.checked })} /> Add to ASAP list (patient wants an earlier opening)</label>
       </div>
 
       <div style={{ marginTop: 10 }}>
@@ -134,6 +165,7 @@ export default function AppointmentForm({ appointment, defaults = {}, patient: i
       )}
 
       <div className="form-actions">
+        {onBlock && !appointment && <button type="button" className="link" style={{ marginRight: 'auto' }} onClick={onBlock}>Block this time instead</button>}
         <button type="button" onClick={onCancel}>Cancel</button>
         <button className="primary" disabled={busy}>{busy ? 'Saving…' : appointment ? 'Save changes' : 'Book appointment'}</button>
       </div>

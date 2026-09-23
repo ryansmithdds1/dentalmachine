@@ -5,6 +5,7 @@ import { useApi, useLookup } from '../../hooks.js';
 import { useAuth } from '../../auth.jsx';
 import { money, fmtDate, toCents, fromCents } from '../../format.js';
 import { Badge, ErrorBox, Modal, useSubmit } from '../ui.jsx';
+import Eligibility from './Eligibility.jsx';
 
 export default function InsuranceTab({ patient, onChange }) {
   const { can } = useAuth();
@@ -56,6 +57,8 @@ export default function InsuranceTab({ patient, onChange }) {
           </table>
         )}
       </div>
+
+      <Eligibility patient={patient} policies={policies} onApplied={refresh} />
 
       {can('billing:read') && (
         <div className="card">

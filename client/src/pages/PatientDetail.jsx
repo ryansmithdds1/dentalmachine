@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { useApi } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
 import { money, fullName, age, fmtDate, fmtDateTime, label } from '../format.js';
@@ -14,6 +14,9 @@ import InsuranceTab from '../components/patient/InsuranceTab.jsx';
 import PerioTab from '../components/patient/PerioTab.jsx';
 import DocumentsTab from '../components/patient/DocumentsTab.jsx';
 import CommsTab from '../components/patient/CommsTab.jsx';
+import FamilyTab from '../components/patient/FamilyTab.jsx';
+import { LabCaseForm, TaskForm, LAB_STATUSES } from '../components/OfficeForms.jsx';
+import { api } from '../api.js';
 
 export default function PatientDetail() {
   const { id } = useParams();
@@ -27,6 +30,7 @@ export default function PatientDetail() {
 
   const tabs = [
     ['overview', 'Overview', true],
+    ['family', `Family${p.family_size > 1 ? ` (${p.family_size})` : ''}`, true],
     ['chart', 'Chart', can('clinical:read')],
     ['treatment', 'Treatment plans', can('clinical:read')],
     ['perio', 'Perio', can('clinical:read')],
@@ -51,6 +55,8 @@ export default function PatientDetail() {
               <div className="inline" style={{ marginTop: 6, flexWrap: 'wrap' }}>
                 {p.medical_alerts && <span className="alert-chip">⚠ {p.medical_alerts}</span>}
                 {p.allergies && <span className="alert-chip">Allergy: {p.allergies}</span>}
+                {p.guarantor && <button className="link" style={{ fontSize: 12 }} onClick={() => setTab('family')}>Guarantor: {p.guarantor.first_name} {p.guarantor.last_name}</button>}
+                {!p.guarantor && p.family_size > 1 && <button className="link" style={{ fontSize: 12 }} onClick={() => setTab('family')}>Head of household · {p.family_size} in family</button>}
               </div>
             </div>
           </div>
@@ -71,7 +77,8 @@ export default function PatientDetail() {
         ))}
       </div>
 
-      {tab === 'overview' && <Overview p={p} />}
+      {tab === 'overview' && <Overview p={p} reload={reload} />}
+      {tab === 'family' && <FamilyTab patient={p} onChange={reload} />}
       {tab === 'chart' && <ChartTab patient={p} onChange={reload} />}
       {tab === 'treatment' && <TreatmentTab patient={p} onChange={reload} />}
       {tab === 'perio' && <PerioTab patient={p} />}
@@ -95,9 +102,20 @@ export default function PatientDetail() {
   );
 }
 
-function Overview({ p }) {
+function Overview({ p, reload }) {
   const ins = p.primary_insurance;
+  const { can } = useAuth();
+  const { data: tasks, reload: reloadTasks } = useApi(`/tasks?patient_id=${p.id}`);
+  const [modal, setModal] = useState(null);
   return (
+    <>
+    {modal && (
+      <Modal title={modal.type === 'lab' ? (modal.item ? 'Lab case' : 'New lab case') : 'New task'} onClose={() => setModal(null)}>
+        {modal.type === 'lab'
+          ? <LabCaseForm patient={p} labCase={modal.item} onDone={() => { setModal(null); reload(); }} />
+          : <TaskForm patient={p} onDone={() => { setModal(null); reloadTasks(); }} />}
+      </Modal>
+    )}
     <div className="grid grid-2">
       <div className="card">
         <h2>Contact</h2>
@@ -152,7 +170,41 @@ function Overview({ p }) {
             </dl>
           ) : <div className="muted">Self-pay. Add a policy on the Insurance tab.</div>}
         </div>
+        <div className="card">
+          <div className="inline" style={{ justifyContent: 'space-between' }}>
+            <h2 style={{ margin: 0 }}>Lab cases</h2>
+            {can('clinical:write') && <button className="small" onClick={() => setModal({ type: 'lab' })}>+ Lab case</button>}
+          </div>
+          {p.open_lab_cases.length === 0 && <div className="muted" style={{ marginTop: 6 }}>No open lab cases.</div>}
+          {p.open_lab_cases.map((l) => (
+            <div key={l.id} className="inline" style={{ justifyContent: 'space-between', marginTop: 8 }}>
+              <span>{l.description} · {l.lab_name}</span>
+              <span className="inline">
+                <span className={`badge ${l.status === 'received' ? 'ok' : 'warn'}`}>{LAB_STATUSES.find((s) => s[0] === l.status)?.[1]}</span>
+                {l.due_date && <span className="muted">due {fmtDate(l.due_date)}</span>}
+                {can('clinical:write') && l.status !== 'received' && <button className="small" onClick={async () => { await api.put(`/lab-cases/${l.id}`, { status: 'received' }); reload(); }}>Received</button>}
+              </span>
+            </div>
+          ))}
+        </div>
+        <div className="card">
+          <div className="inline" style={{ justifyContent: 'space-between' }}>
+            <h2 style={{ margin: 0 }}>Tasks</h2>
+            <button className="small" onClick={() => setModal({ type: 'task' })}>+ Task</button>
+          </div>
+          {tasks?.length === 0 && <div className="muted" style={{ marginTop: 6 }}>Nothing to do.</div>}
+          {tasks?.map((t) => (
+            <label key={t.id} className="checkbox" style={{ color: 'var(--text)', marginTop: 8 }}>
+              <input type="checkbox" onChange={async () => { await api.put(`/tasks/${t.id}`, { status: 'done' }); reloadTasks(); }} />
+              {t.priority === 'high' && <span className="badge danger">High</span>} {t.title}
+              {t.due_date && <span className="muted"> · due {fmtDate(t.due_date)}</span>}
+              {t.assigned_to_name && <span className="muted"> · {t.assigned_to_name}</span>}
+            </label>
+          ))}
+        </div>
+        <div className="muted" style={{ fontSize: 12, marginTop: 8 }}><Link to="/office">All lab cases & tasks →</Link></div>
       </div>
     </div>
+    </>
   );
 }

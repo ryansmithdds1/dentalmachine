@@ -6,14 +6,19 @@ Cloud practice management software for dental offices: scheduling, patient recor
 
 | Area | What it does |
 | --- | --- |
-| **Scheduling** | Day view by operatory or provider. Blocks double-booking of a provider, operatory or patient. Finds open times. Tracks appointment status from scheduled through confirmed, checked in, seated and completed (or no-show/cancelled). Planned treatment can be attached to a visit. |
+| **Scheduling** | A fast calendar with day view (by chair or by provider), week view, and a list view that phones use automatically.<br>• **Mouse:** drag an appointment to move it, including to another chair, provider or day. Drag its bottom edge to change its length, or drag across empty time to book or block it.<br>• **Phone:** tap *Move*, then tap the new time.<br>• **Speed:** changes show instantly, roll back if the server rejects them, and every move has Undo. Every open screen updates live, including when a patient confirms by text or link. Neighbouring days are loaded in the background so moving between dates is instant.<br>• **On the grid:** office hours, blocked time (lunch, meetings, holidays; can repeat weekly), a current-time line, appointment types with colours and preset procedures, scheduled production against the daily goal, confirmation status, medical-alert flags and an ASAP list.<br>• **Rules:** no double-booking of a provider, chair or patient. Booking into blocked time asks for confirmation. Keyboard shortcuts: ←/→ change day, T today, D/W/A switch view, N new appointment. |
 | **Patients** | Demographics, medical alerts, allergies and medications. Search by name, phone, email, DOB or ID. Patients are archived rather than deleted, so records are kept. |
+| **Family accounts** | A guarantor (head of household) with linked family members. The family view shows each member's balance, next visit and recall. Family statements go to the guarantor. You can change the guarantor, and new members copy the household's contact details. |
+| **Payment plans** | Weekly, every-two-weeks or monthly installments with a down payment. Shows the installment schedule and tracks past-due amounts. Payments can be applied to a plan, which closes itself when paid off. A practice-wide list shows plans that are past due. |
 | **Clinical charting** | Interactive tooth chart with five surfaces per tooth (Universal numbering 1–32, primary teeth A–T). Records conditions (caries, missing, crown, RCT, implant and more), planned work and completed work. |
 | **Perio charting** | Six probing depths per tooth, with bleeding on probing. Depths of 4mm and 5mm+ are highlighted. Exam history is kept. |
 | **Treatment plans** | Multi-procedure plans with an insurance vs. patient estimate for each line. Estimates apply the deductible, coverage tier and remaining annual maximum. Plans can be marked accepted or declined, and close automatically when all work is done. |
 | **Clinical notes** | Note templates. Signed notes can't be edited; corrections go in a new note. Signing requires a clinical role. |
 | **Ledger & billing** | Completing a procedure posts the charge automatically. Handles payments, adjustments and refunds, shows a running balance, and prints patient statements. |
 | **Insurance** | Carriers and primary/secondary policies. Claims are built from completed procedures and move through draft → submitted → paid, partially paid or denied (or void). EOB entry posts the insurance payment and write-off to the ledger, and the deductible met updates automatically. |
+| **Electronic insurance (EDI)** | • **Claims:** sent as ANSI X12 5010 **837D** batches, with checks before sending (NPI, tax ID, payer ID, DOB and so on).<br>• **Eligibility:** **270/271** checks show active coverage, annual maximum and amount remaining, deductible and coverage percentages. Verified benefits can be applied to the policy.<br>• **Remittance:** importing an **835 ERA** posts payments, contractual write-offs and denials to the matching claims automatically, with plain-English reason codes. The same file can't be posted twice. |
+| **Two-way texting** | An inbox for patient replies, with unread badges that update live and quick replies. **C** confirms the next appointment, **STOP**/**START** manage opt-out. Incoming texts are verified with Twilio's signature. |
+| **Lab cases & tasks** | Lab cases are tracked by due date, with an alert when the seat appointment is before the case is due back. There's also a team to-do list with priorities, assignees and a patient link. |
 | **Recall** | Completing a prophy or perio maintenance sets the next recall due date. The recall list tracks who has been contacted. |
 | **Reports** | Dashboard, production and collections by day, provider, category and procedure, and A/R aging (0–30 / 31–60 / 61–90 / 90+). |
 | **Reminders & messaging** | Texts or emails reminders automatically (24, 48 or 72 hours ahead). Each reminder has a link the patient taps to confirm or cancel, which updates the schedule. Staff can also send one-off messages and recall reminders. Every message is logged, and patients can opt out of texts or email. |
@@ -77,6 +82,8 @@ docker run -p 4000:4000 -e JWT_SECRET="$(openssl rand -hex 48)" -v dm-data:/data
 | Document encryption | `DOCUMENT_ENCRYPTION_KEY`: a long random string. Keep it safe; encrypted files can't be read without it. |
 | Document storage location | `UPLOAD_DIR` (default `./data/uploads`) |
 | Reminder job | Runs every 10 minutes. Set `REMINDERS=off` on every server except one if you run more than one. |
+| Incoming texts | Set `TWILIO_AUTH_TOKEN` and point your Twilio number's *A message comes in* webhook at `https://<your host>/api/webhooks/twilio/sms`. Enter the number under Settings → Practice. |
+| Electronic insurance (EDI) | `EDI_MODE=manual` (the default): claim and eligibility files are generated for you to upload to your clearinghouse portal, and you import the responses (271/835). `EDI_MODE=sandbox`: simulated eligibility responses for demos and training. Optional `EDI_SUBMITTER_ID` and `EDI_RECEIVER_ID` come from your clearinghouse enrolment. |
 
 Without Twilio or SendGrid configured, messages are recorded in the log but not actually sent. The **Settings → Practice** page shows which integrations are connected.
 
@@ -96,6 +103,11 @@ All endpoints are under `/api` and need `Authorization: Bearer <token>`, except 
 | Insurance | `GET/POST /carriers`, `PUT /carriers/:id`, `GET/POST /patients/:id/insurance`, `PUT /insurance/:id`, `GET/POST /claims`, `GET /claims/:id`, `POST /claims/:id/submit\|deny\|void\|payment`, `GET /patients/:id/unclaimed-procedures`, `POST /patients/:id/estimate` |
 | Settings | `GET/PUT /practice`, `GET/POST/PUT /users`, `/providers`, `/operatories`, `/procedure-codes`, `GET /audit-log` |
 | Reports | `GET /dashboard`, `GET /reports/production`, `GET /reports/aging`, `GET /reports/daysheet` |
+| Calendar | `GET /schedule?from&to` (appointments, blocked time, hours and production in one call), `GET/POST/PUT/DELETE /blockouts`, `GET /asap`, `GET /events` (live updates stream), `GET/POST/PUT /appointment-types` |
+| Family & plans | `GET/POST /patients/:id/family`, `DELETE /patients/:id/family/:memberId`, `POST /patients/:id/family/guarantor`, `GET/POST /patients/:id/payment-plans`, `GET /payment-plans`, `PUT /payment-plans/:id` |
+| EDI | `POST /claims/837`, `GET /claims/:id/validate`, `POST /insurance/:id/eligibility`, `GET /eligibility/:id/270`, `POST /eligibility/:id/response\|apply`, `GET /patients/:id/eligibility`, `POST /era/import`, `GET /era` |
+| Texting | `GET /conversations`, `GET /conversations/unread`, `GET /patients/:id/conversation`, `POST /patients/:id/conversation/read`, `POST /webhooks/twilio/sms` (signed by Twilio) |
+| Office | `GET/POST/PUT /lab-cases`, `GET/POST/PUT /tasks` |
 | Engagement | `GET /messages`, `POST /patients/:id/messages`, `POST /appointments/:id/remind`, `POST /recalls/:id/remind`, `GET /booking-requests`, `POST /booking-requests/:id/accept\|decline`, `POST /patients/:id/form-requests`, `GET /patients/:id/forms` |
 | Documents | `GET/POST /patients/:id/documents`, `GET /documents/:id/file`, `DELETE /documents/:id` |
 | Payments | `GET /payments/config`, `GET/POST /patients/:id/payment-requests`, `POST /webhooks/stripe` (signed by Stripe) |
@@ -103,10 +115,10 @@ All endpoints are under `/api` and need `Authorization: Bearer <token>`, except 
 | Public (no login) | `GET /public/practices/:slug`, `GET /public/practices/:slug/availability`, `POST /public/practices/:slug/booking-requests`, `GET/POST /public/confirm/:token`, `GET/POST /public/forms/:token` |
 
 ## Roadmap ideas
-- Electronic claim submission (837D) and eligibility checks (270/271) through a clearinghouse
-- Two-way texting (patient replies), and handling STOP replies automatically
-- Configurable office hours and appointment types for online booking
-- Family accounts (guarantors), payment plans and statement batches
-- Postgres support for larger groups, and SSO for staff logins
+- Direct connection to a specific clearinghouse (DentalXChange, Change Healthcare, Vyne and so on) for automatic claim submission and real-time eligibility. The EDI files are already generated; this adds the connection.
+- Imaging bridges (Dexis, Sidexis, Carestream) and e-prescribing
+- Recurring appointment series and provider-specific working hours
+- Statement batches by mail, and automatic card-on-file charges for payment plans
+- Postgres support and multi-server live updates (Redis) for larger groups, and SSO for staff logins
 
 The CDT codes in the starter fee schedule are for convenience only. Practices need their own ADA CDT licence and should set fees for their market.

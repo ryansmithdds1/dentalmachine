@@ -20,6 +20,11 @@ const RESOURCES = {
     title: 'Fee schedule', path: '/procedure-codes', columns: ['code', 'description', 'category', 'fee'],
     fields: [['code', 'Code', 'text'], ['description', 'Description', 'text'], ['category', 'Category', 'select', CATEGORIES], ['fee', 'Fee ($)', 'money'], ['requires_tooth', 'Requires tooth', 'checkbox'], ['requires_surface', 'Requires surfaces', 'checkbox'], ['active', 'Active', 'checkbox']],
   },
+  types: {
+    title: 'Appointment types', path: '/appointment-types', columns: ['name', 'duration', 'color', 'procedure_codes', 'online_bookable'],
+    fields: [['name', 'Name', 'text'], ['duration', 'Length (minutes)', 'number'], ['color', 'Calendar color', 'color'], ['procedure_codes', 'Procedures added when booked (e.g. D0120, D1110)', 'codes'],
+      ['provider_type', 'Usually booked with', 'select', ['dentist', 'hygienist', 'specialist']], ['online_bookable', 'Patients can book online', 'checkbox'], ['sort', 'Sort order', 'number'], ['active', 'Active', 'checkbox']],
+  },
   carriers: {
     title: 'Insurance carriers', path: '/carriers', columns: ['name', 'payer_id', 'phone'], writePerm: 'billing:write',
     fields: [['name', 'Name', 'text'], ['payer_id', 'Payer ID', 'text'], ['phone', 'Phone', 'text'], ['address', 'Claims address', 'text'], ['active', 'Active', 'checkbox']],
@@ -36,6 +41,7 @@ export default function Settings() {
     ['providers', 'Providers', true],
     ['operatories', 'Operatories', true],
     ['codes', 'Fee schedule', true],
+    ['types', 'Appointment types', true],
     ['carriers', 'Insurance carriers', can('billing:read')],
     ['audit', 'Audit log', admin],
   ].filter((t) => t[2]);
@@ -55,11 +61,18 @@ export default function Settings() {
 }
 
 function Account() {
+  const { user, logout } = useAuth();
   return (
-    <div className="grid grid-2">
-      <PasswordCard />
-      <TwoFactorCard />
-    </div>
+    <>
+      <div className="card inline" style={{ justifyContent: 'space-between', marginBottom: 16 }}>
+        <div><strong>{user.name}</strong><div className="muted">{user.email} · {label(user.role)}</div></div>
+        <button onClick={logout}>Sign out</button>
+      </div>
+      <div className="grid grid-2">
+        <PasswordCard />
+        <TwoFactorCard />
+      </div>
+    </>
   );
 }
 
@@ -147,6 +160,10 @@ function Practice() {
         </div>
       </div>
       <div className="card">
+        <h2>Office hours</h2>
+        <OfficeHours value={current.office_hours} onChange={(v) => change('office_hours', v)} />
+      </div>
+      <div className="card">
         <h2>Patient engagement</h2>
         <div className="form-grid">
           <label>
@@ -162,6 +179,14 @@ function Practice() {
             </select>
           </label>
           <label className="checkbox full"><input type="checkbox" checked={!!current.online_booking} onChange={(e) => change('online_booking', e.target.checked)} /> Allow patients to request appointments online</label>
+          <label>
+            Daily production goal ($)
+            <input type="number" min="0" step="100" value={current.daily_goal != null ? current.daily_goal / 100 : ''} onChange={(e) => change('daily_goal', Math.round(Number(e.target.value) * 100))} />
+          </label>
+          <label>
+            Practice texting number (Twilio)
+            <input value={current.sms_number ?? ''} placeholder="+15125550142" onChange={(e) => change('sms_number', e.target.value)} />
+          </label>
           <label className="checkbox full"><input type="checkbox" checked={!!current.require_mfa} onChange={(e) => change('require_mfa', e.target.checked)} /> Require two-factor authentication for all staff</label>
         </div>
         <MessagingStatus />
@@ -248,6 +273,9 @@ function ResourceTable({ spec, canWrite }) {
     if (col === 'fee') return money(row.fee);
     if (col === 'color') return <span className="badge" style={{ background: row.color, color: '#fff' }}>{row.color}</span>;
     if (col === 'type' || col === 'category') return label(row[col]);
+    if (col === 'duration') return `${row.duration} min`;
+    if (col === 'procedure_codes') return (row.procedure_codes ? JSON.parse(row.procedure_codes) : []).join(', ') || '—';
+    if (col === 'online_bookable') return row.online_bookable ? 'Online' : '—';
     return row[col] ?? '—';
   };
   return (
@@ -284,10 +312,15 @@ function ResourceForm({ spec, row, onDone }) {
     if (type === 'checkbox') return [name, row.id ? !!row[name] : name === 'active'];
     if (type === 'money') return [name, row.id ? fromCents(row[name]) : ''];
     if (type === 'color') return [name, row[name] || '#3b82f6'];
+    if (type === 'codes') return [name, row[name] ? JSON.parse(row[name]).join(', ') : ''];
     return [name, row[name] ?? ''];
   })));
   const { submit, busy, error } = useSubmit(async () => {
-    const body = Object.fromEntries(spec.fields.map(([name, , type]) => [name, type === 'money' ? toCents(form[name] || 0) : form[name]]));
+    const body = Object.fromEntries(spec.fields.map(([name, , type]) => [name,
+      type === 'money' ? toCents(form[name] || 0)
+        : type === 'codes' ? String(form[name] || '').split(/[\s,]+/).filter(Boolean)
+          : type === 'number' ? Number(form[name] || 0)
+            : form[name]]));
     if (row.id) await api.put(`${spec.path}/${row.id}`, body);
     else await api.post(spec.path, body);
     onDone();
@@ -300,7 +333,7 @@ function ResourceForm({ spec, row, onDone }) {
           const set = (v) => setForm({ ...form, [name]: v });
           if (type === 'checkbox') return <label key={name} className="checkbox"><input type="checkbox" checked={form[name]} onChange={(e) => set(e.target.checked)} /> {text}</label>;
           if (type === 'select') return <label key={name}>{text}<select value={form[name]} onChange={(e) => set(e.target.value)}><option value="">—</option>{options.map((o) => <option key={o} value={o}>{label(o)}</option>)}</select></label>;
-          return <label key={name}>{text}<input type={type === 'money' ? 'number' : type} step={type === 'money' ? '0.01' : undefined} value={form[name]} onChange={(e) => set(e.target.value)} /></label>;
+          return <label key={name} className={type === 'codes' ? 'full' : ''}>{text}<input type={type === 'money' || type === 'number' ? 'number' : type === 'codes' ? 'text' : type} step={type === 'money' ? '0.01' : undefined} value={form[name]} onChange={(e) => set(e.target.value)} /></label>;
         })}
       </div>
       <div className="form-actions"><button className="primary" disabled={busy}>Save</button></div>
@@ -350,5 +383,41 @@ function MessagingStatus() {
       {row('Email', data.email !== 'log', 'Set SENDGRID_API_KEY and EMAIL_FROM on the server. Messages are logged but not sent.')}
       {row('Card payments', pay?.enabled, 'Set STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET on the server.')}
     </ul>
+  );
+}
+
+const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const DEFAULT_HOURS = { 0: [], 1: [['08:00', '17:00']], 2: [['08:00', '17:00']], 3: [['08:00', '17:00']], 4: [['08:00', '17:00']], 5: [['08:00', '17:00']], 6: [] };
+
+// Weekly hours editor; used by the schedule shading and online booking.
+function OfficeHours({ value, onChange }) {
+  const hours = typeof value === 'string' ? JSON.parse(value) : value || DEFAULT_HOURS;
+  const setDay = (d, ranges) => onChange({ ...hours, [d]: ranges });
+  return (
+    <div className="hours-grid">
+      {[1, 2, 3, 4, 5, 6, 0].map((d) => {
+        const ranges = hours[d] || [];
+        return (
+          <div key={d} className="hours-row">
+            <label className="checkbox" style={{ color: 'var(--text)', minWidth: 130 }}>
+              <input type="checkbox" checked={ranges.length > 0} onChange={(e) => setDay(d, e.target.checked ? [['08:00', '17:00']] : [])} /> {DAYS[d]}
+            </label>
+            {ranges.length === 0 && <span className="muted">Closed</span>}
+            {ranges.map(([o, c], i) => (
+              <span key={i} className="inline">
+                <input type="time" value={o} step={900} onChange={(e) => setDay(d, ranges.map((r, j) => (j === i ? [e.target.value, r[1]] : r)))} />
+                <span>–</span>
+                <input type="time" value={c} step={900} onChange={(e) => setDay(d, ranges.map((r, j) => (j === i ? [r[0], e.target.value] : r)))} />
+                <button type="button" className="small" onClick={() => setDay(d, ranges.filter((_, j) => j !== i))} aria-label="Remove">✕</button>
+              </span>
+            ))}
+            {ranges.length > 0 && ranges.length < 3 && (
+              <button type="button" className="small link" onClick={() => setDay(d, [...ranges, [ranges.at(-1)[1] < '13:00' ? '13:00' : ranges.at(-1)[1], '17:00']])}>+ split shift</button>
+            )}
+          </div>
+        );
+      })}
+      <p className="muted" style={{ fontSize: 12 }}>Closed times are shaded on the schedule and never offered for online booking. Use blocked time for lunches and one-off closures.</p>
+    </div>
   );
 }

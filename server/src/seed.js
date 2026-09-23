@@ -154,27 +154,57 @@ db.tx(() => {
     }
   }
 
-  // Upcoming schedule: today and the next several weekdays.
-  const reasons = [['Recall exam & cleaning', hyg, 2, 60], ['Composite filling', drChen, 0, 60], ['Crown prep', drRivera, 1, 90], ['Limited exam - toothache', drChen, 0, 30], ['New patient exam', drRivera, 1, 60]];
+  // Upcoming schedule: today and the next several weekdays, built from appointment types.
+  db.run('UPDATE practices SET daily_goal = ? WHERE id = ?', 600000, practiceId);
+  const typeId = (name) => db.get('SELECT * FROM appointment_types WHERE practice_id = ? AND name = ?', practiceId, name);
+  const hhmm = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+  const plan = [
+    ['Recall exam & cleaning', hyg, 2, []], ['Filling', drChen, 0, [['D2392', '19', 'MO'], ['D2391', '30', 'O']]], ['Crown prep', drRivera, 1, [['D2740', '3'], ['D2950', '3']]],
+    ['Emergency / limited exam', drChen, 0, []], ['New patient exam & cleaning', hyg, 2, []], ['Root canal', drRivera, 1, [['D3330', '14']]],
+    ['Perio maintenance', hyg, 2, []], ['Crown seat', drChen, 0, []], ['Extraction', drRivera, 1, [['D7140', '32']]], ['Recall exam & cleaning', hyg, 2, []],
+  ];
   let pi = 0;
-  for (let d = 0; d < 8; d++) {
+  for (let d = 0; d < 12; d++) {
     const day = dayOffset(d);
     const dow = new Date(`${day}T12:00:00Z`).getUTCDay();
     if (dow === 0 || dow === 6) continue;
+    insert(db, 'blockouts', { practice_id: practiceId, start_time: `${day} 12:00`, end_time: `${day} 13:00`, reason: 'Lunch', created_by: adminId });
     const cursor = { [drChen]: 8 * 60, [drRivera]: 8 * 60, [hyg]: 8 * 60 };
-    for (let k = 0; k < 9; k++) {
-      const [reason, prov, opIdx, dur] = reasons[k % reasons.length];
-      const start = cursor[prov];
-      if (start + dur > 17 * 60) continue;
-      cursor[prov] += dur + (rand() < 0.3 ? 30 : 0);
-      const hhmm = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
-      insert(db, 'appointments', {
-        practice_id: practiceId, patient_id: patients[pi++ % patients.length], provider_id: prov, operatory_id: ops[opIdx],
-        start_time: `${day} ${hhmm(start)}`, end_time: `${day} ${hhmm(start + dur)}`,
-        status: d === 0 ? pickOne(['confirmed', 'checked_in', 'scheduled']) : pickOne(['scheduled', 'confirmed']), reason,
+    for (let k = 0; k < 14; k++) {
+      const [name, prov, opIdx, procs] = plan[(k + d) % plan.length];
+      const type = typeId(name);
+      let start = cursor[prov];
+      if (start < 13 * 60 && start + type.duration > 12 * 60) start = 13 * 60; // skip lunch
+      if (start + type.duration > 17 * 60) continue;
+      cursor[prov] = start + type.duration + (rand() < 0.25 ? 30 : 0);
+      const patientId = patients[pi++ % patients.length];
+      const apptId = insert(db, 'appointments', {
+        practice_id: practiceId, patient_id: patientId, provider_id: prov, operatory_id: ops[opIdx], appointment_type_id: type.id, reason: type.name,
+        start_time: `${day} ${hhmm(start)}`, end_time: `${day} ${hhmm(start + type.duration)}`, asap: d > 3 && rand() < 0.08 ? 1 : 0,
+        status: d === 0 ? pickOne(['confirmed', 'checked_in', 'scheduled', 'confirmed']) : pickOne(['scheduled', 'confirmed']),
       });
+      const codes = [...JSON.parse(type.procedure_codes || '[]').map((c) => [c]), ...procs];
+      for (const [c, tooth, surfaces] of codes) addProc(patientId, c, { appointment_id: apptId, provider_id: prov, tooth: tooth ?? null, surfaces: surfaces ?? null });
+      if (name === 'Crown prep') {
+        insert(db, 'lab_cases', {
+          practice_id: practiceId, patient_id: patientId, provider_id: prov, lab_name: pickOne(['Glidewell', 'Burbank Dental Lab', 'Dental Arts Lab']),
+          description: 'Zirconia crown #3', tooth: '3', shade: 'A2', status: 'sent', sent_date: day, due_date: dayOffset(d + 10), cost: 12900,
+        });
+      }
     }
   }
+
+  // A few households share a guarantor.
+  for (let f = 0; f < 5; f++) {
+    const [head, ...members] = patients.slice(f * 3, f * 3 + 3);
+    for (const m of members) db.run('UPDATE patients SET guarantor_id = ?, last_name = (SELECT last_name FROM patients WHERE id = ?) WHERE id = ?', head, head, m);
+  }
+  insert(db, 'payment_plans', {
+    practice_id: practiceId, patient_id: patients[0], total: 240000, down_payment: 40000, installment_amount: 50000, installments: 4,
+    frequency: 'monthly', start_date: dayOffset(-45), notes: 'Crown + buildup', created_by: adminId,
+  });
+  insert(db, 'tasks', { practice_id: practiceId, title: 'Call Delta Dental about denied claim', priority: 'high', due_date: dayOffset(1), created_by: adminId });
+  insert(db, 'tasks', { practice_id: practiceId, patient_id: patients[4], title: 'Send pre-authorization for crown #3', due_date: dayOffset(3), created_by: adminId });
   // Online booking requests waiting for the front desk.
   const requests = [
     ['Harper', 'Quinn', '1994-06-12', '(512) 555-0188', 'harper.q@example.com', 'New patient exam & cleaning', 60, 2, '15:00', 'Moving from Dallas, last cleaning ~1 year ago.'],
@@ -196,6 +226,14 @@ db.tx(() => {
       practice_id: practiceId, patient_id: pid, channel: 'sms', kind: 'reminder', to_address: p.phone, status: 'sent', provider_id: 'log',
       body: `Hi ${p.first_name}, this is Bright Smiles Family Dentistry reminding you of your appointment. Please confirm: (demo link)`,
       sent_at: `${dayOffset(-2)} 09:00:00`, created_at: `${dayOffset(-2)} 09:00:00`,
+    });
+  }
+  // Two-way text threads.
+  for (const [idx, body] of [[1, 'Can I come in 15 minutes later tomorrow?'], [2, 'C'], [7, 'Do you take Aetna?']]) {
+    const p = db.get('SELECT * FROM patients WHERE id = ?', patients[idx]);
+    insert(db, 'messages', {
+      practice_id: practiceId, patient_id: p.id, channel: 'sms', kind: 'reply', direction: 'inbound', to_address: '+15125550142', from_address: p.phone,
+      body, status: 'sent', sent_at: `${dayOffset(0)} 08:1${idx}:00`, created_at: `${dayOffset(0)} 08:1${idx}:00`,
     });
   }
 });
