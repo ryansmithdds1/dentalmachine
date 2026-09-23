@@ -44,7 +44,7 @@ const TOOL = {
 const ageOf = (dob, today) => (dob ? Math.floor((Date.parse(today) - Date.parse(dob)) / (365.25 * 86400_000)) : null);
 
 // What the chart already says, for the scribe to build on.
-async function chartContext(db, pid, patientId, appointmentId) {
+export async function chartContext(db, pid, patientId, appointmentId) {
   const p = await db.get('SELECT * FROM patients WHERE id = ? AND practice_id = ?', patientId, pid);
   const today = (await practiceNow(db, pid)).slice(0, 10);
   const visit = appointmentId

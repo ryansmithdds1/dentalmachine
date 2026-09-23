@@ -30,6 +30,7 @@ import xrayAiRoutes from './routes/xrayai.js';
 import insuranceAiRoutes from './routes/insuranceai.js';
 import askRoutes, { mcpRoutes } from './routes/ask.js';
 import orgRoutes from './routes/org.js';
+import claimAiRoutes from './routes/claimai.js';
 import { createXrayAi, registerXrayAi } from './xrayai.js';
 import { registerFill } from './fill.js';
 import { createPlaid } from './finance/plaid.js';
@@ -233,6 +234,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(askRoutes({ db, config }));
   api.use(phoneRoutes({ db, storage }));
   api.use(orgRoutes({ db }));
+  api.use(claimAiRoutes({ db, config }));
   api.use(attachmentRoutes({ db, storage, sender: attachmentSender ?? createAttachmentSender(attachmentConfig(process.env, config.ediMode), fetchImpl) }));
   api.use(billingRoutes({ db, payments, config, messenger }));
   api.use(insuranceRoutes({ db }));

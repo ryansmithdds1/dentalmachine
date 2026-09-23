@@ -70,6 +70,7 @@ export default function ClaimDetail() {
       </div>
       <ErrorBox error={err} />
       {c.denial_reason && <div className="error">Denial reason: {c.denial_reason}</div>}
+      {w && ['denied', 'partially_paid', 'paid'].includes(c.status) && <Appeal claim={c} />}
       {c.payer_claim_number && <div className="muted" style={{ marginBottom: 8 }}>Payer claim # {c.payer_claim_number}</div>}
       {c.ch_status === 'rejected' && c.status === 'draft' && <div className="error">Rejected electronically: {c.ch_message}</div>}
       <ClaimChecks id={c.id} status={c.status} version={checks} />
@@ -180,10 +181,23 @@ function ClaimChecks({ id, status, version }) {
   const { data } = useApi(['draft', 'denied'].includes(status) ? `/claims/${id}/validate?v=${version}` : null);
   // Only for claims still to send (the last answer is kept while the claim moves on).
   if (!data || !['draft', 'denied'].includes(status)) return null;
-  const warn = data.warnings?.length ? (
+  const risks = data.risks || [];
+  const warn = data.warnings?.length || risks.length ? (
     <div className="public-notice" style={{ marginBottom: 12 }}>
-      <strong>Payers often deny these without attachments:</strong>
-      <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>{data.warnings.map((p) => <li key={p}>{p}</li>)}</ul>
+      {risks.length > 0 && (
+        <>
+          <strong>Denial risks:</strong>
+          <ul style={{ margin: '4px 0 6px', paddingLeft: 18 }}>
+            {risks.map((r) => <li key={`${r.procedure_id}-${r.message}`} className={r.level === 'deny' ? 'text-danger' : ''}>{r.code ? `${r.code}${r.tooth ? ` #${r.tooth}` : ''}: ` : ''}{r.message}{r.level === 'deny' ? ' — likely denied as it stands' : ''}</li>)}
+          </ul>
+        </>
+      )}
+      {data.warnings?.length > 0 && (
+        <>
+          <strong>Payers often deny these without attachments:</strong>
+          <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>{data.warnings.map((p) => <li key={p}>{p}</li>)}</ul>
+        </>
+      )}
     </div>
   ) : null;
   if (!data.problems.length) return <>{warn}<div className="badge ok" style={{ marginBottom: 12 }}>✓ Ready to send electronically</div></>;
@@ -195,6 +209,47 @@ function ClaimChecks({ id, status, version }) {
         <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>{data.problems.map((p) => <li key={p}>{p}</li>)}</ul>
       </div>
     </>
+  );
+}
+
+// An appeal letter drafted from the chart and the payer's reason, to edit, print on letterhead and send.
+function Appeal({ claim }) {
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState(claim.denial_reason || '');
+  const [draft, setDraft] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  const write = async () => {
+    setBusy(true);
+    setErr(null);
+    try { setDraft(await api.post(`/claims/${claim.id}/appeal`, { reason })); } catch (e) { setErr(e); } finally { setBusy(false); }
+  };
+  const print = () => {
+    const w = window.open('', '_blank');
+    if (!w) return;
+    w.document.title = `Appeal — claim ${claim.id}`;
+    const pre = w.document.createElement('pre');
+    pre.style.cssText = 'font: 12pt/1.5 Georgia, serif; white-space: pre-wrap; margin: 1in;';
+    pre.textContent = draft.letter;
+    w.document.body.appendChild(pre);
+    w.print();
+  };
+  if (!open) return <div style={{ margin: '8px 0' }}><button className="small" onClick={() => setOpen(true)}>Draft an appeal letter</button></div>;
+  return (
+    <div className="card">
+      <h2>Appeal</h2>
+      <ErrorBox error={err} />
+      <label>What the payer said, or what you disagree with<textarea rows={2} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Downgraded to amalgam; paid at 50% instead of 80%" /></label>
+      <div className="form-actions" style={{ justifyContent: 'flex-start' }}><button className="primary" disabled={busy} onClick={write}>{busy ? 'Writing…' : draft ? 'Write again' : 'Draft with AI'}</button></div>
+      {draft && (
+        <>
+          <textarea rows={16} style={{ width: '100%', fontFamily: 'Georgia, serif' }} value={draft.letter} onChange={(e) => setDraft({ ...draft, letter: e.target.value })} aria-label="Appeal letter" />
+          {draft.enclosures?.length > 0 && <div className="muted" style={{ fontSize: 12 }}>Enclose: {draft.enclosures.join('; ')}</div>}
+          {draft.missing?.length > 0 && <div className="text-warn" style={{ fontSize: 12 }}>Stronger with (not in the chart): {draft.missing.join('; ')}</div>}
+          <div className="form-actions"><button onClick={() => navigator.clipboard?.writeText(draft.letter)}>Copy</button><button className="primary" onClick={print}>Print</button></div>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -249,9 +304,20 @@ function Attachments({ claim, onChange }) {
                   {(docs || []).map((d) => <option key={d.id} value={d.id}>{d.filename} · {d.category}{d.tooth ? ` #${d.tooth}` : ''} · {fmtDate(d.taken_at || d.created_at)}</option>)}
                 </select>
               </label>
-              <label className="full">Narrative{form.report_type === 'OZ' ? ' *' : ' (optional)'}<textarea rows={4} value={form.narrative} onChange={(e) => setForm({ ...form, narrative: e.target.value })} placeholder="e.g. Tooth #30 has a fractured MB cusp under a large existing amalgam; a crown is needed to restore it." /></label>
+              <label className="full">Narrative{form.report_type === 'OZ' ? ' *' : ' (optional)'}<textarea rows={5} value={form.narrative} onChange={(e) => setForm({ ...form, narrative: e.target.value })} placeholder="e.g. Tooth #30 has a fractured MB cusp under a large existing amalgam; a crown is needed to restore it." /></label>
+              <div className="full">
+                <button type="button" className="small" disabled={form.drafting} onClick={async () => {
+                  setForm((f) => ({ ...f, drafting: true }));
+                  try {
+                    const d = await api.post(`/claims/${claim.id}/narrative`, {});
+                    setForm((f) => ({ ...f, drafting: false, narrative: d.narrative, report_type: f.document_id ? f.report_type : 'OZ', hint: [d.missing?.length ? `Not in the chart (add if you can): ${d.missing.join('; ')}` : '', d.attach?.length ? `Send with it: ${d.attach.join('; ')}` : ''].filter(Boolean).join(' · ') }));
+                  } catch (e) { setErr(e); setForm((f) => ({ ...f, drafting: false })); }
+                }}>{form.drafting ? 'Writing…' : 'Draft the narrative with AI'}</button>
+                {form.hint && <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>{form.hint}</div>}
+                <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>Drafted from the chart — read it and correct anything before sending.</div>
+              </div>
             </div>
-            <div className="form-actions"><button type="button" onClick={() => setForm(null)}>Cancel</button><button className="primary">Add</button></div>
+            <div className="form-actions"><button type="button" onClick={() => setForm(null)}>Cancel</button><button className="primary" onClick={() => setForm((f) => { const { drafting: _d, hint: _h, ...rest } = f; return rest; })}>Add</button></div>
           </form>
         </Modal>
       )}

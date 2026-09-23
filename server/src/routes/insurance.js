@@ -51,7 +51,8 @@ export default function insuranceRoutes({ db }) {
   });
 
   r.post('/carriers', requirePermission('billing:write'), async (req, res) => {
-    const row = pick(req.body, ['name', 'payer_id', 'phone', 'address']);
+    const row = pick(req.body, ['name', 'payer_id', 'phone', 'address', 'timely_filing_days']);
+    if (row.timely_filing_days === '' ) row.timely_filing_days = null;
     requireFields(row, ['name']);
     const id = await insert(db, 'insurance_carriers', { ...row, practice_id: req.user.practice_id });
     await audit(db, req, 'carrier.create', 'insurance_carriers', id);
@@ -60,7 +61,9 @@ export default function insuranceRoutes({ db }) {
 
   r.put('/carriers/:cid', requirePermission('billing:write'), async (req, res) => {
     const existing = await findOr404(db, 'insurance_carriers', req.params.cid, req.user.practice_id, 'Carrier');
-    await update(db, 'insurance_carriers', existing.id, req.user.practice_id, pick(req.body, ['name', 'payer_id', 'phone', 'address', 'active']));
+    const changes = pick(req.body, ['name', 'payer_id', 'phone', 'address', 'active', 'timely_filing_days']);
+    if (changes.timely_filing_days !== undefined) changes.timely_filing_days = Number(changes.timely_filing_days) > 0 ? Math.min(3650, Math.round(Number(changes.timely_filing_days))) : null;
+    await update(db, 'insurance_carriers', existing.id, req.user.practice_id, changes);
     await audit(db, req, 'carrier.update', 'insurance_carriers', existing.id);
     res.json(await db.get('SELECT * FROM insurance_carriers WHERE id = ?', existing.id));
   });

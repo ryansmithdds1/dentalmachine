@@ -48,7 +48,7 @@ const RESOURCES = {
   },
   carriers: {
     title: 'Insurance carriers', singular: 'insurance carrier', path: '/carriers', columns: ['name', 'payer_id', 'phone'], writePerm: 'billing:write',
-    fields: [['name', 'Name', 'text'], ['payer_id', 'Payer ID', 'text'], ['phone', 'Phone', 'text'], ['address', 'Claims address', 'text'], ['active', 'Active', 'checkbox']],
+    fields: [['name', 'Name', 'text'], ['payer_id', 'Payer ID', 'text'], ['phone', 'Phone', 'text'], ['address', 'Claims address', 'text'], ['timely_filing_days', 'Filing limit (days, blank = 365)', 'number'], ['active', 'Active', 'checkbox']],
   },
 };
 

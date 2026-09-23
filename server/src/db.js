@@ -2008,6 +2008,7 @@ const COLUMNS = [
   ['practices', 'missed_call_text', 'INTEGER NOT NULL DEFAULT 1'],
   ['practices', 'ai_receptionist', "TEXT NOT NULL DEFAULT 'off'"],
   ['practices', 'voicemail_greeting', 'TEXT'],
+  ['insurance_carriers', 'timely_filing_days', 'INTEGER'],
   ['calls', 'caller_name', 'TEXT'],
   ['calls', 'ai_turns', 'TEXT'],
   ['calls', 'recording_key', 'TEXT'],
