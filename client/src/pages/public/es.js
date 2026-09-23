@@ -83,6 +83,7 @@ export default {
   'Health history': 'Historial de salud',
   'Sending…': 'Enviando…',
   'Sign and submit': 'Firmar y enviar',
+  'Download a copy (PDF)': 'Descargar una copia (PDF)',
   'Hi {name}, please complete this before your visit. It takes about 5 minutes. Your answers go directly into your secure dental record.': 'Hola, {name}: por favor complete esto antes de su cita. Toma unos 5 minutos. Sus respuestas van directamente a su expediente dental seguro.',
   'Contact details': 'Datos de contacto',
   'Street address': 'Dirección',

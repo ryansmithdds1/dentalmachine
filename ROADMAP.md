@@ -224,7 +224,7 @@ Works well: drag, resize and create; undo; live updates; conflict checks; open-t
 
 ### Treatment plans and case acceptance
 1. ✅ **P1** Build a plan by selecting planned procedures on the chart ("add to plan").
-2. **P1** Signed-plan snapshot and PDF (see Part 1).
+2. ✅ **P1** Signed-plan snapshot and PDF (see Part 1). _(Done: the signed version is frozen and filed in the chart as a PDF with the signature; PDF download for staff and for the patient after signing.)_
 3. **P2** Show insurance-remaining-this-year vs next year, and suggest splitting across benefit years.
 4. **P2** Financing options on the plan (in-house plan, CareCredit/Sunbit link).
 5. ✅ **P2** Don't offer "Accepted verbally" on a plan that was declined.

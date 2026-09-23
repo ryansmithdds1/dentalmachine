@@ -145,6 +145,28 @@ test('case presentation: send plan, patient reviews estimate and e-signs', async
   assert.equal((await pub.post(`/public/tp/${token}`, { signature_name: 'Jane Doe', consent: true })).status, 409);
   const plans = (await api.get(`/patients/${patient.id}/treatment-plans`)).data;
   assert.equal(plans[0].signature_name, 'Jane Doe');
+
+  // The signed copy is filed in the chart as a PDF, and stays the signed version after the plan changes.
+  const docs = (await api.get(`/patients/${patient.id}/documents`)).data;
+  const filed = docs.find((d) => d.category === 'consent' && d.mime === 'application/pdf');
+  assert.ok(filed, 'signed plan PDF filed');
+  assert.match(filed.filename, /^Treatment plan Phase 1 \d{4}-\d{2}-\d{2}\.pdf$/);
+  const added = await api.post(`/treatment-plans/${plan.id}/procedures`, { procedures: [{ code: 'D2950', tooth: '3', provider_id: dentist.id }] });
+  assert.equal(added.status, 200, JSON.stringify(added.data));
+  const pdf = await api.get(`/treatment-plans/${plan.id}/pdf`);
+  assert.equal(pdf.status, 200);
+  assert.match(pdf.data, /^%PDF/);
+  assert.match(pdf.data, /Signed electronically by Jane Doe/);
+  assert.match(pdf.data, /D2740/);
+  assert.doesNotMatch(pdf.data, /D2950/, 'work added after signing is not in the signed version');
+  assert.match(pdf.data, /has changed since it was signed/);
+  assert.match((await pub.get(`/public/tp/${token}/pdf`)).data, /Signed electronically by Jane Doe/);
+
+  // An unsigned plan prints as an estimate with a signature line.
+  const draft = (await api.post(`/patients/${patient.id}/treatment-plans`, { name: 'Phase 2', procedures: [{ code: 'D2950', tooth: '14', provider_id: dentist.id }] })).data;
+  const dpdf = (await api.get(`/treatment-plans/${draft.id}/pdf`)).data;
+  assert.match(dpdf, /Not yet signed/);
+  assert.match(dpdf, /D2950/);
 });
 
 test('prescriptions: favorites, allergy warnings, hygienists cannot prescribe', async () => {

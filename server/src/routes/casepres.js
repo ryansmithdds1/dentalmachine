@@ -6,6 +6,7 @@ import { estimateCoverage, primaryPolicy } from '../services.js';
 import { sendMessage, preferredChannel } from '../messaging.js';
 import { checkEpcs } from '../erx.js';
 import { allergyWarning, controlledSchedule, stricterSchedule } from '../drugs.js';
+import { PdfDoc, dataUrlImage } from '../pdf.js';
 
 // Common dental prescriptions for one-click entry.
 export const RX_FAVORITES = [
@@ -45,6 +46,54 @@ const planView = async (db, plan) => {
 };
 const SIGN_LINK_DAYS = 30;
 
+// The plan as a PDF: once signed, exactly the version the patient signed (with their signature);
+// before that, the current plan marked as an estimate awaiting signature.
+export async function planPdf(db, plan) {
+  const live = await planView(db, plan);
+  const v = plan.signed_snapshot ? { ...live, ...JSON.parse(plan.signed_snapshot) } : { ...live, procedures: live.procedures.filter((p) => p.status === 'planned') };
+  const patient = await db.get('SELECT first_name, last_name, dob FROM patients WHERE id = ?', plan.patient_id);
+  const practice = await db.get('SELECT name, address, city, state, zip, phone FROM practices WHERE id = ?', plan.practice_id);
+  const money = (c) => `${c < 0 ? '-' : ''}$${(Math.abs(c) / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const doc = new PdfDoc({ footer: `${practice.name} · treatment plan for ${patient.first_name} ${patient.last_name}` });
+  doc.text(practice.name, { size: 15, bold: true, gap: 1 });
+  doc.text([practice.address, practice.city, practice.state, practice.zip].filter(Boolean).join(', '), { size: 9.5, gap: 1 });
+  if (practice.phone) doc.text(practice.phone, { size: 9.5 });
+  doc.space(8);
+  doc.text(`Treatment plan: ${plan.name}`, { size: 13, bold: true });
+  doc.text(`${patient.first_name} ${patient.last_name}${patient.dob ? ` · born ${patient.dob}` : ''}`, { size: 10.5 });
+  doc.space(6);
+  const byId = new Map((v.estimate?.items || []).map((i) => [i.procedure_id, i]));
+  const at = [0, 0.1, 0.2, 0.62, 0.76, 0.88];
+  doc.row(['Code', 'Tooth', 'Procedure', 'Fee', 'Insurance', 'You pay'], { at, right: [3, 4, 5], bold: true, size: 9.5 });
+  doc.rule();
+  for (const p of v.procedures) {
+    const e = byId.get(p.id) || {};
+    doc.row([p.code, [p.tooth, p.surfaces].filter(Boolean).join(' '), p.description, money(p.fee), money(e.insurance ?? 0), money(e.patient ?? p.fee)], { at, right: [3, 4, 5], size: 9.5 });
+  }
+  doc.rule();
+  const est = v.estimate || {};
+  doc.row(['', '', 'Total', money(est.total_fee ?? 0), money(est.total_insurance ?? 0), money(est.total_patient ?? 0)], { at, right: [3, 4, 5], bold: true, size: 9.5 });
+  if (est.total_write_off) doc.row(['', '', 'In-network adjustment (included above)', money(-est.total_write_off), '', ''], { at, right: [3], size: 9 });
+  doc.space(6);
+  doc.text(est.policy ? `Insurance estimate based on ${est.policy.carrier_name}. Estimates are not a guarantee of payment; you are responsible for any amount your insurance doesn't pay.` : 'No insurance on file: amounts shown are the full fees.', { size: 8.5, color: [0.35, 0.38, 0.45] });
+  if (v.notes) { doc.space(4); doc.text(v.notes, { size: 9.5 }); }
+  doc.space(14);
+  if (plan.signed_at) {
+    doc.text('I have reviewed this treatment plan, had the chance to ask questions, and accept it.', { size: 9.5 });
+    doc.space(4);
+    const img = plan.signature_image ? dataUrlImage(plan.signature_image) : null;
+    if (img) doc.image(img, { maxW: 200, maxH: 60, border: true });
+    doc.text(`Signed electronically by ${plan.signature_name} on ${plan.signed_at} UTC`, { size: 9.5, bold: true });
+    if (live.signed_version?.changed) doc.text('Note: the plan in the chart has changed since it was signed; this is the signed version.', { size: 8.5, color: [0.6, 0.2, 0.1] });
+  } else {
+    doc.text('Not yet signed — estimate for discussion.', { size: 9.5, bold: true });
+    doc.space(24);
+    doc.text('Patient signature ______________________________     Date ______________', { size: 9.5 });
+  }
+  return doc.toBuffer();
+}
+const pdfFilename = (plan) => `Treatment plan ${plan.name} ${(plan.signed_at || '').slice(0, 10)}`.trim().replace(/[^\w.\- ()]/g, '_');
+
 export default function casePresentationRoutes({ db, messenger, config, erx }) {
   const r = Router();
 
@@ -70,6 +119,11 @@ export default function casePresentationRoutes({ db, messenger, config, erx }) {
     }
     await audit(db, req, 'treatment_plan.present', 'treatment_plans', plan.id);
     res.json({ url, message });
+  });
+
+  r.get('/treatment-plans/:tid/pdf', requirePermission('clinical:read'), async (req, res) => {
+    const plan = await findOr404(db, 'treatment_plans', req.params.tid, req.user.practice_id, 'Treatment plan');
+    res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': `attachment; filename="${pdfFilename(plan)}.pdf"` }).send(await planPdf(db, plan));
   });
 
   r.get('/treatment-plans/:tid', requirePermission('clinical:read'), async (req, res) => {
@@ -177,7 +231,7 @@ export default function casePresentationRoutes({ db, messenger, config, erx }) {
 }
 
 // Patient-facing treatment plan review & e-signature.
-export function publicCasePresentation({ db }) {
+export function publicCasePresentation({ db, storage }) {
   const r = Router();
   const limiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 30 });
   const byToken = async (token) => {
@@ -202,6 +256,10 @@ export function publicCasePresentation({ db }) {
   };
 
   r.get('/tp/:token', async (req, res) => res.json(await publicView(await byToken(req.params.token))));
+  r.get('/tp/:token/pdf', async (req, res) => {
+    const plan = await byToken(req.params.token);
+    res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': `attachment; filename="${pdfFilename(plan)}.pdf"` }).send(await planPdf(db, plan));
+  });
 
   r.post('/tp/:token', limiter, async (req, res) => {
     const plan = await byToken(req.params.token);
@@ -218,6 +276,16 @@ export function publicCasePresentation({ db }) {
     );
     if (!signed.changes) throw new HttpError(409, 'This plan has already been signed');
     await audit(db, { ip: req.ip, user: { practice_id: plan.practice_id, id: null } }, 'treatment_plan.patient_signed', 'treatment_plans', plan.id);
+    // The signed copy is filed in the chart, so it's there even if the plan is edited later.
+    if (storage) {
+      const fresh = await db.get('SELECT * FROM treatment_plans WHERE id = ?', plan.id);
+      const pdf = await planPdf(db, fresh);
+      const saved = await storage.save(plan.practice_id, pdf);
+      await insert(db, 'documents', {
+        practice_id: plan.practice_id, patient_id: plan.patient_id, category: 'consent', filename: `${pdfFilename(fresh)}.pdf`, mime: 'application/pdf', size: pdf.length,
+        storage_key: saved.storageKey, encrypted: saved.encrypted ? 1 : 0, notes: `Signed by ${name}`,
+      });
+    }
     res.json(await publicView(await db.get('SELECT * FROM treatment_plans WHERE id = ?', plan.id)));
   });
   return r;

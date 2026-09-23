@@ -31,7 +31,7 @@ export default function CaseAcceptance() {
 
   return (
     <PublicLayout title={plan.signed_at ? t('Thank you!') : t('Your treatment plan, {name}', { name: plan.first_name })} practice={plan.practice}>
-      {plan.signed_at && <div className="public-notice ok" style={{ marginBottom: 16 }}>{t('You accepted this plan on {date}. We’ll be in touch to schedule — or call us at {phone}.', { date: new Date(plan.signed_at.replace(' ', 'T') + 'Z').toLocaleDateString(locale(lang)), phone: plan.practice.phone })}</div>}
+      {plan.signed_at && <div className="public-notice ok" style={{ marginBottom: 16 }}>{t('You accepted this plan on {date}. We’ll be in touch to schedule — or call us at {phone}.', { date: new Date(plan.signed_at.replace(' ', 'T') + 'Z').toLocaleDateString(locale(lang)), phone: plan.practice.phone })} <a href={`/api/public/tp/${token}/pdf`}>{t('Download a copy (PDF)')}</a></div>}
       <div className="card">
         <h2>{plan.name}</h2>
         {planned.map((p, i) => (

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { api } from '../../api.js';
+import { api, download } from '../../api.js';
 import { useApi, useLookup } from '../../hooks.js';
 import { useAuth } from '../../auth.jsx';
 import { money, fmtDate, practiceToday, toCents, fromCents } from '../../format.js';
@@ -56,7 +56,7 @@ export default function TreatmentTab({ patient, onChange }) {
               <h3 style={{ margin: 0 }}>{plan.name}{plan.option_label ? <span className="badge info" style={{ marginLeft: 6 }}>{plan.option_label}</span> : null} <Badge value={plan.status} />{plan.discount_pct > 0 && <span className="badge ok" style={{ marginLeft: 6 }}>{plan.discount_pct}% discount</span>}</h3>
               <div className="muted">
                 Created {fmtDate(plan.created_at)}{plan.accepted_at ? ` · Accepted ${fmtDate(plan.accepted_at)}` : ''}
-                {plan.signed_at && <> · <span className="badge ok">✍ Signed by {plan.signature_name}</span> <a href={`/treatment-plans/${plan.id}/print?signed=1`} target="_blank" rel="noreferrer">signed copy</a></>}
+                {plan.signed_at && <> · <span className="badge ok">✍ Signed by {plan.signature_name}</span> <a href={`/treatment-plans/${plan.id}/print?signed=1`} target="_blank" rel="noreferrer">signed copy</a> · <a href="#" onClick={(e) => { e.preventDefault(); download(`/treatment-plans/${plan.id}/pdf`, 'treatment-plan.pdf'); }}>PDF</a></>}
                 {plan.signed_version?.changed && <> · <span className="badge warn" title="The plan was edited after the patient signed it. The signed copy is kept as it was; put new work in a new plan to get it signed.">Changed since signed</span></>}
                 {!plan.signed_at && plan.presented_at && ` · Sent to patient ${fmtDate(plan.presented_at)}`}
               </div>
@@ -68,6 +68,7 @@ export default function TreatmentTab({ patient, onChange }) {
                   <button className="small" onClick={() => act(async () => { await api.post('/preauths', { patient_insurance_id: plan.estimate.policy.id, treatment_plan_id: plan.id }); setNote('Pre-authorization created — send it from Billing → Pre-authorizations.'); })}>Pre-authorize</button>
                 )}
                 <button className="small" onClick={() => window.open(`/treatment-plans/${plan.id}/print`, '_blank')}>Print</button>
+                <button className="small" onClick={() => download(`/treatment-plans/${plan.id}/pdf`, 'treatment-plan.pdf')}>PDF</button>
                 {plan.procedures.some((p) => p.status === 'planned') && <button className="small" title="Informed consent for this plan's procedures" onClick={() => setConsent(plan)}>Consent…</button>}
                 {plan.status !== 'rejected' && <button className="small" onClick={() => setAdding(plan)}>+ Add work</button>}
                 {plan.status === 'proposed' && <button className="small" title="A copy of this plan's unstarted work to change into another option (e.g. implant vs bridge). Accepting one option declines the others." onClick={() => act(() => api.post(`/treatment-plans/${plan.id}/duplicate`, {}))}>+ Alternative</button>}
