@@ -181,7 +181,7 @@ async function frequencyProblem(db, policy, freqs, p, dos, earlier, ids) {
 // frequency limits, waiting periods, alternate benefits (downgrades), per-code coverage, the deductible
 // (individual and family), the annual maximum, and the orthodontic lifetime maximum.
 // For a secondary policy, pass `primary`: procedure id → { covered, write_off } from the primary claim.
-export async function estimateCoverage(db, rawPolicy, procedures, { primary = null } = {}) {
+export async function estimateCoverage(db, rawPolicy, procedures, { primary = null, asOf = null } = {}) {
   if (!rawPolicy) {
     return {
       policy: null,
@@ -195,7 +195,8 @@ export async function estimateCoverage(db, rawPolicy, procedures, { primary = nu
   }
   const policy = await withPlan(db, rawPolicy);
   const plan = policy.plan;
-  const today = (await practiceNow(db, policy.practice_id)).slice(0, 10);
+  // asOf: price the work as if done on another day (e.g. once the benefit year renews).
+  const today = asOf || (await practiceNow(db, policy.practice_id)).slice(0, 10);
   // In-network (PPO) carriers pay from their fee schedule; the difference is written off.
   const scheduleId = policy.fee_schedule_id ?? (await db.get('SELECT fee_schedule_id FROM insurance_carriers WHERE id = ?', policy.carrier_id))?.fee_schedule_id;
   const scheduleFee = async (code) => (scheduleId ? (await db.get('SELECT fee FROM fee_schedule_items WHERE fee_schedule_id = ? AND code = ?', scheduleId, code))?.fee : null);

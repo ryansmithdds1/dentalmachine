@@ -53,7 +53,7 @@ const RESOURCES = {
 // Fields of the simple list sections (providers, carriers…) are added from their definitions.
 const KEYWORDS = {
   account: 'password two-factor 2fa authenticator mfa my account sign in',
-  practice: 'practice name phone email address city state zip group npi tax id tin timezone time zone office hours opening hours booking page address slug online booking instant booking reminders portal production goal hygiene goal texting number twilio sms two-factor mfa require sign-out idle timeout inactivity write-off approval limit adjustment lock date books closed month-end close export data single sign-on sso oidc google microsoft',
+  practice: 'practice name phone email address city state zip group npi tax id tin timezone time zone office hours opening hours booking page address slug online booking instant booking reminders portal production goal hygiene goal texting number twilio sms two-factor mfa require sign-out idle timeout inactivity write-off approval limit adjustment lock date books closed month-end close export data single sign-on sso oidc google microsoft financing carecredit sunbit cherry payment plans lender interest',
   users: 'users staff login roles permissions invite access front desk hygienist dentist billing admin',
   locations: 'offices locations multi-location branches',
   providers: 'time off vacation special hours schedule exceptions',
@@ -449,6 +449,7 @@ function Practice() {
         </div>
         <p className="muted" style={{ fontSize: 13, marginTop: 12 }}>Texting, email, card payments and other connections: <Link to="/settings?tab=integrations">Settings → Integrations</Link>.</p>
       </div>
+      <FinancingSettings value={current.financing} onChange={(v) => change('financing', v)} />
       <div className="card">
         <h2>Security & data</h2>
         <div className="form-grid">
@@ -481,6 +482,37 @@ function Practice() {
       </div>
       <SingleSignOn />
     </>
+  );
+}
+
+// Financing offered on treatment plans: the office's own monthly plans and outside lenders' links.
+function FinancingSettings({ value, onChange }) {
+  let f = { in_house_months: [], in_house_apr: 0, links: [], min_amount: 0 };
+  try { if (value) f = { ...f, ...(typeof value === 'string' ? JSON.parse(value) : value) }; } catch { /* keep the defaults */ }
+  const set = (patch) => onChange(JSON.stringify({ ...f, ...patch }));
+  const toggleMonths = (m) => set({ in_house_months: f.in_house_months.includes(m) ? f.in_house_months.filter((x) => x !== m) : [...f.in_house_months, m].sort((a, b) => a - b) });
+  const links = [...f.links, { name: '', url: '' }];
+  return (
+    <div className="card">
+      <h2>Financing</h2>
+      <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>Shown with treatment plans (to staff, and to patients reviewing their plan online) as monthly amounts for the patient&apos;s portion.</p>
+      <div className="form-grid">
+        <div className="full">
+          <div className="muted" style={{ fontSize: 12 }}>In-house payment plans</div>
+          <div className="inline" style={{ gap: 12, flexWrap: 'wrap' }}>
+            {[3, 6, 12, 18, 24].map((m) => <label key={m} className="checkbox"><input type="checkbox" checked={f.in_house_months.includes(m)} onChange={() => toggleMonths(m)} /> {m} months</label>)}
+          </div>
+        </div>
+        <label>Interest rate (% a year, 0 for none)<input type="number" min="0" max="30" step="0.1" value={f.in_house_apr} onChange={(e) => set({ in_house_apr: e.target.value })} /></label>
+        <label>Only offer from ($)<input type="number" min="0" step="50" value={f.min_amount ? f.min_amount / 100 : ''} placeholder="Any amount" onChange={(e) => set({ min_amount: Math.round(Number(e.target.value || 0) * 100) })} /></label>
+        {links.map((l, i) => (
+          <div key={i} className="full inline" style={{ gap: 8 }}>
+            <input aria-label="Lender" placeholder="Lender (e.g. CareCredit)" value={l.name} style={{ width: 200 }} onChange={(e) => { const next = [...links]; next[i] = { ...l, name: e.target.value }; set({ links: next.filter((x) => x.name || x.url) }); }} />
+            <input aria-label="Application link" placeholder="https:// your application link" value={l.url} style={{ flex: 1 }} onChange={(e) => { const next = [...links]; next[i] = { ...l, url: e.target.value }; set({ links: next.filter((x) => x.name || x.url) }); }} />
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 

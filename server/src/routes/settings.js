@@ -42,6 +42,23 @@ function resource(r, db, { path, table, fields, required, validate = () => {}, o
   });
 }
 
+// Financing shown on treatment plans: in-house monthly plans (months offered, 0% unless a rate is set)
+// and links to the lenders the office works with (CareCredit, Sunbit, Cherry…).
+export function cleanFinancing(v) {
+  if (v == null || v === '') return null;
+  const f = typeof v === 'string' ? JSON.parse(v) : v;
+  const months = [...new Set((Array.isArray(f.in_house_months) ? f.in_house_months : []).map(Number))].filter((m) => Number.isInteger(m) && m >= 2 && m <= 60).sort((a, b) => a - b);
+  const apr = f.in_house_apr == null || f.in_house_apr === '' ? 0 : Number(f.in_house_apr);
+  if (!(apr >= 0 && apr <= 30)) throw new HttpError(400, 'In-house interest rate must be 0-30%');
+  const links = (Array.isArray(f.links) ? f.links : []).filter((l) => l?.name || l?.url).slice(0, 6).map((l) => {
+    const name = String(l.name || '').trim().slice(0, 40);
+    const url = String(l.url || '').trim();
+    if (!name || !/^https:\/\/\S+$/.test(url)) throw new HttpError(400, 'Each financing link needs a name and an https:// address');
+    return { name, url };
+  });
+  return JSON.stringify({ in_house_months: months, in_house_apr: apr, links, min_amount: Math.max(0, Math.round(Number(f.min_amount) || 0)) });
+}
+
 export default function settingsRoutes({ db, secret, config = {} }) {
   const r = Router();
 
@@ -79,7 +96,8 @@ export default function settingsRoutes({ db, secret, config = {} }) {
   r.get('/message-templates/defaults', (_req, res) => res.json(DEFAULT_TEMPLATES));
   r.get('/message-templates/meta', (_req, res) => res.json(TEMPLATE_META));
   r.put('/practice', requireAdmin, async (req, res) => {
-    const row = pick(req.body, ['name', 'address', 'city', 'state', 'zip', 'phone', 'email', 'tax_id', 'npi', 'timezone', 'slug', 'online_booking', 'reminder_hours', 'require_mfa', 'office_hours', 'daily_goal', 'sms_number', 'review_url', 'review_requests', 'review_threshold', 'instant_booking', 'idle_timeout_minutes', 'message_templates', 'hygiene_goal', 'portal_enabled', 'lock_date', 'adjustment_approval_limit', 'reminder_steps', 'recall_steps', 'recall_auto', 'finance_charge_bps', 'finance_charge_min', 'late_fee', 'collection_agency']);
+    const row = pick(req.body, ['name', 'address', 'city', 'state', 'zip', 'phone', 'email', 'tax_id', 'npi', 'timezone', 'slug', 'online_booking', 'reminder_hours', 'require_mfa', 'office_hours', 'daily_goal', 'sms_number', 'review_url', 'review_requests', 'review_threshold', 'instant_booking', 'idle_timeout_minutes', 'message_templates', 'hygiene_goal', 'portal_enabled', 'lock_date', 'adjustment_approval_limit', 'reminder_steps', 'recall_steps', 'recall_auto', 'finance_charge_bps', 'finance_charge_min', 'late_fee', 'collection_agency', 'financing']);
+    if (row.financing !== undefined) row.financing = cleanFinancing(row.financing);
     if (row.message_templates != null) row.message_templates = validateTemplates(row.message_templates);
     if (row.review_url && !/^https:\/\/\S+$/.test(row.review_url)) throw new HttpError(400, 'Review link must start with https://');
     if (row.review_threshold != null && ![3, 4, 5].includes(Number(row.review_threshold))) throw new HttpError(400, 'review_threshold must be 3, 4 or 5 stars');

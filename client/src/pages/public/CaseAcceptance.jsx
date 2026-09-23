@@ -49,6 +49,13 @@ export default function CaseAcceptance() {
         <p className="muted" style={{ fontSize: 12 }}>{t('Insurance amounts are estimates and not a guarantee of payment. Ask us about payment plans.')}</p>
       </div>
 
+      {plan.financing && !plan.signed_at && (
+        <div className="card">
+          <h3 style={{ marginTop: 0 }}>{t('Ways to pay your {amount}', { amount: money(plan.financing.amount) })}</h3>
+          {plan.financing.in_house.length > 0 && <p>{t('Monthly with us:')} {plan.financing.in_house.map((o) => `${o.months} × ${money(o.monthly)}`).join(' · ')}{plan.financing.in_house[0]?.apr ? ` (${plan.financing.in_house[0].apr}% APR)` : ` (${t('no interest')})`}</p>}
+          {plan.financing.links.length > 0 && <p>{t('Or apply for financing:')} {plan.financing.links.map((l) => <a key={l.url} href={l.url} target="_blank" rel="noreferrer" style={{ marginRight: 12 }}>{l.name} ↗</a>)}</p>}
+        </div>
+      )}
       {!plan.signed_at && (
         <form className="card" onSubmit={(ev) => { ev.preventDefault(); submit(); }}>
           <h2>{t('Accept your plan')}</h2>

@@ -2,7 +2,9 @@ import { Router } from 'express';
 import { messageText, patientLang, subjectFor } from '../templates.js';
 import { requirePermission, HttpError, rateLimit } from '../auth.js';
 import { pick, requireFields, insert, findOr404, audit, newToken, hashToken } from '../util.js';
-import { estimateCoverage, primaryPolicy } from '../services.js';
+import { estimateCoverage, primaryPolicy, benefitYear, withPlan } from '../services.js';
+import { practiceNow } from '../util.js';
+import { financingOptions } from '../financing.js';
 import { sendMessage, preferredChannel } from '../messaging.js';
 import { checkEpcs } from '../erx.js';
 import { allergyWarning, controlledSchedule, stricterSchedule } from '../drugs.js';
@@ -121,6 +123,53 @@ export default function casePresentationRoutes({ db, messenger, config, erx }) {
     res.json({ url, message });
   });
 
+  // This benefit year vs next: what insurance has left, and whether doing part of the plan after the
+  // year renews would get more of it paid (work in the plan's order until this year's maximum runs out).
+  r.get('/treatment-plans/:tid/benefit-years', requirePermission('clinical:read'), async (req, res) => {
+    const plan = await findOr404(db, 'treatment_plans', req.params.tid, req.user.practice_id, 'Treatment plan');
+    const policy = await primaryPolicy(db, plan.practice_id, plan.patient_id);
+    if (!policy) return res.json({ policy: null });
+    const procs = await db.all("SELECT * FROM procedures WHERE treatment_plan_id = ? AND status = 'planned' ORDER BY priority, id", plan.id);
+    const today = (await practiceNow(db, plan.practice_id)).slice(0, 10);
+    const { end: renews } = benefitYear(await withPlan(db, policy), today);
+    const all = await estimateCoverage(db, policy, procs);
+    const limited = all.items.some((i) => i.notes.some((n) => /annual maximum/.test(n)));
+    const out = {
+      policy: { carrier_name: policy.carrier_name, annual_max: all.policy?.annual_max },
+      remaining_now: all.remaining?.annual_max != null ? all.remaining.annual_max + all.total_insurance : null,
+      renews, all_now: { insurance: all.total_insurance, patient: all.total_patient }, split: null,
+    };
+    if (limited && procs.length > 1) {
+      // The longest start of the plan that this year's maximum still covers in full; the rest waits.
+      // The procedure that reaches the maximum either waits for next year or goes first, part-covered:
+      // whichever gets more paid.
+      let hit = procs.length;
+      for (let i = 1; i <= procs.length; i++) {
+        const e = await estimateCoverage(db, policy, procs.slice(0, i));
+        if (e.items.some((x) => x.notes.some((n) => /annual maximum/.test(n)))) { hit = i; break; }
+      }
+      let best = null;
+      for (const cut of [hit - 1, hit].filter((c) => c > 0 && c < procs.length)) {
+        const now = await estimateCoverage(db, policy, procs.slice(0, cut));
+        const later = await estimateCoverage(db, policy, procs.slice(cut), { asOf: renews });
+        if (!best || now.total_insurance + later.total_insurance > best.now.total_insurance + best.later.total_insurance) best = { cut, now, later };
+      }
+      if (best) {
+        const { cut, now, later } = best;
+        const insurance = now.total_insurance + later.total_insurance;
+        if (insurance > all.total_insurance) {
+          const line = (p) => ({ id: p.id, code: p.code, description: p.description, tooth: p.tooth, fee: p.fee });
+          out.split = {
+            this_year: { procedures: procs.slice(0, cut).map(line), insurance: now.total_insurance, patient: now.total_patient },
+            next_year: { from: renews, procedures: procs.slice(cut).map(line), insurance: later.total_insurance, patient: later.total_patient },
+            insurance, patient: now.total_patient + later.total_patient, saves: insurance - all.total_insurance,
+          };
+        }
+      }
+    }
+    res.json(out);
+  });
+
   r.get('/treatment-plans/:tid/pdf', requirePermission('clinical:read'), async (req, res) => {
     const plan = await findOr404(db, 'treatment_plans', req.params.tid, req.user.practice_id, 'Treatment plan');
     res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': `attachment; filename="${pdfFilename(plan)}.pdf"` }).send(await planPdf(db, plan));
@@ -128,8 +177,10 @@ export default function casePresentationRoutes({ db, messenger, config, erx }) {
 
   r.get('/treatment-plans/:tid', requirePermission('clinical:read'), async (req, res) => {
     const plan = await findOr404(db, 'treatment_plans', req.params.tid, req.user.practice_id, 'Treatment plan');
+    const view = await planView(db, plan);
     res.json({
-      ...(await planView(db, plan)),
+      ...view,
+      financing: financingOptions(await db.get('SELECT financing FROM practices WHERE id = ?', req.user.practice_id), view.estimate.total_patient),
       patient: await db.get('SELECT id, first_name, last_name, dob, address, city, state, zip, phone FROM patients WHERE id = ?', plan.patient_id),
       practice: await db.get('SELECT name, address, city, state, zip, phone FROM practices WHERE id = ?', req.user.practice_id),
     });
@@ -247,8 +298,11 @@ export function publicCasePresentation({ db, storage }) {
     // After signing, the patient sees exactly the version they signed.
     const v = plan.signed_snapshot ? { ...live, ...JSON.parse(plan.signed_snapshot) } : live;
     const patient = await db.get('SELECT first_name, language FROM patients WHERE id = ?', plan.patient_id);
-    const practice = await db.get('SELECT name, phone, address, city, state, zip FROM practices WHERE id = ?', plan.practice_id);
+    const practice = await db.get('SELECT name, phone, address, city, state, zip, financing FROM practices WHERE id = ?', plan.practice_id);
+    const financing = financingOptions(practice, v.estimate.total_patient);
+    delete practice.financing;
     return {
+      financing,
       name: v.name, status: v.status, notes: v.notes, signed_at: v.signed_at, signature_name: v.signature_name, first_name: patient.first_name, language: patientLang(patient), practice,
       procedures: v.procedures.map((p) => ({ code: p.code, description: p.description, tooth: p.tooth, surfaces: p.surfaces, fee: p.fee, status: p.status })),
       estimate: { ...v.estimate, items: v.estimate.items.map(({ procedure_id: _, ...rest }) => rest) },

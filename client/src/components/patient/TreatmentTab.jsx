@@ -85,6 +85,7 @@ export default function TreatmentTab({ patient, onChange }) {
           </div>
           <PlanTable plan={plan} codes={codes} canEdit={can('clinical:write') && !['completed', 'rejected'].includes(plan.status)} act={act}
             onBook={(procs) => setBooking({ plan, procs })} canBook={can('schedule:write')} />
+          {['proposed', 'accepted'].includes(plan.status) && plan.procedures?.some((p) => p.status === 'planned') && <PlanMoney plan={plan} patient={patient} onChange={refresh} />}
         </div>
       ))}
       {adding && (
@@ -118,6 +119,57 @@ export default function TreatmentTab({ patient, onChange }) {
         </Modal>
       )}
     </>
+  );
+}
+
+// Paying for the plan: insurance this benefit year vs next (with a suggested split when the annual
+// maximum runs out), and monthly options — the office's own plans and outside lenders.
+function PlanMoney({ plan, patient, onChange }) {
+  const { can } = useAuth();
+  const { data: years } = useApi(`/treatment-plans/${plan.id}/benefit-years?v=${plan.estimate?.total_insurance}`);
+  const { data: full } = useApi(`/treatment-plans/${plan.id}?v=${plan.estimate?.total_patient}`);
+  const [note, setNote] = useState(null);
+  const [err, setErr] = useState(null);
+  const fin = full?.financing;
+  const startPlan = async (o) => {
+    setErr(null);
+    try {
+      await api.post(`/patients/${patient.id}/payment-plans`, { total: fin.amount, down_payment: 0, installments: o.months, start_date: practiceToday(), notes: `${plan.name} (treatment plan)` });
+      setNote(`Payment plan set up: ${o.months} × ${money(o.monthly)}. It's on the Ledger tab.`);
+      onChange?.();
+    } catch (e) { setErr(e); }
+  };
+  if (!years?.policy && !fin) return null;
+  return (
+    <div className="plan-money">
+      <ErrorBox error={err} />
+      {years?.policy && (
+        <div>
+          <strong>Insurance</strong> ({years.policy.carrier_name}): {years.remaining_now != null ? <>{money(years.remaining_now)} left this benefit year, renews {fmtDate(years.renews)}.</> : null} This plan: insurance {money(years.all_now.insurance)}, patient {money(years.all_now.patient)}.
+          {years.split && (
+            <div className="plan-split">
+              💡 Split across benefit years to get <strong>{money(years.split.saves)} more</strong> from insurance:
+              {' '}now — {years.split.this_year.procedures.map((p) => `${p.code}${p.tooth ? ` #${p.tooth}` : ''}`).join(', ')} (insurance {money(years.split.this_year.insurance)});
+              {' '}from {fmtDate(years.split.next_year.from)} — {years.split.next_year.procedures.map((p) => `${p.code}${p.tooth ? ` #${p.tooth}` : ''}`).join(', ')} (insurance {money(years.split.next_year.insurance)}).
+              {' '}Patient pays {money(years.split.patient)} instead of {money(years.all_now.patient)}.
+            </div>
+          )}
+        </div>
+      )}
+      {fin && (
+        <div style={{ marginTop: 6 }}>
+          <strong>Financing</strong> for the {money(fin.amount)} patient portion:{' '}
+          {fin.in_house.map((o) => (
+            <span key={o.months} className="fin-option">
+              {o.months} × {money(o.monthly)}{o.apr ? ` (${o.apr}% APR)` : ' (0%)'}
+              {can('billing:write') && <button className="small" onClick={() => startPlan(o)}>Set up</button>}
+            </span>
+          ))}
+          {fin.links.map((l) => <a key={l.url} className="fin-option" href={l.url} target="_blank" rel="noreferrer">{l.name} ↗</a>)}
+          {note && <div className="muted" style={{ fontSize: 12 }}>{note}</div>}
+        </div>
+      )}
+    </div>
   );
 }
 

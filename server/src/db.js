@@ -1470,6 +1470,7 @@ const COLUMNS = [
   ['claims', 'remarks', 'TEXT'],
   ['booking_requests', 'referral_source', 'TEXT'],
   ['patients', 'family_relationship', 'TEXT'],
+  ['practices', 'financing', 'TEXT'],
   ['patients', 'second_responsible_id', 'INTEGER REFERENCES patients(id)'],
   ['appointment_types', 'pattern', 'TEXT'],
   ['appointment_types', 'provider_durations', 'TEXT'],

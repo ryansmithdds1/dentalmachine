@@ -706,3 +706,6 @@ p a, .muted a, li a, .public-notice a { text-decoration: underline; }
 .cal-pattern i.x { background: var(--p, var(--primary)); opacity: .55; }
 .cal-pattern i.a { background: repeating-linear-gradient(45deg, rgba(100,116,139,.45) 0 2px, transparent 2px 4px); }
 .schedule-print .print-page { margin-bottom: 28px; } .schedule-print table td { vertical-align: top; } @media print { .schedule-print .print-page { break-after: page; } .schedule-print .print-page:last-child { break-after: auto; } }
+.plan-money { margin-top: 10px; padding: 10px 12px; background: var(--bg); border-radius: 8px; font-size: 13px; }
+.plan-split { margin-top: 6px; padding: 8px 10px; background: #fef9c3; border-radius: 6px; }
+.fin-option { display: inline-flex; align-items: center; gap: 6px; margin: 2px 10px 2px 0; padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px; background: #fff; }
