@@ -13,7 +13,8 @@ import { readOfflineDay } from './offline.js';
 import { ClockButton } from './components/TimeClock.jsx';
 import { useLiveEvents } from './live.js';
 import MfaSetup from './components/MfaSetup.jsx';
-import { Sun, CalendarDays, Users, MessageSquare, Inbox as InboxIcon, PhoneCall, Megaphone, Receipt, ListChecks, ChartColumn, Settings as SettingsIcon, Search, PanelLeftClose, PanelLeftOpen, LogOut, Keyboard } from 'lucide-react';
+import { Sun, CalendarDays, Users, MessageSquare, Inbox as InboxIcon, PhoneCall, Megaphone, Receipt, ListChecks, ChartColumn, Settings as SettingsIcon, Search, PanelLeftClose, PanelLeftOpen, LogOut, Keyboard, Monitor, Moon } from 'lucide-react';
+import { getThemePref, setThemePref, watchTheme } from './theme.js';
 
 // Pages load on demand so the first screen appears quickly.
 const Schedule = lazy(() => import('./pages/Schedule.jsx'));
@@ -214,6 +215,7 @@ const initials = (name = '') => name.split(/\s+/).filter(Boolean).slice(0, 2).ma
 
 function UserMenu({ user, practice, logout }) {
   const [open, setOpen] = useState(false);
+  const [theme, setTheme] = useState(getThemePref);
   useEffect(() => {
     if (!open) return undefined;
     const close = (e) => { if (e.type === 'keydown' ? e.key === 'Escape' : !e.target.closest?.('.user-menu')) setOpen(false); };
@@ -232,6 +234,11 @@ function UserMenu({ user, practice, logout }) {
           <div className="user-pop-head">
             <span className="rail-avatar big">{initials(user.name)}</span>
             <div><strong>{user.name}</strong><div className="muted">{label(user.role)} · {practice?.name}</div></div>
+          </div>
+          <div className="seg theme-seg" role="group" aria-label="Appearance">
+            {[['system', Monitor, 'Auto'], ['light', Sun, 'Light'], ['dark', Moon, 'Dark']].map(([k, Icon, text]) => (
+              <button key={k} className={theme === k ? 'active' : ''} onClick={() => { setTheme(k); setThemePref(k); }} title={k === 'system' ? "Follow this computer's setting" : undefined}><Icon size={14} /> {text}</button>
+            ))}
           </div>
           <LocationPicker user={user} />
           <ClockButton />
@@ -252,6 +259,7 @@ function Shell({ nav }) {
     return !o;
   });
   const fullBleed = location.pathname === '/schedule';
+  useEffect(() => watchTheme(), []);
   return (
     <div className={`app${railOpen ? ' rail-open' : ''}`}>
       <a href="#main" className="skip-link">Skip to content</a>

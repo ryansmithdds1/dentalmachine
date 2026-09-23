@@ -77,3 +77,21 @@ test('schedule-only access: no chart, money or DEA numbers on the huddle, route 
   assert.equal((await api.get('/providers')).data.find((p) => p.id === provider.id).dea_number, 'AB1234563');
   assert.equal((await s.post('/tasks', { title: 'Call back' })).status, 403);
 });
+
+test('the schedule hover card: health details need clinical access, money needs billing access', async () => {
+  const { api, patient } = await h.practice();
+  await api.put(`/patients/${patient.id}`, { allergies: 'Latex', office_alert: 'Prefers mornings' });
+  const full = (await api.get(`/patients/${patient.id}/card`)).data;
+  assert.equal(full.allergies, 'Latex');
+  assert.equal(full.balance, 0);
+  assert.equal(full.office_alert, 'Prefers mornings');
+  const role = (await api.post('/roles', { name: 'Greeter', permissions: ['patients:read', 'schedule:read'] })).data;
+  const email = `greet-${Date.now()}@example.com`;
+  await api.post('/users', { email, name: 'Greeter', role: 'front_desk', custom_role_id: role.id, password: 'greeter-password' });
+  const g = h.client((await h.client().post('/auth/login', { email, password: 'greeter-password' })).data.token);
+  const limited = (await g.get(`/patients/${patient.id}/card`)).data;
+  assert.equal(limited.first_name, 'Jane');
+  assert.equal(limited.allergies, undefined);
+  assert.equal(limited.balance, undefined);
+  assert.equal(limited.unscheduled, null);
+});

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Check, CheckCheck, DoorOpen, Armchair, Pill, TriangleAlert, Repeat } from 'lucide-react';
 import { eligibilityBadge } from '../../format.js';
+import PatientHoverCard from './PatientHoverCard.jsx';
 
 export const toMin = (t) => Number(t.slice(-5, -3)) * 60 + Number(t.slice(-2));
 export const fmtMin = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
@@ -45,8 +46,10 @@ export const STATUS_COLORS = { scheduled: '#64748b', confirmed: '#16a34a', check
 
 export default function CalendarGrid({
   columns, appointments, range, pxPerMin, nowMin, onMove, onResize, onSelectRange, onOpen, onOpenBlockout, onPin,
-  placing, onPlace, selectedId, scrollKey, headerExtra, readOnly = false, step = 10, colorBy = 'type',
+  placing, onPlace, selectedId, scrollKey, headerExtra, readOnly = false, step = 10, colorBy = 'type', onReorderColumn,
 }) {
+  const [dragCol, setDragCol] = useState(null);
+  const [overCol, setOverCol] = useState(null);
   // The grid step (5, 10 or 15 minutes) is what drags and new appointments snap to.
   const SNAP = step;
   const snap = (m) => Math.round(m / SNAP) * SNAP;
@@ -63,6 +66,19 @@ export default function CalendarGrid({
     for (let m = Math.ceil(range.start / 60) * 60; m < range.end; m += 60) out.push(m);
     return out;
   }, [range]);
+
+  // Hovering a visit (mouse only) for a moment shows the patient card; any drag or scroll hides it.
+  const [hover, setHover] = useState(null);
+  const hoverTimer = useRef(null);
+  const hoverIn = (e, a) => {
+    if (e.pointerType !== 'mouse' || dragRef.current) return;
+    const el = e.currentTarget;
+    clearTimeout(hoverTimer.current);
+    hoverTimer.current = setTimeout(() => setHover({ appt: a, anchor: el.getBoundingClientRect() }), 450);
+  };
+  const hoverOut = () => { clearTimeout(hoverTimer.current); setHover(null); };
+  useEffect(() => () => clearTimeout(hoverTimer.current), []);
+  useEffect(() => { if (drag) hoverOut(); }, [drag !== null]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // While an appointment is being dragged, the pinboard shows as a drop target.
   const moving = drag?.kind === 'move' && drag.active;
@@ -199,11 +215,19 @@ export default function CalendarGrid({
 
   return (
     <div className="cal">
-      <div className="cal-scroll" ref={scroller}>
+      {hover && <PatientHoverCard appt={hover.appt} anchor={hover.anchor} />}
+      <div className="cal-scroll" ref={scroller} onScroll={hover ? hoverOut : undefined}>
         <div className="cal-head" style={{ gridTemplateColumns: `56px repeat(${columns.length}, minmax(var(--cal-col-min), 1fr))` }}>
           <div className="cal-corner">{headerExtra}</div>
           {columns.map((c) => (
-            <div key={c.key} className={`cal-col-head${c.isToday ? ' today' : ''}`} style={c.color ? { '--col': c.color } : undefined}>
+            <div key={c.key} className={`cal-col-head${c.isToday ? ' today' : ''}${onReorderColumn ? ' movable' : ''}${overCol === c.key && dragCol && dragCol !== c.key ? ' drop-before' : ''}`} style={c.color ? { '--col': c.color } : undefined}
+              draggable={!!onReorderColumn}
+              onDragStart={onReorderColumn ? (e) => { setDragCol(c.key); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', c.label); } : undefined}
+              onDragOver={onReorderColumn && dragCol ? (e) => { e.preventDefault(); setOverCol(c.key); } : undefined}
+              onDragLeave={onReorderColumn ? () => setOverCol((k) => (k === c.key ? null : k)) : undefined}
+              onDrop={onReorderColumn ? (e) => { e.preventDefault(); const from = columns.find((x) => x.key === dragCol); if (from && from.key !== c.key) onReorderColumn(from, c); setDragCol(null); setOverCol(null); } : undefined}
+              onDragEnd={() => { setDragCol(null); setOverCol(null); }}
+              title={onReorderColumn ? 'Drag to move this chair' : undefined}>
               <div className="cal-col-title">
                 {c.color && <span className="cal-col-avatar" style={{ background: c.color }}>{initialsOf(c.label)}</span>}
                 <span>{c.label}</span>
@@ -267,7 +291,8 @@ export default function CalendarGrid({
                         data-appt-id={a.id}
                         className={`cal-appt status-${a.status}${dragging ? ' dragging' : ''}${selectedId === a.id ? ' selected' : ''}${a._pending ? ' pending' : ''}`}
                         style={{ top: (s - range.start) * pxPerMin, height: Math.max(h - 2, 14), left: `calc(${(lane / lanes) * 100}% + 2px)`, width: `calc(${100 / lanes}% - 4px)`, '--c': color, '--p': a.provider_color || color }}
-                        onPointerDown={(ev) => startMove(ev, a, ci, s, e)}
+                        onPointerDown={(ev) => { hoverOut(); startMove(ev, a, ci, s, e); }}
+                        onPointerEnter={(ev) => hoverIn(ev, a)} onPointerLeave={hoverOut}
                         onClick={(ev) => {
                           ev.stopPropagation();
                           if (suppressClick.current) suppressClick.current = false;

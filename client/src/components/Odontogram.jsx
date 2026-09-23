@@ -112,7 +112,7 @@ function ToothSvg({ tooth, state, size = 1 }) {
   const [left, right] = mesialRight ? ['D', 'M'] : ['M', 'D'];
   const { fills, overlays, missing, planX, watch, mobility } = state;
   const alt = { B: 'F', F: 'B', O: 'I', I: 'O' };
-  const c = (s) => fills[s] || fills[alt[s]] || '#fff';
+  const c = (s) => fills[s] || fills[alt[s]] || 'var(--tooth)';
   const has = (k) => overlays.find((o) => o.kind === k);
   const W = 40;
   const H = 76;
@@ -125,7 +125,7 @@ function ToothSvg({ tooth, state, size = 1 }) {
   const roots = MOLARS.has(b) ? [12, 28] : [20];
   const pontic = has('pontic');
   const implant = has('implant');
-  const stroke = missing ? '#cbd5e1' : '#64748b';
+  const stroke = missing ? 'var(--tooth-line-faint)' : 'var(--tooth-line)';
   const x0 = 2;
   const y0 = crownY;
   const s = 36;
@@ -135,7 +135,7 @@ function ToothSvg({ tooth, state, size = 1 }) {
       <g opacity={missing ? 0.35 : 1}>
         {/* roots */}
         {!pontic && !implant && roots.map((x) => (
-          <path key={x} d={`M${x - 7} ${cervical} C${x - 7} ${(cervical + apex) / 2} ${x - 4} ${apex} ${x} ${apex} C${x + 4} ${apex} ${x + 7} ${(cervical + apex) / 2} ${x + 7} ${cervical}`} fill="#f8fafc" stroke={stroke} strokeWidth="1" />
+          <path key={x} d={`M${x - 7} ${cervical} C${x - 7} ${(cervical + apex) / 2} ${x - 4} ${apex} ${x} ${apex} C${x + 4} ${apex} ${x + 7} ${(cervical + apex) / 2} ${x + 7} ${cervical}`} fill="var(--tooth-root)" stroke={stroke} strokeWidth="1" />
         ))}
         {implant && (
           <g stroke={implant.color} strokeWidth="1.5" fill="none">
@@ -166,7 +166,7 @@ function ToothSvg({ tooth, state, size = 1 }) {
         {has('abscess') && <circle cx="20" cy={apex + (upper ? 4 : -4)} r="4" fill={has('abscess').color} />}
         {has('impacted') && <rect x="1" y="1" width={W - 2} height={H - 2} rx="6" fill="none" stroke={has('impacted').color} strokeDasharray="3 2" />}
       </g>
-      {missing && <path d={`M4 ${y0 + 2} L36 ${y0 + s - 2} M36 ${y0 + 2} L4 ${y0 + s - 2}`} stroke="#64748b" strokeWidth="2.5" />}
+      {missing && <path d={`M4 ${y0 + 2} L36 ${y0 + s - 2} M36 ${y0 + 2} L4 ${y0 + s - 2}`} stroke="var(--tooth-line)" strokeWidth="2.5" />}
       {planX && <path d={`M2 4 L38 ${H - 4} M38 4 L2 ${H - 4}`} stroke={STATUS_COLORS.planned} strokeWidth="3" />}
       {watch && <circle cx="35" cy={upper ? 70 : 6} r="4" fill={STATUS_COLORS.watch} />}
       {mobility && <text x="4" y={upper ? 72 : 10} fontSize="9" fontWeight="700" fill={CONDITION_COLORS.mobility}>M</text>}

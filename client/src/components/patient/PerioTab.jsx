@@ -45,6 +45,35 @@ function probingPath(missing) {
 
 const MARKERS = [['bop', 'Bleeding', 'var(--danger)'], ['sup', 'Suppuration', '#ca8a04'], ['plaque', 'Plaque', '#2563eb']];
 
+// One tooth's side as a picture: crown toward the tooth numbers, the gum line (blue) and the bottom of each
+// pocket (red) drawn from the CEJ at 3 units per mm, with the pocket shaded. Deep pockets show at a glance.
+const MM = 3;
+function PerioTooth({ tooth, sites, v, rootsUp }) {
+  const molar = MOLARS.has(tooth);
+  const xs = [14, 30, 46];
+  const val = (list, i) => (list[i] === '' || list[i] == null || list[i] === '-' ? null : Number(list[i]));
+  const gm = sites.map((i) => val(v.gm, i) ?? 0);
+  const pd = sites.map((i) => val(v.pd, i));
+  const has = pd.some((d) => d != null);
+  const gy = gm.map((g) => 20 + g * MM);
+  const py = pd.map((d, k) => gy[k] + (d ?? 0) * MM);
+  const deep = pd.some((d) => d >= 5) ? 'deep' : pd.some((d) => d === 4) ? 'watch' : '';
+  const roots = molar ? 'M12 20 C12 44 16 66 21 69 C25 66 27 46 28 28 L32 28 C33 46 35 66 39 69 C44 66 48 44 48 20' : 'M17 20 C17 44 24 68 30 70 C36 68 43 44 43 20';
+  return (
+    <svg className="perio-tooth" viewBox="0 0 60 72" preserveAspectRatio="none" aria-hidden="true">
+      <g transform={rootsUp ? 'translate(0 72) scale(1 -1)' : undefined}>
+        <path d={roots} className="pt-root" />
+        <path d="M9 20 C8 12 9 4 16 2 L44 2 C51 4 52 12 51 20 Z" className="pt-crown" />
+        <line x1="6" x2="54" y1="20" y2="20" className="pt-cej" />
+        {has && <polygon className={`pt-pocket ${deep}`} points={[...xs.map((x, k) => `${x},${gy[k]}`), ...[...xs].reverse().map((x, k) => `${x},${py[2 - k]}`)].join(' ')} />}
+        {has && <polyline className="pt-gm" points={xs.map((x, k) => `${x},${gy[k]}`).join(' ')} />}
+        {has && <polyline className="pt-pd" points={xs.map((x, k) => `${x},${py[k]}`).join(' ')} />}
+        {sites.map((i, k) => v.bop[i] && <circle key={i} cx={xs[k]} cy={py[k]} r="2.6" className="pt-bleed" />)}
+      </g>
+    </svg>
+  );
+}
+
 export default function PerioTab({ patient }) {
   const { can } = useAuth();
   const { data: exams, reload } = useApi(`/patients/${patient.id}/perio`);
@@ -234,6 +263,7 @@ export default function PerioTab({ patient }) {
         const c = cal(get(t).pd[i], get(t).gm[i]);
         return <span key={i} className="perio-site calc" style={{ color: c >= 5 ? 'var(--danger)' : undefined }}>{c ?? '·'}</span>;
       })],
+      ['Chart', (t) => <PerioTooth tooth={t} sites={siteOrder(t, from)} v={get(t)} rootsUp={upper ? from === 0 : from === 3} />],
     ].filter(Boolean);
     // Rows run outer→inner above the tooth numbers and inner→outer below; the upper arch has facial on top,
     // the lower arch lingual on top.
@@ -246,8 +276,8 @@ export default function PerioTab({ patient }) {
           {rows.map((r, idx) => (r === 'numbers' ? (
             <tr key="n" className="perio-numbers"><td />{teeth.map((t) => <th key={t} className={isMissing(t) ? 'missing' : ''}>{t}</th>)}</tr>
           ) : (
-            <tr key={`${r[0]}-${idx}`}>
-              <td className="muted perio-label">{r[0]} <span>{sideLabel(idx)}</span></td>
+            <tr key={`${r[0]}-${idx}`} className={r[0] === 'Chart' ? 'perio-chart-row' : undefined}>
+              <td className="muted perio-label">{r[0] === 'Chart' ? '' : <>{r[0]} <span>{sideLabel(idx)}</span></>}</td>
               {teeth.map((t) => <td key={t} className={isMissing(t) ? 'missing' : ''}>{isMissing(t) ? null : <div className="perio-cell">{r[1](t)}</div>}</td>)}
             </tr>
           )))}
@@ -308,7 +338,7 @@ export default function PerioTab({ patient }) {
         </div>
       )}
       <div className="muted" style={{ marginBottom: 8, fontSize: 12 }}>
-        mm. <span style={{ color: 'var(--warn)' }}>4</span> · <span style={{ color: 'var(--danger)' }}>5+</span> · shaded = bleeding.
+        mm. <span style={{ color: 'var(--warn)' }}>4</span> · <span style={{ color: 'var(--danger)' }}>5+</span> · shaded = bleeding. The tooth pictures show the gum line (blue) and pocket depth (red).
         Gingival margin: + recession, − overgrowth; CAL = depth + margin.{compare ? ` Underlined red/green: 2mm+ worse/better than ${fmtDate(compare.exam_date)}.` : ''}
         {editable ? ' Type a digit per site (it moves on); pick a marker and tap sites to toggle it.' : ''}
       </div>

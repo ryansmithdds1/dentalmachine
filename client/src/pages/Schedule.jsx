@@ -7,7 +7,7 @@ import { useAuth } from '../auth.jsx';
 import { useLiveEvents } from '../live.js';
 import { money, fmtTime, shiftDate, practiceToday, label } from '../format.js';
 import { Modal } from '../components/ui.jsx';
-import { ChevronLeft, ChevronRight, CalendarDays, Plus, Ban, SlidersHorizontal, Printer, Hourglass, Pin, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, CalendarDays, Plus, Ban, SlidersHorizontal, Printer, Hourglass, Pin, X, ArrowUp, ArrowDown, EyeOff } from 'lucide-react';
 import AppointmentForm from '../components/AppointmentForm.jsx';
 import BlockoutForm from '../components/calendar/BlockoutForm.jsx';
 import AppointmentDrawer from '../components/calendar/AppointmentDrawer.jsx';
@@ -82,7 +82,37 @@ export default function Schedule() {
   // Multi-location: the office picked in the sidebar decides which chairs and visits show.
   const office = getLocationId();
   const allChairs = useLookup('/operatories?active=true');
-  const operatories = useMemo(() => (office ? allChairs.filter((o) => String(o.location_id) === office) : allChairs), [allChairs, office]);
+  const officeChairs = useMemo(() => (office ? allChairs.filter((o) => String(o.location_id) === office) : allChairs), [allChairs, office]);
+  // Chair order and hidden chairs, kept per computer (the front desk and a hygiene room see different sets).
+  const [chairLayout, setChairLayoutState] = useState(() => {
+    try {
+      const v = JSON.parse(pref('chairs', '{}'));
+      return { order: Array.isArray(v.order) ? v.order : [], hidden: Array.isArray(v.hidden) ? v.hidden : [] };
+    } catch {
+      return { order: [], hidden: [] };
+    }
+  });
+  const setChairLayout = (next) => { setChairLayoutState(next); savePref('chairs', JSON.stringify(next)); };
+  const orderedChairs = useMemo(() => {
+    const rank = new Map(chairLayout.order.map((id, i) => [id, i]));
+    return [...officeChairs].sort((a, b) => (rank.get(a.id) ?? 1e6 + officeChairs.indexOf(a)) - (rank.get(b.id) ?? 1e6 + officeChairs.indexOf(b)));
+  }, [officeChairs, chairLayout.order]);
+  const operatories = useMemo(() => orderedChairs.filter((o) => !chairLayout.hidden.includes(o.id)), [orderedChairs, chairLayout.hidden]);
+  const moveChair = (id, toId) => {
+    const ids = orderedChairs.map((o) => o.id).filter((x) => x !== id);
+    const at = toId == null ? ids.length : ids.indexOf(toId);
+    ids.splice(at < 0 ? ids.length : at, 0, id);
+    setChairLayout({ ...chairLayout, order: ids });
+  };
+  const stepChair = (id, dir) => {
+    const ids = orderedChairs.map((o) => o.id);
+    const i = ids.indexOf(id);
+    const j = i + dir;
+    if (j < 0 || j >= ids.length) return;
+    [ids[i], ids[j]] = [ids[j], ids[i]];
+    setChairLayout({ ...chairLayout, order: ids });
+  };
+  const toggleChair = (id) => setChairLayout({ ...chairLayout, hidden: chairLayout.hidden.includes(id) ? chairLayout.hidden.filter((x) => x !== id) : [...chairLayout.hidden, id] });
   const providers = useLookup('/providers?active=true');
   const from = view === 'week' ? weekStart(date) : date;
   const to = view === 'week' ? shiftDate(from, 6) : date;
@@ -346,7 +376,7 @@ export default function Schedule() {
       }));
     }
     const cols = operatories.map((o) => ({
-      ...base, key: `o${o.id}`, label: o.name, assign: { operatory_id: o.id }, showProvider: true,
+      ...base, key: `o${o.id}`, chairId: o.id, label: o.name, assign: { operatory_id: o.id }, showProvider: true,
       sub: ((n) => `${n} appt${n === 1 ? '' : 's'}`)(appts.filter((a) => a.operatory_id === o.id && a.start_time.startsWith(date) && !['cancelled', 'no_show'].includes(a.status)).length),
       // Who's working in this chair today (from the visits booked in it).
       people: [...new Map(appts.filter((a) => a.operatory_id === o.id && a.start_time.startsWith(date)).map((a) => [a.provider_id, { name: a.provider_name, color: a.provider_color }])).values()],
@@ -427,6 +457,10 @@ export default function Schedule() {
           <input ref={dateInput} type="date" value={date} onChange={(e) => e.target.value && go({ date: e.target.value })} aria-label="Go to date" tabIndex={-1} />
         </button>
         <div className="sched-stats">
+          {(() => {
+            const n = view === 'day' && mode === 'operatory' ? dayAppts.filter((a) => chairLayout.hidden.includes(a.operatory_id) && !['cancelled', 'no_show'].includes(a.status)).length : 0;
+            return n > 0 ? <button className="stat-pill warn hidden-chairs" onClick={() => setChairLayout({ ...chairLayout, hidden: [] })} title="Some chairs are hidden on this computer — show them all"><EyeOff size={13} /> {n} in hidden chairs</button> : null;
+          })()}
           <span className="stat-pill">{dayAppts.length} appts</span>
           {unconfirmed > 0 && <span className="stat-pill warn">{unconfirmed} unconfirmed</span>}
           <span className="stat-pill prod" title="Scheduled production">
@@ -471,6 +505,19 @@ export default function Schedule() {
                   <div className="popover-row"><span>Color by</span>
                     <div className="seg">{[['type', 'Type'], ['provider', 'Provider'], ['status', 'Status']].map(([k, l]) => <button key={k} className={colorBy === k ? 'active' : ''} onClick={() => setColorBy(k)}>{l}</button>)}</div>
                   </div>
+                  {orderedChairs.length > 1 && (
+                    <div className="chair-list">
+                      <div className="popover-row"><span>Chairs on this computer</span>{(chairLayout.hidden.length > 0 || chairLayout.order.length > 0) && <button className="link" onClick={() => setChairLayout({ order: [], hidden: [] })}>Reset</button>}</div>
+                      {orderedChairs.map((o, i) => (
+                        <div key={o.id} className="chair-row">
+                          <label className="checkbox"><input type="checkbox" checked={!chairLayout.hidden.includes(o.id)} onChange={() => toggleChair(o.id)} /> {o.name}</label>
+                          <button className="icon-btn tiny" disabled={i === 0} onClick={() => stepChair(o.id, -1)} aria-label={`Move ${o.name} left`}><ArrowUp size={13} /></button>
+                          <button className="icon-btn tiny" disabled={i === orderedChairs.length - 1} onClick={() => stepChair(o.id, 1)} aria-label={`Move ${o.name} right`}><ArrowDown size={13} /></button>
+                        </div>
+                      ))}
+                      <div className="muted" style={{ fontSize: 11.5 }}>Or drag a chair&apos;s heading on the schedule to move it.</div>
+                    </div>
+                  )}
                   <button className="menu-item" onClick={() => { setOptionsOpen(false); window.open(`/schedule/print?date=${date}${providerFilter ? `&provider_id=${providerFilter}` : ''}`, '_blank'); }}><Printer size={16} /> Print the day (one page per provider)</button>
                 </div>
               )}
@@ -511,6 +558,7 @@ export default function Schedule() {
             onOpenBlockout={(b) => can('schedule:write') && setModal({ type: 'block', blockout: b })}
             placing={placing} onPlace={onPlace} selectedId={selectedId} scrollKey={`${view}|${from}|${zoom}`}
             onPin={can('schedule:write') ? onPin : undefined}
+            onReorderColumn={view === 'day' && mode === 'operatory' ? (from, to) => moveChair(from.chairId, to.chairId) : undefined}
           />
           </>
         )}

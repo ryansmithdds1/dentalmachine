@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { requirePermission, HttpError } from '../auth.js';
+import { requirePermission, HttpError, can } from '../auth.js';
 import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, practiceNow } from '../util.js';
 import { schemaInfo } from '../db.js';
 import { emitPatient } from '../webhooks.js';
@@ -263,6 +263,38 @@ export default function patientRoutes({ db }) {
     await audit(db, req, 'patient.create', 'patients', id);
     await emitPatient(db, id, 'patient.created');
     res.status(201).json(await db.get('SELECT * FROM patients WHERE id = ?', id));
+  });
+
+  // The small card shown when hovering a visit on the schedule: who they are and what to know before
+  // they sit down. Health details need clinical access, money needs billing access (as on the huddle).
+  r.get('/patients/:id/card', requirePermission('patients:read'), async (req, res) => {
+    const p = await findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient');
+    const pid = req.user.practice_id;
+    const today = (await practiceNow(db, pid)).slice(0, 10);
+    const clinical = can(req.user, 'clinical:read');
+    const billing = can(req.user, 'billing:read');
+    const policy = billing ? await primaryPolicy(db, pid, p.id) : null;
+    const elig = policy ? await db.get('SELECT status, created_at FROM eligibility_checks WHERE patient_insurance_id = ? ORDER BY id DESC LIMIT 1', policy.id) : null;
+    const visit = (op, dir) => db.get(
+      `SELECT a.start_time, a.reason, a.status, pr.name AS provider_name FROM appointments a JOIN providers pr ON pr.id = a.provider_id
+       WHERE a.practice_id = ? AND a.patient_id = ? AND a.start_time ${op} ? AND a.status ${op === '<' ? "= 'completed'" : "NOT IN ('cancelled','no_show','completed')"} ORDER BY a.start_time ${dir} LIMIT 1`,
+      pid, p.id, op === '<' ? today : `${today} 24:00`,
+    );
+    const unscheduled = clinical ? await db.get("SELECT COUNT(*) AS n, COALESCE(SUM(fee), 0) AS amount FROM procedures WHERE practice_id = ? AND patient_id = ? AND status = 'planned' AND appointment_id IS NULL", pid, p.id) : null;
+    const missed = (await db.get("SELECT COUNT(*) AS n FROM appointments WHERE practice_id = ? AND patient_id = ? AND status = 'no_show' AND start_time >= ?", pid, p.id, `${Number(today.slice(0, 4)) - 2}${today.slice(4)}`)).n;
+    res.json({
+      id: p.id, first_name: p.first_name, last_name: p.last_name, preferred_name: p.preferred_name, dob: p.dob, phone: p.phone, email: p.email,
+      photo: p.photo || null, office_alert: p.office_alert, language: p.language,
+      ...(clinical ? { medical_alerts: p.medical_alerts, allergies: p.allergies, premed_required: !!p.premed_required, medical_reviewed_at: p.medical_reviewed_at } : {}),
+      ...(billing ? {
+        balance: await patientBalance(db, pid, p.id),
+        insurance: policy ? { carrier: policy.carrier_name, eligibility: elig?.status ?? null, checked_at: elig?.created_at ?? null } : null,
+      } : {}),
+      last_visit: (await visit('<', 'DESC')) || null,
+      next_visit: (await visit('>=', 'ASC')) || null,
+      unscheduled: unscheduled ? { count: Number(unscheduled.n), amount: Number(unscheduled.amount) } : null,
+      missed_2y: Number(missed),
+    });
   });
 
   r.get('/patients/:id', requirePermission('patients:read'), async (req, res) => {

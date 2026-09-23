@@ -5,7 +5,7 @@
 import { audit } from './util.js';
 
 const RULES = [
-  [/^\/patients\/(\d+)\/(notes|perio|treatment-plans|prescriptions|ledger|statement|documents|mounts|insurance|insurance-updates|procedures|vitals|forms|history-review|ortho|referrals|payment-methods|payment-plans|payment-requests|eligibility|family|note-draft|followups|membership|unclaimed-procedures|conversation|consents\/suggest)$/, 'patients', (m) => `patient.${m[2].replace(/\//g, '_')}.view`],
+  [/^\/patients\/(\d+)\/(card|notes|perio|treatment-plans|prescriptions|ledger|statement|documents|mounts|insurance|insurance-updates|procedures|vitals|forms|history-review|ortho|referrals|payment-methods|payment-plans|payment-requests|eligibility|family|note-draft|followups|membership|unclaimed-procedures|conversation|consents\/suggest)$/, 'patients', (m) => `patient.${m[2].replace(/\//g, '_')}.view`],
   [/^\/documents\/(\d+)\/(thumb|viewer)$/, 'documents', (m) => `document.${m[2]}`],
   [/^\/imaging\/unfiled\/(\d+)\/image$/, 'unfiled_images', () => 'imaging.unfiled_view'],
   [/^\/treatment-plans\/(\d+)$/, 'treatment_plans', () => 'treatment_plan.view'],
