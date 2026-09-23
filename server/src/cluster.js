@@ -60,22 +60,33 @@ export async function hit(key, windowMs) {
   const now = Date.now();
   const entry = windows.get(key);
   if (!entry || now - entry.start > windowMs) {
-    windows.set(key, { start: now, count: 1 });
-    if (windows.size > 50_000) windows.clear();
+    windows.set(key, { start: now, count: 1, windowMs });
+    // Keep memory bounded by dropping only windows that have ended (never live counters).
+    if (windows.size > 50_000) for (const [k, e] of windows) if (now - e.start > e.windowMs) windows.delete(k);
     return 1;
   }
   return ++entry.count;
 }
 
-// Runs a background job on only one server at a time (reminders, autopay, clearinghouse polling).
+// Runs a job on only one server at a time — and only once at a time on this server (reminders, autopay,
+// clearinghouse polling). Returns null when the job is already running somewhere.
+const running = new Set();
+const RELEASE = "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end";
 export async function runExclusive(name, ttlMs, fn) {
-  if (!redis) return fn();
-  const key = `${PREFIX}:lock:${name}`;
-  const ok = await redis.set(key, nodeId, { NX: true, PX: ttlMs });
-  if (!ok) return null;
+  if (running.has(name)) return null;
+  running.add(name);
   try {
-    return await fn();
+    if (!redis) return await fn();
+    const key = `${PREFIX}:lock:${name}`;
+    const token = `${nodeId}:${randomUUID()}`;
+    if (!(await redis.set(key, token, { NX: true, PX: ttlMs }))) return null;
+    try {
+      return await fn();
+    } finally {
+      // Delete the lock only if it's still ours (it may have expired and been taken by another server).
+      await redis.eval(RELEASE, { keys: [key], arguments: [token] }).catch(() => {});
+    }
   } finally {
-    if ((await redis.get(key)) === nodeId) await redis.del(key);
+    running.delete(name);
   }
 }

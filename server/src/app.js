@@ -62,7 +62,9 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   app.locals.clearinghouse = clearinghouse;
   app.locals.payments = payments;
   app.locals.messenger = messenger;
-  app.set('trust proxy', 1);
+  // Client IPs (rate limits, audit log) come from X-Forwarded-For only when set by a proxy we trust:
+  // by default one on a private network (a load balancer in the same VPC). Set TRUST_PROXY for others.
+  app.set('trust proxy', process.env.TRUST_PROXY ? (/^\d+$/.test(process.env.TRUST_PROXY) ? Number(process.env.TRUST_PROXY) : process.env.TRUST_PROXY) : 'loopback, linklocal, uniquelocal');
   app.disable('x-powered-by');
   app.use(stripeWebhook({ db, config, payments })); // needs the raw body, so before express.json
   app.use(smsWebhook({ db, config }));

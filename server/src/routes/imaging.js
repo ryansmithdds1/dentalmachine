@@ -112,6 +112,7 @@ export function bridgeAgentRoutes({ db, storage }) {
       }
       if (fresh.length || Date.now() > deadline || aborted) return res.json(fresh);
       await new Promise((resolve) => setTimeout(resolve, 700));
+      if (aborted) return undefined; // the agent hung up (or the server is shutting down)
     }
   });
 

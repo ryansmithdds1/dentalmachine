@@ -145,10 +145,12 @@ export async function postClaimPayment(
         description: `Insurance write-off - ${carrier.name} (claim #${claim.id})`, claim_id: claim.id, entry_date: date, created_by: userId,
       });
     }
-    await db.run(
-      "UPDATE claims SET paid_amount = paid_amount + ?, status = ?, paid_at = datetime('now'), payer_claim_number = COALESCE(?, payer_claim_number) WHERE id = ?",
+    // Only an open claim takes a payment; a concurrent post rolls this one back instead of doubling it.
+    const updated = await db.run(
+      "UPDATE claims SET paid_amount = paid_amount + ?, status = ?, paid_at = datetime('now'), denial_reason = NULL, payer_claim_number = COALESCE(?, payer_claim_number) WHERE id = ? AND status IN ('submitted','partially_paid','denied')",
       amount, final ? 'paid' : 'partially_paid', payerClaimNumber, claim.id,
     );
+    if (!updated.changes) throw new HttpError(409, `Claim #${claim.id} is no longer open for payment`);
     // First payment on a claim satisfies the deductible it applied.
     if (claim.status === 'submitted' && claim.deductible_applied > 0) {
       await db.run('UPDATE patient_insurance SET deductible_met = CASE WHEN deductible_met + ? > deductible THEN deductible ELSE deductible_met + ? END WHERE id = ?', claim.deductible_applied, claim.deductible_applied, claim.patient_insurance_id);

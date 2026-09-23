@@ -5,7 +5,7 @@ import { generateKeyPairSync } from 'node:crypto';
 import ssh2 from 'ssh2';
 import { harness } from './helpers.js';
 import { createClearinghouse, processInbound } from '../src/clearinghouse.js';
-import { parse277, parse999, build276, parseX12, sandbox999 } from '../src/x12.js';
+import { parse277, parse999, build276, parseX12, sandbox999, sandbox277, sandbox835 } from '../src/x12.js';
 
 const h = harness();
 
@@ -54,7 +54,8 @@ test('a rejected batch (999) sends claims back for correction', async () => {
   const sent = await api.post('/claims/837', { claim_ids: [claim.id] }); // manual download marks it submitted
   const control = parseX12(sent.data).find((s) => s.id === 'GS').e[6];
   // Record the batch as if it had been uploaded, then load the clearinghouse's rejection.
-  await h.db.run("INSERT INTO edi_batches (practice_id, control, claim_ids, status) VALUES (?, ?, ?, 'sent')", claim.practice_id, String(Number(control)), JSON.stringify([claim.id]));
+  const batch = await h.db.run("INSERT INTO edi_batches (practice_id, control, claim_ids, status) VALUES (?, ?, ?, 'sent')", claim.practice_id, String(Number(control)), JSON.stringify([claim.id]));
+  await h.db.run('UPDATE claims SET batch_id = ? WHERE id = ?', batch.id, claim.id);
   const rejection = sandbox999({ groupControl: control, accepted: false }).replace('IK5*R', 'IK3*NM1*12**8~IK4*9*67*7*BADID~IK5*R');
   const ack = parse999(rejection);
   assert.equal(ack.status, 'rejected');
@@ -218,5 +219,114 @@ test('real-time eligibility and claim status over CAQH CORE multipart', async ()
     assert.equal(parse277(x277).claims[0].group, 'pending');
   } finally {
     srv.close();
+  }
+});
+
+// ---- Hardening: responses that arrive twice, late, out of scope, split or bundled ----
+const era835 = (claims, eft = `EFT${Math.random().toString(36).slice(2, 8)}`) =>
+  sandbox835({ payee: { name: 'Practice', npi: '1234567893' }, eft, date: '2026-01-15', claims: claims.map((c) => ({ billed: 23500, patient: 0, write_off: 0, payer_claim_number: 'PCN1', ...c })) });
+// Two transactions (two payers' remittances) in one interchange.
+function bundle835(a, b) {
+  const segs = (x) => x.split('~').filter(Boolean);
+  const inner = (x) => segs(x).filter((s) => !/^(ISA|GS|GE|IEA)\*/.test(s));
+  const outer = segs(a);
+  return [...outer.filter((s) => /^(ISA|GS)\*/.test(s)), ...inner(a), ...inner(b), ...outer.filter((s) => /^(GE|IEA)\*/.test(s))].join('~') + '~';
+}
+async function manuallySent(api, claim) {
+  const sent = await api.post('/claims/837', { claim_ids: [claim.id] });
+  assert.equal(sent.status, 200, JSON.stringify(sent.data));
+  return Number(parseX12(sent.data).find((s) => s.id === 'GS').e[6]);
+}
+
+test('responses are scoped: one practice cannot post to or reject another practice\'s claims', async () => {
+  const a = await claimReady();
+  const b = await h.practice();
+  await manuallySent(a.api, a.claim);
+  const up = await b.api.post('/era/import?filename=x.835', era835([{ control_number: `DM${a.claim.id}`, paid: 23500 }]));
+  assert.equal(up.status, 201, JSON.stringify(up.data));
+  assert.equal(up.data.claims[0].result, 'unmatched');
+  assert.equal((await a.api.get(`/claims/${a.claim.id}`)).data.status, 'submitted');
+  const rej = await b.api.post('/clearinghouse/responses?filename=x.277', sandbox277({ claims: [{ control_number: `DM${a.claim.id}`, category: 'A7', code: '21', last_name: 'X', first_name: 'Y' }] }));
+  assert.equal(rej.status, 201);
+  assert.equal((await a.api.get(`/claims/${a.claim.id}`)).data.status, 'submitted');
+});
+
+test('the same response file processed twice at once is applied once', async () => {
+  const { api, claim, patient } = await claimReady();
+  await manuallySent(api, claim);
+  const file = { name: 'dup.835', content: era835([{ control_number: `DM${claim.id}`, paid: claim.estimated_amount, write_off: 23500 - claim.estimated_amount }]) };
+  const results = await Promise.all([processInbound(h.db, file), processInbound(h.db, file), processInbound(h.db, file)]);
+  assert.equal(results.filter((r) => r.duplicate).length, 2);
+  const payments = (await api.get(`/patients/${patient.id}/ledger`)).data;
+  assert.equal((payments.entries || payments).filter((e) => e.type === 'insurance_payment').length, 1);
+  assert.equal((await api.get(`/claims/${claim.id}`)).data.status, 'paid');
+});
+
+test('a late rejection of an older submission does not undo a resend', async () => {
+  const { api, claim } = await claimReady();
+  const control = await manuallySent(api, claim);
+  await h.db.run("INSERT INTO edi_batches (practice_id, control, claim_ids, status) VALUES (?, ?, ?, 'sent')", claim.practice_id, String(control), JSON.stringify([claim.id]));
+  // Sending again needs a deliberate resend.
+  const again = await api.post('/claims/submit', { claim_ids: [claim.id] });
+  assert.equal(again.status, 409);
+  assert.equal(again.data.details.already_sent, true);
+  // Park the sandbox's instant answers so the resend stays in flight.
+  const resend = await api.post('/claims/submit', { claim_ids: [claim.id], resend: true });
+  assert.equal(resend.status, 201, JSON.stringify(resend.data));
+  const now = (await api.get(`/claims/${claim.id}`)).data;
+  assert.match(now.control_number, new RegExp(`^DM${claim.id}B${resend.data.batch_id}$`));
+  // Now the first batch's rejection turns up.
+  await api.post('/clearinghouse/responses?filename=old.999', sandbox999({ groupControl: control, accepted: false }));
+  const c = (await api.get(`/claims/${claim.id}`)).data;
+  assert.notEqual(c.status, 'draft');
+  const events = (await api.get(`/claims/${claim.id}/events`)).data;
+  assert.ok(events.some((e) => /earlier submission/.test(e.message)));
+});
+
+test('835 files: several remittances in one file, split claim lines, and patient-responsibility write-offs', async () => {
+  const one = await claimReady();
+  const two = await claimReady();
+  await manuallySent(one.api, one.claim);
+  await manuallySent(one.api, two.claim).catch(() => {}); // other practice — send through its own account
+  await manuallySent(two.api, two.claim);
+  // Claim one paid in two lines (150 + 50), $35 patient share, $0 contractual listed → rest written off.
+  const fileA = era835([
+    { control_number: `DM${one.claim.id}`, paid: 15000, patient: 3500, billed: 20000 },
+    { control_number: `DM${one.claim.id}`, paid: 0, patient: 0, billed: 3500, write_off: 3500 },
+  ]).replace(/CLP\*([^*]+)\*4\*/, 'CLP*$1*1*');
+  const fileB = era835([{ control_number: `DM${two.claim.id}`, paid: 20000, billed: 23500, patient: 0 }]).replace(/CAS\*CO\*45/, 'CAS*PI*45');
+  const both = bundle835(fileA, fileB);
+  const res = await processInbound(h.db, { name: 'multi.835', content: both });
+  assert.equal(res.error ?? null, null, JSON.stringify(res));
+  const c1 = (await one.api.get(`/claims/${one.claim.id}`)).data;
+  assert.equal(c1.status, 'paid');
+  assert.equal(c1.paid_amount, 15000);
+  assert.equal((await one.api.get(`/patients/${one.patient.id}/ledger`)).data.balance, 3500);
+  const c2 = (await two.api.get(`/claims/${two.claim.id}`)).data;
+  assert.equal(c2.status, 'paid');
+  assert.equal(c2.paid_amount, 20000);
+  assert.equal((await two.api.get(`/patients/${two.patient.id}/ledger`)).data.balance, 0);
+});
+
+test('a TA1 rejection sends the whole batch back; a non-277 status answer is a gateway error', async () => {
+  const { api, claim } = await claimReady();
+  const control = await manuallySent(api, claim);
+  const batch = await h.db.run("INSERT INTO edi_batches (practice_id, control, claim_ids, status) VALUES (?, ?, ?, 'sent')", claim.practice_id, String(control), JSON.stringify([claim.id]));
+  await h.db.run('UPDATE claims SET batch_id = ? WHERE id = ?', batch.id, claim.id);
+  const ta1 = `ISA*00*          *00*          *ZZ*CH             *ZZ*DM             *260101*1200*^*00501*${String(control).padStart(9, '0')}*0*P*:~TA1*${String(control).padStart(9, '0')}*260101*1200*R*022~IEA*0*${String(control).padStart(9, '0')}~`;
+  assert.equal((await api.post('/clearinghouse/responses?filename=r.ta1', ta1)).status, 201);
+  const c = (await api.get(`/claims/${claim.id}`)).data;
+  assert.equal(c.status, 'draft');
+  assert.equal(c.ch_status, 'rejected');
+
+  await manuallySent(api, claim);
+  const ch = h.app.locals.clearinghouse;
+  ch.realtime = { claimStatus: async () => sandbox999({ groupControl: 1 }) };
+  try {
+    const r = await api.post(`/claims/${claim.id}/status-check`);
+    assert.equal(r.status, 502);
+    assert.match(r.data.error, /999/);
+  } finally {
+    delete ch.realtime;
   }
 });

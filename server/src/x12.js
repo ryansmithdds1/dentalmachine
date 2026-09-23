@@ -178,9 +178,32 @@ export function parse271(text) {
   return out;
 }
 
-export function parse835(text) {
-  const segs = parseX12(text);
-  if (!segs.some((s) => s.id === 'ST' && s.e[1] === '835')) throw new Error('Not an 835 remittance file');
+// Splits a file into its ST…SE transaction sets (one file can carry several checks or batches).
+export function transactions(segs, type) {
+  const out = [];
+  let cur = null;
+  for (const s of segs) {
+    if (s.id === 'ST') cur = s.e[1] === type ? [s] : null;
+    else if (cur) {
+      cur.push(s);
+      if (s.id === 'SE') {
+        out.push(cur);
+        cur = null;
+      }
+    }
+  }
+  return out;
+}
+
+// Every remittance (check/EFT) in an 835 file.
+export function parse835All(text) {
+  const txs = transactions(parseX12(text), '835');
+  if (!txs.length) throw new Error('Not an 835 remittance file');
+  return txs.map(parse835Segments);
+}
+export const parse835 = (text) => parse835All(text)[0];
+
+function parse835Segments(segs) {
   const era = { payer_name: null, check_number: null, payment_date: null, total_paid: 0, claims: [] };
   let claim = null;
   let inPayer = false;
@@ -264,9 +287,15 @@ export function build276({ practice, bundle, senderId, receiverId, control = 1, 
 }
 
 // ---- 999 implementation acknowledgment ----
+// A 999 can acknowledge several functional groups (batches); `groups` lists each one.
 export function parse999(text) {
-  const segs = parseX12(text);
-  if (!segs.some((s) => s.id === 'ST' && s.e[1] === '999')) throw new Error('Not a 999 acknowledgment');
+  const txs = transactions(parseX12(text), '999');
+  if (!txs.length) throw new Error('Not a 999 acknowledgment');
+  const groups = txs.map(parse999Segments);
+  return { ...groups[0], groups };
+}
+
+function parse999Segments(segs) {
   const out = { group_control: null, functional_id: null, transactions: [], status: null, errors: [] };
   for (const s of segs) {
     if (s.id === 'AK1') {
@@ -328,11 +357,20 @@ export function parse277(text) {
   return { kind, claims };
 }
 
+// TA1 interchange acknowledgment: the clearinghouse accepted or refused the whole file.
+export function parseTA1(text) {
+  const ta1 = parseX12(text).find((s) => s.id === 'TA1');
+  if (!ta1) throw new Error('Not a TA1 acknowledgment');
+  const status = { A: 'accepted', E: 'accepted_with_errors', R: 'rejected' }[ta1.e[4]] || 'unknown';
+  return { interchange_control: ta1.e[1], status, note_code: ta1.e[5] || null, errors: status === 'rejected' ? [`Interchange rejected (TA1 note ${ta1.e[5] || '?'})`] : [] };
+}
+
 // Which X12 transaction a file carries (for routing downloads from the clearinghouse).
 export function x12Type(text) {
   try {
-    const st = parseX12(text).find((s) => s.id === 'ST');
-    if (!st) return null;
+    const segs = parseX12(text);
+    const st = segs.find((s) => s.id === 'ST');
+    if (!st) return segs.some((s) => s.id === 'TA1') ? 'TA1' : null;
     if (st.e[1] === '277' && /X214/.test(st.e[3] || '')) return '277CA';
     return st.e[1];
   } catch {

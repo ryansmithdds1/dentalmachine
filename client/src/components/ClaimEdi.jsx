@@ -19,9 +19,21 @@ export function ChStatus({ claim }) {
 }
 
 // Sends claims to the clearinghouse when connected, otherwise downloads an 837 file for the portal.
-export async function sendClaims(ids, connection) {
-  if (connection?.batch) return api.post('/claims/submit', { claim_ids: ids });
-  const res = await fetch('/api/claims/837', { method: 'POST', headers: { Authorization: `Bearer ${getToken()}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ claim_ids: ids }) });
+// A claim the payer already has is only resent after the user confirms (resends cause duplicate denials).
+export async function sendClaims(ids, connection, resend = false) {
+  try {
+    return await sendOnce(ids, connection, resend);
+  } catch (err) {
+    if (resend || !err.details?.already_sent) throw err;
+    if (!window.confirm(`${err.message.replace(/ — .*/, '')}.\n\nResending can make the payer deny it as a duplicate. Resend anyway?`)) return null;
+    return sendOnce(ids, connection, true);
+  }
+}
+
+async function sendOnce(ids, connection, resend) {
+  const body = { claim_ids: ids, ...(resend ? { resend: true } : {}) };
+  if (connection?.batch) return api.post('/claims/submit', body);
+  const res = await fetch('/api/claims/837', { method: 'POST', headers: { Authorization: `Bearer ${getToken()}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw Object.assign(new Error(err.error || res.statusText), { details: err.details });
