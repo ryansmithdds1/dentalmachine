@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import QRCode from 'qrcode';
 import { api, getToken } from '../../api.js';
 import { useApi } from '../../hooks.js';
 import { useAuth } from '../../auth.jsx';
@@ -57,6 +58,7 @@ function Thumb({ doc, onOpen }) {
       <div className="doc-meta">
         <strong>{doc.filename}{doc.annotated ? ' ✎' : ''}</strong>
         <span className="muted">{catLabel(doc.category)}{doc.tooth ? ` · #${doc.tooth}` : ''} · {fmtDate(doc.created_at)}</span>
+        {doc.tags && JSON.parse(doc.tags).length > 0 && <span className="doc-tags">{JSON.parse(doc.tags).map((t) => <i key={t}>{t}</i>)}</span>}
       </div>
     </button>
   );
@@ -77,6 +79,8 @@ export default function DocumentsTab({ patient }) {
   const input = useRef(null);
   const [focusMount, setFocusMount] = useState(null);
   const [editing, setEditing] = useState(null);
+  const [search, setSearch] = useState('');
+  const [phone, setPhone] = useState(false);
 
   const upload = async (files) => {
     setUploading(true);
@@ -122,7 +126,10 @@ export default function DocumentsTab({ patient }) {
     reload();
   };
 
-  const shown = (docs || []).filter((d) => !filter || d.category === filter);
+  const tagsOf = (d) => { try { return JSON.parse(d.tags || '[]'); } catch { return []; } };
+  const words = search.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const shown = (docs || []).filter((d) => (!filter || d.category === filter)
+    && words.every((w) => [d.filename, d.notes, d.tooth ? `#${d.tooth}` : '', catLabel(d.category), ...tagsOf(d)].join(' ').toLowerCase().includes(w)));
 
   return (
     <>
@@ -145,12 +152,14 @@ export default function DocumentsTab({ patient }) {
       <div className="card">
         <div className="page-header" style={{ marginBottom: 10 }}>
           <h2 style={{ margin: 0 }}>Documents & imaging</h2>
+          <input type="search" aria-label="Search documents" placeholder="Search name, note, tag…" value={search} onChange={(e) => setSearch(e.target.value)} style={{ width: 220 }} />
+          {can('clinical:write') && <button onClick={() => setPhone(true)} title="Take photos or scans with a phone straight into this chart">📱 Scan from phone</button>}
           <select aria-label="Show" value={filter} onChange={(e) => setFilter(e.target.value)} style={{ width: 170 }}>
             <option value="">All types</option>
             {CATEGORIES.map((c) => <option key={c} value={c}>{catLabel(c)}</option>)}
           </select>
         </div>
-        {docs && !shown.length && <div className="empty">No documents yet.</div>}
+        {docs && !shown.length && <div className="empty">{docs.length ? 'Nothing matches.' : 'No documents yet.'}</div>}
         <div className="doc-grid">{shown.map((d) => <Thumb key={d.id} doc={d} onOpen={() => open(d)} />)}</div>
       </div>
 
@@ -187,6 +196,7 @@ export default function DocumentsTab({ patient }) {
           </div>
         </Modal>
       )}
+      {phone && <PhoneScan patient={patient} category={category} onClose={() => setPhone(false)} />}
       {editing && (
         <DocumentDetails doc={editing} onClose={() => setEditing(null)}
           onSaved={(d) => { setEditing(null); setViewing((v) => v && { ...v, doc: { ...v.doc, ...d } }); reload(); }} />
@@ -195,9 +205,40 @@ export default function DocumentsTab({ patient }) {
   );
 }
 
+// A QR code the office shows a patient (or scans with a staff phone): photos taken on that phone go
+// straight into this chart. Good for 15 minutes; new files appear here as they arrive.
+function PhoneScan({ patient, category, onClose }) {
+  const [link, setLink] = useState(null);
+  const [qr, setQr] = useState(null);
+  const [cat, setCat] = useState(category === 'xray' ? 'document' : category);
+  const [error, setError] = useState(null);
+  const make = async (c) => {
+    setError(null);
+    try {
+      const l = await api.post(`/patients/${patient.id}/upload-links`, { category: c });
+      setLink(l);
+      setQr(await QRCode.toDataURL(l.url, { margin: 1, width: 220 }));
+    } catch (e) { setError(e); }
+  };
+  useEffect(() => { make(cat); }, [cat]); // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <Modal title="Scan from a phone" onClose={onClose}>
+      <ErrorBox error={error} />
+      <label>Save as<select value={cat} onChange={(e) => setCat(e.target.value)}>{CATEGORIES.map((c) => <option key={c} value={c}>{catLabel(c)}</option>)}</select></label>
+      {link && (
+        <div style={{ textAlign: 'center', marginTop: 12 }}>
+          {qr && <img src={qr} alt="QR code to upload from a phone" width={220} height={220} />}
+          <p>Scan with the phone camera, then take photos of the {catLabel(cat).toLowerCase()} (insurance card, referral letter, outside x-ray…). They land in {patient.first_name}&apos;s chart.</p>
+          <p className="muted" style={{ fontSize: 12, wordBreak: 'break-all' }}>{link.url}<br />Works for 15 minutes.</p>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 // Fix what was recorded at upload.
 function DocumentDetails({ doc, onClose, onSaved }) {
-  const [f, setF] = useState({ filename: doc.filename, category: doc.category, tooth: doc.tooth || '', taken_at: doc.taken_at || '', notes: doc.notes || '' });
+  const [f, setF] = useState({ filename: doc.filename, category: doc.category, tooth: doc.tooth || '', taken_at: doc.taken_at || '', notes: doc.notes || '', tags: (() => { try { return JSON.parse(doc.tags || '[]').join(', '); } catch { return ''; } })() });
   const [error, setError] = useState(null);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   const save = async (e) => {
@@ -214,6 +255,7 @@ function DocumentDetails({ doc, onClose, onSaved }) {
           <label>Tooth<input value={f.tooth} onChange={set('tooth')} placeholder="e.g. 19" /></label>
           <label>Date taken<input type="date" value={f.taken_at} onChange={set('taken_at')} /></label>
           <label className="full">Note<input value={f.notes} onChange={set('notes')} /></label>
+          <label className="full">Tags (comma-separated)<input value={f.tags} onChange={set('tags')} placeholder="e.g. pre-op, ortho records" /></label>
         </div>
         <div className="form-actions"><button type="button" onClick={onClose}>Cancel</button><button className="primary">Save</button></div>
       </form>

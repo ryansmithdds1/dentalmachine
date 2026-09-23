@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import express, { Router } from 'express';
 import { HttpError, rateLimit } from '../auth.js';
 import { insert, update, hashToken, practiceNow, normalizeDateTime, audit, mapSeq, publicPractice } from '../util.js';
 import { MEDICAL_CONDITIONS, parseMedicalHistory, contactUpdatesFromHistory } from '../forms.js';
@@ -11,6 +11,8 @@ import { openSlots } from './schedule.js';
 import { publish } from '../events.js';
 import { officeHours } from '../hours.js';
 import { parseDurations } from '../patterns.js';
+import { sniffMime } from './imaging.js';
+import { MAX_UPLOAD_BYTES } from './documents.js';
 
 // Used only for practices that haven't marked any appointment types as bookable online.
 const FALLBACK_REASONS = [
@@ -38,6 +40,40 @@ export default function publicRoutes({ db, storage, payments, messenger, config 
   };
   const r = Router();
   const limiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 30 });
+
+  // ---- Scan to chart from a phone (a 15-minute link shown to staff as a QR code) ----
+  const uploadLink = async (token) => {
+    const link = await db.get('SELECT * FROM upload_links WHERE token_hash = ?', hashToken(String(token)));
+    if (!link) throw new HttpError(404, 'This link is not valid');
+    if (link.expires_at < new Date().toISOString()) throw new HttpError(410, 'This link has expired — make a new one on the computer');
+    return link;
+  };
+  const uploadLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 60, name: 'phone-upload' });
+  r.get('/upload/:token', uploadLimiter, async (req, res) => {
+    const link = await uploadLink(req.params.token);
+    const p = await db.get('SELECT first_name, last_name FROM patients WHERE id = ?', link.patient_id);
+    const practice = await db.get('SELECT name FROM practices WHERE id = ?', link.practice_id);
+    // First name and last initial only: enough for staff to see it's the right chart.
+    res.json({ practice: practice.name, patient: `${p.first_name} ${p.last_name.slice(0, 1)}.`, category: link.category, expires_at: link.expires_at, uploads: link.uploads });
+  });
+  r.post('/upload/:token', uploadLimiter, express.raw({ type: () => true, limit: MAX_UPLOAD_BYTES }), async (req, res) => {
+    const link = await uploadLink(req.params.token);
+    if (link.uploads >= 40) throw new HttpError(429, 'That is plenty for one link — make a new one');
+    const data = req.body;
+    if (!Buffer.isBuffer(data) || !data.length) throw new HttpError(400, 'Empty upload');
+    const filename = String(req.query.filename || 'scan').replace(/[^\w.\- ()]/g, '_').slice(0, 200);
+    const mime = sniffMime(data, filename);
+    if (!mime) throw new HttpError(415, 'Photos and PDFs only');
+    const saved = await storage.save(link.practice_id, data);
+    const id = await insert(db, 'documents', {
+      practice_id: link.practice_id, patient_id: link.patient_id, category: link.category, filename, mime, size: data.length,
+      storage_key: saved.storageKey, encrypted: saved.encrypted ? 1 : 0, uploaded_by: link.created_by, notes: 'Scanned from a phone',
+    });
+    await db.run('UPDATE upload_links SET uploads = uploads + 1 WHERE id = ?', link.id);
+    await audit(db, { user: { practice_id: link.practice_id, id: link.created_by }, ip: req.ip }, 'document.phone_upload', 'documents', id, { patient_id: link.patient_id });
+    publish(link.practice_id, { type: 'documents', patient_id: link.patient_id });
+    res.status(201).json({ ok: true, id });
+  });
   const reader = rateLimit({ windowMs: 60 * 1000, max: 120 });
   const logPublic = async (req, practiceId, action, entity, entityId, details) => await audit(db, { ip: req.ip, user: { practice_id: practiceId, id: null } }, action, entity, entityId, details);
 

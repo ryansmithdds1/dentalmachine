@@ -865,6 +865,19 @@ CREATE TABLE IF NOT EXISTS unfiled_images (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Short-lived links for adding photos or scans to a chart from a phone (shown as a QR code).
+CREATE TABLE IF NOT EXISTS upload_links (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  token_hash TEXT NOT NULL UNIQUE,
+  category TEXT NOT NULL DEFAULT 'document',
+  created_by INTEGER REFERENCES users(id),
+  expires_at TEXT NOT NULL,
+  uploads INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Saved custom queries from the report builder (a JSON description, never SQL).
 CREATE TABLE IF NOT EXISTS custom_queries (
   id INTEGER PRIMARY KEY,
@@ -1495,6 +1508,7 @@ const COLUMNS = [
   ['booking_requests', 'referral_source', 'TEXT'],
   ['patients', 'family_relationship', 'TEXT'],
   ['practices', 'financing', 'TEXT'],
+  ['documents', 'tags', 'TEXT'],
   ['patients', 'second_responsible_id', 'INTEGER REFERENCES patients(id)'],
   ['appointment_types', 'pattern', 'TEXT'],
   ['appointment_types', 'provider_durations', 'TEXT'],

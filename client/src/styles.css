@@ -711,3 +711,7 @@ p a, .muted a, li a, .public-notice a { text-decoration: underline; }
 .fin-option { display: inline-flex; align-items: center; gap: 6px; margin: 2px 10px 2px 0; padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px; background: #fff; }
 .note-signature { font-size: 12px; color: var(--muted); font-style: italic; margin-top: 6px; } .notes-print .note-print { border-top: 1px solid var(--border); padding: 10px 0; break-inside: avoid; }
 .doc-tile.unfiled { cursor: pointer; } .doc-tile.picked { outline: 2px solid var(--primary); }
+.doc-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; } .doc-tags i { font-style: normal; font-size: 11px; background: var(--primary-soft, #e6f4f1); color: var(--primary); border-radius: 999px; padding: 1px 7px; }
+.phone-upload { display: block; margin: 12px auto; padding: 16px; max-width: 320px; border: 2px dashed var(--border); border-radius: 12px; font-size: 18px; font-weight: 600; cursor: pointer; }
+.phone-upload.primary { background: var(--primary); color: #fff; border-style: solid; border-color: var(--primary); }
+.phone-upload input { display: none; }

@@ -35,6 +35,7 @@ const DepositSlipPrint = lazy(() => import('./pages/PrintDocs.jsx').then((m) => 
 const CollectionLetterPrint = lazy(() => import('./pages/PrintDocs.jsx').then((m) => ({ default: m.CollectionLetterPrint })));
 const AttachmentCoverPrint = lazy(() => import('./pages/PrintDocs.jsx').then((m) => ({ default: m.AttachmentCoverPrint })));
 const CaseAcceptance = lazy(() => import('./pages/public/CaseAcceptance.jsx'));
+const PhoneUpload = lazy(() => import('./pages/public/PhoneUpload.jsx'));
 const Portal = lazy(() => import('./pages/public/Portal.jsx'));
 const Reports = lazy(() => import('./pages/Reports.jsx'));
 const Settings = lazy(() => import('./pages/Settings.jsx'));
@@ -62,6 +63,7 @@ export default function App() {
         <Route path="/u/:token" element={<UnsubscribePage />} />
         <Route path="/pay/:result" element={<PayResult />} />
         <Route path="/tp/:token" element={<CaseAcceptance />} />
+        <Route path="/scan/:token" element={<PhoneUpload />} />
         <Route path="/portal/:key" element={<Portal />} />
         <Route path="*" element={<StaffApp />} />
       </Routes>

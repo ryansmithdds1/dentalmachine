@@ -167,7 +167,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(settingsRoutes({ db, secret, config }));
   api.use(reportRoutes({ db }));
   api.use(engagementRoutes({ db, messenger, config }));
-  api.use(documentRoutes({ db, storage }));
+  api.use(documentRoutes({ db, storage, config }));
   api.use(paymentRoutes({ db, config, messenger, payments, mailer }));
   api.use(familyRoutes({ db }));
   api.use(conversationRoutes({ db, messenger }));

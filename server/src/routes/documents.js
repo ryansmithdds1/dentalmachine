@@ -1,6 +1,6 @@
 import express, { Router } from 'express';
 import { requirePermission, HttpError } from '../auth.js';
-import { findOr404, insert, audit, requireOneOf, validTooth } from '../util.js';
+import { findOr404, insert, audit, requireOneOf, validTooth, newToken } from '../util.js';
 import { sniffMime } from './imaging.js';
 import { dicomToImage } from '../dicomimage.js';
 import { makeThumbnail, imageSize } from '../thumbnails.js';
@@ -12,16 +12,24 @@ const ANNOTATION_TYPES = ['line', 'arrow', 'measure', 'text', 'circle'];
 
 const CATEGORIES = ['xray', 'photo', 'document', 'consent', 'insurance_card', 'referral', 'other'];
 const ALLOWED = /^(image\/(png|jpeg|gif|webp|bmp|tiff)|application\/pdf|application\/dicom|text\/plain)$/;
+// Tags: short labels to find documents by ("pre-op", "ortho records", "insurance"), stored as a JSON list.
+export function cleanTags(v) {
+  const list = (Array.isArray(v) ? v : String(v || '').split(','))
+    .map((t) => String(t).trim().toLowerCase().replace(/\s+/g, ' ').slice(0, 30)).filter(Boolean);
+  const unique = [...new Set(list)].slice(0, 12);
+  return unique.length ? JSON.stringify(unique) : null;
+}
+
 export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 
 // Patient documents & imaging. Files are uploaded as the raw request body.
-export default function documentRoutes({ db, storage }) {
+export default function documentRoutes({ db, storage, config = {} }) {
   const r = Router();
 
   r.get('/patients/:id/documents', requirePermission('clinical:read'), async (req, res) => {
     const patient = await findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient');
     res.json(await db.all(
-      `SELECT d.id, d.category, d.filename, d.mime, d.size, d.tooth, d.notes, d.source, d.taken_at, d.created_at, u.name AS uploaded_by_name,
+      `SELECT d.id, d.category, d.filename, d.mime, d.size, d.tooth, d.notes, d.source, d.taken_at, d.created_at, d.tags, u.name AS uploaded_by_name,
          CASE WHEN d.annotations IS NOT NULL AND d.annotations != '[]' THEN 1 ELSE 0 END AS annotated
        FROM documents d LEFT JOIN users u ON u.id = d.uploaded_by
        WHERE d.practice_id = ? AND d.patient_id = ? AND d.deleted_at IS NULL ORDER BY d.id DESC`,
@@ -213,11 +221,23 @@ export default function documentRoutes({ db, storage }) {
       row.filename = name;
     }
     if (b.notes !== undefined) row.notes = String(b.notes || '').slice(0, 500) || null;
+    if (b.tags !== undefined) row.tags = cleanTags(b.tags);
     if (!Object.keys(row).length) throw new HttpError(400, 'Nothing to change');
     await db.run(`UPDATE documents SET ${Object.keys(row).map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, ...Object.values(row), doc.id);
     await audit(db, req, 'document.update', 'documents', doc.id, { patient_id: doc.patient_id, ...row });
     publish(req.user.practice_id, { type: 'documents', patient_id: doc.patient_id });
-    res.json(await db.get('SELECT id, category, tooth, taken_at, filename, notes FROM documents WHERE id = ?', doc.id));
+    res.json(await db.get('SELECT id, category, tooth, taken_at, filename, notes, tags FROM documents WHERE id = ?', doc.id));
+  });
+
+  // Scan to chart from a phone: a link (shown as a QR code) good for 15 minutes, for this patient only.
+  r.post('/patients/:id/upload-links', requirePermission('clinical:write'), async (req, res) => {
+    const patient = await findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient');
+    const category = CATEGORIES.includes(req.body?.category) ? req.body.category : 'document';
+    const { token, hash } = newToken();
+    const expires = new Date(Date.now() + 15 * 60_000).toISOString();
+    await insert(db, 'upload_links', { practice_id: req.user.practice_id, patient_id: patient.id, token_hash: hash, category, created_by: req.user.id, expires_at: expires });
+    await audit(db, req, 'upload_link.create', 'patients', patient.id, { category });
+    res.status(201).json({ url: `${config.appUrl}/scan/${token}`, expires_at: expires, category });
   });
 
   // Soft delete: the file is retained for record-keeping but hidden from the chart.

@@ -113,3 +113,28 @@ test('documents: server thumbnails, browser-made previews for the rest, and edit
   assert.equal((await api.put(`/documents/${pngDoc.id}`, { taken_at: 'yesterday' })).status, 400);
   assert.equal((await api.put(`/documents/${pngDoc.id}`, { tooth: '' })).data.tooth, null);
 });
+
+test('documents: tags, and scan-to-chart from a phone through a short-lived link', async () => {
+  const { api, patient, token } = await h.practice();
+  const up = await (await fetch(`${h.origin}/api/patients/${patient.id}/documents?category=document&filename=letter.png`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'image/png' }, body: encodePng(4, 4, 1, Buffer.alloc(16, 9)) })).json();
+  const t = await api.put(`/documents/${up.id}`, { tags: 'Pre-op, ortho records, pre-op,  ' });
+  assert.deepEqual(JSON.parse(t.data.tags), ['pre-op', 'ortho records']);
+  assert.deepEqual(JSON.parse((await api.get(`/patients/${patient.id}/documents`)).data[0].tags), ['pre-op', 'ortho records']);
+
+  const link = (await api.post(`/patients/${patient.id}/upload-links`, { category: 'insurance_card' })).data;
+  assert.match(link.url, /\/scan\/[\w-]+$/);
+  const tok = link.url.split('/scan/')[1];
+  const info = await (await fetch(`${h.origin}/api/public/upload/${tok}`)).json();
+  assert.equal(info.patient, 'Jane D.', 'first name and initial only');
+  const phone = await fetch(`${h.origin}/api/public/upload/${tok}?filename=card-front.png`, { method: 'POST', headers: { 'Content-Type': 'image/png' }, body: encodePng(4, 4, 1, Buffer.alloc(16, 3)) });
+  assert.equal(phone.status, 201);
+  assert.equal((await fetch(`${h.origin}/api/public/upload/${tok}?filename=x.txt`, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: 'hello' })).status, 415);
+  const docs = (await api.get(`/patients/${patient.id}/documents`)).data;
+  const card = docs.find((d) => d.filename === 'card-front.png');
+  assert.equal(card.category, 'insurance_card');
+  assert.equal(card.notes, 'Scanned from a phone');
+
+  await h.db.run("UPDATE upload_links SET expires_at = '2000-01-01T00:00:00Z'");
+  assert.equal((await fetch(`${h.origin}/api/public/upload/${tok}`)).status, 410);
+  assert.equal((await fetch(`${h.origin}/api/public/upload/not-a-token`)).status, 404);
+});
