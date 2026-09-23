@@ -7,6 +7,7 @@ import {
   syncQbo, sealQbo, qboSettings, pushDeposits, today, day,
 } from '../finance/service.js';
 import { financeOverview } from '../finance/metrics.js';
+import { ppoProfitability } from '../finance/ppo.js';
 import { openSecret } from '../sso.js';
 
 const requireAdmin = (req, _res, next) => (req.user.role === 'admin' ? next() : next(new HttpError(403, 'Only an administrator can connect or disconnect accounts')));
@@ -251,6 +252,15 @@ export default function financeRoutes({ db, config, secret, plaid, qbo }) {
   r.get('/finance/overview', requirePermission('finance:read'), async (req, res) => {
     const months = Math.min(Math.max(Number(req.query.months) || 12, 3), 24);
     res.json(await financeOverview(db, req.user.practice_id, { months, today: await today(db, req.user.practice_id) }));
+  });
+  // Which insurance plans pay for the chair time they take, and what leaving one would likely do.
+  r.get('/finance/ppo', requirePermission('finance:read'), async (req, res) => {
+    const clamp = (v, lo, hi, d) => (v === undefined || v === '' || Number.isNaN(Number(v)) ? d : Math.min(Math.max(Number(v), lo), hi));
+    res.json(await ppoProfitability(db, req.user.practice_id, {
+      today: await today(db, req.user.practice_id), months: clamp(req.query.months, 3, 24, 12),
+      retention: clamp(req.query.retention, 0, 100, 70), refill: clamp(req.query.refill, 0, 100, 50),
+      costPerHour: req.query.cost_per_hour ? Math.round(clamp(req.query.cost_per_hour, 1, 1e8, 0)) : null,
+    }));
   });
 
   return r;

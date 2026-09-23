@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../api.js';
 import { useApi } from '../hooks.js';
@@ -8,7 +8,7 @@ import { ErrorBox } from '../components/ui.jsx';
 
 // The business side: what the practice really costs to run and earns (the schedule and ledger next to the
 // bank and QuickBooks), deposits matched to the bank, the bank's lines by category, and the connections.
-const TABS = [['overview', 'Profit & costs'], ['deposits', 'Deposits'], ['bank', 'Bank activity'], ['connections', 'Connections']];
+const TABS = [['overview', 'Profit & costs'], ['ppo', 'Insurance plans'], ['deposits', 'Deposits'], ['bank', 'Bank activity'], ['connections', 'Connections']];
 const pct = (n) => (n == null ? '—' : `${n}%`);
 const cents = (n) => (n == null ? '—' : money(n));
 const monthName = (m) => new Date(`${m}-15T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', year: '2-digit', timeZone: 'UTC' });
@@ -35,6 +35,7 @@ export default function Finance() {
         </div>
       )}
       {tab === 'overview' && <Overview />}
+      {tab === 'ppo' && <Ppo />}
       {tab === 'deposits' && <Deposits />}
       {tab === 'bank' && status && <Bank categories={status.categories} />}
       {tab === 'connections' && status && <Connections status={status} reload={reload} notice={params.get('qbo')} message={params.get('message')} />}
@@ -121,6 +122,87 @@ function Overview() {
           </table>
         </div>
       </div>
+    </>
+  );
+}
+
+// Which insurance plans pay for the chair time they take. What-ifs are adjustable because every office's
+// patients are different: how many would stay out of network, and how much freed time gets filled.
+const VERDICT = { profitable: ['ok', 'Pays its way'], renegotiate: ['warn', 'Renegotiate'], consider_dropping: ['danger', 'Consider dropping'] };
+function Ppo() {
+  const [q, setQ] = useState({ months: 12, retention: 70, refill: 50, cost: '' });
+  const [open, setOpen] = useState(null);
+  const qs = `months=${q.months}&retention=${q.retention}&refill=${q.refill}${q.cost ? `&cost_per_hour=${Math.round(Number(q.cost) * 100)}` : ''}`;
+  const { data, error } = useApi(`/finance/ppo?${qs}`);
+  if (error) return <ErrorBox error={error} />;
+  if (!data) return <div className="empty">Loading…</div>;
+  const set = (k) => (e) => setQ({ ...q, [k]: e.target.value });
+  return (
+    <>
+      <div className="card">
+        <div className="form-grid">
+          <label>Period<select value={q.months} onChange={set('months')}><option value={6}>6 months</option><option value={12}>12 months</option><option value={24}>24 months</option></select></label>
+          <label>
+            A chair hour costs ($)
+            <input type="number" min="0" value={q.cost} onChange={set('cost')} placeholder={data.measured_cost_per_hour ? (data.measured_cost_per_hour / 100).toFixed(0) : 'enter a cost'} />
+            <span className="muted" style={{ fontSize: 11 }}>{data.measured_cost_per_hour ? `From your ${data.cost_months} months of costs (everything, incl. doctor pay) over chair hours.` : 'Connect the bank or QuickBooks to measure it, or enter one.'}</span>
+          </label>
+          <label>If you left a plan, patients who’d stay (%)<input type="number" min="0" max="100" value={q.retention} onChange={set('retention')} /></label>
+          <label>Freed chair time you’d refill (%)<input type="number" min="0" max="100" value={q.refill} onChange={set('refill')} /></label>
+        </div>
+      </div>
+      {data.insights.length > 0 && (
+        <div className="card" style={{ marginTop: 12 }}>
+          <h2>Worth a look</h2>
+          {data.insights.map((i) => <div key={i.text} className={i.tone === 'warn' ? 'text-warn' : ''} style={{ padding: '4px 0' }}>{i.tone === 'warn' ? '⚠︎ ' : 'ℹ︎ '}{i.text}</div>)}
+        </div>
+      )}
+      <div className="card" style={{ marginTop: 12, padding: 0 }}>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Plan</th><th className="num">Patients</th><th className="num">Chair hrs</th><th className="num">Your fees</th><th className="num">Written off</th><th className="num">Kept</th><th className="num">Kept per hr</th><th className="num">vs cost per hr</th><th className="num">If you left it (per year)</th><th /></tr>
+            </thead>
+            <tbody>
+              {data.carriers.map((c) => (
+                <Fragment key={c.name}>
+                  <tr style={{ cursor: 'pointer' }} onClick={() => setOpen(open === c.name ? null : c.name)}>
+                    <td><strong>{c.name}</strong></td>
+                    <td className="num">{c.patients}</td>
+                    <td className="num">{c.chair_hours}</td>
+                    <td className="num">{money(c.gross)}</td>
+                    <td className="num">{money(c.write_off)} <span className="muted" style={{ fontSize: 11 }}>{pct(c.write_off_pct)}</span></td>
+                    <td className="num">{money(c.net)}</td>
+                    <td className="num"><strong>{cents(c.net_per_hour)}</strong></td>
+                    <td className={`num ${c.profit_per_hour < 0 ? 'text-danger' : ''}`}>{c.profit_per_hour == null ? '—' : `${c.profit_per_hour < 0 ? '−' : '+'}${money(Math.abs(c.profit_per_hour))}`}</td>
+                    <td className={`num ${c.drop?.change_per_year > 0 ? 'text-warn' : ''}`}>{c.drop ? `${c.drop.change_per_year >= 0 ? '+' : '−'}${money(Math.abs(c.drop.change_per_year))}` : '—'}</td>
+                    <td>{c.verdict && <span className={`badge ${VERDICT[c.verdict][0]}`}>{VERDICT[c.verdict][1]}</span>}</td>
+                  </tr>
+                  {open === c.name && (
+                    <tr>
+                      <td colSpan={10} style={{ background: 'var(--surface-2, transparent)' }}>
+                        {c.drop && (
+                          <p style={{ margin: '4px 0 10px', fontSize: 13 }}>
+                            Leaving {c.name}: about {c.drop.patients_leaving} of {c.patients} patients go (−{money(c.drop.lost_net)}); those who stay pay your full fee (+{money(c.drop.recaptured_write_offs)} of write-offs kept);
+                            {' '}{c.drop.freed_hours} chair hours freed, {q.refill}% refilled at {money(c.drop.alt_net_per_hour)}/hr (+{money(c.drop.refilled)}){c.drop.variable_saved ? `, supplies and lab saved on the rest (+${money(c.drop.variable_saved)})` : ''}.
+                            {c.raise_needed_pct > 0 && ` To pay its way, the fee schedule needs to be about ${c.raise_needed_pct}% higher.`}
+                          </p>
+                        )}
+                        <table className="compact-table">
+                          <thead><tr><th>Code</th><th>Service</th><th className="num">Times</th><th className="num">Your fee</th><th className="num">They allow</th><th className="num">% of your fee</th></tr></thead>
+                          <tbody>{c.codes.map((x) => <tr key={x.code}><td>{x.code}</td><td>{x.description}</td><td className="num">{x.count}</td><td className="num">{money(x.fee)}</td><td className="num">{money(x.allowed)}</td><td className="num">{pct(x.pct_of_fee)}</td></tr>)}</tbody>
+                        </table>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              ))}
+            </tbody>
+          </table>
+          {data.carriers.length === 0 && <div className="empty">No completed work in this period yet.</div>}
+        </div>
+      </div>
+      <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>Kept = your fee minus the PPO write-off (what the plan and patient pay together). Chair time is each finished visit’s length, split by the work done in it. Click a plan for its fees code by code.</p>
     </>
   );
 }
