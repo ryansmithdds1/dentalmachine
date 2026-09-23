@@ -171,6 +171,22 @@ export class PdfDoc {
     this.y -= gap;
   }
 
+  // One table row: cells at fractions of the page width ([0, .2, .75]), right-aligned where asked. Long cells are cut.
+  row(cells, { at, right = [], size = 10, bold = false, color = [0.07, 0.09, 0.15] } = {}) {
+    const lead = size * 1.4;
+    const inner = PAGE_W - 2 * MARGIN;
+    this.need(lead);
+    this.y -= lead;
+    cells.forEach((cell, i) => {
+      const start = MARGIN + inner * at[i];
+      const end = MARGIN + inner * (at[i + 1] ?? 1) - 6;
+      let str = winAnsi(String(cell ?? ''));
+      while (str.length > 1 && width(str, size, bold) > end - start) str = str.slice(0, -1);
+      const x = right.includes(i) ? end - width(str, size, bold) + 6 : start;
+      this.ops.push(`BT ${color.join(' ')} rg /F${bold ? 2 : 1} ${size} Tf ${x.toFixed(2)} ${this.y.toFixed(2)} Td (${esc(str)}) Tj ET`);
+    });
+  }
+
   rule() {
     this.need(10);
     this.y -= 6;

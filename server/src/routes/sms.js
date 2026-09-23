@@ -112,7 +112,7 @@ export default function conversationRoutes({ db, messenger }) {
             AND ((m.patient_id IS NULL AND u.patient_id IS NULL AND u.from_address = m.from_address) OR u.patient_id = m.patient_id)) AS unread
        FROM messages m LEFT JOIN patients p ON p.id = m.patient_id
        WHERE m.id IN (
-         SELECT MAX(id) FROM messages WHERE practice_id = ? AND channel = 'sms'
+         SELECT MAX(id) FROM messages WHERE practice_id = ? AND channel IN ('sms','portal')
            AND (direction = 'inbound' OR patient_id IN (SELECT patient_id FROM messages WHERE practice_id = ? AND direction = 'inbound')
                 OR (patient_id IS NULL AND kind = 'reply'))
          GROUP BY COALESCE(CAST(patient_id AS TEXT), 'x' || CASE WHEN direction = 'inbound' THEN from_address ELSE to_address END)
@@ -146,7 +146,7 @@ export default function conversationRoutes({ db, messenger }) {
       const patient = await findOr404(db, 'patients', t.patientId, req.user.practice_id, 'Patient');
       return res.json(await db.all(
         `SELECT m.*, u.name AS created_by_name FROM messages m LEFT JOIN users u ON u.id = m.created_by
-         WHERE m.practice_id = ? AND m.patient_id = ? AND m.channel = 'sms' ORDER BY m.id`, req.user.practice_id, patient.id,
+         WHERE m.practice_id = ? AND m.patient_id = ? AND m.channel IN ('sms','portal') ORDER BY m.id`, req.user.practice_id, patient.id,
       ));
     }
     const list = await numberMessages(req.user.practice_id, t.number);
@@ -225,7 +225,7 @@ export default function conversationRoutes({ db, messenger }) {
     const patient = await findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient');
     res.json(await db.all(
       `SELECT m.*, u.name AS created_by_name FROM messages m LEFT JOIN users u ON u.id = m.created_by
-       WHERE m.practice_id = ? AND m.patient_id = ? AND m.channel = 'sms' ORDER BY m.id`, req.user.practice_id, patient.id,
+       WHERE m.practice_id = ? AND m.patient_id = ? AND m.channel IN ('sms','portal') ORDER BY m.id`, req.user.practice_id, patient.id,
     ));
   });
 

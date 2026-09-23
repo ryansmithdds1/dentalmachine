@@ -7,6 +7,7 @@ import { publish } from '../events.js';
 import { templatesFor, renderTemplate, messageText, patientLang, fixedText, subjectFor } from '../templates.js';
 import { createPacket, runFormSends } from '../formtemplates.js';
 import { finishBooking } from '../onlinebooking.js';
+import { portalKey } from './portal.js';
 
 const requireAdmin = (req, _res, next) => (req.user.role === 'admin' ? next() : next(new HttpError(403, 'Administrator access required')));
 
@@ -38,7 +39,26 @@ export default function engagementRoutes({ db, messenger, config }) {
     const patient = await patientOr404(req);
     const row = pick(req.body, ['channel', 'subject', 'body']);
     requireFields(row, ['body']);
-    requireOneOf(row.channel, ['sms', 'email'], 'channel');
+    requireOneOf(row.channel, ['sms', 'email', 'portal'], 'channel');
+    // A secure portal message: kept in the portal, with a short heads-up by text or email (no details in it).
+    if (row.channel === 'portal') {
+      const practice = await db.get('SELECT * FROM practices WHERE id = ?', req.user.practice_id);
+      if (!practice.portal_enabled) throw new HttpError(400, 'Turn on the patient portal first');
+      const id = await insert(db, 'messages', {
+        practice_id: practice.id, patient_id: patient.id, channel: 'portal', direction: 'outbound', kind: 'custom', to_address: 'portal', body: String(row.body).slice(0, 4000),
+        status: 'sent', sent_at: new Date().toISOString(), created_by: req.user.id,
+      });
+      const heads = preferredChannel(patient);
+      if (heads) {
+        await sendMessage(db, messenger, {
+          practiceId: practice.id, patientId: patient.id, userId: req.user.id, kind: 'portal_notice', channel: heads.channel, to: heads.to,
+          subject: `New message from ${practice.name}`, body: `${practice.name} sent you a secure message. Read it in your patient portal: ${config.appUrl}/portal/${portalKey(practice)}`,
+        });
+      }
+      await audit(db, req, 'message.send', 'messages', id, { channel: 'portal' });
+      publish(req.user.practice_id, { type: 'message', patient_id: patient.id });
+      return res.status(201).json(await db.get('SELECT * FROM messages WHERE id = ?', id));
+    }
     const target = preferredChannel(patient, row.channel);
     if (!target) throw new HttpError(400, 'Patient has no reachable phone/email for that channel (or has opted out)');
     const msg = await sendMessage(db, messenger, {

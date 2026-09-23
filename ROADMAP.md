@@ -163,7 +163,7 @@ The "OD / Curve" column shows which competitor has the feature: ✓ = has it, ~ 
 | 62 | ✅ **Campaigns:** segmented mass text and email (reactivation, unscheduled treatment, birthdays, holiday closures) with templates, HTML email and scheduling. | Curve GRO-style marketing. | ~ / ✓ | P2 | M |
 | 63 | ✅ **Editable message templates** for every automated message, with merge fields and a preview. | Offices want their own voice. | ✓ / ✓ | P2 | S |
 | 64 | ✅ **Review routing.** Ask for satisfaction first, send happy patients to Google and route unhappy ones to the office. | Reputation. | ~ / ✓ | P2 | S |
-| 65 | **Portal additions:** reschedule, request an appointment, secure messages, forms, statements/receipts download, and membership sign-up. | Patient self-service. | ✓ / ✓ | P2 | M |
+| 65 | ✅ _(Done: move a visit to another open time, secure messages with the office (in the staff inbox), statement and receipt PDFs, and membership sign-up; booking and forms were already there.)_ **Portal additions:** reschedule, request an appointment, secure messages, forms, statements/receipts download, and membership sign-up. | Patient self-service. | ✓ / ✓ | P2 | M |
 | 66 | **Teledentistry** video visits (links only, via a partner). | Emergencies and consults. | ~ / ✓ | P3 | M |
 | 67 | **Patient surveys / NPS.** | Quality tracking. | ~ / ✓ | P3 | S |
 

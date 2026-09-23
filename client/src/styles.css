@@ -646,3 +646,10 @@ a.button.primary { background: var(--primary); color: #fff; }
 .close-list li { padding: 5px 0; border-bottom: 1px solid var(--border); }
 .close-list li.done { color: #15803d; }
 .report-preview { white-space: pre-wrap; font-size: 13px; background: var(--bg); padding: 12px; border-radius: 8px; margin: 0; }
+.portal-move { flex-basis: 100%; padding: 8px 0; }
+.slot-grid { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.portal-thread { display: flex; flex-direction: column; gap: 6px; max-height: 260px; overflow-y: auto; margin-bottom: 8px; }
+.bubble { max-width: 85%; padding: 6px 10px; border-radius: 10px; font-size: 14px; }
+.bubble.mine { align-self: flex-end; background: var(--primary-soft, #e6f4f1); }
+.bubble.theirs { align-self: flex-start; background: #f1f5f9; }
+.portal-appt { flex-wrap: wrap; }

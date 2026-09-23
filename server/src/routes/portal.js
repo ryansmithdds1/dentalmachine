@@ -8,6 +8,10 @@ import { publish } from '../events.js';
 import { planStatus } from './family.js';
 import { estimateCoverage, primaryPolicy, pendingInsurance } from '../services.js';
 import { patientLang } from '../templates.js';
+import { openSlots, validateAppt } from './schedule.js';
+import { emitAppointment } from '../webhooks.js';
+import { PdfDoc } from '../pdf.js';
+import { runMembershipBilling } from '../memberships.js';
 
 const CODE_TTL_MINUTES = 10;
 const SESSION_HOURS = 2;
@@ -91,7 +95,7 @@ export function portalPublicRoutes({ db, secret, messenger }) {
   return r;
 }
 
-export function portalRoutes({ db, secret, config, payments }) {
+export function portalRoutes({ db, secret, config, payments, messenger }) {
   const r = Router();
   r.use(async (req, _res, next) => {
     const token = String(req.headers.authorization || '').replace(/^Bearer /, '');
@@ -192,6 +196,160 @@ export function portalRoutes({ db, secret, config, payments }) {
     publish(req.portal.practice.id, { type: 'schedule', dates: [a.start_time.slice(0, 10)], source: 'portal' });
     await pAudit(req, 'portal.cancel', 'appointments', a.id);
     res.json({ ok: true });
+  });
+
+  // Move a visit (more than 24 hours away) to another open time with the same provider.
+  const openFor = async (req, a, date) => {
+    const now = await practiceNow(db, req.portal.practice.id);
+    const duration = (Date.parse(`${a.end_time.replace(' ', 'T')}:00Z`) - Date.parse(`${a.start_time.replace(' ', 'T')}:00Z`)) / 60000;
+    return openSlots(db, req.portal.practice.id, a.provider_id, date, { duration, step: 30, after: addHours(now, 24), typeId: a.appointment_type_id, locationId: a.location_id });
+  };
+  r.get('/appointments/:aid/slots', async (req, res) => {
+    const a = await ownAppt(req);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '')) throw new HttpError(400, 'date must be YYYY-MM-DD');
+    res.json({ date: req.query.date, slots: await openFor(req, a, req.query.date) });
+  });
+  r.post('/appointments/:aid/reschedule', async (req, res) => {
+    const a = await ownAppt(req);
+    const { practice } = req.portal;
+    const now = await practiceNow(db, practice.id);
+    if (!['scheduled', 'confirmed'].includes(a.status)) throw new HttpError(409, 'This visit can’t be moved online');
+    if (a.start_time <= addHours(now, 24)) throw new HttpError(409, `Visits within 24 hours can't be moved online — please call ${practice.phone || 'the office'}`);
+    const start = String(req.body?.start || '');
+    if (!(await openFor(req, a, start.slice(0, 10))).includes(start)) throw new HttpError(409, 'That time was just taken. Please pick another.');
+    const minutes = (Date.parse(`${a.end_time.replace(' ', 'T')}:00Z`) - Date.parse(`${a.start_time.replace(' ', 'T')}:00Z`)) / 60000;
+    const end = new Date(Date.parse(`${start.replace(' ', 'T')}:00Z`) + minutes * 60000).toISOString().slice(0, 16).replace('T', ' ');
+    // Keep the chair if it's free then; otherwise the office picks one.
+    let row = { ...a, start_time: start, end_time: end };
+    try {
+      await validateAppt(db, practice.id, row);
+    } catch (err) {
+      if (err.status !== 409 || !a.operatory_id) throw err;
+      row = { ...row, operatory_id: null };
+      await validateAppt(db, practice.id, row);
+    }
+    await db.run('UPDATE appointments SET start_time = ?, end_time = ?, operatory_id = ?, status = ?, confirmed_at = NULL, reminder_sent_at = NULL WHERE id = ?', start, end, row.operatory_id, 'scheduled', a.id);
+    const p = req.portal.household.find((h) => h.id === a.patient_id);
+    await insert(db, 'tasks', {
+      practice_id: practice.id, patient_id: a.patient_id, priority: 'normal', due_date: now.slice(0, 10),
+      title: `${p.first_name} ${p.last_name} moved their visit online: ${a.start_time} → ${start}${row.operatory_id ? '' : ' (needs a chair)'}`,
+    });
+    publish(practice.id, { type: 'schedule', dates: [...new Set([a.start_time.slice(0, 10), start.slice(0, 10)])], source: 'portal' });
+    await emitAppointment(db, a.id);
+    await pAudit(req, 'portal.reschedule', 'appointments', a.id, { from: a.start_time, to: start });
+    res.json({ ok: true, start_time: start });
+  });
+
+  // Secure messages with the office (they show in the staff inbox; replies come back here).
+  r.get('/messages', async (req, res) => {
+    const { patient } = req.portal;
+    const list = await db.all(
+      "SELECT id, direction, body, created_at FROM messages WHERE patient_id = ? AND channel = 'portal' ORDER BY id DESC LIMIT 100", patient.id,
+    );
+    await db.run("UPDATE messages SET read_at = datetime('now') WHERE patient_id = ? AND channel = 'portal' AND direction = 'outbound' AND read_at IS NULL", patient.id);
+    res.json(list.reverse());
+  });
+  r.post('/messages', async (req, res) => {
+    const { patient, practice } = req.portal;
+    const body = String(req.body?.body || '').trim().slice(0, 2000);
+    if (!body) throw new HttpError(400, 'Write a message first');
+    const recent = await db.get("SELECT COUNT(*) AS n FROM messages WHERE patient_id = ? AND channel = 'portal' AND direction = 'inbound' AND created_at > ?", patient.id, new Date(Date.now() - 3600_000).toISOString().slice(0, 19).replace('T', ' '));
+    if (recent.n >= 10) throw new HttpError(429, 'That’s a lot of messages — please call the office');
+    const id = await insert(db, 'messages', {
+      practice_id: practice.id, patient_id: patient.id, channel: 'portal', direction: 'inbound', kind: 'reply', to_address: 'office', from_address: 'portal', body, status: 'sent', sent_at: new Date().toISOString(),
+    });
+    publish(practice.id, { type: 'message', patient_id: patient.id });
+    await pAudit(req, 'portal.message', 'messages', id);
+    res.status(201).json({ id });
+  });
+
+  // Statement of account and payment receipts as PDFs.
+  const pdfOut = (res, doc, name) => res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': `attachment; filename="${name}"` }).send(doc.toBuffer());
+  const money = (c) => `${c < 0 ? '-' : ''}$${(Math.abs(c) / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const head = (doc, practice, title) => {
+    doc.text(practice.name, { size: 15, bold: true, gap: 1 });
+    doc.text([practice.address, practice.city, practice.state, practice.zip].filter(Boolean).join(', '), { size: 9.5, gap: 1 });
+    if (practice.phone) doc.text(practice.phone, { size: 9.5 });
+    doc.space(8);
+    doc.text(title, { size: 13, bold: true });
+  };
+  r.get('/statement.pdf', async (req, res) => {
+    const { patient, practice, ids, household } = req.portal;
+    const today = (await practiceNow(db, practice.id)).slice(0, 10);
+    const from = new Date(Date.parse(`${today}T12:00:00Z`) - 365 * 86400_000).toISOString().slice(0, 10);
+    const L = inList(ids);
+    const opening = (await db.get(`SELECT COALESCE(SUM(amount), 0) AS n FROM ledger_entries WHERE patient_id IN (${L}) AND entry_date < ?`, ...ids, from)).n;
+    const rows = await db.all(`SELECT l.entry_date, l.description, l.amount, p.first_name FROM ledger_entries l JOIN patients p ON p.id = l.patient_id WHERE l.patient_id IN (${L}) AND l.entry_date >= ? ORDER BY l.entry_date, l.id`, ...ids, from);
+    const pending = (await pendingInsurance(db, practice.id, ids)).total;
+    const doc = new PdfDoc({ footer: `${practice.name} · statement for ${patient.first_name} ${patient.last_name}` });
+    head(doc, practice, `Statement of account · ${today}`);
+    doc.text(`${patient.first_name} ${patient.last_name}${household.length > 1 ? ' and family' : ''}`, { size: 10.5 });
+    doc.space(6);
+    const at = [0, 0.16, 0.34, 0.8];
+    doc.row(['Date', 'Patient', 'Description', 'Amount'], { at, right: [3], bold: true });
+    doc.rule();
+    doc.row([from, '', 'Balance brought forward', money(opening)], { at, right: [3] });
+    let bal = opening;
+    for (const x of rows) { bal += x.amount; doc.row([x.entry_date, x.first_name, x.description, money(x.amount)], { at, right: [3] }); }
+    doc.rule();
+    doc.row(['', '', 'Balance', money(bal)], { at, right: [3], bold: true });
+    if (pending > 0) doc.row(['', '', 'Expected from insurance', money(-Math.min(pending, Math.max(bal, 0)))], { at, right: [3] });
+    doc.row(['', '', 'You owe', money(Math.max(0, bal - pending))], { at, right: [3], bold: true });
+    await pAudit(req, 'portal.statement', 'patients', patient.id);
+    pdfOut(res, doc, `statement-${today}.pdf`);
+  });
+  r.get('/payments', async (req, res) => {
+    const { ids } = req.portal;
+    res.json(await db.all(
+      `SELECT l.id, l.entry_date, l.amount, l.method, p.first_name FROM ledger_entries l JOIN patients p ON p.id = l.patient_id
+       WHERE l.patient_id IN (${inList(ids)}) AND l.type = 'payment' AND l.amount < 0 AND l.voided_at IS NULL ORDER BY l.entry_date DESC, l.id DESC LIMIT 50`, ...ids,
+    ));
+  });
+  r.get('/receipts/:lid.pdf', async (req, res) => {
+    const { practice, ids } = req.portal;
+    const l = await db.get(`SELECT l.*, p.first_name, p.last_name FROM ledger_entries l JOIN patients p ON p.id = l.patient_id WHERE l.id = ? AND l.type = 'payment' AND l.patient_id IN (${inList(ids)})`, Number(req.params.lid), ...ids);
+    if (!l) throw new HttpError(404, 'Payment not found');
+    const doc = new PdfDoc({ footer: `${practice.name} · receipt #${l.id}` });
+    head(doc, practice, `Payment receipt #${l.id}`);
+    const at = [0, 0.35];
+    for (const [k, v] of [['Date', l.entry_date], ['Received from', `${l.first_name} ${l.last_name}`], ['Amount', money(-l.amount)], ['Method', String(l.method || 'other').replace('_', ' ')], ['For', l.description]]) doc.row([k, v], { at });
+    doc.space(12);
+    doc.text('Thank you.', { size: 10.5 });
+    await pAudit(req, 'portal.receipt', 'ledger_entries', l.id);
+    pdfOut(res, doc, `receipt-${l.id}.pdf`);
+  });
+
+  // Membership plans: join with the card on file (charged now), or ask the office if there's no card yet.
+  r.get('/membership-plans', async (req, res) => {
+    const { practice, ids } = req.portal;
+    res.json({
+      plans: await db.all('SELECT id, name, description, price, interval, discount_pct, min_age, max_age FROM membership_plans WHERE practice_id = ? AND active = 1 ORDER BY price', practice.id),
+      members: await db.all(`SELECT m.patient_id, m.status, mp.name FROM memberships m JOIN membership_plans mp ON mp.id = m.plan_id WHERE m.patient_id IN (${inList(ids)}) AND m.status IN ('active','past_due')`, ...ids),
+    });
+  });
+  r.post('/memberships', async (req, res) => {
+    const { practice, household, patient: me } = req.portal;
+    const who = household.find((h) => h.id === Number(req.body?.patient_id || me.id));
+    if (!who) throw new HttpError(404, 'Patient not found');
+    const plan = await db.get('SELECT * FROM membership_plans WHERE id = ? AND practice_id = ? AND active = 1', Number(req.body?.plan_id), practice.id);
+    if (!plan) throw new HttpError(404, 'Plan not found');
+    const today = (await practiceNow(db, practice.id)).slice(0, 10);
+    const years = who.dob ? Math.floor((new Date(today) - new Date(who.dob)) / (365.25 * 86400_000)) : null;
+    if ((plan.min_age != null && (years == null || years < plan.min_age)) || (plan.max_age != null && (years == null || years > plan.max_age))) throw new HttpError(400, `${plan.name} isn't available for ${who.first_name}'s age`);
+    if (await db.get("SELECT id FROM memberships WHERE patient_id = ? AND status IN ('active','past_due')", who.id)) throw new HttpError(409, `${who.first_name} already has a membership`);
+    const payer = who.guarantor_id || who.id;
+    const card = await db.get('SELECT id FROM payment_methods WHERE patient_id = ? AND practice_id = ? AND removed_at IS NULL ORDER BY id DESC LIMIT 1', payer, practice.id);
+    if (!card || !payments.enabled) {
+      await insert(db, 'tasks', { practice_id: practice.id, patient_id: who.id, priority: 'normal', due_date: today, title: `${who.first_name} ${who.last_name} asked to join ${plan.name} online — set up their card and enroll them` });
+      await pAudit(req, 'portal.membership_request', 'patients', who.id, { plan: plan.name });
+      return res.status(202).json({ requested: true });
+    }
+    const id = await insert(db, 'memberships', {
+      practice_id: practice.id, patient_id: who.id, plan_id: plan.id, start_date: today, next_bill_date: today, paid_through: today, payment_method_id: card.id, autopay: 1,
+    });
+    const billing = await runMembershipBilling(db, payments, { membershipId: id, messenger });
+    await pAudit(req, 'portal.membership', 'memberships', id, { plan: plan.name });
+    res.status(201).json({ id, charged: billing.some((b) => b.ok !== false) });
   });
 
   // Fresh links for forms and treatment plans (links are single-purpose tokens; only hashes are stored).

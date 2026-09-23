@@ -32,6 +32,18 @@ async function call(method, path, body, token) {
   return data;
 }
 
+// PDFs need the portal session, so they're fetched and saved rather than linked.
+async function download(path, token, name) {
+  const res = await fetch(`/api${path}`, { headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) throw Object.assign(new Error((await res.json().catch(() => ({}))).error || res.statusText), { status: res.status });
+  const url = URL.createObjectURL(await res.blob());
+  const a = Object.assign(document.createElement('a'), { href: url, download: name });
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 const when = (lang, s) => `${fmtDateL(lang, s, { weekday: 'short', month: 'short', day: 'numeric' })}, ${fmtTimeL(lang, s)}`;
 const shortDate = (lang, s) => fmtDateL(lang, s, { month: 'short', day: 'numeric', year: 'numeric' });
 
@@ -108,6 +120,7 @@ function Dashboard({ token, onSignOut }) {
   const [me, setMe] = useState(null);
   const [error, setError] = useState(null);
   const [notice, setNotice] = useState(params.get('paid') ? 'Thank you — your payment was received and will show on your account shortly.' : null);
+  const [moving, setMoving] = useState(null);
   const load = useCallback(async () => {
     try {
       const data = await call('GET', '/portal/me', null, token);
@@ -172,8 +185,10 @@ function Dashboard({ token, onSignOut }) {
               </div>
               <div className="portal-actions">
                 {a.status === 'confirmed' ? <span className="badge ok nocap">{t('Confirmed')}</span> : a.status === 'scheduled' && <button className="small primary" onClick={() => act(() => call('POST', `/portal/appointments/${a.id}/confirm`, {}, token), 'Thanks — your visit is confirmed.')}>{t('Confirm')}</button>}
+                {a.can_cancel && <button className="small" onClick={() => setMoving(moving?.id === a.id ? null : a)}>{t('Move')}</button>}
                 {a.can_cancel && <button className="small" onClick={() => confirm(t('Cancel the {when} visit?', { when: when(lang, a.start_time) })) && act(() => call('POST', `/portal/appointments/${a.id}/cancel`, {}, token), "Cancelled. We'll reach out to find a new time.")}>{t('Cancel')}</button>}
               </div>
+              {moving?.id === a.id && <Reschedule token={token} appt={a} onDone={() => { setMoving(null); act(async () => {}, 'Your visit was moved. We’ll send a new reminder.'); }} />}
             </div>
           ))}
           <div className="muted" style={{ fontSize: 13, marginTop: 8 }}>
@@ -200,6 +215,16 @@ function Dashboard({ token, onSignOut }) {
           </section>
         )}
 
+        <Messages token={token} onError={setError} />
+
+        <section className="card">
+          <h2>{t('Statements & receipts')}</h2>
+          <button className="small" onClick={() => act(() => download('/portal/statement.pdf', token, 'statement.pdf'))}>{t('Download statement (PDF)')}</button>
+          <Receipts token={token} onError={setError} />
+        </section>
+
+        <Memberships token={token} household={me.household} onDone={(msg) => act(async () => {}, msg)} onError={setError} />
+
         <section className="card">
           <h2>{t('Your details')}</h2>
           <ContactForm token={token} patient={p} onSaved={() => act(async () => {}, 'Your details were updated.')} />
@@ -222,6 +247,108 @@ function Dashboard({ token, onSignOut }) {
         </section>
       </div>
     </PublicLayout>
+  );
+}
+
+function Reschedule({ token, appt, onDone }) {
+  const t = useT();
+  const lang = useLang();
+  const [date, setDate] = useState(appt.start_time.slice(0, 10));
+  const [slots, setSlots] = useState(null);
+  const [error, setError] = useState(null);
+  useEffect(() => {
+    setSlots(null);
+    call('GET', `/portal/appointments/${appt.id}/slots?date=${date}`, null, token).then((r) => setSlots(r.slots)).catch(setError);
+  }, [appt.id, date, token]);
+  const pick = async (start) => {
+    setError(null);
+    try { await call('POST', `/portal/appointments/${appt.id}/reschedule`, { start }, token); onDone(); } catch (e) { setError(e); }
+  };
+  return (
+    <div className="portal-move">
+      <ErrorBox error={error} />
+      <label>{t('New day')} <input type="date" value={date} onChange={(e) => e.target.value && setDate(e.target.value)} /></label>
+      {slots === null ? <p className="muted">{t('Checking availability…')}</p> : slots.length === 0 ? <p className="muted">{t('No openings that day — try another.')}</p> : (
+        <div className="slot-grid">{slots.map((s) => <button key={s} className="small" onClick={() => pick(s)}>{fmtTimeL(lang, s)}</button>)}</div>
+      )}
+    </div>
+  );
+}
+
+function Messages({ token, onError }) {
+  const t = useT();
+  const lang = useLang();
+  const [list, setList] = useState(null);
+  const [body, setBody] = useState('');
+  const load = useCallback(() => call('GET', '/portal/messages', null, token).then(setList).catch(onError), [token, onError]);
+  useEffect(() => { load(); }, [load]);
+  const send = async () => {
+    try { await call('POST', '/portal/messages', { body }, token); setBody(''); load(); } catch (e) { onError(e); }
+  };
+  return (
+    <section className="card">
+      <h2>{t('Messages')}</h2>
+      <div className="portal-thread">
+        {list?.map((m) => (
+          <div key={m.id} className={`bubble ${m.direction === 'inbound' ? 'mine' : 'theirs'}`}>
+            <div>{m.body}</div>
+            <div className="muted" style={{ fontSize: 11 }}>{m.direction === 'inbound' ? t('You') : t('The office')} · {fmtDateL(lang, m.created_at, { month: 'short', day: 'numeric' })}</div>
+          </div>
+        ))}
+        {list?.length === 0 && <p className="muted">{t('Questions about a visit, a bill or your care? Send the office a secure message.')}</p>}
+      </div>
+      <textarea rows={2} value={body} onChange={(e) => setBody(e.target.value)} placeholder={t('Write a message…')} maxLength={2000} />
+      <button className="small primary" disabled={!body.trim()} onClick={send} style={{ marginTop: 6 }}>{t('Send')}</button>
+    </section>
+  );
+}
+
+function Receipts({ token, onError }) {
+  const t = useT();
+  const lang = useLang();
+  const [list, setList] = useState(null);
+  useEffect(() => { call('GET', '/portal/payments', null, token).then(setList).catch(onError); }, [token, onError]);
+  if (!list?.length) return null;
+  return (
+    <div style={{ marginTop: 10 }}>
+      {list.slice(0, 10).map((p) => (
+        <div key={p.id} className="portal-activity">
+          <div>{shortDate(lang, p.entry_date)}<span className="muted"> · {money(-p.amount)}</span></div>
+          <button className="link" onClick={() => download(`/portal/receipts/${p.id}.pdf`, token, `receipt-${p.id}.pdf`).catch(onError)}>{t('Receipt')}</button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function Memberships({ token, household, onDone, onError }) {
+  const t = useT();
+  const [data, setData] = useState(null);
+  const [who, setWho] = useState(household[0]?.id);
+  const load = useCallback(() => call('GET', '/portal/membership-plans', null, token).then(setData).catch(onError), [token, onError]);
+  useEffect(() => { load(); }, [load]);
+  if (!data?.plans.length) return null;
+  const join = async (plan) => {
+    const name = household.find((h) => h.id === Number(who))?.first_name;
+    if (!confirm(t('Join {plan} for {name} at {price}?', { plan: plan.name, name, price: `${money(plan.price)}/${plan.interval === 'year' ? t('year') : t('month')}` }))) return;
+    try {
+      const r = await call('POST', '/portal/memberships', { plan_id: plan.id, patient_id: Number(who) }, token);
+      onDone(r.requested ? 'Thanks — the office will call to set up your card and finish joining.' : 'Welcome to the plan! Your first payment was charged to your card on file.');
+      load();
+    } catch (e) { onError(e); }
+  };
+  return (
+    <section className="card">
+      <h2>{t('Membership plans')}</h2>
+      {data.members.map((m) => <div key={m.patient_id} className="muted" style={{ fontSize: 13 }}>{t('{name} is a member: {plan}', { name: household.find((h) => h.id === m.patient_id)?.first_name, plan: m.name })}</div>)}
+      {household.length > 1 && <label style={{ fontSize: 13 }}>{t('For')} <select value={who} onChange={(e) => setWho(e.target.value)}>{household.map((h) => <option key={h.id} value={h.id}>{h.first_name}</option>)}</select></label>}
+      {data.plans.map((pl) => (
+        <div key={pl.id} className="portal-appt">
+          <div><strong>{pl.name}</strong> · {money(pl.price)}/{pl.interval === 'year' ? t('year') : t('month')}<div className="muted" style={{ fontSize: 12 }}>{pl.description || (pl.discount_pct ? t('{pct}% off other care', { pct: pl.discount_pct }) : '')}</div></div>
+          <button className="small primary" onClick={() => join(pl)}>{t('Join')}</button>
+        </div>
+      ))}
+    </section>
   );
 }
 

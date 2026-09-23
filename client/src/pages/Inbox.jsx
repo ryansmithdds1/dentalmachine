@@ -24,6 +24,12 @@ export default function Inbox() {
   const [sending, setSending] = useState(false);
   const [attaching, setAttaching] = useState(false);
   const [editingQuick, setEditingQuick] = useState(false);
+  // Answer the way the patient wrote: a portal message gets a portal reply (it can hold clinical details).
+  const [via, setVia] = useState('sms');
+  useEffect(() => {
+    const last = thread?.filter((m) => m.direction === 'inbound').at(-1);
+    setVia(last?.channel === 'portal' ? 'portal' : 'sms');
+  }, [thread]);
   const end = useRef(null);
   const patientId = activeKey?.startsWith('p') ? Number(activeKey.slice(1)) : null;
   const open = (t) => setParams({ view, t });
@@ -55,7 +61,7 @@ export default function Inbox() {
     setSending(true);
     setErr(null);
     try {
-      if (patientId) await api.post(`/patients/${patientId}/messages`, { channel: 'sms', body });
+      if (patientId) await api.post(`/patients/${patientId}/messages`, { channel: via, body });
       else await api.post(`/conversations/${activeKey}/reply`, { body });
       setBody('');
       reloadThread();
@@ -72,8 +78,8 @@ export default function Inbox() {
     <>
       <div className="page-header">
         <div>
-          <h1>Text messages</h1>
-          <div className="muted">Patient replies arrive here instantly. Replies of <strong>C</strong> confirm automatically; <strong>STOP</strong> opts out.</div>
+          <h1>Messages</h1>
+          <div className="muted">Texts and secure portal messages from patients arrive here instantly. Texted replies of <strong>C</strong> confirm automatically; <strong>STOP</strong> opts out.</div>
         </div>
       </div>
       <div className="tabs" style={{ marginBottom: 10 }}>
@@ -120,7 +126,7 @@ export default function Inbox() {
                 {thread?.map((m) => (
                   <div key={m.id} className={`bubble ${m.direction}`}>
                     <div>{m.body}</div>
-                    <div className="bubble-meta">{fmtDateTime(m.created_at)}{m.direction === 'outbound' ? ` · ${m.created_by_name || (m.kind === 'auto_reply' ? 'auto-reply' : m.kind.replace('_', ' '))}${m.status === 'failed' ? ' · failed' : ''}` : ''}</div>
+                    <div className="bubble-meta">{m.channel === 'portal' ? '🔒 Portal · ' : ''}{fmtDateTime(m.created_at)}{m.direction === 'outbound' ? ` · ${m.created_by_name || (m.kind === 'auto_reply' ? 'auto-reply' : m.kind.replace('_', ' '))}${m.status === 'failed' ? ' · failed' : ''}` : ''}</div>
                   </div>
                 ))}
                 <div ref={end} />
@@ -132,7 +138,13 @@ export default function Inbox() {
                     <button type="button" className="small link" onClick={() => setEditingQuick(true)}>Edit…</button>
                   </div>
                   <div className="inline">
-                    <textarea rows={2} value={body} onChange={(e) => setBody(e.target.value)} maxLength={480} placeholder="Type a reply… (no clinical details by text)" style={{ minHeight: 44 }}
+                    {patientId && (
+                      <select value={via} onChange={(e) => setVia(e.target.value)} aria-label="Reply by" style={{ width: 'auto' }}>
+                        <option value="sms">Text</option>
+                        <option value="portal">Portal (secure)</option>
+                      </select>
+                    )}
+                    <textarea rows={2} value={body} onChange={(e) => setBody(e.target.value)} maxLength={via === 'portal' ? 4000 : 480} placeholder={via === 'portal' ? 'Secure reply — the patient reads it in the portal' : 'Type a reply… (no clinical details by text)'} style={{ minHeight: 44 }}
                       onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && body.trim()) send(e); }} />
                     <button className="primary" disabled={sending || !body.trim()}>Send</button>
                   </div>

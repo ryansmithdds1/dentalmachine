@@ -111,7 +111,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
     res.set('Cache-Control', 'no-store');
     next();
   }, publicRoutes({ db, storage, payments, messenger, config }), publicCasePresentation({ db }), portalPublicRoutes({ db, secret, messenger }), campaignPublicRoutes({ db }));
-  app.use('/api/portal', portalRoutes({ db, secret, config, payments }));
+  app.use('/api/portal', portalRoutes({ db, secret, config, payments, messenger }));
   app.use('/api/v1', apiV1Routes({ db }));
 
   app.use('/api/bridge', (_req, res, next) => {

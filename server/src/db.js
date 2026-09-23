@@ -266,7 +266,7 @@ CREATE TABLE IF NOT EXISTS messages (
   practice_id INTEGER NOT NULL REFERENCES practices(id),
   patient_id INTEGER REFERENCES patients(id),
   appointment_id INTEGER REFERENCES appointments(id),
-  channel TEXT NOT NULL CHECK (channel IN ('sms','email')),
+  channel TEXT NOT NULL CHECK (channel IN ('sms','email','portal')),
   kind TEXT NOT NULL DEFAULT 'custom',
   to_address TEXT NOT NULL,
   subject TEXT,
@@ -1407,6 +1407,11 @@ const COLUMNS = [
   ['appointments', 'series_id', 'INTEGER REFERENCES appointment_series(id)'],
 ];
 
+// CHECK constraints widened after release: [table, constraint name on Postgres, old text, new text].
+const RELAXED = [
+  ['messages', 'messages_channel_check', "CHECK (channel IN ('sms','email'))", "CHECK (channel IN ('sms','email','portal'))"],
+];
+
 const INDEXES = `
 CREATE UNIQUE INDEX IF NOT EXISTS idx_practice_slug ON practices(slug);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_appt_token ON appointments(confirm_token_hash);
@@ -1478,6 +1483,16 @@ function openSqlite(path) {
   for (const [table, column, def] of COLUMNS) {
     const exists = db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === column);
     if (!exists) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${def}`);
+  }
+  // SQLite can't alter a CHECK; a wider one is swapped into the stored table definition (safe: existing rows still pass).
+  for (const [table, , from, to] of RELAXED) {
+    const sql = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(table)?.sql;
+    if (!sql?.includes(from)) continue;
+    const version = db.prepare('PRAGMA schema_version').get().schema_version;
+    db.exec('PRAGMA writable_schema = ON');
+    db.prepare("UPDATE sqlite_master SET sql = ? WHERE type = 'table' AND name = ?").run(sql.replace(from, to), table);
+    db.exec(`PRAGMA schema_version = ${version + 1}`);
+    db.exec('PRAGMA writable_schema = OFF');
   }
   db.exec(INDEXES);
 
@@ -1621,7 +1636,7 @@ async function openPostgres(url, { freshSchema = false } = {}) {
   const setup = await pool.connect();
   // Skip the migration when this exact schema is already in place (serverless cold starts would
   // otherwise re-run hundreds of statements each time).
-  const version = createHash('sha256').update(JSON.stringify([SCHEMA, COLUMNS, INDEXES])).digest('hex').slice(0, 16);
+  const version = createHash('sha256').update(JSON.stringify([SCHEMA, COLUMNS, INDEXES, RELAXED])).digest('hex').slice(0, 16);
   const current = await setup.query('SELECT version FROM schema_meta').then((r) => r.rows[0]?.version, () => null);
   if (current === version && !freshSchema) setup.release();
   else {
@@ -1632,6 +1647,7 @@ async function openPostgres(url, { freshSchema = false } = {}) {
       await setup.query('SELECT pg_advisory_xact_lock(424242)');
       await setup.query(pgSchema(SCHEMA));
       for (const [table, column, def] of COLUMNS) await setup.query(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${column} ${pgSchema(def)}`);
+      for (const [table, name, , to] of RELAXED) await setup.query(`ALTER TABLE ${table} DROP CONSTRAINT IF EXISTS ${name}; ALTER TABLE ${table} ADD CONSTRAINT ${name} ${to}`);
       await setup.query(pgSchema(INDEXES));
       await setup.query('CREATE TABLE IF NOT EXISTS schema_meta (version TEXT NOT NULL)');
       await setup.query('DELETE FROM schema_meta');
