@@ -35,6 +35,28 @@
   ],
   "scanSeconds": 5,
   "sensor": {
+    "preset": "tuxedo",
+    "exposure": {
+      "kvp": 70,
+      "ma": 7
+    },
+    "size": "2"
+  },
+  "_sensorFolderExample": {
+    "name": "Sensor",
+    "mode": "folder",
+    "folder": "C:\\SensorCapture",
+    "moveTo": "C:\\SensorCapture\\sent"
+  },
+  "_sensorJazzExample": {
+    "preset": "jazz",
+    "device": "Jazz SOLO",
+    "exposure": {
+      "kvp": 65,
+      "ma": 7
+    }
+  },
+  "_sensorTwainExample": {
     "name": "Schick 33",
     "mode": "command",
     "command": "C:\\Program Files\\NAPS2\\NAPS2.Console.exe",
@@ -50,11 +72,5 @@
     ],
     "extension": "png",
     "timeoutSeconds": 120
-  },
-  "_sensorFolderExample": {
-    "name": "Sensor",
-    "mode": "folder",
-    "folder": "C:\\SensorCapture",
-    "moveTo": "C:\\SensorCapture\\sent"
   }
 }

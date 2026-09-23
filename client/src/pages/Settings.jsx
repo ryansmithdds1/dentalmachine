@@ -13,6 +13,7 @@ import Developer from '../components/Developer.jsx';
 import FormTemplates from '../components/FormTemplates.jsx';
 import { MembershipPlans } from '../components/Memberships.jsx';
 import MfaSetup from '../components/MfaSetup.jsx';
+import SensorTest from '../components/imaging/SensorTest.jsx';
 
 const ROLES = ['admin', 'dentist', 'hygienist', 'assistant', 'front_desk', 'billing'];
 const CATEGORIES = ['diagnostic', 'preventive', 'restorative', 'endodontics', 'periodontics', 'prosthodontics', 'oral_surgery', 'orthodontics', 'implants', 'adjunctive'];
@@ -1284,6 +1285,8 @@ function ImagingBridges() {
   const { data: agents, reload } = useApi('/imaging/agents');
   const [name, setName] = useState('');
   const [created, setCreated] = useState(null);
+  const [sensorPreset, setSensorPreset] = useState('');
+  const [testing, setTesting] = useState(null);
   const add = useSubmit(async () => {
     setCreated(await api.post('/imaging/agents', { name }));
     setName('');
@@ -1293,6 +1296,7 @@ function ImagingBridges() {
     server: window.location.origin, token: created.token,
     apps: [{ id: 'dexis', name: 'DEXIS', command: 'C:\\DEXIS\\DEXIS.exe', args: ['/P{patientId}'] }],
     watch: [{ folder: 'C:\\DEXIS\\Export', category: 'xray' }],
+    ...(sensorPreset ? { sensor: { preset: sensorPreset, exposure: { kvp: 70, ma: 7 } } } : {}),
   }, null, 2);
   const download = async (path, filename, text) => {
     const blob = text ? new Blob([text], { type: 'application/json' }) : await (await fetch(`/api${path}`, { headers: { Authorization: `Bearer ${getToken()}` } })).blob();
@@ -1310,9 +1314,16 @@ function ImagingBridges() {
           <li>Add the workstation below and download its settings file.</li>
           <li>On that computer, install Node.js (18 or newer) and save the <button className="link" onClick={() => download('/imaging/agent-download', 'dental-machine-bridge.mjs')}>bridge program</button> next to the settings file.</li>
           <li>Edit the settings file with your imaging program&apos;s path and export folder (your imaging vendor&apos;s bridge guide lists the command-line options), then run <code>node dental-machine-bridge.mjs bridge-config.json</code> — or set it to start with Windows.</li>
+          <li>For direct sensor capture (Tuxedo, Jazz or any TWAIN sensor): install the sensor&apos;s TWAIN driver and the free NAPS2 scanner app, choose the sensor below, then press <strong>Test sensor</strong>. <code>node dental-machine-bridge.mjs bridge-config.json --list-sensors</code> shows the sensors that PC can see.</li>
         </ol>
         <form className="inline" onSubmit={(e) => { e.preventDefault(); add.submit(); }} style={{ gap: 8 }}>
           <input placeholder='Workstation name, e.g. "Op 2"' value={name} onChange={(e) => setName(e.target.value)} style={{ maxWidth: 320 }} />
+          <select aria-label="Sensor" value={sensorPreset} onChange={(e) => setSensorPreset(e.target.value)} style={{ width: 'auto' }}>
+            <option value="">No sensor on this PC</option>
+            <option value="tuxedo">Tuxedo sensor</option>
+            <option value="jazz">Jazz sensor</option>
+            <option value="twain">Other TWAIN sensor</option>
+          </select>
           <button className="primary" disabled={!name.trim() || add.busy}>Add workstation</button>
         </form>
         <ErrorBox error={add.error} />
@@ -1326,7 +1337,7 @@ function ImagingBridges() {
       <div className="card" style={{ padding: 0 }}>
         <div className="table-wrap">
           <table>
-            <thead><tr><th>Workstation</th><th>Status</th><th>Computer</th><th>Imaging programs</th><th>Last seen</th><th /></tr></thead>
+            <thead><tr><th>Workstation</th><th>Status</th><th>Computer</th><th>Imaging programs</th><th>Sensor</th><th>Last seen</th><th /></tr></thead>
             <tbody>
               {agents?.map((a) => (
                 <tr key={a.id}>
@@ -1334,8 +1345,15 @@ function ImagingBridges() {
                   <td><span className={`live-dot${a.online ? ' on' : ''}`}>{a.online ? 'Online' : 'Offline'}</span></td>
                   <td>{a.hostname || '—'}{a.version ? <span className="muted"> · v{a.version}</span> : ''}</td>
                   <td>{a.apps.map((x) => x.name).join(', ') || <span className="muted">—</span>}</td>
+                  <td>
+                    {a.sensor || <span className="muted">—</span>}
+                    {a.sensor_info?.exposure && <div className="muted" style={{ fontSize: 12 }}>{[a.sensor_info.exposure.kvp && `${a.sensor_info.exposure.kvp} kVp`, a.sensor_info.exposure.ma && `${a.sensor_info.exposure.ma} mA`].filter(Boolean).join(' · ')}</div>}
+                  </td>
                   <td>{a.last_seen_at ? fmtUtcDateTime(a.last_seen_at, practice?.timezone) : 'Never'}</td>
-                  <td><button className="small danger" onClick={() => confirm(`Remove ${a.name}? Its bridge will stop working.`) && api.del(`/imaging/agents/${a.id}`).then(reload)}>Remove</button></td>
+                  <td className="inline" style={{ gap: 6, justifyContent: 'flex-end' }}>
+                    {a.sensor && <button className="small" disabled={!a.online} onClick={() => setTesting(a)} title={a.online ? 'Take one test exposure' : 'The bridge is offline'}>Test sensor</button>}
+                    <button className="small danger" onClick={() => confirm(`Remove ${a.name}? Its bridge will stop working.`) && api.del(`/imaging/agents/${a.id}`).then(reload)}>Remove</button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -1343,6 +1361,7 @@ function ImagingBridges() {
           {agents?.length === 0 && <div className="empty">No workstations yet.</div>}
         </div>
       </div>
+      {testing && <SensorTest agent={testing} onClose={() => setTesting(null)} />}
     </>
   );
 }

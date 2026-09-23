@@ -8,8 +8,55 @@ import { publish } from '../events.js';
 import { buildRecordExport } from '../recordexport.js';
 
 // Mount layouts (FMX etc.): how many images each holds; the client draws the slots.
-export const MOUNT_TEMPLATES = { fmx18: 18, fmx20: 20, bw4: 4, bw2: 2, pa4: 4, photos8: 8 };
-const ANNOTATION_TYPES = ['line', 'arrow', 'measure', 'text', 'circle'];
+export const MOUNT_TEMPLATES = { fmx18: 18, fmx20: 20, fmx14: 14, bw4: 4, bw2: 2, vbw7: 7, pa1: 1, pa2: 2, pa4: 4, pano1: 1, photos8: 8 };
+// How many points each kind of mark keeps: an angle is vertex + two arms; a polyline follows a curved
+// canal or root for its length.
+const ANNOTATION_POINTS = { line: 2, arrow: 2, measure: 2, text: 1, circle: 2, angle: 3, polyline: 40 };
+const ANNOTATION_TYPES = Object.keys(ANNOTATION_POINTS);
+
+// Non-destructive viewing adjustments saved with an image (the original pixels are never changed).
+const ADJUST_RANGES = { brightness: [-100, 100], contrast: [-100, 100], gamma: [0.2, 5], sharpen: [0, 3] };
+const ADJUST_FLAGS = ['invert', 'equalize', 'emboss', 'flipH', 'flipV'];
+const COLORMAPS = ['none', 'heat', 'bone', 'spectrum'];
+export function cleanAdjust(a) {
+  if (a == null) return null;
+  if (typeof a !== 'object' || Array.isArray(a)) throw new HttpError(400, 'adjust must be an object');
+  const out = {};
+  for (const [k, [lo, hi]] of Object.entries(ADJUST_RANGES)) {
+    if (a[k] === undefined || a[k] === null) continue;
+    const n = Number(a[k]);
+    if (!Number.isFinite(n) || n < lo || n > hi) throw new HttpError(400, `${k} must be between ${lo} and ${hi}`);
+    out[k] = Math.round(n * 100) / 100;
+  }
+  for (const k of ADJUST_FLAGS) if (a[k]) out[k] = true;
+  if (a.rotate !== undefined && a.rotate !== null) {
+    const r = ((Math.round(Number(a.rotate) / 90) * 90) % 360 + 360) % 360;
+    if (!Number.isFinite(r)) throw new HttpError(400, 'rotate must be a multiple of 90');
+    if (r) out.rotate = r;
+  }
+  if (a.colormap && a.colormap !== 'none') {
+    if (!COLORMAPS.includes(a.colormap)) throw new HttpError(400, `colormap must be one of ${COLORMAPS.join(', ')}`);
+    out.colormap = a.colormap;
+  }
+  return Object.keys(out).length ? out : null;
+}
+// Exposure record for an x-ray: settings used and the sensor, for the radiation log.
+export function cleanExposure(e) {
+  if (e == null) return null;
+  if (typeof e !== 'object' || Array.isArray(e)) throw new HttpError(400, 'exposure must be an object');
+  const num = (k, lo, hi) => {
+    if (e[k] === undefined || e[k] === null || e[k] === '') return undefined;
+    const n = Number(e[k]);
+    if (!Number.isFinite(n) || n < lo || n > hi) throw new HttpError(400, `${k} must be between ${lo} and ${hi}`);
+    return n;
+  };
+  const out = { kvp: num('kvp', 40, 150), ma: num('ma', 0.1, 20), seconds: num('seconds', 0.005, 20) };
+  if (e.sensor) out.sensor = String(e.sensor).slice(0, 60);
+  if (e.size) out.size = String(e.size).slice(0, 10);
+  for (const k of Object.keys(out)) if (out[k] === undefined) delete out[k];
+  return Object.keys(out).length ? out : null;
+}
+const parseJson = (v) => (v ? JSON.parse(v) : null);
 
 const CATEGORIES = ['xray', 'photo', 'document', 'consent', 'insurance_card', 'referral', 'other'];
 const ALLOWED = /^(image\/(png|jpeg|gif|webp|bmp|tiff)|application\/pdf|application\/dicom|text\/plain)$/;
@@ -37,13 +84,13 @@ export default function documentRoutes({ db, storage, config = {} }) {
 
   r.get('/patients/:id/documents', requirePermission('clinical:read'), async (req, res) => {
     const patient = await findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient');
-    res.json(await db.all(
-      `SELECT d.id, d.category, d.filename, d.mime, d.size, d.tooth, d.notes, d.source, d.taken_at, d.created_at, d.tags, u.name AS uploaded_by_name,
+    res.json((await db.all(
+      `SELECT d.id, d.category, d.filename, d.mime, d.size, d.tooth, d.notes, d.source, d.taken_at, d.created_at, d.tags, d.adjust, d.exposure, d.retake_of, u.name AS uploaded_by_name,
          CASE WHEN d.annotations IS NOT NULL AND d.annotations != '[]' THEN 1 ELSE 0 END AS annotated
        FROM documents d LEFT JOIN users u ON u.id = d.uploaded_by
        WHERE d.practice_id = ? AND d.patient_id = ? AND d.deleted_at IS NULL ORDER BY d.id DESC`,
       req.user.practice_id, patient.id,
-    ));
+    )).map((d) => ({ ...d, adjust: parseJson(d.adjust), exposure: parseJson(d.exposure) })));
   });
 
   r.post(
@@ -119,7 +166,20 @@ export default function documentRoutes({ db, storage, config = {} }) {
     if (doc.mime === 'application/dicom') {
       try { spacing = (await viewable(doc)).pixelSpacing?.[0] || null; } catch { spacing = null; }
     }
-    res.json({ id: doc.id, annotations: JSON.parse(doc.annotations || '[]'), mm_per_px: doc.mm_per_px || spacing, scale_source: doc.mm_per_px ? 'calibrated' : spacing ? 'dicom' : null });
+    res.json({
+      id: doc.id, annotations: JSON.parse(doc.annotations || '[]'), mm_per_px: doc.mm_per_px || spacing, scale_source: doc.mm_per_px ? 'calibrated' : spacing ? 'dicom' : null,
+      adjust: parseJson(doc.adjust), exposure: parseJson(doc.exposure), retake_of: doc.retake_of || null,
+    });
+  });
+
+  // Saved viewing adjustments (brightness, sharpen, invert, rotation…): what the image opens with next time.
+  r.put('/documents/:did/adjust', requirePermission('clinical:write'), async (req, res) => {
+    const doc = await findOr404(db, 'documents', req.params.did, req.user.practice_id, 'Document');
+    if (doc.deleted_at) throw new HttpError(404, 'Document not found');
+    const adjust = cleanAdjust(req.body?.adjust);
+    await db.run('UPDATE documents SET adjust = ? WHERE id = ?', adjust ? JSON.stringify(adjust) : null, doc.id);
+    publish(req.user.practice_id, { type: 'documents', patient_id: doc.patient_id });
+    res.json({ ok: true, adjust });
   });
 
   r.put('/documents/:did/annotations', requirePermission('clinical:write'), async (req, res) => {
@@ -128,8 +188,9 @@ export default function documentRoutes({ db, storage, config = {} }) {
     if (!Array.isArray(list) || list.length > 200) throw new HttpError(400, 'annotations must be a list of up to 200');
     const clean = list.map((a) => {
       if (!ANNOTATION_TYPES.includes(a?.type)) throw new HttpError(400, `Annotation type must be one of ${ANNOTATION_TYPES.join(', ')}`);
-      const points = (Array.isArray(a.points) ? a.points : []).slice(0, 2).map((p) => [Number(p?.[0]), Number(p?.[1])]);
+      const points = (Array.isArray(a.points) ? a.points : []).slice(0, ANNOTATION_POINTS[a.type]).map((p) => [Number(p?.[0]), Number(p?.[1])]);
       if (!points.length || points.some((p) => !p.every(Number.isFinite))) throw new HttpError(400, 'Annotation points must be numbers');
+      if (a.type === 'angle' && points.length !== 3) throw new HttpError(400, 'An angle needs three points');
       return { type: a.type, points, ...(a.text ? { text: String(a.text).slice(0, 200) } : {}), color: /^#[0-9a-f]{6}$/i.test(a.color || '') ? a.color : '#facc15' };
     });
     const mm = req.body?.mm_per_px;
@@ -231,11 +292,16 @@ export default function documentRoutes({ db, storage, config = {} }) {
     }
     if (b.notes !== undefined) row.notes = String(b.notes || '').slice(0, 500) || null;
     if (b.tags !== undefined) row.tags = cleanTags(b.tags);
+    if (b.exposure !== undefined) {
+      const e = cleanExposure(b.exposure);
+      row.exposure = e ? JSON.stringify(e) : null;
+    }
     if (!Object.keys(row).length) throw new HttpError(400, 'Nothing to change');
     await db.run(`UPDATE documents SET ${Object.keys(row).map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, ...Object.values(row), doc.id);
     await audit(db, req, 'document.update', 'documents', doc.id, { patient_id: doc.patient_id, ...row });
     publish(req.user.practice_id, { type: 'documents', patient_id: doc.patient_id });
-    res.json(await db.get('SELECT id, category, tooth, taken_at, filename, notes, tags FROM documents WHERE id = ?', doc.id));
+    const out = await db.get('SELECT id, category, tooth, taken_at, filename, notes, tags, exposure FROM documents WHERE id = ?', doc.id);
+    res.json({ ...out, exposure: parseJson(out.exposure) });
   });
 
   // Scan to chart from a phone: a link (shown as a QR code) good for 15 minutes, for this patient only.

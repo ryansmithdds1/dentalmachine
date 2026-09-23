@@ -8,10 +8,12 @@ import { findOr404, insert, audit, newToken, hashToken, validTooth } from '../ut
 import { publish } from '../events.js';
 import { isDicom, readDicomTags } from '../dicom.js';
 import { dicomToImage } from '../dicomimage.js';
-import { MAX_UPLOAD_BYTES, MOUNT_TEMPLATES } from './documents.js';
+import { MAX_UPLOAD_BYTES, MOUNT_TEMPLATES, cleanExposure } from './documents.js';
 
 const ONLINE_SECONDS = 90;
 const sqlAgo = (ms) => new Date(Date.now() - ms).toISOString().slice(0, 19).replace('T', ' ');
+const PROGRESS_STATES = ['ready', 'waiting', 'exposing', 'uploading', 'error'];
+const parseJson = (v) => { try { return v ? JSON.parse(v) : null; } catch { return null; } };
 const requireAdmin = (req, _res, next) => (req.user.role === 'admin' ? next() : next(new HttpError(403, 'Administrator access required')));
 
 // Imaging bridges: a small agent on each operatory PC opens the patient in the practice's imaging
@@ -19,7 +21,7 @@ const requireAdmin = (req, _res, next) => (req.user.role === 'admin' ? next() : 
 export default function imagingRoutes({ db, storage }) {
   const r = Router();
   const view = (a) => ({
-    id: a.id, name: a.name, hostname: a.hostname, version: a.version, apps: JSON.parse(a.apps || '[]'), sensor: a.sensor || null, last_seen_at: a.last_seen_at, active: !!a.active,
+    id: a.id, name: a.name, hostname: a.hostname, version: a.version, apps: JSON.parse(a.apps || '[]'), sensor: a.sensor || null, sensor_info: parseJson(a.sensor_info), last_seen_at: a.last_seen_at, active: !!a.active,
     online: !!a.last_seen_at && Date.now() - Date.parse(`${a.last_seen_at.replace(' ', 'T')}Z`) < ONLINE_SECONDS * 1000,
   });
 
@@ -83,13 +85,48 @@ export default function imagingRoutes({ db, storage }) {
       mount = await db.get('SELECT * FROM image_mounts WHERE id = ?', mid);
     }
     const total = MOUNT_TEMPLATES[mount.template];
-    if (Object.keys(JSON.parse(mount.slots || '{}')).length >= total) throw new HttpError(409, 'That mount is already full');
+    // A particular spot can be aimed at (the chart's "Retake" or a click on an empty spot); otherwise
+    // images fill the next empty spot in order.
+    const target = targetFrom(req.body, total, JSON.parse(mount.slots || '{}'));
+    if (!target && Object.keys(JSON.parse(mount.slots || '{}')).length >= total) throw new HttpError(409, 'That mount is already full — choose an image to retake');
     const busy = await db.get("SELECT id FROM bridge_commands WHERE agent_id = ? AND type = 'capture' AND status IN ('pending','delivered') AND created_at > ?", agent.id, sqlAgo(30 * 60_000));
     if (busy) await db.run("UPDATE bridge_commands SET status = 'done', result = 'Replaced by a new capture', completed_at = datetime('now') WHERE id = ?", busy.id);
-    const payload = { mount_id: mount.id, template: mount.template, total, patient: { id: patient.id, first_name: patient.first_name, last_name: patient.last_name } };
+    const payload = { mount_id: mount.id, template: mount.template, total, target, patient: { id: patient.id, first_name: patient.first_name, last_name: patient.last_name } };
     const id = await insert(db, 'bridge_commands', { practice_id: req.user.practice_id, agent_id: agent.id, patient_id: patient.id, type: 'capture', payload: JSON.stringify(payload), created_by: req.user.id });
     await audit(db, req, 'imaging.capture', 'patients', patient.id, { agent: agent.name, mount_id: mount.id });
-    res.status(201).json({ id, status: 'pending', mount_id: mount.id, workstation: agent.name, sensor: agent.sensor });
+    res.status(201).json({ id, status: 'pending', mount_id: mount.id, workstation: agent.name, sensor: agent.sensor, target });
+  });
+
+  // Aim the running capture at a spot: the next exposure goes there (replacing the image in it when retaking).
+  r.put('/imaging/commands/:cid/target', requirePermission('clinical:write'), async (req, res) => {
+    const c = await findOr404(db, 'bridge_commands', req.params.cid, req.user.practice_id, 'Command');
+    if (c.type !== 'capture' || !['pending', 'delivered'].includes(c.status)) throw new HttpError(409, 'That capture has finished');
+    const payload = JSON.parse(c.payload);
+    const mount = await db.get('SELECT slots FROM image_mounts WHERE id = ?', payload.mount_id);
+    payload.target = req.body?.slot == null ? null : targetFrom(req.body, payload.total, JSON.parse(mount?.slots || '{}'));
+    await db.run('UPDATE bridge_commands SET payload = ? WHERE id = ?', JSON.stringify(payload), c.id);
+    res.json({ ok: true, target: payload.target });
+  });
+
+  // "Test sensor": one exposure (or a check of the capture folder) with no patient, to prove the setup works.
+  r.post('/imaging/agents/:aid/test-sensor', requirePermission('clinical:write'), async (req, res) => {
+    const agent = await findOr404(db, 'bridge_agents', req.params.aid, req.user.practice_id, 'Workstation');
+    if (!agent.active) throw new HttpError(409, 'That workstation was removed');
+    if (!agent.sensor) throw new HttpError(400, `No sensor is set up in the imaging bridge on ${agent.name}`);
+    if (!view(agent).online) throw new HttpError(409, `The imaging bridge on ${agent.name} is offline`);
+    const id = await insert(db, 'bridge_commands', { practice_id: req.user.practice_id, agent_id: agent.id, type: 'sensor_test', payload: '{}', created_by: req.user.id });
+    await audit(db, req, 'imaging.sensor_test', 'bridge_agents', agent.id);
+    res.status(201).json({ id, status: 'pending', workstation: agent.name, sensor: agent.sensor });
+  });
+  r.get('/imaging/commands/:cid/test-image', requirePermission('clinical:read'), async (req, res) => {
+    const c = await findOr404(db, 'bridge_commands', req.params.cid, req.user.practice_id, 'Command');
+    if (c.type !== 'sensor_test' || !c.result_key) throw new HttpError(404, 'No test image');
+    const [enc, key] = [c.result_key.slice(0, 1) === '1', c.result_key.slice(2)];
+    const data = await storage.read(key, enc);
+    if (!data) throw new HttpError(404, 'Test image expired');
+    const img = isDicom(data) ? dicomToImage(data) : { mime: sniffMime(data), data };
+    if (!img || !/^image\/(png|jpeg|gif|webp|bmp)$/.test(img.mime)) throw new HttpError(415, 'The sensor sent an image the browser can’t show (it still works — check it in the chart)');
+    res.set({ 'Content-Type': img.mime, 'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'none'; sandbox" }).send(img.data);
   });
   r.post('/imaging/commands/:cid/stop', requirePermission('clinical:write'), async (req, res) => {
     const c = await findOr404(db, 'bridge_commands', req.params.cid, req.user.practice_id, 'Command');
@@ -153,7 +190,14 @@ export default function imagingRoutes({ db, storage }) {
 
   r.get('/imaging/commands/:cid', requirePermission('clinical:read'), async (req, res) => {
     const c = await findOr404(db, 'bridge_commands', req.params.cid, req.user.practice_id, 'Command');
-    res.json({ id: c.id, status: c.status, result: c.result, delivered_at: c.delivered_at, completed_at: c.completed_at });
+    const payload = parseJson(c.payload) || {};
+    let filled = null;
+    if (c.type === 'capture') filled = Object.keys(parseJson((await db.get('SELECT slots FROM image_mounts WHERE id = ?', payload.mount_id))?.slots) || {}).length;
+    res.json({
+      id: c.id, type: c.type, status: c.status, result: c.result, delivered_at: c.delivered_at, completed_at: c.completed_at, progress: parseJson(c.progress),
+      ...(c.type === 'capture' ? { mount_id: payload.mount_id, total: payload.total, filled, target: payload.target || null } : {}),
+      ...(c.type === 'sensor_test' ? { test_image: !!c.result_key } : {}),
+    });
   });
 
   return r;
@@ -174,8 +218,15 @@ export function bridgeAgentRoutes({ db, storage }) {
 
   r.post('/hello', express.json(), async (req, res) => {
     const apps = (Array.isArray(req.body?.apps) ? req.body.apps : []).slice(0, 20).map((a) => ({ id: String(a.id).slice(0, 40), name: String(a.name || a.id).slice(0, 60) }));
-    const sensor = req.body?.sensor ? String(req.body.sensor.name || req.body.sensor).slice(0, 60) : null;
-    await db.run('UPDATE bridge_agents SET apps = ?, sensor = ?, hostname = ?, version = ? WHERE id = ?', JSON.stringify(apps), sensor, String(req.body?.hostname || '').slice(0, 100) || null, String(req.body?.version || '').slice(0, 20) || null, req.agent.id);
+    const s = req.body?.sensor;
+    const sensor = s ? String(s.name || s).slice(0, 60) : null;
+    let info = null;
+    if (s && typeof s === 'object') {
+      let exposure = null;
+      try { exposure = cleanExposure(s.exposure); } catch { exposure = null; }
+      info = { mode: s.mode === 'folder' ? 'folder' : 'command', preset: s.preset ? String(s.preset).slice(0, 40) : null, exposure };
+    }
+    await db.run('UPDATE bridge_agents SET apps = ?, sensor = ?, sensor_info = ?, hostname = ?, version = ? WHERE id = ?', JSON.stringify(apps), sensor, info ? JSON.stringify(info) : null, String(req.body?.hostname || '').slice(0, 100) || null, String(req.body?.version || '').slice(0, 20) || null, req.agent.id);
     const practice = await db.get('SELECT name FROM practices WHERE id = ?', req.agent.practice_id);
     res.json({ practice: practice.name, workstation: req.agent.name });
   });
@@ -204,10 +255,31 @@ export function bridgeAgentRoutes({ db, storage }) {
   r.get('/captures/:cid', async (req, res) => {
     const c = await db.get("SELECT * FROM bridge_commands WHERE id = ? AND agent_id = ? AND type = 'capture'", Number(req.params.cid), req.agent.id);
     if (!c) throw new HttpError(404, 'Capture not found');
-    const { mount_id: mountId, total } = JSON.parse(c.payload);
+    const { mount_id: mountId, total, target } = JSON.parse(c.payload);
     const mount = await db.get('SELECT slots FROM image_mounts WHERE id = ?', mountId);
     const filled = Object.keys(JSON.parse(mount?.slots || '{}')).length;
-    res.json({ active: c.status === 'delivered' && filled < total, filled, total });
+    res.json({ active: c.status === 'delivered' && (filled < total || !!target), filled, total, target: target || null });
+  });
+
+  // What the sensor is doing right now ("waiting for exposure", "uploading"), shown live in the chart.
+  r.post('/commands/:cid/progress', express.json(), async (req, res) => {
+    const c = await db.get('SELECT * FROM bridge_commands WHERE id = ? AND agent_id = ?', Number(req.params.cid), req.agent.id);
+    if (!c) throw new HttpError(404, 'Command not found');
+    const state = PROGRESS_STATES.includes(req.body?.state) ? req.body.state : 'waiting';
+    const progress = { state, message: String(req.body?.message || '').slice(0, 200) || null, at: new Date().toISOString() };
+    await db.run('UPDATE bridge_commands SET progress = ? WHERE id = ?', JSON.stringify(progress), c.id);
+    publish(req.agent.practice_id, { type: 'capture', id: c.id, patient_id: c.patient_id, state });
+    res.json({ ok: true });
+  });
+
+  // The picture from "Test sensor" (stored like any image; no patient attached).
+  r.post('/commands/:cid/test-image', express.raw({ type: () => true, limit: MAX_UPLOAD_BYTES }), async (req, res) => {
+    const c = await db.get("SELECT * FROM bridge_commands WHERE id = ? AND agent_id = ? AND type = 'sensor_test'", Number(req.params.cid), req.agent.id);
+    if (!c) throw new HttpError(404, 'Sensor test not found');
+    if (!Buffer.isBuffer(req.body) || !req.body.length || !sniffMime(req.body)) throw new HttpError(415, 'Send the image the sensor produced');
+    const saved = await storage.save(req.agent.practice_id, req.body);
+    await db.run('UPDATE bridge_commands SET result_key = ? WHERE id = ?', `${saved.encrypted ? 1 : 0}:${saved.storageKey}`, c.id);
+    res.json({ ok: true });
   });
 
   r.post('/commands/:cid/result', express.json(), async (req, res) => {
@@ -283,30 +355,52 @@ export function bridgeAgentRoutes({ db, storage }) {
     const dup = await db.get('SELECT id FROM documents WHERE patient_id = ? AND source_hash = ? AND deleted_at IS NULL', patientId, hash);
     if (dup && capture) throw new HttpError(409, 'The sensor sent the same image twice — it was already filed', { duplicate: true, id: dup.id });
     if (dup) return res.json({ id: dup.id, duplicate: true, patient_id: patientId });
-    const payload = capture ? JSON.parse(capture.payload) : null;
+    let payload = capture ? JSON.parse(capture.payload) : null;
     const category = payload ? (payload.template.startsWith('photos') ? 'photo' : 'xray') : ['xray', 'photo'].includes(req.query.category) ? req.query.category : tags?.modality === 'XC' ? 'photo' : 'xray';
     const tooth = req.query.tooth && validTooth(String(req.query.tooth).toUpperCase()) ? String(req.query.tooth).toUpperCase() : null;
+    // Exposure log: the workstation's usual settings for its sensor, unless the bridge reports this shot's own.
+    let exposure = null;
+    if (capture && category === 'xray') {
+      const defaults = parseJson(agent.sensor_info)?.exposure || {};
+      try {
+        exposure = cleanExposure({ ...defaults, sensor: agent.sensor, ...Object.fromEntries(['kvp', 'ma', 'seconds', 'size'].filter((k) => req.query[k]).map((k) => [k, req.query[k]])) });
+      } catch {
+        exposure = cleanExposure({ ...defaults, sensor: agent.sensor });
+      }
+    }
     const { storageKey, encrypted } = await storage.save(agent.practice_id, data);
     const id = await insert(db, 'documents', {
       practice_id: agent.practice_id, patient_id: patientId, category, filename, mime, size: data.length, storage_key: storageKey, encrypted: encrypted ? 1 : 0,
       tooth, notes: `Imported from ${agent.name}${tags?.modality ? ` (${tags.modality})` : ''}`, source: `bridge:${agent.id}`, source_hash: hash,
-      taken_at: tags?.studyDate || null,
+      taken_at: tags?.studyDate || (capture ? new Date().toISOString().slice(0, 10) : null), exposure: exposure ? JSON.stringify(exposure) : null,
     });
     await audit(db, { user: { practice_id: agent.practice_id, id: null }, ip: req.ip }, 'document.import', 'documents', id, { patient_id: patientId, agent: agent.name, matched_by: matchedBy });
     let placed = null;
     if (capture) {
       placed = await db.tx(async () => {
+        payload = JSON.parse((await db.get('SELECT payload FROM bridge_commands WHERE id = ?', capture.id)).payload); // the chart may have re-aimed it
         const mount = await db.get('SELECT * FROM image_mounts WHERE id = ?', payload.mount_id);
         const slots = JSON.parse(mount.slots || '{}');
         let slot = 0;
-        while (slot < payload.total && slots[slot] != null) slot++;
-        if (slot >= payload.total) return { slot: null, remaining: 0 };
+        let replaced = null;
+        const t = payload.target;
+        if (t && t.slot >= 0 && t.slot < payload.total && (slots[t.slot] == null || t.retake)) {
+          slot = t.slot;
+          replaced = slots[slot] ?? null;
+        } else {
+          while (slot < payload.total && slots[slot] != null) slot++;
+          if (slot >= payload.total) return { slot: null, remaining: 0 };
+        }
         slots[slot] = id;
+        // A retake keeps the first image in the chart (it's part of the record); only the mount shows the new one.
+        if (replaced) await db.run('UPDATE documents SET retake_of = ? WHERE id = ?', replaced, id);
         await db.run('UPDATE image_mounts SET slots = ? WHERE id = ?', JSON.stringify(slots), mount.id);
         const remaining = payload.total - Object.keys(slots).length;
-        if (!remaining) await db.run("UPDATE bridge_commands SET status = 'done', result = ?, completed_at = datetime('now') WHERE id = ?", `Mount complete (${payload.total} images)`, capture.id);
-        return { slot, remaining };
+        if (t) await db.run('UPDATE bridge_commands SET payload = ? WHERE id = ?', JSON.stringify({ ...payload, target: null }), capture.id);
+        if (!remaining) await db.run("UPDATE bridge_commands SET status = 'done', result = ?, completed_at = datetime('now') WHERE id = ?", replaced ? `Retake saved (spot ${slot + 1})` : `Mount complete (${payload.total} images)`, capture.id);
+        return { slot, remaining, ...(replaced ? { replaced } : {}) };
       });
+      if (placed.replaced) await audit(db, { user: { practice_id: agent.practice_id, id: null }, ip: req.ip }, 'mount.retake', 'image_mounts', payload.mount_id, { patient_id: patientId, slot: placed.slot, replaced: placed.replaced, document_id: id });
       publish(agent.practice_id, { type: 'mounts', patient_id: patientId });
     }
     publish(agent.practice_id, { type: 'documents', patient_id: patientId });
@@ -314,6 +408,17 @@ export function bridgeAgentRoutes({ db, storage }) {
   });
 
   return r;
+}
+
+// { slot, retake } from a request, checked against the mount: an empty spot can always be aimed at;
+// a filled one only when retaking it.
+function targetFrom(body, total, slots) {
+  if (body?.slot === undefined || body?.slot === null || body?.slot === '') return null;
+  const slot = Number(body.slot);
+  if (!Number.isInteger(slot) || slot < 0 || slot >= total) throw new HttpError(400, `No spot ${body.slot} in this mount`);
+  const retake = !!body.retake;
+  if (slots[slot] != null && !retake) throw new HttpError(409, 'That spot already has an image — retake it instead');
+  return { slot, retake: retake && slots[slot] != null };
 }
 
 export function sniffMime(buf, filename = '') {

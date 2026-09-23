@@ -181,7 +181,7 @@ test('sensor capture: stopping from the chart ends it; workstations without a se
   const img = await bridge('POST', `/images?filename=img1.png&capture_id=${cap.id}`, Buffer.from([0x89, 0x50, 0x4e, 0x47, 9, 9]));
   assert.equal(img.status, 201);
   assert.deepEqual([(await img.json()).slot, 17], [0, 17]);
-  assert.deepEqual(await (await bridge('GET', `/captures/${cap.id}`)).json(), { active: true, filled: 1, total: 18 });
+  assert.deepEqual(await (await bridge('GET', `/captures/${cap.id}`)).json(), { active: true, filled: 1, total: 18, target: null });
 
   await api.post(`/imaging/commands/${cap.id}/stop`);
   assert.equal((await (await bridge('GET', `/captures/${cap.id}`)).json()).active, false);

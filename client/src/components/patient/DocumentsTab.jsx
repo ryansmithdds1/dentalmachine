@@ -6,7 +6,13 @@ import { useAuth } from '../../auth.jsx';
 import { fmtDate, label } from '../../format.js';
 import { ErrorBox, Modal } from '../ui.jsx';
 import { useLiveEvents } from '../../live.js';
+import { ScanLine, Radio } from 'lucide-react';
 import ImageViewer from '../ImageViewer.jsx';
+import ImagingStudio, { MountBoard } from '../imaging/ImagingStudio.jsx';
+import { MOUNTS, slotLabels } from '../imaging/mounts.js';
+import { fetchBlob, useThumb } from '../imaging/thumbs.js';
+import { thumbStyle } from '../imaging/imageproc.js';
+import { readWs, saveWs } from '../imaging/workstation.js';
 
 // Browsers can't show TIFF or DICOM; those are offered as downloads instead of a broken preview.
 const previewable = (mime) => /^image\/(png|jpeg|gif|webp|bmp)$/.test(mime);
@@ -16,47 +22,13 @@ const viewerable = (mime) => previewable(mime) || mime === 'application/dicom';
 const CATEGORIES = ['xray', 'photo', 'document', 'consent', 'insurance_card', 'referral', 'other'];
 const catLabel = (c) => (c === 'xray' ? 'X-ray' : label(c));
 
-// Files are behind auth, so fetch them with the bearer token and show via object URLs.
-async function fetchBlob(id, image = false) {
-  const res = await fetch(`/api/documents/${id}/${image ? 'image' : 'file'}`, { headers: { Authorization: `Bearer ${getToken()}` } });
-  if (!res.ok) throw new Error('Could not load file');
-  return URL.createObjectURL(await res.blob());
-}
-
-// A small preview from the server. When the server can't make one (a JPEG without an embedded thumbnail),
-// this browser makes it from the full image once and hands it back, so nobody downloads the full file again.
-async function fetchThumb(id) {
-  const res = await fetch(`/api/documents/${id}/thumb`, { headers: { Authorization: `Bearer ${getToken()}` } });
-  if (res.status === 200) return URL.createObjectURL(await res.blob());
-  if (res.status !== 202) throw new Error('No preview');
-  const full = await fetchBlob(id, true);
-  try {
-    const img = await new Promise((resolve, reject) => { const i = new Image(); i.onload = () => resolve(i); i.onerror = reject; i.src = full; });
-    const f = Math.min(1, 240 / Math.max(img.naturalWidth, img.naturalHeight));
-    const canvas = Object.assign(document.createElement('canvas'), { width: Math.max(1, Math.round(img.naturalWidth * f)), height: Math.max(1, Math.round(img.naturalHeight * f)) });
-    canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
-    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.8));
-    if (blob) fetch(`/api/documents/${id}/thumb`, { method: 'PUT', headers: { Authorization: `Bearer ${getToken()}`, 'Content-Type': 'image/jpeg' }, body: blob }).catch(() => {});
-    return blob ? URL.createObjectURL(blob) : full;
-  } finally {
-    setTimeout(() => URL.revokeObjectURL(full), 1000);
-  }
-}
-
 function Thumb({ doc, onOpen }) {
-  const [src, setSrc] = useState(null);
-  useEffect(() => {
-    if (!viewerable(doc.mime)) return undefined;
-    let url;
-    let alive = true;
-    fetchThumb(doc.id).then((u) => { url = u; if (alive) setSrc(u); else URL.revokeObjectURL(u); }).catch(() => {});
-    return () => { alive = false; if (url) URL.revokeObjectURL(url); };
-  }, [doc.id, doc.mime]);
+  const src = useThumb(doc.id, viewerable(doc.mime));
   return (
     <button className="doc-tile" onClick={onOpen}>
-      <div className="doc-thumb">{src ? <img src={src} alt={doc.filename} /> : <span style={{ fontSize: 32 }}>{doc.mime === 'application/pdf' ? '📄' : '📎'}</span>}</div>
+      <div className="doc-thumb">{src ? <img src={src} alt={doc.filename} style={thumbStyle(doc.adjust)} /> : <span style={{ fontSize: 32 }}>{doc.mime === 'application/pdf' ? '📄' : '📎'}</span>}</div>
       <div className="doc-meta">
-        <strong>{doc.filename}{doc.annotated ? ' ✎' : ''}</strong>
+        <strong>{doc.filename}{doc.annotated ? ' ✎' : ''}{doc.retake_of ? ' · retake' : ''}</strong>
         <span className="muted">{catLabel(doc.category)}{doc.tooth ? ` · #${doc.tooth}` : ''} · {fmtDate(doc.created_at)}</span>
         {doc.tags && JSON.parse(doc.tags).length > 0 && <span className="doc-tags">{JSON.parse(doc.tags).map((t) => <i key={t}>{t}</i>)}</span>}
       </div>
@@ -77,10 +49,10 @@ export default function DocumentsTab({ patient }) {
   const [viewing, setViewing] = useState(null);
   const [compare, setCompare] = useState(null);
   const input = useRef(null);
-  const [focusMount, setFocusMount] = useState(null);
   const [editing, setEditing] = useState(null);
   const [search, setSearch] = useState('');
   const [phone, setPhone] = useState(false);
+  const [studio, setStudio] = useState(null);
 
   const upload = async (files) => {
     setUploading(true);
@@ -133,8 +105,8 @@ export default function DocumentsTab({ patient }) {
 
   return (
     <>
-      <ImagingBar patient={patient} onCapture={setFocusMount} canCapture={can('clinical:write')} />
-      <Mounts patient={patient} docs={(docs || []).filter((d) => viewerable(d.mime))} onOpen={open} canEdit={can('clinical:write')} focus={focusMount} />
+      <ImagingBar patient={patient} canCapture={can('clinical:write')} onStudio={setStudio} />
+      <Mounts patient={patient} docs={docs} canEdit={can('clinical:write')} onStudio={setStudio} />
       {can('clinical:write') && (
         <div className="card">
           <div className="inline" style={{ flexWrap: 'wrap', gap: 12 }}>
@@ -195,6 +167,10 @@ export default function DocumentsTab({ patient }) {
             {can('clinical:write') && <button className="danger" onClick={() => remove(viewing.doc)}>Remove</button>}
           </div>
         </Modal>
+      )}
+      {studio && (
+        <ImagingStudio patient={patient} docs={(docs || []).filter((d) => viewerable(d.mime))} canEdit={can('clinical:write')} initial={studio}
+          onClose={() => { setStudio(null); reload(); }} onDocsChanged={reload} />
       )}
       {phone && <PhoneScan patient={patient} category={category} onClose={() => setPhone(false)} />}
       {editing && (
@@ -263,55 +239,17 @@ function DocumentDetails({ doc, onClose, onSaved }) {
   );
 }
 
-const WS_KEY = 'dm_workstation';
-const readWs = () => {
-  try {
-    return localStorage.getItem(WS_KEY);
-  } catch {
-    return null;
-  }
-};
-
-// Open the patient in the imaging software on this operatory's PC (through its imaging bridge).
-function ImagingBar({ patient, onCapture, canCapture }) {
+// Open the patient in the imaging software on this operatory's PC (through its imaging bridge), or
+// capture straight from the sensor into the imaging studio.
+function ImagingBar({ patient, canCapture, onStudio }) {
   const { data: agents } = useApi('/imaging/agents');
   const [ws, setWs] = useState(readWs);
   const [status, setStatus] = useState(null);
   const [error, setError] = useState(null);
   const [template, setTemplate] = useState('fmx18');
-  const [capture, setCapture] = useState(null);
-  // While a capture runs, follow it: the mount fills in as exposures arrive (live events reload it).
-  useEffect(() => {
-    if (!capture) return undefined;
-    let alive = true;
-    const tick = async () => {
-      try {
-        const c = await api.get(`/imaging/commands/${capture.id}`);
-        if (!alive) return;
-        if (c.status === 'expired') { setCapture(null); setError(new Error(`${capture.workstation} didn't pick up the capture — is the imaging bridge running?`)); return; }
-        if (c.status === 'done' || c.status === 'error') {
-          setCapture(null);
-          if (c.status === 'error') setError(new Error(c.result || 'Capture failed'));
-          else setStatus(c.result || 'Capture finished');
-          return;
-        }
-        setCapture((x) => x && { ...x, status: c.status });
-      } catch { /* keep polling */ }
-      if (alive) setTimeout(tick, 1500);
-    };
-    const t = setTimeout(tick, 800);
-    return () => { alive = false; clearTimeout(t); };
-  }, [capture?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!agents?.length) return null;
   const agent = agents.find((a) => String(a.id) === String(ws));
-  const choose = (id) => {
-    setWs(id);
-    try {
-      localStorage.setItem(WS_KEY, id);
-    } catch {
-      /* per-browser convenience only */
-    }
-  };
+  const choose = (id) => { setWs(id); saveWs(id); };
   const launch = async (app) => {
     setError(null);
     setStatus(`Opening ${patient.first_name} in ${app.name} on ${agent.name}…`);
@@ -330,6 +268,7 @@ function ImagingBar({ patient, onCapture, canCapture }) {
       setError(e);
     }
   };
+  const sensorName = agent?.sensor?.replace(/\s*\(.*\)$/, '');
   return (
     <div className="card imaging-bar">
       <label className="imaging-ws">
@@ -342,137 +281,55 @@ function ImagingBar({ patient, onCapture, canCapture }) {
       {agent && (
         <div className="inline" style={{ flexWrap: 'wrap', gap: 6 }}>
           <span className={`live-dot${agent.online ? ' on' : ''}`}>{agent.online ? 'Bridge online' : 'Bridge offline'}</span>
-          {agent.apps.map((app) => <button key={app.id} className="small primary" disabled={!agent.online} onClick={() => launch(app)}>Open in {app.name}</button>)}
+          {agent.apps.map((app) => <button key={app.id} className="small" disabled={!agent.online} onClick={() => launch(app)}>Open in {app.name}</button>)}
           {!agent.apps.length && !agent.sensor && <span className="muted">No imaging programs set up on {agent.name}.</span>}
         </div>
       )}
       {agent?.sensor && canCapture && (
         <div className="inline imaging-capture" style={{ flexWrap: 'wrap', gap: 6 }}>
-          {capture ? (
-            <>
-              <span className="live-dot on">{capture.status === 'delivered' ? `Ready — take the exposures on ${agent.sensor}; each one fills the next spot` : `Starting ${agent.sensor} on ${agent.name}…`}</span>
-              <button className="small" onClick={() => api.post(`/imaging/commands/${capture.id}/stop`).then(() => setCapture(null)).catch(setError)}>Stop capture</button>
-            </>
-          ) : (
-            <>
-              <select aria-label="Series to capture" value={template} onChange={(e) => setTemplate(e.target.value)} style={{ width: 'auto' }}>
-                {Object.entries(MOUNTS).map(([k, m]) => <option key={k} value={k}>{m.label}</option>)}
-              </select>
-              <button className="small primary" disabled={!agent.online} onClick={startCapture}>Capture from {agent.sensor}</button>
-            </>
-          )}
+          <select aria-label="Series to capture" value={template} onChange={(e) => setTemplate(e.target.value)} style={{ width: 'auto' }}>
+            {Object.entries(MOUNTS).map(([k, m]) => <option key={k} value={k}>{m.label}</option>)}
+          </select>
+          <button className="small primary" disabled={!agent.online} onClick={() => onStudio({ capture: true, template })}><Radio size={14} /> Capture from {sensorName}</button>
         </div>
       )}
       {status && <div className="muted imaging-status">{status}</div>}
       <ErrorBox error={error} />
     </div>
   );
-
-  async function startCapture() {
-    setError(null);
-    setStatus(null);
-    try {
-      const c = await api.post(`/patients/${patient.id}/imaging/capture`, { agent_id: agent.id, template });
-      setCapture({ id: c.id, workstation: c.workstation, status: 'pending' });
-      onCapture?.(c.mount_id);
-    } catch (e) { setError(e); }
-  }
 }
 
-// Mount layouts: rows of labelled slots (FMX, bitewings, photo series).
-const U7 = ['UR molar', 'UR premolar', 'UR canine', 'Upper incisors', 'UL canine', 'UL premolar', 'UL molar'];
-const L7 = ['LR molar', 'LR premolar', 'LR canine', 'Lower incisors', 'LL canine', 'LL premolar', 'LL molar'];
-const BW4 = ['R molar BW', 'R premolar BW', 'L premolar BW', 'L molar BW'];
-export const MOUNTS = {
-  fmx18: { label: 'FMX (18)', rows: [U7, BW4, L7] },
-  fmx20: { label: 'FMX (20)', rows: [['UR molar', ...U7.slice(0, 3), 'Upper incisors R', 'Upper incisors L', ...U7.slice(4)], BW4, ['LR molar', ...L7.slice(0, 3), 'Lower incisors R', 'Lower incisors L', ...L7.slice(4)]] },
-  bw4: { label: '4 bitewings', rows: [BW4] },
-  bw2: { label: '2 bitewings', rows: [['Right BW', 'Left BW']] },
-  pa4: { label: '4 periapicals', rows: [['PA 1', 'PA 2', 'PA 3', 'PA 4']] },
-  photos8: { label: 'Photo series (8)', rows: [['Full face', 'Smile', 'Profile', 'Retracted front'], ['Right buccal', 'Left buccal', 'Upper occlusal', 'Lower occlusal']] },
-};
-
-function MountThumb({ docId, onClick, label, onClear }) {
-  const [src, setSrc] = useState(null);
-  useEffect(() => {
-    if (!docId) { setSrc(null); return undefined; }
-    let url;
-    fetchThumb(docId).then((u) => setSrc((url = u))).catch(() => {});
-    return () => url && URL.revokeObjectURL(url);
-  }, [docId]);
-  return (
-    <div className={`mount-slot${docId ? ' filled' : ''}`} onClick={onClick} role="button" tabIndex={0} title={label}>
-      {src ? <img src={src} alt={label} /> : <span>{label}</span>}
-      {docId && onClear && <button type="button" className="mount-clear" aria-label="Remove from mount" onClick={(e) => { e.stopPropagation(); onClear(); }}>✕</button>}
-    </div>
-  );
-}
-
-// FMX and other mounts: images placed into a layout, opened in the viewer.
-function Mounts({ patient, docs, onOpen, canEdit, focus }) {
+// The latest mounts at a glance; the studio opens on a click (at the spot clicked).
+function Mounts({ patient, docs, canEdit, onStudio }) {
   const { data: mounts, reload } = useApi(`/patients/${patient.id}/mounts`);
+  const docById = new Map((docs || []).map((d) => [d.id, d]));
   const [open, setOpen] = useState(null);
   useLiveEvents((e) => ['mounts', 'documents'].includes(e.type) && e.patient_id === patient.id && reload());
-  useEffect(() => {
-    if (!focus) return;
-    setOpen(focus);
-    reload();
-  }, [focus]); // eslint-disable-line react-hooks/exhaustive-deps
-  const [picking, setPicking] = useState(null);
-  const [error, setError] = useState(null);
-  const current = mounts?.find((m) => m.id === open) || mounts?.[0];
-  const setSlot = async (i, docId) => {
-    try {
-      await api.put(`/mounts/${current.id}`, { slots: { ...current.slots, [i]: docId } });
-      setPicking(null);
-      reload();
-    } catch (e) { setError(e); }
-  };
   if (!mounts || (!mounts.length && !canEdit)) return null;
-  let n = 0;
+  const current = mounts.find((m) => m.id === open) || mounts[0];
+  const filled = current ? Object.keys(current.slots).length : 0;
   return (
     <div className="card">
-      <div className="inline" style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
-        <h2 style={{ margin: 0 }}>Mounts</h2>
+      <div className="mount-card-head">
+        <h2 style={{ margin: 0 }}>X-rays & mounts</h2>
         <div className="inline" style={{ gap: 6 }}>
-          {mounts.length > 0 && (
-            <select aria-label="Mount" value={current?.id || ''} onChange={(e) => setOpen(Number(e.target.value))}>
+          {mounts.length > 1 && (
+            <select aria-label="Mount" value={current?.id || ''} onChange={(e) => setOpen(Number(e.target.value))} style={{ width: 'auto' }}>
               {mounts.map((m) => <option key={m.id} value={m.id}>{MOUNTS[m.template]?.label} · {fmtDate(m.taken_at)}</option>)}
             </select>
           )}
-          {canEdit && (
-            <select aria-label="New mount" value="" onChange={async (e) => { if (!e.target.value) return; try { const m = await api.post(`/patients/${patient.id}/mounts`, { template: e.target.value }); setOpen(m.id); reload(); } catch (err) { setError(err); } }}>
-              <option value="">+ New mount…</option>
-              {Object.entries(MOUNTS).map(([k, m]) => <option key={k} value={k}>{m.label}</option>)}
-            </select>
-          )}
+          <button className="small primary" onClick={() => onStudio({ mountId: current?.id })}><ScanLine size={14} /> Open imaging</button>
         </div>
       </div>
-      <ErrorBox error={error} />
-      {current && (
-        <div className="mount-grid">
-          {MOUNTS[current.template].rows.map((row, r) => (
-            <div key={r} className="mount-row">
-              {row.map((label) => {
-                const i = n++;
-                const docId = current.slots[i];
-                return (
-                  <MountThumb key={i} docId={docId} label={label}
-                    onClick={() => (docId ? onOpen(docs.find((d) => d.id === docId) || { id: docId, mime: 'image/png', filename: label, category: 'xray' }) : canEdit && setPicking(i))}
-                    onClear={canEdit ? () => setSlot(i, null) : null} />
-                );
-              })}
-            </div>
-          ))}
-        </div>
-      )}
-      {picking != null && (
-        <Modal title="Choose an image for this spot" onClose={() => setPicking(null)}>
-          {docs.length === 0 ? <div className="muted">No images yet.</div> : (
-            <div className="doc-grid">{docs.map((d) => <Thumb key={d.id} doc={d} onOpen={() => setSlot(picking, d.id)} />)}</div>
-          )}
-        </Modal>
-      )}
+      {current ? (
+        <>
+          <div className="muted" style={{ fontSize: 12.5, marginTop: 4 }}>{MOUNTS[current.template]?.label} · {fmtDate(current.taken_at)} · {filled} of {slotLabels(current.template).length} images</div>
+          <div className="mount-strip" title="Click an image to open it in the imaging studio">
+            <MountBoard mount={current} labels={slotLabels(current.template)} selected={null} next={-1} capturing={false} canEdit={false} sensorReady={false}
+              adjustOf={(id) => docById.get(id)?.adjust} docById={docById} onClick={(i) => onStudio({ mountId: current.id, slot: current.slots[i] != null ? i : null })} onRetake={() => {}} onClear={() => {}} compact />
+          </div>
+        </>
+      ) : <div className="muted" style={{ marginTop: 6 }}>No mounts yet — open imaging to start an FMX, bitewings or a single PA.</div>}
     </div>
   );
 }

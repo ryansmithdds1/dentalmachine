@@ -1,12 +1,31 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  Hand, Ruler, Spline, DraftingCompass, MoveUpRight, Circle, Type, Eraser, Crosshair, ZoomIn, ZoomOut, RotateCw, ArrowLeftRight,
+  Contrast, Search, SlidersHorizontal, Maximize, Minimize, Undo2, Save, Keyboard,
+} from 'lucide-react';
 import { api, getToken } from '../api.js';
 import { ErrorBox } from './ui.jsx';
+import { PRESETS, COLORMAPS, NEUTRAL, withDefaults, compact, renderProcessed, dist, pathLength, angleAt } from './imaging/imageproc.js';
 
-// X-ray / photo viewer: zoom (wheel or buttons), pan, rotate, flip, brightness/contrast/invert, and
-// annotations stored in image pixels — measurements (mm from the DICOM spacing or a calibration),
-// arrows, circles and text. Used on its own or two side by side to compare.
+// Diagnostic x-ray / photo viewer. Pixels are enhanced on a copy (gamma, sharpen, auto-levels, false
+// colour, emboss) with presets for caries, endo and perio reads; the settings can be saved with the image
+// so it opens the same way next time. Marks are stored in image pixels: lengths, canal lengths (a path),
+// angles, arrows, circles and notes, in mm from the DICOM pixel spacing or a calibration. A magnifier,
+// full screen and keyboard shortcuts cover the rest. Used alone, side by side to compare, or in the studio.
 
-const TOOLS = [['pan', '✋', 'Move'], ['measure', '📏', 'Measure'], ['arrow', '➚', 'Arrow'], ['circle', '◯', 'Circle'], ['text', 'T', 'Note'], ['calibrate', '⇔', 'Calibrate (draw a line of known length)']];
+const TOOLS = [
+  ['pan', Hand, 'Move', 'p'],
+  ['measure', Ruler, 'Measure', 'l'],
+  ['polyline', Spline, 'Canal length', 'c'],
+  ['angle', DraftingCompass, 'Angle', 'a'],
+  ['arrow', MoveUpRight, 'Arrow', 'w'],
+  ['circle', Circle, 'Circle', 'o'],
+  ['text', Type, 'Note', 't'],
+  ['erase', Eraser, 'Erase a mark', 'e'],
+  ['calibrate', Crosshair, 'Calibrate (draw a line of known length)', 'k'],
+];
+const READ_ONLY_TOOLS = ['pan', 'measure', 'polyline', 'angle'];
+const MARK = '#facc15';
 
 async function loadImage(id) {
   const res = await fetch(`/api/documents/${id}/image`, { headers: { Authorization: `Bearer ${getToken()}` } });
@@ -17,86 +36,158 @@ async function loadImage(id) {
   return { img, url };
 }
 
-export default function ImageViewer({ doc, canEdit = false, height = '70vh', compact = false }) {
+const SHORTCUTS = [
+  ['+ / −', 'Zoom'], ['0', 'Fit'], ['R', 'Rotate'], ['H', 'Flip'], ['I', 'Invert'], ['M', 'Magnifier'], ['F', 'Full screen'],
+  ['1–5', 'Original · Caries · Endo · Perio · Auto'], ['P L C A W O T E K', 'Tools'], ['Enter / double-click', 'Finish a canal length'],
+  ['Esc', 'Cancel the mark'], ['Ctrl+Z', 'Undo'], ['← →', 'Previous / next image'], ['?', 'These shortcuts'],
+];
+
+export default function ImageViewer({ doc, canEdit = false, height = '70vh', compact: small = false, onPrev, onNext, onSaved, dark = false, autoFocus = false }) {
   const canvas = useRef(null);
   const wrap = useRef(null);
+  const root = useRef(null);
+  const cache = useRef({});
+  const loupe = useRef(null);
+  const drag = useRef(null);
   const [img, setImg] = useState(null);
+  const [processed, setProcessed] = useState(null);
   const [error, setError] = useState(null);
-  const [view, setView] = useState({ zoom: 1, x: 0, y: 0, rot: 0, flip: false });
-  const [adj, setAdj] = useState({ brightness: 100, contrast: 100, invert: false });
+  const [view, setView] = useState({ zoom: 1, x: 0, y: 0 });
+  const [adj, setAdj] = useState(NEUTRAL);
+  const [savedAdj, setSavedAdj] = useState(null);
   const [tool, setTool] = useState('pan');
   const [notes, setNotes] = useState([]);
   const [mm, setMm] = useState(null);
   const [scaleSource, setScaleSource] = useState(null);
+  const [exposure, setExposure] = useState(null);
   const [dirty, setDirty] = useState(false);
   const [draft, setDraft] = useState(null);
-  const drag = useRef(null);
+  const [magnify, setMagnify] = useState(false);
+  const [panel, setPanel] = useState(false);
+  const [help, setHelp] = useState(false);
+  const [full, setFull] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     let url;
     setImg(null);
+    setProcessed(null);
     setError(null);
+    setDraft(null);
+    cache.current = {};
     Promise.all([loadImage(doc.id), api.get(`/documents/${doc.id}/viewer`)]).then(([l, meta]) => {
       url = l.url;
       setImg(l.img);
       setNotes(meta.annotations);
       setMm(meta.mm_per_px);
       setScaleSource(meta.scale_source);
+      setExposure(meta.exposure);
+      setAdj(withDefaults(meta.adjust));
+      setSavedAdj(compact(meta.adjust));
       setDirty(false);
-      setView({ zoom: 1, x: 0, y: 0, rot: 0, flip: false });
+      setView({ zoom: 1, x: 0, y: 0 });
     }).catch(setError);
     return () => url && URL.revokeObjectURL(url);
   }, [doc.id]);
 
+  // Enhancement runs off the main render (a big x-ray takes a moment), newest settings winning.
+  useEffect(() => {
+    if (!img) return undefined;
+    const t = setTimeout(() => {
+      try { setProcessed(renderProcessed(img, adj, cache.current)); } catch (e) { setError(e); }
+    }, 16);
+    return () => clearTimeout(t);
+  }, [img, adj.brightness, adj.contrast, adj.gamma, adj.sharpen, adj.invert, adj.equalize, adj.emboss, adj.colormap]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Image pixels → screen: centre, pan, zoom (fit × zoom), rotate, flip.
   const matrix = useCallback(() => {
     const c = canvas.current;
-    const rotated = view.rot % 180 !== 0;
-    const fit = Math.min(c.width / (rotated ? img.height : img.width), c.height / (rotated ? img.width : img.height));
+    const rotated = adj.rotate % 180 !== 0;
+    const fit = Math.min(c.width / (rotated ? img.height : img.width), c.height / (rotated ? img.width : img.height)) * 0.96;
     const s = fit * view.zoom;
-    return new DOMMatrix().translate(c.width / 2 + view.x, c.height / 2 + view.y).rotate(view.rot).scale(view.flip ? -s : s, s).translate(-img.width / 2, -img.height / 2);
-  }, [img, view]);
+    return new DOMMatrix().translate(c.width / 2 + view.x, c.height / 2 + view.y).rotate(adj.rotate).scale(adj.flipH ? -s : s, s).translate(-img.width / 2, -img.height / 2);
+  }, [img, view, adj.rotate, adj.flipH]);
 
-  const lengthMm = (a) => {
-    const px = Math.hypot(a.points[1][0] - a.points[0][0], a.points[1][1] - a.points[0][1]);
-    return mm ? `${(px * mm).toFixed(1)} mm` : `${Math.round(px)} px`;
-  };
+  const fmtLen = (px) => (mm ? `${(px * mm).toFixed(1)} mm` : `${Math.round(px)} px`);
 
   const draw = useCallback(() => {
     const c = canvas.current;
-    if (!c || !img) return;
+    if (!c || !img || !wrap.current) return;
     const ratio = window.devicePixelRatio || 1;
     const w = wrap.current.clientWidth;
     const hgt = wrap.current.clientHeight;
-    if (c.width !== w * ratio || c.height !== hgt * ratio) { c.width = w * ratio; c.height = hgt * ratio; }
+    if (c.width !== Math.round(w * ratio) || c.height !== Math.round(hgt * ratio)) { c.width = Math.round(w * ratio); c.height = Math.round(hgt * ratio); }
     const ctx = c.getContext('2d');
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.fillStyle = '#0b0f19';
-    ctx.fillRect(0, 0, c.width, c.height);
     const m = matrix();
-    ctx.setTransform(m);
-    ctx.filter = `brightness(${adj.brightness}%) contrast(${adj.contrast}%)${adj.invert ? ' invert(1)' : ''}`;
-    ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(img, 0, 0);
-    ctx.filter = 'none';
-    // Annotations: drawn in screen space from image points so lines stay crisp at any zoom.
+    const source = processed || img;
+    const paint = (t) => {
+      ctx.setTransform(t);
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(source, 0, 0, img.width, img.height);
+    };
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = '#05070c';
+    ctx.fillRect(0, 0, c.width, c.height);
+    paint(m);
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     const toScreen = ([x, y]) => { const p = m.transformPoint(new DOMPoint(x, y)); return [p.x, p.y]; };
+    const label = (text, x, y) => {
+      ctx.font = `600 ${12 * ratio}px Inter, system-ui, sans-serif`;
+      const tw = ctx.measureText(text).width;
+      ctx.fillStyle = 'rgba(5,7,12,.78)';
+      ctx.beginPath();
+      ctx.roundRect(x - 4 * ratio, y - 13 * ratio, tw + 8 * ratio, 18 * ratio, 4 * ratio);
+      ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.fillText(text, x, y);
+    };
+    const dot = (p) => { ctx.beginPath(); ctx.arc(p[0], p[1], 3 * ratio, 0, Math.PI * 2); ctx.fill(); };
     const all = draft ? [...notes, draft] : notes;
     for (const a of all) {
-      ctx.strokeStyle = a.color || '#facc15';
-      ctx.fillStyle = a.color || '#facc15';
+      ctx.strokeStyle = a.color || MARK;
+      ctx.fillStyle = a.color || MARK;
       ctx.lineWidth = 2 * ratio;
-      ctx.font = `${13 * ratio}px system-ui, sans-serif`;
-      const [p0, p1] = [toScreen(a.points[0]), a.points[1] ? toScreen(a.points[1]) : null];
+      ctx.lineJoin = 'round';
+      const pts = a.points.map(toScreen);
+      const [p0, p1] = pts;
       if (a.type === 'text') {
-        ctx.fillText(a.text || '', p0[0] + 6 * ratio, p0[1] - 6 * ratio);
-        ctx.beginPath(); ctx.arc(p0[0], p0[1], 3 * ratio, 0, Math.PI * 2); ctx.fill();
+        dot(p0);
+        label(a.text || '', p0[0] + 8 * ratio, p0[1] - 6 * ratio);
+        continue;
+      }
+      if (a.type === 'polyline') {
+        ctx.beginPath();
+        pts.forEach((p, i) => (i ? ctx.lineTo(...p) : ctx.moveTo(...p)));
+        ctx.stroke();
+        pts.forEach(dot);
+        const end = pts[pts.length - 1];
+        if (pts.length > 1) label(fmtLen(pathLength(a.points)), end[0] + 8 * ratio, end[1] + 16 * ratio);
+        continue;
+      }
+      if (a.type === 'angle') {
+        ctx.beginPath();
+        ctx.moveTo(...p0);
+        ctx.lineTo(...p1);
+        if (pts[2]) ctx.lineTo(...pts[2]);
+        ctx.stroke();
+        pts.forEach(dot);
+        if (pts[2]) {
+          const r = 22 * ratio;
+          const s = Math.atan2(p0[1] - p1[1], p0[0] - p1[0]);
+          const e = Math.atan2(pts[2][1] - p1[1], pts[2][0] - p1[0]);
+          let d = e - s;
+          while (d > Math.PI) d -= 2 * Math.PI;
+          while (d < -Math.PI) d += 2 * Math.PI;
+          ctx.beginPath();
+          ctx.arc(p1[0], p1[1], r, s, s + d, d < 0);
+          ctx.stroke();
+          label(`${angleAt(...a.points).toFixed(1)}°`, p1[0] + 10 * ratio, p1[1] - 10 * ratio);
+        }
         continue;
       }
       if (!p1) continue;
       if (a.type === 'circle') {
-        ctx.beginPath(); ctx.arc(p0[0], p0[1], Math.hypot(p1[0] - p0[0], p1[1] - p0[1]), 0, Math.PI * 2); ctx.stroke();
+        ctx.beginPath(); ctx.arc(p0[0], p0[1], dist(p0, p1), 0, Math.PI * 2); ctx.stroke();
         continue;
       }
       ctx.beginPath(); ctx.moveTo(...p0); ctx.lineTo(...p1); ctx.stroke();
@@ -105,15 +196,30 @@ export default function ImageViewer({ doc, canEdit = false, height = '70vh', com
         for (const d of [-0.45, 0.45]) { ctx.beginPath(); ctx.moveTo(...p1); ctx.lineTo(p1[0] - 12 * ratio * Math.cos(ang + d), p1[1] - 12 * ratio * Math.sin(ang + d)); ctx.stroke(); }
       }
       if (a.type === 'measure' || a.type === 'calibrate') {
-        for (const p of [p0, p1]) { ctx.beginPath(); ctx.arc(p[0], p[1], 3 * ratio, 0, Math.PI * 2); ctx.fill(); }
-        const label = a.type === 'calibrate' ? 'calibrate' : lengthMm(a);
-        ctx.lineWidth = 3 * ratio;
-        ctx.strokeStyle = 'rgba(0,0,0,.7)';
-        ctx.strokeText(label, (p0[0] + p1[0]) / 2 + 6 * ratio, (p0[1] + p1[1]) / 2 - 6 * ratio);
-        ctx.fillText(label, (p0[0] + p1[0]) / 2 + 6 * ratio, (p0[1] + p1[1]) / 2 - 6 * ratio);
+        dot(p0); dot(p1);
+        label(a.type === 'calibrate' ? 'known length' : fmtLen(dist(a.points[0], a.points[1])), (p0[0] + p1[0]) / 2 + 8 * ratio, (p0[1] + p1[1]) / 2 - 8 * ratio);
       }
     }
-  }, [img, adj, notes, draft, matrix, mm]); // eslint-disable-line react-hooks/exhaustive-deps
+    // Magnifier: the same view at 3× inside a circle that follows the pointer.
+    if (magnify && loupe.current) {
+      const [lx, ly] = loupe.current;
+      const r = 90 * ratio;
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(lx, ly, r, 0, Math.PI * 2);
+      ctx.clip();
+      ctx.fillStyle = '#05070c';
+      ctx.fillRect(lx - r, ly - r, r * 2, r * 2);
+      paint(new DOMMatrix().translate(lx, ly).scale(3).translate(-lx, -ly).multiply(m));
+      ctx.restore();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.strokeStyle = 'rgba(255,255,255,.85)';
+      ctx.lineWidth = 2 * ratio;
+      ctx.beginPath();
+      ctx.arc(lx, ly, r, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  }, [img, processed, notes, draft, matrix, mm, magnify]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { draw(); }, [draw]);
   useEffect(() => {
@@ -122,100 +228,253 @@ export default function ImageViewer({ doc, canEdit = false, height = '70vh', com
     return () => ro.disconnect();
   }, [draw]);
 
-  const toImage = (e) => {
+  const screenPoint = (e) => {
     const r = canvas.current.getBoundingClientRect();
     const ratio = window.devicePixelRatio || 1;
-    const p = matrix().inverse().transformPoint(new DOMPoint((e.clientX - r.left) * ratio, (e.clientY - r.top) * ratio));
+    return [(e.clientX - r.left) * ratio, (e.clientY - r.top) * ratio];
+  };
+  const toImage = (e) => {
+    const [sx, sy] = screenPoint(e);
+    const p = matrix().inverse().transformPoint(new DOMPoint(sx, sy));
     return [Math.round(p.x * 10) / 10, Math.round(p.y * 10) / 10];
+  };
+  const addNote = (n) => { setNotes((list) => [...list, n]); setDirty(true); };
+  const finishPath = () => {
+    if (draft?.type !== 'polyline') return;
+    const pts = draft.points.slice(0, -1); // the last point follows the pointer
+    setDraft(null);
+    if (pts.length >= 2) addNote({ ...draft, points: pts });
   };
 
   const down = (e) => {
     if (!img) return;
-    canvas.current.setPointerCapture(e.pointerId);
-    if (tool === 'pan' || e.button === 1) { drag.current = { x: e.clientX, y: e.clientY, view }; return; }
-    if (tool === 'text') {
-      const text = window.prompt('Note');
-      if (text) { setNotes([...notes, { type: 'text', points: [toImage(e)], text }]); setDirty(true); }
+    root.current?.focus({ preventScroll: true });
+    if (tool === 'pan' || e.button === 1) {
+      canvas.current.setPointerCapture(e.pointerId);
+      drag.current = { x: e.clientX, y: e.clientY, view };
       return;
     }
     const p = toImage(e);
-    setDraft({ type: tool, points: [p, p], color: tool === 'calibrate' ? '#38bdf8' : '#facc15' });
+    if (tool === 'text') {
+      const text = window.prompt('Note');
+      if (text) addNote({ type: 'text', points: [p], text, color: MARK });
+      return;
+    }
+    if (tool === 'erase') {
+      // The nearest mark within a few screen pixels of any of its points or segments.
+      const m = matrix();
+      const [sx, sy] = screenPoint(e);
+      const near = (a) => {
+        const s = a.points.map(([x, y]) => { const q = m.transformPoint(new DOMPoint(x, y)); return [q.x, q.y]; });
+        if (a.type === 'circle' && s[1]) return Math.abs(dist(s[0], [sx, sy]) - dist(s[0], s[1]));
+        let best = Math.min(...s.map((q) => dist(q, [sx, sy])));
+        for (let i = 1; i < s.length; i++) {
+          const [ax, ay] = s[i - 1];
+          const [bx, by] = s[i];
+          const len = (bx - ax) ** 2 + (by - ay) ** 2 || 1;
+          const t = Math.max(0, Math.min(1, ((sx - ax) * (bx - ax) + (sy - ay) * (by - ay)) / len));
+          best = Math.min(best, dist([ax + t * (bx - ax), ay + t * (by - ay)], [sx, sy]));
+        }
+        return best;
+      };
+      let hit = -1;
+      let bestD = 10 * (window.devicePixelRatio || 1);
+      notes.forEach((a, i) => { const d = near(a); if (d < bestD) { bestD = d; hit = i; } });
+      if (hit >= 0) { setNotes(notes.filter((_, i) => i !== hit)); setDirty(true); }
+      return;
+    }
+    if (tool === 'polyline') {
+      if (e.detail > 1) return; // the double-click that finishes it
+      setDraft(draft?.type === 'polyline' ? { ...draft, points: [...draft.points.slice(0, -1), p, p] } : { type: 'polyline', points: [p, p], color: MARK });
+      return;
+    }
+    if (tool === 'angle') {
+      if (!draft) setDraft({ type: 'angle', points: [p, p], color: MARK });
+      else if (draft.points.length === 2) setDraft({ ...draft, points: [draft.points[0], p, p] });
+      else { addNote({ ...draft, points: [draft.points[0], draft.points[1], p] }); setDraft(null); }
+      return;
+    }
+    canvas.current.setPointerCapture(e.pointerId);
+    setDraft({ type: tool, points: [p, p], color: tool === 'calibrate' ? '#38bdf8' : MARK });
   };
   const move = (e) => {
+    if (magnify) { loupe.current = screenPoint(e); if (!drag.current && !draft) draw(); }
     if (drag.current) {
       const ratio = window.devicePixelRatio || 1;
       setView({ ...drag.current.view, x: drag.current.view.x + (e.clientX - drag.current.x) * ratio, y: drag.current.view.y + (e.clientY - drag.current.y) * ratio });
-    } else if (draft) setDraft({ ...draft, points: [draft.points[0], toImage(e)] });
+    } else if (draft) setDraft({ ...draft, points: [...draft.points.slice(0, -1), toImage(e)] });
   };
   const up = () => {
     drag.current = null;
-    if (!draft) return;
+    if (!draft || ['polyline', 'angle'].includes(draft.type)) return;
     const d = draft;
     setDraft(null);
-    const px = Math.hypot(d.points[1][0] - d.points[0][0], d.points[1][1] - d.points[0][1]);
+    const px = dist(d.points[0], d.points[1]);
     if (px < 2) return;
     if (d.type === 'calibrate') {
       const v = window.prompt('How long is that line, in millimetres? (e.g. a known implant or file length)');
       if (v && Number(v) > 0) { setMm(Number(v) / px); setScaleSource('calibrated'); setDirty(true); }
       return;
     }
-    setNotes([...notes, d]);
-    setDirty(true);
+    addNote(d);
   };
-  const wheel = (e) => {
-    e.preventDefault();
-    const f = e.deltaY < 0 ? 1.15 : 1 / 1.15;
-    const r = canvas.current.getBoundingClientRect();
-    const ratio = window.devicePixelRatio || 1;
-    const cx = (e.clientX - r.left) * ratio - canvas.current.width / 2;
-    const cy = (e.clientY - r.top) * ratio - canvas.current.height / 2;
-    setView((v) => {
-      const zoom = Math.min(20, Math.max(0.2, v.zoom * f));
-      const k = zoom / v.zoom;
-      return { ...v, zoom, x: cx - (cx - v.x) * k, y: cy - (cy - v.y) * k };
-    });
-  };
+  const leave = () => { if (magnify) { loupe.current = null; draw(); } };
+
+  const zoomBy = (f, cx = 0, cy = 0) => setView((v) => {
+    const zoom = Math.min(30, Math.max(0.2, v.zoom * f));
+    const k = zoom / v.zoom;
+    return { ...v, zoom, x: cx - (cx - v.x) * k, y: cy - (cy - v.y) * k };
+  });
   useEffect(() => {
     const c = canvas.current;
     if (!c) return undefined;
+    const wheel = (e) => {
+      e.preventDefault();
+      const [sx, sy] = screenPoint(e);
+      zoomBy(e.deltaY < 0 ? 1.15 : 1 / 1.15, sx - c.width / 2, sy - c.height / 2);
+    };
     c.addEventListener('wheel', wheel, { passive: false });
     return () => c.removeEventListener('wheel', wheel);
   });
 
+  const setA = (patch) => setAdj((a) => ({ ...a, ...patch }));
+  const applyPreset = (p) => setAdj((a) => ({ ...NEUTRAL, ...p.adjust, rotate: a.rotate, flipH: a.flipH }));
+  const toggleFull = () => {
+    if (document.fullscreenElement) document.exitFullscreen?.();
+    else root.current?.requestFullscreen?.().catch(() => setFull((f) => !f));
+  };
+  useEffect(() => {
+    const on = () => setFull(document.fullscreenElement === root.current);
+    document.addEventListener('fullscreenchange', on);
+    return () => document.removeEventListener('fullscreenchange', on);
+  }, []);
+  useEffect(() => { if (autoFocus) root.current?.focus({ preventScroll: true }); }, [autoFocus, doc.id]);
+
+  const adjDirty = JSON.stringify(compact(adj)) !== JSON.stringify(savedAdj);
   const save = async () => {
+    setSaving(true);
     try {
-      await api.put(`/documents/${doc.id}/annotations`, { annotations: notes, ...(scaleSource === 'calibrated' ? { mm_per_px: mm } : {}) });
+      if (dirty) await api.put(`/documents/${doc.id}/annotations`, { annotations: notes, ...(scaleSource === 'calibrated' ? { mm_per_px: mm } : {}) });
+      if (adjDirty) {
+        const out = await api.put(`/documents/${doc.id}/adjust`, { adjust: compact(adj) });
+        setSavedAdj(out.adjust);
+        onSaved?.({ id: doc.id, adjust: out.adjust });
+      }
       setDirty(false);
-    } catch (e) { setError(e); }
+    } catch (e) { setError(e); } finally { setSaving(false); }
   };
 
+  const key = (e) => {
+    if (e.target.closest('input, select, textarea')) return;
+    const k = e.key;
+    const handled = () => { e.preventDefault(); e.stopPropagation(); };
+    if ((e.ctrlKey || e.metaKey) && k.toLowerCase() === 'z') { handled(); if (canEdit && notes.length) { setNotes(notes.slice(0, -1)); setDirty(true); } return; }
+    if ((e.ctrlKey || e.metaKey) && k.toLowerCase() === 's') { handled(); if (canEdit && (dirty || adjDirty)) save(); return; }
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (k === 'Escape') { if (draft) { handled(); setDraft(null); } else if (help) { handled(); setHelp(false); } return; }
+    if (k === 'Enter' && draft?.type === 'polyline') { handled(); finishPath(); return; }
+    if (k === '+' || k === '=') { handled(); zoomBy(1.25); return; }
+    if (k === '-' || k === '_') { handled(); zoomBy(1 / 1.25); return; }
+    if (k === '0') { handled(); setView({ zoom: 1, x: 0, y: 0 }); return; }
+    if (k === 'ArrowLeft' && onPrev) { handled(); onPrev(); return; }
+    if (k === 'ArrowRight' && onNext) { handled(); onNext(); return; }
+    const lower = k.toLowerCase();
+    const preset = PRESETS.find((p) => p.key === k);
+    if (preset) { handled(); applyPreset(preset); return; }
+    const t = TOOLS.find(([id, , , s]) => s === lower && (canEdit || READ_ONLY_TOOLS.includes(id)));
+    if (t) { handled(); setDraft(null); setTool(t[0]); return; }
+    const acts = { r: () => setA({ rotate: (adj.rotate + 90) % 360 }), h: () => setA({ flipH: !adj.flipH }), i: () => setA({ invert: !adj.invert }), m: () => setMagnify((v) => !v), f: toggleFull, '?': () => setHelp((v) => !v) };
+    if (acts[lower] || acts[k]) { handled(); (acts[lower] || acts[k])(); }
+  };
+
+  const activePreset = PRESETS.find((p) => JSON.stringify(compact({ ...NEUTRAL, ...p.adjust })) === JSON.stringify(compact({ ...adj, rotate: 0, flipH: false })));
+  const cursor = tool === 'pan' ? (drag.current ? 'grabbing' : 'grab') : tool === 'erase' ? 'not-allowed' : magnify ? 'none' : 'crosshair';
+  const canvasHeight = full ? '100%' : height;
+  const xp = exposure && [exposure.kvp && `${exposure.kvp} kVp`, exposure.ma && `${exposure.ma} mA`, exposure.seconds && `${exposure.seconds} s`].filter(Boolean).join(' · ');
+
   return (
-    <div className="image-viewer">
+    <div ref={root} className={`image-viewer${dark ? ' dark' : ''}${full ? ' full' : ''}`} tabIndex={0} onKeyDown={key} onPointerEnter={() => !document.activeElement?.closest('input, select, textarea') && root.current?.focus({ preventScroll: true })}>
       <div className="viewer-toolbar">
-        {TOOLS.filter(([k]) => canEdit || k === 'pan' || k === 'measure').map(([k, icon, title]) => (
-          <button key={k} type="button" className={`small${tool === k ? ' primary' : ''}`} title={title} onClick={() => setTool(k)}>{icon}{compact ? '' : ` ${title.split(' (')[0]}`}</button>
-        ))}
-        <span className="viewer-sep" />
-        <button type="button" className="small" title="Zoom in" onClick={() => setView({ ...view, zoom: Math.min(20, view.zoom * 1.25) })}>＋</button>
-        <button type="button" className="small" title="Zoom out" onClick={() => setView({ ...view, zoom: Math.max(0.2, view.zoom / 1.25) })}>－</button>
-        <button type="button" className="small" title="Rotate" onClick={() => setView({ ...view, rot: (view.rot + 90) % 360 })}>⟳</button>
-        <button type="button" className="small" title="Flip" onClick={() => setView({ ...view, flip: !view.flip })}>⇋</button>
-        <button type="button" className={`small${adj.invert ? ' primary' : ''}`} title="Invert" onClick={() => setAdj({ ...adj, invert: !adj.invert })}>◐</button>
-        <button type="button" className="small" title="Reset view" onClick={() => { setView({ zoom: 1, x: 0, y: 0, rot: 0, flip: false }); setAdj({ brightness: 100, contrast: 100, invert: false }); }}>Reset</button>
-        <label className="viewer-slider" title="Brightness">☀<input type="range" min="30" max="200" value={adj.brightness} onChange={(e) => setAdj({ ...adj, brightness: Number(e.target.value) })} /></label>
-        <label className="viewer-slider" title="Contrast">◑<input type="range" min="30" max="300" value={adj.contrast} onChange={(e) => setAdj({ ...adj, contrast: Number(e.target.value) })} /></label>
-        {canEdit && notes.length > 0 && <button type="button" className="small" title="Undo last mark" onClick={() => { setNotes(notes.slice(0, -1)); setDirty(true); }}>↶</button>}
-        {canEdit && dirty && <button type="button" className="small primary" onClick={save}>Save marks</button>}
+        <div className="vgroup">
+          {TOOLS.filter(([k]) => canEdit || READ_ONLY_TOOLS.includes(k)).map(([k, Icon, title, s]) => (
+            <IconBtn key={k} on={tool === k} title={`${title} (${s.toUpperCase()})`} onClick={() => { setDraft(null); setTool(k); }}><Icon size={16} /></IconBtn>
+          ))}
+        </div>
+        <div className="vgroup">
+          <IconBtn title="Zoom in (+)" onClick={() => zoomBy(1.25)}><ZoomIn size={16} /></IconBtn>
+          <IconBtn title="Zoom out (−)" onClick={() => zoomBy(1 / 1.25)}><ZoomOut size={16} /></IconBtn>
+          <IconBtn title="Rotate (R)" onClick={() => setA({ rotate: (adj.rotate + 90) % 360 })}><RotateCw size={16} /></IconBtn>
+          <IconBtn on={adj.flipH} title="Flip (H)" onClick={() => setA({ flipH: !adj.flipH })}><ArrowLeftRight size={16} /></IconBtn>
+          <IconBtn on={adj.invert} title="Invert (I)" onClick={() => setA({ invert: !adj.invert })}><Contrast size={16} /></IconBtn>
+          <IconBtn on={magnify} title="Magnifier (M)" onClick={() => setMagnify(!magnify)}><Search size={16} /></IconBtn>
+          <IconBtn on={panel} title="Adjust image" onClick={() => setPanel(!panel)}><SlidersHorizontal size={16} /></IconBtn>
+        </div>
+        {!small && (
+          <div className="vgroup presets" role="group" aria-label="Presets">
+            {PRESETS.map((p) => <button key={p.id} type="button" className={`vchip${activePreset?.id === p.id ? ' on' : ''}`} title={`${p.hint || 'No enhancement'} (${p.key})`} onClick={() => applyPreset(p)}>{p.label}</button>)}
+          </div>
+        )}
+        <div className="vgroup end">
+          {canEdit && notes.length > 0 && <IconBtn title="Undo last mark (Ctrl+Z)" onClick={() => { setNotes(notes.slice(0, -1)); setDirty(true); }}><Undo2 size={16} /></IconBtn>}
+          <IconBtn title="Keyboard shortcuts (?)" on={help} onClick={() => setHelp(!help)}><Keyboard size={16} /></IconBtn>
+          <IconBtn title="Full screen (F)" onClick={toggleFull}>{full ? <Minimize size={16} /> : <Maximize size={16} />}</IconBtn>
+          {canEdit && (dirty || adjDirty) && (
+            <button type="button" className="small primary vsave" disabled={saving} onClick={save} title="Save marks and image settings (Ctrl+S)"><Save size={14} /> {saving ? 'Saving…' : 'Save'}</button>
+          )}
+        </div>
       </div>
+      {panel && (
+        <div className="viewer-adjust">
+          {small && (
+            <div className="vgroup presets">
+              {PRESETS.map((p) => <button key={p.id} type="button" className={`vchip${activePreset?.id === p.id ? ' on' : ''}`} title={p.hint} onClick={() => applyPreset(p)}>{p.label}</button>)}
+            </div>
+          )}
+          <Slider label="Brightness" min={-100} max={100} step={1} value={adj.brightness} onChange={(v) => setA({ brightness: v })} />
+          <Slider label="Contrast" min={-100} max={100} step={1} value={adj.contrast} onChange={(v) => setA({ contrast: v })} />
+          <Slider label="Gamma" min={0.3} max={3} step={0.05} value={adj.gamma} onChange={(v) => setA({ gamma: v })} fmt={(v) => v.toFixed(2)} />
+          <Slider label="Sharpen" min={0} max={3} step={0.1} value={adj.sharpen} onChange={(v) => setA({ sharpen: v })} fmt={(v) => v.toFixed(1)} />
+          <label className="vcheck"><input type="checkbox" checked={adj.equalize} onChange={(e) => setA({ equalize: e.target.checked })} /> Auto levels</label>
+          <label className="vcheck"><input type="checkbox" checked={adj.emboss} onChange={(e) => setA({ emboss: e.target.checked })} /> Emboss</label>
+          <label className="vcheck">Colour
+            <select value={adj.colormap} onChange={(e) => setA({ colormap: e.target.value })}>{Object.entries(COLORMAPS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
+          </label>
+          <button type="button" className="small" onClick={() => setAdj({ ...NEUTRAL })}>Reset</button>
+        </div>
+      )}
       <ErrorBox error={error} />
-      <div ref={wrap} className="viewer-canvas" style={{ height }}>
-        {!img && !error && <div className="muted" style={{ padding: 20 }}>Loading…</div>}
-        <canvas ref={canvas} onPointerDown={down} onPointerMove={move} onPointerUp={up} style={{ cursor: tool === 'pan' ? 'grab' : 'crosshair', width: '100%', height: '100%' }} />
+      <div ref={wrap} className="viewer-canvas" style={{ height: canvasHeight }}>
+        {!img && !error && <div className="viewer-loading"><span className="spinner" /> Loading image…</div>}
+        <canvas ref={canvas} onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerLeave={leave} onDoubleClick={finishPath} style={{ cursor, width: '100%', height: '100%' }} />
+        {draft?.type === 'polyline' && <div className="viewer-hint">Click along the canal · double-click or Enter to finish · Esc to cancel</div>}
+        {draft?.type === 'angle' && <div className="viewer-hint">{draft.points.length === 2 ? 'Click the vertex of the angle' : 'Click the end of the second line'}</div>}
+        {help && (
+          <div className="viewer-help" onClick={() => setHelp(false)}>
+            <strong>Keyboard shortcuts</strong>
+            <dl>{SHORTCUTS.map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}</dl>
+          </div>
+        )}
       </div>
-      <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-        {img ? `${img.width}×${img.height}px · ` : ''}{mm ? `${(1 / mm).toFixed(1)} px/mm (${scaleSource === 'dicom' ? 'from the sensor' : 'calibrated'})` : 'Not calibrated — measurements are in pixels; use Calibrate with a known length.'}
-        {' · '}Scroll to zoom, drag to move.
+      <div className="viewer-foot">
+        {img ? <span>{img.width}×{img.height}px</span> : null}
+        <span>{mm ? `${(1 / mm).toFixed(1)} px/mm · ${scaleSource === 'dicom' ? 'scale from the sensor' : 'calibrated'}` : 'Not calibrated — lengths in pixels (Calibrate with a known length)'}</span>
+        {xp && <span title={exposure.sensor ? `Sensor: ${exposure.sensor}` : undefined}>Exposure {xp}</span>}
+        {adj.rotate ? <span>Rotated {adj.rotate}°</span> : null}
       </div>
     </div>
+  );
+}
+
+function IconBtn({ on, title, onClick, children, disabled }) {
+  return <button type="button" className={`vbtn${on ? ' on' : ''}`} title={title} aria-label={title} aria-pressed={on || undefined} onClick={onClick} disabled={disabled}>{children}</button>;
+}
+
+function Slider({ label, min, max, step, value, onChange, fmt = (v) => v }) {
+  return (
+    <label className="vslider">
+      <span>{label}</span>
+      <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} onDoubleClick={() => onChange(NEUTRAL[label.toLowerCase()])} />
+      <output>{fmt(value)}</output>
+    </label>
   );
 }
