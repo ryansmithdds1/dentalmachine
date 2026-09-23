@@ -38,7 +38,7 @@ import { createMailer } from './mail.js';
 export function loadConfig(env = process.env) {
   return {
     // Render and similar hosts publish the public URL themselves.
-    appUrl: (env.APP_URL || env.RENDER_EXTERNAL_URL || `http://localhost:${env.PORT || 4000}`).replace(/\/$/, ''),
+    appUrl: (env.APP_URL || env.RENDER_EXTERNAL_URL || (env.VERCEL_PROJECT_PRODUCTION_URL && `https://${env.VERCEL_PROJECT_PRODUCTION_URL}`) || `http://localhost:${env.PORT || 4000}`).replace(/\/$/, ''),
     uploadDir: env.UPLOAD_DIR || './data/uploads',
     documentKey: env.DOCUMENT_ENCRYPTION_KEY || null,
     stripeSecretKey: env.STRIPE_SECRET_KEY || null,

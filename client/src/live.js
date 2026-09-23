@@ -19,6 +19,11 @@ export function useLiveEvents(onEvent, onStatus) {
         controller = new AbortController();
         try {
           const res = await fetch('/api/events', { headers: { Authorization: `Bearer ${getToken()}` }, signal: controller.signal });
+          // 204: this server doesn't do live updates (serverless hosting).
+          if (res.status === 204) {
+            status.current?.(null);
+            return;
+          }
           if (!res.ok || !res.body) throw new Error(`events ${res.status}`);
           status.current?.(true);
           retry = 1000;

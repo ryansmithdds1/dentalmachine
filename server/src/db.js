@@ -1095,13 +1095,19 @@ async function openPostgres(url, { freshSchema = false } = {}) {
     ...(schema ? { options: `-c search_path=${schema}` } : {}),
   });
   const setup = await pool.connect();
+  // One server migrates at a time. The lock is transaction-scoped so it also works behind a
+  // transaction-mode connection pooler (Supabase/PgBouncer), where session locks can leak.
   try {
-    await setup.query('SELECT pg_advisory_lock(424242)'); // one server migrates at a time
+    await setup.query('BEGIN');
+    await setup.query('SELECT pg_advisory_xact_lock(424242)');
     await setup.query(pgSchema(SCHEMA));
     for (const [table, column, def] of COLUMNS) await setup.query(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${column} ${pgSchema(def)}`);
     await setup.query(pgSchema(INDEXES));
+    await setup.query('COMMIT');
+  } catch (err) {
+    await setup.query('ROLLBACK').catch(() => {});
+    throw err;
   } finally {
-    await setup.query('SELECT pg_advisory_unlock(424242)');
     setup.release();
   }
 

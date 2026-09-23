@@ -328,7 +328,7 @@ export default function Schedule() {
             {unconfirmed > 0 && <span className="badge warn">{unconfirmed} unconfirmed</span>}
             <span title="Scheduled production">{short(production)}{goal ? ` of ${short(goal)}` : ''}</span>
             {goal > 0 && <span className="goal-bar" title="Scheduled production vs goal"><i style={{ width: `${Math.min(100, (production / goal) * 100)}%` }} /></span>}
-            <span className={`live-dot${live ? ' on' : ''}`} title={live ? 'Live: changes from other screens appear instantly' : 'Reconnecting…'}>{live ? 'Live' : 'Offline'}</span>
+            {live !== null && <span className={`live-dot${live ? ' on' : ''}`} title={live ? 'Live: changes from other screens appear instantly' : 'Reconnecting…'}>{live ? 'Live' : 'Offline'}</span>}
             {loading && <span>Loading…</span>}
           </div>
         </div>

@@ -6,7 +6,9 @@ export function publish(practiceId, event) {
 }
 
 // Server-Sent Events stream of practice events for the signed-in user.
+// LIVE_UPDATES=off (serverless hosting, where a request can't stay open) answers 204 so clients stop.
 export function eventStream(req, res) {
+  if (process.env.LIVE_UPDATES === 'off') return res.status(204).end();
   res.set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
   res.flushHeaders();
   res.write('retry: 3000\n\n');
