@@ -109,7 +109,7 @@ export default function AppointmentForm({ appointment, defaults = {}, patient: i
       <ErrorBox error={error} />
       {override && (
         <div className="inline" style={{ marginTop: -6, marginBottom: 12 }}>
-          <button type="button" className="small" onClick={() => submit(true)}>Book into blocked time anyway</button>
+          <button type="button" className="small" onClick={() => submit(true)}>Book it anyway</button>
         </div>
       )}
       <div className="form-grid">
