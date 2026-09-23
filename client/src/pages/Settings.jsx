@@ -48,6 +48,34 @@ const RESOURCES = {
   },
 };
 
+// What each section contains, so the search box finds "lock date" or "two-factor" as well as section names.
+// Fields of the simple list sections (providers, carriers…) are added from their definitions.
+const KEYWORDS = {
+  account: 'password two-factor 2fa authenticator mfa my account sign in',
+  practice: 'practice name phone email address city state zip group npi tax id tin timezone time zone office hours opening hours booking page address slug online booking instant booking reminders portal production goal hygiene goal texting number twilio sms two-factor mfa require sign-out idle timeout inactivity write-off approval limit adjustment lock date books closed month-end close export data single sign-on sso oidc google microsoft',
+  users: 'users staff login roles permissions invite access front desk hygienist dentist billing admin',
+  locations: 'offices locations multi-location branches',
+  providers: 'time off vacation special hours schedule exceptions',
+  types: 'appointment types reasons duration online booking deposit video',
+  import: 'import open dental dentrix eaglesoft csv convert switch migrate',
+  templates: 'clinical note templates auto notes prompts merge fields',
+  forms: 'forms consents intake medical history health history signature',
+  labs: 'dental labs turnaround lab slip',
+  referrals: 'referral contacts specialists referring doctors',
+  codes: 'fee schedule procedure codes cdt fees ucr import codes',
+  ppo: 'fee schedules ppo contracted fees insurance fees office fees fee history',
+  carriers: 'insurance carriers payers payer id',
+  memberships: 'membership plans in-house plans subscription',
+  messaging: 'messages reminders recall reviews google yelp templates spanish text email review link threshold',
+  custom: 'custom patient fields extra fields',
+  duplicates: 'duplicate charts merge patients',
+  integrations: 'integrations stripe payments card twilio texting email smtp clearinghouse edi eligibility e-prescribing erx dosespot mail lob postgrid attachments',
+  imaging: 'imaging bridges dexis sidexis sensor capture twain x-ray workstation',
+  developer: 'api keys webhooks developer integrations',
+  audit: 'audit log access log who viewed hipaa',
+  backups: 'backups restore download',
+};
+
 export default function Settings() {
   const { user, can } = useAuth();
   const admin = user.role === 'admin';
@@ -64,16 +92,36 @@ export default function Settings() {
   const [params, setParams] = useSearchParams();
   const tab = all.some((t) => t[0] === params.get('tab')) ? params.get('tab') : admin ? 'practice' : 'account';
   const setTab = (k) => setParams({ tab: k }, { replace: true });
+  const [q, setQ] = useState('');
+  const words = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const haystack = (k, t) => `${t} ${KEYWORDS[k] || ''} ${RESOURCES[k] ? `${RESOURCES[k].title} ${RESOURCES[k].fields.map((f) => f[1]).join(' ')}` : ''}`.toLowerCase();
+  const matches = (k, t) => words.every((w) => haystack(k, t).includes(w));
+  // After choosing a result, bring the matching field or heading into view.
+  const reveal = (k) => {
+    setTab(k);
+    if (!words.length) return;
+    setTimeout(() => {
+      const el = [...document.querySelectorAll('.settings-body label, .settings-body h2, .settings-body h3')].find((x) => words.some((w) => x.textContent.toLowerCase().includes(w)));
+      if (!el) return;
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.classList.add('flash');
+      setTimeout(() => el.classList.remove('flash'), 1800);
+    }, 350);
+  };
+  const shownGroups = words.length ? groups.map(([g, items]) => [g, items.filter(([k, t]) => matches(k, t))]).filter(([, items]) => items.length) : groups;
 
   return (
     <>
       <div className="page-header"><h1>Settings</h1></div>
       <div className="settings-layout">
         <nav className="settings-nav" aria-label="Settings sections">
-          {groups.map(([g, items]) => (
+          <input className="settings-search" type="search" placeholder="Search settings…" aria-label="Search settings" value={q} onChange={(e) => setQ(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && shownGroups[0]) { reveal(shownGroups[0][1][0][0]); } if (e.key === 'Escape') setQ(''); }} />
+          {words.length > 0 && !shownGroups.length && <div className="muted" style={{ fontSize: 13, padding: '6px 8px' }}>Nothing matches “{q}”.</div>}
+          {shownGroups.map(([g, items]) => (
             <div key={g} className="settings-group">
               <div className="settings-group-title">{g}</div>
-              {items.map(([k, t]) => <button key={k} className={tab === k ? 'active' : ''} onClick={() => setTab(k)}>{t}</button>)}
+              {items.map(([k, t]) => <button key={k} className={tab === k ? 'active' : ''} onClick={() => reveal(k)}>{t}</button>)}
             </div>
           ))}
         </nav>

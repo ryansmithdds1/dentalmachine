@@ -695,3 +695,5 @@ p a, .muted a, li a, .public-notice a { text-decoration: underline; }
 .claim-diff del { color: var(--danger); }
 .claim-diff ins { color: var(--ok, #15803d); text-decoration: none; font-weight: 600; }
 .timeline .claim-diff li { padding-left: 0; list-style: disc; } .timeline .claim-diff li::before { display: none; }
+.settings-search { width: 100%; }
+.flash { animation: flash 1.8s ease-out; border-radius: 6px; } @keyframes flash { 0%, 40% { background: #fef3c7; box-shadow: 0 0 0 4px #fef3c7; } 100% { background: transparent; box-shadow: none; } }
