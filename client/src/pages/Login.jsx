@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useAuth, takeSsoError, takeSsoTicket, takeResetToken } from '../auth.jsx';
+import { useAuth, takeSsoError, takeSsoTicket, takeResetToken, takeInviteToken } from '../auth.jsx';
 import { api } from '../api.js';
 import { ErrorBox, useSubmit } from '../components/ui.jsx';
 
@@ -12,6 +12,18 @@ export default function Login() {
   const [ssoError] = useState(takeSsoError);
   const [resetToken] = useState(takeResetToken);
   const [ssoTicket] = useState(takeSsoTicket);
+  const [invite] = useState(takeInviteToken);
+  const [signupOpen, setSignupOpen] = useState(false);
+  const [inviteError, setInviteError] = useState(null);
+  useEffect(() => {
+    api.get('/auth/registration').then((r) => setSignupOpen(r.mode === 'open')).catch(() => {});
+    if (invite) {
+      setMode('register');
+      api.get(`/auth/invites/${encodeURIComponent(invite)}`)
+        .then((r) => r.email && setForm((f) => ({ ...f, email: r.email })))
+        .catch(setInviteError);
+    }
+  }, [invite]);
   const [notice, setNotice] = useState(null);
   useEffect(() => { if (resetToken) setMode('reset'); else if (ssoTicket) setMode('sso_mfa'); }, [resetToken, ssoTicket]);
   // Offer single sign-on as soon as we know the email belongs to a practice that uses it.
@@ -35,7 +47,7 @@ export default function Login() {
       setForm({ ...form, password: '' });
       return setMode('login');
     }
-    if (mode !== 'login') return register(form);
+    if (mode !== 'login') return register(invite ? { ...form, invite } : form);
     try {
       await login(form.email, form.password, form.mfa_code);
     } catch (e) {
@@ -53,7 +65,7 @@ export default function Login() {
         <h1>🦷 Dental Machine</h1>
         <div className="muted">{{ login: 'Sign in to your practice', register: 'Create your practice account', forgot: 'Reset your password', reset: 'Choose a new password', sso_mfa: 'Enter the code from your authenticator app' }[mode]}</div>
         <form onSubmit={(e) => { e.preventDefault(); submit(); }}>
-          <ErrorBox error={error || (ssoError ? new Error(ssoError) : null)} />
+          <ErrorBox error={error || inviteError || (ssoError ? new Error(ssoError) : null)} />
           {notice && <div className="public-notice ok">{notice}</div>}
           {mode === 'register' && (
             <>
@@ -96,8 +108,12 @@ export default function Login() {
           {mode === 'login' ? (
             <>
               <button className="link" onClick={() => { setNotice(null); setMode('forgot'); }}>Forgot password?</button>
-              <span className="muted"> · </span>
-              <button className="link" onClick={() => setMode('register')}>New practice? Create an account</button>
+              {signupOpen && (
+                <>
+                  <span className="muted"> · </span>
+                  <button className="link" onClick={() => setMode('register')}>New practice? Create an account</button>
+                </>
+              )}
             </>
           ) : (
             <button className="link" onClick={() => setMode('login')}>Already have an account? Sign in</button>

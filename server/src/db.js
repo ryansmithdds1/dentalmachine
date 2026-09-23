@@ -891,6 +891,19 @@ CREATE TABLE IF NOT EXISTS staff_sessions (
   end_reason TEXT
 );
 
+-- Invitations to create a practice on this server (when sign-up is invite-only). Made with
+-- npm run invite; each works once.
+CREATE TABLE IF NOT EXISTS signup_invites (
+  id INTEGER PRIMARY KEY,
+  token_hash TEXT NOT NULL UNIQUE,
+  email TEXT,
+  note TEXT,
+  expires_at TEXT NOT NULL,
+  used_at TEXT,
+  practice_id INTEGER,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- New insurance sent in from the patient portal (with card photos), for the office to check and enter.
 CREATE TABLE IF NOT EXISTS insurance_updates (
   id INTEGER PRIMARY KEY,

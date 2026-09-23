@@ -43,14 +43,32 @@ export default function authRoutes({ db, secret, config = {}, fetchImpl = global
   const endOtherSessions = (userId) => db.run('UPDATE users SET token_version = token_version + 1 WHERE id = ?', userId);
   const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20 });
 
+  // Whether the sign-in page offers "create a practice" (always, with an invitation link).
+  r.get('/registration', (_req, res) => res.json({ mode: config.registration || 'open' }));
+  const inviteFor = async (token) => {
+    const invite = token && (await db.get('SELECT * FROM signup_invites WHERE token_hash = ?', hashToken(String(token))));
+    if (!invite || invite.used_at || invite.expires_at < new Date().toISOString()) throw new HttpError(403, 'This invitation link is no longer valid. Ask for a new one.');
+    return invite;
+  };
+  r.get('/invites/:token', limiter, async (req, res) => {
+    const invite = await inviteFor(req.params.token);
+    res.json({ email: invite.email });
+  });
+
   // Creates a new practice (tenant) along with its first admin user.
   r.post('/register', limiter, async (req, res) => {
     const body = pick(req.body, ['practice_name', 'name', 'email', 'password', 'phone', 'timezone']);
+    // Invite-only servers: a practice is created only from an invitation (for that email, if it names one).
+    const invite = config.registration === 'invite' || req.body?.invite ? await inviteFor(req.body?.invite) : null;
     requireFields(body, ['practice_name', 'name', 'email', 'password']);
+    if (invite?.email && invite.email.toLowerCase() !== String(body.email).trim().toLowerCase()) throw new HttpError(403, `This invitation is for ${invite.email}`);
     validatePassword(req.body.password);
     if (await db.get('SELECT id FROM users WHERE lower(email) = lower(?)', body.email)) throw new HttpError(409, 'Email already registered');
 
     const user = await db.tx(async () => {
+      if (invite && !(await db.run("UPDATE signup_invites SET used_at = datetime('now') WHERE id = ? AND used_at IS NULL", invite.id)).changes) {
+        throw new HttpError(403, 'This invitation link has already been used');
+      }
       const practiceId = await insert(db, 'practices', {
         name: body.practice_name, phone: body.phone ?? null, email: body.email, timezone: body.timezone || 'America/New_York', setup_status: 'pending',
       });
@@ -58,10 +76,11 @@ export default function authRoutes({ db, secret, config = {}, fetchImpl = global
         practice_id: practiceId, email: body.email, name: body.name, role: 'admin', password_hash: hashPassword(req.body.password),
       });
       await seedPracticeDefaults(db, practiceId);
+      if (invite) await db.run('UPDATE signup_invites SET practice_id = ? WHERE id = ?', practiceId, invite.id);
       return await db.get('SELECT * FROM users WHERE id = ?', userId);
     });
     req.user = user;
-    await audit(db, req, 'practice.register', 'practices', user.practice_id);
+    await audit(db, req, 'practice.register', 'practices', user.practice_id, invite ? { invite_id: invite.id } : null);
     res.status(201).json(await session(user, secret, db, req));
   });
 

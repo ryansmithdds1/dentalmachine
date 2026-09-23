@@ -122,6 +122,8 @@ JWT_SECRET=... DOCUMENT_ENCRYPTION_KEY=... docker compose up --build --scale app
 | Feature | Environment variables |
 | --- | --- |
 | Links in texts and emails | `APP_URL`: the public web address, e.g. `https://app.yourpractice.com` |
+| Who can create a practice | `REGISTRATION=invite` (the default in production): a practice is created only from an invitation link, made with `npm run invite -- [email] [--days 14] [--note "…"]` (`npm run invite -- --list` shows them). Each link works once; with an email, only that address can use it. `REGISTRATION=open` lets anyone sign up. |
+| Proxies | `TRUST_PROXY`: which proxies' `X-Forwarded-For` to believe for client addresses (rate limits, audit log). Defaults to one hop on Vercel, otherwise proxies on a private network. |
 | Text messages (Twilio) | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM` |
 | Email (SendGrid) | `SENDGRID_API_KEY`, `EMAIL_FROM` |
 | Card payments (Stripe) | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`. In Stripe, point a webhook at `https://<your host>/api/webhooks/stripe` for the `checkout.session.completed` and `checkout.session.expired` events. |

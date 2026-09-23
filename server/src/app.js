@@ -80,6 +80,9 @@ export function loadConfig(env = process.env) {
     backupDocuments: env.BACKUP_DOCUMENTS ? env.BACKUP_DOCUMENTS === 'on' : null,
     // Error monitoring: a Sentry (or compatible) DSN; off when unset.
     sentryDsn: env.SENTRY_DSN || null,
+    // Who can create a practice: 'invite' (someone running the server hands out links with
+    // `npm run invite`) or 'open' (anyone). Invite-only unless set otherwise in production.
+    registration: env.REGISTRATION === 'open' || env.REGISTRATION === 'invite' ? env.REGISTRATION : env.NODE_ENV === 'production' ? 'invite' : 'open',
   };
 }
 

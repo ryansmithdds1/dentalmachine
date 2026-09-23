@@ -15,6 +15,17 @@ if (typeof window !== 'undefined' && /^#(sso|sso_error|sso_mfa)=/.test(window.lo
   ssoTicket = params.get('sso_mfa');
   window.history.replaceState(null, '', window.location.pathname + window.location.search);
 }
+// Invitations to create a practice arrive as /#invite=<token>.
+let inviteToken = null;
+if (typeof window !== 'undefined' && /^#invite=/.test(window.location.hash)) {
+  inviteToken = new URLSearchParams(window.location.hash.slice(1)).get('invite');
+  window.history.replaceState(null, '', window.location.pathname + window.location.search);
+}
+export const takeInviteToken = () => {
+  const t = inviteToken;
+  inviteToken = null;
+  return t;
+};
 // Password reset links arrive as /#reset=<token>.
 let resetToken = null;
 if (typeof window !== 'undefined' && /^#reset=/.test(window.location.hash)) {
