@@ -8,7 +8,8 @@ import { assertPublicUrl } from '../netguard.js';
 export const API_SCOPES = {
   'patients:read': 'Read patients', 'patients:write': 'Create and update patients',
   'appointments:read': 'Read appointments and availability', 'appointments:write': 'Book, confirm and cancel appointments',
-  'payments:read': 'Read payments',
+  'payments:read': 'Read payments and balances',
+  'reports:read': 'Read reports and practice numbers (MCP and API)', 'finance:read': 'Read business costs and plan profitability (MCP)',
 };
 const requireAdmin = (req, _res, next) => (req.user.role === 'admin' ? next() : next(new HttpError(403, 'Only administrators can manage API access')));
 

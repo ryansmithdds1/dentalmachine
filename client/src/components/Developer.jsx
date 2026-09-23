@@ -47,6 +47,19 @@ export default function Developer() {
       </div>
 
       <div className="card">
+        <h2 style={{ margin: 0 }}>Connect an AI app (MCP)</h2>
+        <div className="muted" style={{ fontSize: 13 }}>
+          Claude and other AI apps that speak the Model Context Protocol can look up your practice’s numbers, patients and schedule — read only.
+          Make a key above with the access it should have (reports, patients, appointments, payments, finance), then add a remote MCP server with this address and the key as a Bearer token:
+        </div>
+        <pre style={{ fontSize: 12, marginTop: 8, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{`URL: ${window.location.origin}/api/mcp
+Header: Authorization: Bearer dm_live_…
+
+Claude Code:
+claude mcp add --transport http dental-machine ${window.location.origin}/api/mcp --header "Authorization: Bearer dm_live_…"`}</pre>
+      </div>
+
+      <div className="card">
         <div className="inline" style={{ justifyContent: 'space-between' }}>
           <div>
             <h2 style={{ margin: 0 }}>Webhooks</h2>

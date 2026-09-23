@@ -26,6 +26,7 @@ import financeRoutes, { financePublicRoutes } from './routes/finance.js';
 import scribeRoutes from './routes/scribe.js';
 import xrayAiRoutes from './routes/xrayai.js';
 import insuranceAiRoutes from './routes/insuranceai.js';
+import askRoutes, { mcpRoutes } from './routes/ask.js';
 import { createXrayAi, registerXrayAi } from './xrayai.js';
 import { registerFill } from './fill.js';
 import { createPlaid } from './finance/plaid.js';
@@ -178,6 +179,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   }, publicRoutes({ db, storage, payments, messenger, config, secret }), publicCasePresentation({ db, storage, secret }), portalPublicRoutes({ db, secret, messenger }), campaignPublicRoutes({ db }), surveyPublicRoutes({ db }));
   app.use('/api/portal', portalRoutes({ db, secret, config, payments, messenger, storage }));
   app.use('/api/v1', apiV1Routes({ db }));
+  app.use('/api/mcp', (_req, res, next) => { res.set('Cache-Control', 'no-store'); next(); }, mcpRoutes({ db }));
 
   app.use('/api/bridge', (_req, res, next) => {
     res.set('Cache-Control', 'no-store');
@@ -221,6 +223,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(scribeRoutes({ db, config }));
   api.use(xrayAiRoutes({ db, xrayAi }));
   api.use(insuranceAiRoutes({ db, config }));
+  api.use(askRoutes({ db, config }));
   api.use(attachmentRoutes({ db, storage, sender: attachmentSender ?? createAttachmentSender(attachmentConfig(process.env, config.ediMode), fetchImpl) }));
   api.use(billingRoutes({ db, payments, config, messenger }));
   api.use(insuranceRoutes({ db }));
