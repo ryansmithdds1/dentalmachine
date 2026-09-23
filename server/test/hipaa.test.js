@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { harness } from './helpers.js';
 import { totp, timeStep } from '../src/totp.js';
+import { inflateRawSync } from 'node:zlib';
 
 const h = harness();
 const auditRows = (action, practiceId) => h.db.all('SELECT * FROM audit_log WHERE action = ? AND practice_id = ?', action, practiceId);
@@ -99,4 +100,58 @@ test('portal codes: wrong guesses for one address are capped across devices, and
   const text = (ip) => h.client(null, { 'X-Forwarded-For': ip }).post(`/public/portal/${slug}/code`, { contact: '(512) 555-0100', dob: '1985-04-12' });
   for (let i = 0; i < 14; i++) await text(`10.0.${i}.1`);
   assert.equal(await count(), 10, 'codes stop being made after ten an hour');
+});
+
+// Reads the file names (and one file) out of a ZIP.
+function unzip(buf) {
+  const files = {};
+  let pos = 0;
+  while (buf.readUInt32LE(pos) === 0x04034b50) {
+    const method = buf.readUInt16LE(pos + 8);
+    const size = buf.readUInt32LE(pos + 18);
+    const nameLen = buf.readUInt16LE(pos + 26);
+    const name = buf.toString('utf8', pos + 30, pos + 30 + nameLen);
+    const body = buf.subarray(pos + 30 + nameLen, pos + 30 + nameLen + size);
+    files[name] = method === 8 ? inflateRawSync(body) : body;
+    pos += 30 + nameLen + size;
+  }
+  return files;
+}
+
+test("a patient's record export: summary PDF, all the data, and their files, for staff and in the portal", async () => {
+  const slug = `rec-${Date.now()}`;
+  const p = await h.practice({ slug });
+  const note = (await p.api.post(`/patients/${p.patient.id}/notes`, { body: 'Crown prep #3', provider_id: p.provider.id })).data;
+  await p.api.post(`/notes/${note.id}/sign`);
+  await p.api.post(`/patients/${p.patient.id}/notes`, { body: 'Unsigned draft', provider_id: p.provider.id });
+  await p.api.post(`/patients/${p.patient.id}/procedures`, { code: 'D0150', provider_id: p.provider.id, complete: true });
+  const up = await fetch(`${h.origin}/api/patients/${p.patient.id}/documents?filename=referral.txt`, { method: 'POST', headers: { Authorization: `Bearer ${p.token}`, 'Content-Type': 'text/plain' }, body: 'Referral letter text' });
+  assert.ok([200, 201].includes(up.status));
+
+  const res = await fetch(`${h.origin}/api/patients/${p.patient.id}/record-export`, { headers: { Authorization: `Bearer ${p.token}` } });
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get('content-disposition'), /Health record Jane Doe/);
+  const files = unzip(Buffer.from(await res.arrayBuffer()));
+  assert.match(files['record.pdf'].toString('latin1', 0, 5), /%PDF/);
+  const data = JSON.parse(files['record.json']);
+  assert.equal(data.patient.last_name, 'Doe');
+  assert.deepEqual(data.clinical_notes.map((n) => n.body), ['Crown prep #3'], 'signed notes only');
+  assert.equal(data.procedures[0].code, 'D0150');
+  assert.ok(!JSON.stringify(data).includes('storage_key'));
+  const doc = Object.keys(files).find((n) => n.startsWith('documents/') && n.endsWith('referral.txt'));
+  assert.equal(files[doc].toString(), 'Referral letter text');
+  assert.ok((await h.db.all("SELECT * FROM audit_log WHERE action = 'patient.record_export'")).length >= 1);
+
+  // The patient downloads it from the portal too.
+  const before = h.sent.length;
+  await h.client().post(`/public/portal/${slug}/code`, { contact: 'jane@example.com', dob: '1985-04-12' });
+  const deadline = Date.now() + 5000;
+  while (h.sent.length === before && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
+  const code = h.sent.at(-1).body.match(/\d{6}/)[0];
+  const portal = (await h.client().post(`/public/portal/${slug}/verify`, { contact: 'jane@example.com', code })).data.token;
+  const mine = await fetch(`${h.origin}/api/portal/record-export`, { headers: { Authorization: `Bearer ${portal}` } });
+  assert.equal(mine.status, 200);
+  assert.ok(unzip(Buffer.from(await mine.arrayBuffer()))['record.json']);
+  const other = await fetch(`${h.origin}/api/portal/record-export?patient_id=999999`, { headers: { Authorization: `Bearer ${portal}` } });
+  assert.equal(other.status, 404);
 });

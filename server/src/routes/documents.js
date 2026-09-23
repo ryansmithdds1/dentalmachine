@@ -5,6 +5,7 @@ import { sniffMime } from './imaging.js';
 import { dicomToImage } from '../dicomimage.js';
 import { makeThumbnail, imageSize } from '../thumbnails.js';
 import { publish } from '../events.js';
+import { buildRecordExport } from '../recordexport.js';
 
 // Mount layouts (FMX etc.): how many images each holds; the client draws the slots.
 export const MOUNT_TEMPLATES = { fmx18: 18, fmx20: 20, bw4: 4, bw2: 2, pa4: 4, photos8: 8 };
@@ -25,6 +26,14 @@ export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 // Patient documents & imaging. Files are uploaded as the raw request body.
 export default function documentRoutes({ db, storage, config = {} }) {
   const r = Router();
+
+  // The patient's copy of their record (HIPAA right of access): summary PDF, the data, and their files.
+  r.get('/patients/:id/record-export', requirePermission('clinical:read'), requirePermission('billing:read'), async (req, res) => {
+    const patient = await findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient');
+    const out = await buildRecordExport(db, storage, req.user.practice_id, patient.id);
+    await audit(db, req, 'patient.record_export', 'patients', patient.id, { files: out.files });
+    res.set({ 'Content-Type': 'application/zip', 'Content-Disposition': `attachment; filename="${out.filename}"` }).send(out.zip);
+  });
 
   r.get('/patients/:id/documents', requirePermission('clinical:read'), async (req, res) => {
     const patient = await findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient');

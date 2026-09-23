@@ -18,7 +18,7 @@ import FamilyTab from '../components/patient/FamilyTab.jsx';
 import RxTab from '../components/patient/RxTab.jsx';
 import OrthoTab from '../components/patient/OrthoTab.jsx';
 import { LabCaseForm, TaskForm, WaitlistForm, LAB_STATUSES } from '../components/OfficeForms.jsx';
-import { api } from '../api.js';
+import { api, download } from '../api.js';
 import { CustomFieldValues, MergeDialog } from '../components/Switching.jsx';
 import { MembershipCard } from '../components/Memberships.jsx';
 
@@ -96,6 +96,11 @@ export default function PatientDetail() {
             {can('schedule:write') && <button className="primary" onClick={() => setModal('appt')}>Book appointment</button>}
             {can('patients:write') && <button onClick={() => setModal('edit')}>Edit</button>}
             {user?.role === 'admin' && <button onClick={() => setModal('merge')} title="Move a duplicate chart's history into this one">Merge…</button>}
+            {can('clinical:read') && can('billing:read') && (
+              <button onClick={() => download(`/patients/${p.id}/record-export`, `health-record-${p.id}.zip`)} title="The patient's copy of their record (for a records request): summary PDF, all the data and their images and documents, in one ZIP">
+                Export record
+              </button>
+            )}
             {user?.role === 'admin' && <Link to={`/settings?tab=audit&patient_id=${p.id}`}><button title="Who viewed or changed this patient's record">Access log</button></Link>}
           </div>
         </div>

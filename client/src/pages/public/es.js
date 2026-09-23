@@ -303,6 +303,8 @@ export default {
   'Send to the office': 'Enviar a la oficina',
   'Statements & receipts': 'Estados de cuenta y recibos',
   'Download statement (PDF)': 'Descargar estado de cuenta (PDF)',
+  'Download my health record': 'Descargar mi expediente médico',
+  'Your records: a summary, your chart details, and your x-rays and documents': 'Su expediente: un resumen, los datos de su historia y sus radiografías y documentos',
   'Receipt': 'Recibo',
   'Membership plans': 'Planes de membresía',
   'For': 'Para',

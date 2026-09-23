@@ -16,6 +16,7 @@ import { sniffMime } from './imaging.js';
 import { MAX_UPLOAD_BYTES } from './documents.js';
 import { runMembershipBilling } from '../memberships.js';
 import { planPass } from './casepres.js';
+import { buildRecordExport } from '../recordexport.js';
 
 const CODE_TTL_MINUTES = 10;
 const SESSION_HOURS = 2;
@@ -376,6 +377,16 @@ export function portalRoutes({ db, secret, config, payments, messenger, storage 
   });
 
   // Membership plans: join with the card on file (charged now), or ask the office if there's no card yet.
+  // Patients can download their own record (a parent, their children's) whenever they like.
+  const exportLimit = rateLimit({ windowMs: 60 * 60_000, max: 5, name: 'portal-record-export' });
+  r.get('/record-export', exportLimit, async (req, res) => {
+    const id = Number(req.query.patient_id) || req.portal.patient.id;
+    if (!req.portal.ids.includes(id)) throw new HttpError(404, 'Not found');
+    const out = await buildRecordExport(db, storage, req.portal.practice.id, id);
+    await pAudit(req, 'portal.record_export', 'patients', id, { files: out.files });
+    res.set({ 'Content-Type': 'application/zip', 'Content-Disposition': `attachment; filename="${out.filename}"` }).send(out.zip);
+  });
+
   r.get('/membership-plans', async (req, res) => {
     const { practice, ids } = req.portal;
     res.json({

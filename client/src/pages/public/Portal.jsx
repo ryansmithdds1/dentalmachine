@@ -219,7 +219,8 @@ function Dashboard({ token, onSignOut }) {
 
         <section className="card">
           <h2>{t('Statements & receipts')}</h2>
-          <button className="small" onClick={() => act(() => download('/portal/statement.pdf', token, 'statement.pdf'))}>{t('Download statement (PDF)')}</button>
+          <button className="small" onClick={() => act(() => download('/portal/statement.pdf', token, 'statement.pdf'))}>{t('Download statement (PDF)')}</button>{' '}
+          <button className="small" onClick={() => act(() => download('/portal/record-export', token, 'health-record.zip'))} title={t('Your records: a summary, your chart details, and your x-rays and documents')}>{t('Download my health record')}</button>
           <Receipts token={token} onError={setError} />
         </section>
 
