@@ -31,30 +31,38 @@ export async function accountAging(db, pid, ids, today) {
 // By family, each account is the head of household (guarantor) with everyone they're responsible for.
 export async function agingReport(db, pid, today, { family = false } = {}) {
   const acct = family ? 'COALESCE(p.guarantor_id, p.id)' : 'p.id';
-  // Three queries whatever the size of the practice: balances (with names), the debits that make them up,
-  // and what insurance is still expected, all grouped by account.
-  const patients = await db.all(
-    `SELECT b.id, b.balance, a.first_name, a.last_name, a.phone FROM (
-       SELECT ${acct} AS id, SUM(l.amount) AS balance FROM ledger_entries l JOIN patients p ON p.id = l.patient_id
-       WHERE l.practice_id = ? AND l.entry_date <= ? GROUP BY ${acct} HAVING SUM(l.amount) <> 0
-     ) b JOIN patients a ON a.id = b.id ORDER BY b.balance DESC, b.id`, pid, today,
-  );
-  const owing = patients.filter((p) => p.balance > 0);
   const buckets = ['current', 'd31_60', 'd61_90', 'd90_plus'];
   const totals = Object.fromEntries(buckets.map((b) => [b, 0]));
-  const todayMs = Date.parse(`${today}T00:00:00Z`);
-  // Voided entries and reversals are left out: they cancel each other in the balance, and the balance is
-  // what gets spread over the real charges.
-  const debits = owing.length ? await db.all(
-    `SELECT ${acct} AS patient_id, l.amount, l.entry_date FROM ledger_entries l JOIN patients p ON p.id = l.patient_id
-     WHERE l.practice_id = ? AND l.amount > 0 AND l.voided_at IS NULL AND l.reverses_id IS NULL AND l.entry_date <= ?
-     ORDER BY 1, l.entry_date DESC, l.id DESC`, pid, today,
-  ) : [];
-  const byPatient = new Map();
-  for (const d of debits) {
-    if (!byPatient.has(d.patient_id)) byPatient.set(d.patient_id, []);
-    byPatient.get(d.patient_id).push(d);
+  // One pass over the ledger, grouped by patient: the balance, and the debits (not voided or reversed)
+  // dated in each 30-day band. Spreading a balance over the newest debits first is the same as filling the
+  // newest band, then the next — so the per-charge detail never has to leave the database.
+  const back = (n) => new Date(Date.parse(`${today}T00:00:00Z`) - n * 86400000).toISOString().slice(0, 10);
+  const [b30, b60, b90] = [back(30), back(60), back(90)];
+  const debit = (cond) => `SUM(CASE WHEN l.amount > 0 AND l.voided_at IS NULL AND l.reverses_id IS NULL AND ${cond} THEN l.amount ELSE 0 END)`;
+  const perPatient = await db.all(
+    `SELECT l.patient_id, SUM(l.amount) AS balance, ${debit('l.entry_date >= ?')} AS s0, ${debit('l.entry_date >= ? AND l.entry_date < ?')} AS s1, ${debit('l.entry_date >= ? AND l.entry_date < ?')} AS s2
+     FROM ledger_entries l WHERE l.practice_id = ? AND l.entry_date <= ? GROUP BY l.patient_id`,
+    b30, b60, b30, b90, b60, pid, today,
+  );
+  const people = new Map((await db.all('SELECT id, guarantor_id, first_name, last_name, phone FROM patients WHERE practice_id = ?', pid)).map((p) => [p.id, p]));
+  const accounts = new Map();
+  for (const r of perPatient) {
+    const id = family ? (people.get(r.patient_id)?.guarantor_id ?? r.patient_id) : r.patient_id;
+    const a = accounts.get(id) || { balance: 0, s0: 0, s1: 0, s2: 0 };
+    a.balance += Number(r.balance); a.s0 += Number(r.s0); a.s1 += Number(r.s1); a.s2 += Number(r.s2);
+    accounts.set(id, a);
   }
+  const patients = [...accounts].filter(([, a]) => a.balance !== 0)
+    .map(([id, a]) => { const p = people.get(id) || {}; return { id, balance: a.balance, first_name: p.first_name, last_name: p.last_name, phone: p.phone, bands: a }; })
+    .sort((x, y) => y.balance - x.balance || x.id - y.id);
+  const owing = patients.filter((p) => p.balance > 0);
+  const spreadBands = (balance, a) => {
+    const current = Math.min(balance, a.s0);
+    const d31_60 = Math.min(balance - current, a.s1);
+    const d61_90 = Math.min(balance - current - d31_60, a.s2);
+    // Older debits, and anything not explained by a debit still on file (e.g. a voided payment).
+    return { current, d31_60, d61_90, d90_plus: balance - current - d31_60 - d61_90 };
+  };
   // Open claims: insurance still expected plus the in-network write-off still to come.
   const pendingRows = owing.length ? await db.all(
     `SELECT ${acct} AS id,
@@ -64,8 +72,8 @@ export async function agingReport(db, pid, today, { family = false } = {}) {
      WHERE c.practice_id = ? AND c.status IN ('draft','submitted','partially_paid') GROUP BY ${acct}`, pid,
   ) : [];
   const pending = new Map(pendingRows.map((x) => [x.id, x.pending]));
-  const rows = owing.map((p) => {
-    const row = { ...p, ...spread(p.balance, byPatient.get(p.id) || [], todayMs) };
+  const rows = owing.map(({ bands, ...p }) => {
+    const row = { ...p, ...spreadBands(p.balance, bands) };
     buckets.forEach((b) => (totals[b] += row[b]));
     // What insurance is still expected to cover vs what the patient owes (open claims today).
     row.insurance_pending = Math.min(row.balance, pending.get(p.id) || 0);
@@ -74,7 +82,7 @@ export async function agingReport(db, pid, today, { family = false } = {}) {
   });
   totals.insurance_pending = rows.reduce((s, r) => s + r.insurance_pending, 0);
   totals.patient_portion = rows.reduce((s, r) => s + r.patient_portion, 0);
-  const credits = patients.filter((p) => p.balance < 0).map((p) => ({ ...p, credit: -p.balance }));
+  const credits = patients.filter((p) => p.balance < 0).map(({ bands: _b, ...p }) => ({ ...p, credit: -p.balance }));
   return {
     as_of: today, group: family ? 'family' : 'patient', totals: { ...totals, total: rows.reduce((s, r) => s + r.balance, 0), credits: credits.reduce((s, c) => s + c.credit, 0) }, rows, credits,
   };

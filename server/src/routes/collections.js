@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { requirePermission, HttpError } from '../auth.js';
-import { insert, findOr404, audit, practiceNow } from '../util.js';
+import { insert, findOr404, audit, practiceNow, paged } from '../util.js';
 import { agingReport } from '../aging.js';
 import { preferredChannel, sendMessage } from '../messaging.js';
 
@@ -19,16 +19,26 @@ export const letterText = (stage, vars) => LETTERS[stage].text.replace(/\{(\w+)\
 export async function collectionsList(db, pid) {
   const today = (await practiceNow(db, pid)).slice(0, 10);
   const { rows } = await agingReport(db, pid, today, { family: true });
+  const overdueOf = (r) => Math.min(r.patient_portion, r.d31_60 + r.d61_90 + r.d90_plus);
+  // Looked up for every account at once (three grouped queries, however many accounts there are).
+  const info = new Map((await db.all('SELECT id, guarantor_id, collection_status, email, address, city, state, zip FROM patients WHERE practice_id = ?', pid)).map((p) => [p.id, p]));
+  const lastAction = new Map((await db.all(
+    'SELECT patient_id, action, created_at FROM collection_actions WHERE id IN (SELECT MAX(id) FROM collection_actions WHERE practice_id = ? GROUP BY patient_id)', pid,
+  )).map((a) => [a.patient_id, a]));
+  // The latest payment by anyone in each household.
+  const lastPaid = new Map();
+  for (const x of await db.all("SELECT patient_id, MAX(entry_date) AS d FROM ledger_entries WHERE practice_id = ? AND type = 'payment' AND voided_at IS NULL GROUP BY patient_id", pid)) {
+    const account = info.get(x.patient_id)?.guarantor_id ?? x.patient_id;
+    if (!lastPaid.has(account) || x.d > lastPaid.get(account)) lastPaid.set(account, x.d);
+  }
   const out = [];
   for (const r of rows) {
     // Only what the patient owes counts; money expected from insurance isn't past due from them.
-    const overdue = Math.min(r.patient_portion, r.d31_60 + r.d61_90 + r.d90_plus);
-    const p = await db.get('SELECT collection_status, email, address, city, state, zip FROM patients WHERE id = ?', r.id);
+    const overdue = overdueOf(r);
+    const { id: _id, guarantor_id: _g, ...p } = info.get(r.id) || {};
     if (overdue <= 0 && !p.collection_status) continue;
-    const last = await db.get('SELECT action, created_at FROM collection_actions WHERE patient_id = ? ORDER BY id DESC LIMIT 1', r.id);
-    const paid = await db.get(
-      "SELECT MAX(l.entry_date) AS d FROM ledger_entries l JOIN patients m ON m.id = l.patient_id WHERE (m.id = ? OR m.guarantor_id = ?) AND l.type = 'payment' AND l.voided_at IS NULL", r.id, r.id,
-    );
+    const last = lastAction.get(r.id);
+    const paid = { d: lastPaid.get(r.id) ?? null };
     const age = r.d90_plus > 0 ? 90 : r.d61_90 > 0 ? 60 : r.d31_60 > 0 ? 30 : 0;
     const done = STAGES.indexOf(p.collection_status);
     const due = age >= 90 ? 'letter_90' : age >= 60 ? 'letter_60' : age >= 30 ? 'letter_30' : null;
@@ -53,7 +63,8 @@ export default function collectionRoutes({ db, messenger }) {
 
   r.get('/collections', requirePermission('billing:read'), async (req, res) => {
     const practice = await db.get('SELECT finance_charge_bps, finance_charge_min, late_fee, collection_agency FROM practices WHERE id = ?', req.user.practice_id);
-    res.json({ settings: practice, accounts: await collectionsList(db, req.user.practice_id) });
+    const accounts = await collectionsList(db, req.user.practice_id);
+    res.json({ settings: practice, accounts: paged(req, res, accounts), total_accounts: accounts.length, total_overdue: accounts.reduce((s, a) => s + a.overdue, 0) });
   });
 
   r.get('/collections/:id', requirePermission('billing:read'), async (req, res) => {

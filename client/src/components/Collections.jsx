@@ -4,7 +4,7 @@ import { api } from '../api.js';
 import { useApi } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
 import { money, fmtDate, fmtUtcDateTime, label, toCents, fromCents } from '../format.js';
-import { ErrorBox, Modal, useSubmit } from './ui.jsx';
+import { ErrorBox, Modal, useSubmit, MoreRows } from './ui.jsx';
 
 const STEP = { letter_30: '30-day letter', letter_60: '60-day letter', letter_90: 'Final notice', agency: 'Send to agency', written_off: 'Written off', cleared: 'Taken out of collections', finance_charge: 'Finance charge', late_fee: 'Late fee' };
 const AGE = { 0: 'Current', 30: '31–60 days', 60: '61–90 days', 90: '90+ days' };
@@ -12,20 +12,21 @@ const AGE = { 0: 'Current', 30: '31–60 days', 60: '61–90 days', 90: '90+ day
 // Billing → Collections: past-due family accounts and the next step for each.
 export default function Collections() {
   const { can, user } = useAuth();
-  const { data, reload } = useApi('/collections');
+  const [limit, setLimit] = useState(200);
+  const { data, reload } = useApi(`/collections?limit=${limit}`);
   const [open, setOpen] = useState(null);
   const [charges, setCharges] = useState(false);
   const [setup, setSetup] = useState(false);
   if (!data) return <div className="card">Loading…</div>;
   const w = can('billing:write');
-  const total = data.accounts.reduce((s, a) => s + a.overdue, 0);
+  const total = data.total_overdue ?? data.accounts.reduce((s, a) => s + a.overdue, 0);
   return (
     <>
       <div className="card">
         <div className="inline" style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
           <div>
             <h2 style={{ margin: 0 }}>Past-due accounts</h2>
-            <div className="muted" style={{ fontSize: 13 }}>{data.accounts.length} families · {money(total)} more than 30 days past due (what patients owe, not what insurance is expected to pay).</div>
+            <div className="muted" style={{ fontSize: 13 }}>{(data.total_accounts ?? data.accounts.length).toLocaleString()} families · {money(total)} more than 30 days past due (what patients owe, not what insurance is expected to pay).</div>
           </div>
           <div className="inline">
             {w && <button onClick={() => setCharges(true)}>Finance charges & late fees…</button>}
@@ -51,6 +52,7 @@ export default function Collections() {
               {!data.accounts.length && <tr><td colSpan={8} className="muted">Nobody is more than 30 days past due.</td></tr>}
             </tbody>
           </table>
+          <MoreRows shown={data.accounts.length} total={data.total_accounts} onMore={(n) => setLimit(limit + n)} />
         </div>
       </div>
       {open && <AccountModal id={open} canWrite={w} admin={user.role === 'admin'} agency={data.settings.collection_agency} onClose={() => setOpen(null)} onChanged={reload} />}

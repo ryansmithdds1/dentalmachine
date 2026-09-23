@@ -99,3 +99,14 @@ export function PatientPicker({ value, onChange }) {
     </div>
   );
 }
+
+// "Showing 200 of 1,834 · Show 200 more" under a list the server sends a page at a time.
+export function MoreRows({ shown, total, onMore, step = 200 }) {
+  if (total == null || total <= shown) return null;
+  return (
+    <div className="more-rows no-print">
+      <span className="muted">Showing {shown.toLocaleString()} of {total.toLocaleString()}</span>
+      <button className="small" onClick={() => onMore(step)}>Show {Math.min(step, total - shown).toLocaleString()} more</button>
+    </div>
+  );
+}

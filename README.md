@@ -82,6 +82,7 @@ To start from scratch, open the app and click **Create an account**. This create
 npm test          # API integration tests (SQLite)
 TEST_DATABASE_URL=postgres://localhost/dm_test TEST_REDIS_URL=redis://localhost:6379 npm test   # also on PostgreSQL + Redis
 npm run build && npm run e2e   # end-to-end in a real browser (Playwright): new patient → insurance → book → check in → chart → check out → claim → ERA → statement
+npm run loadtest               # 50,000 patients with years of history; times every main screen and report (--patients N; DATABASE_URL=… for a scratch Postgres)
 npm run build     # production build of the web app
 ```
 

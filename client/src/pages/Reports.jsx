@@ -9,7 +9,8 @@ import ReviewReport from '../components/ReviewReport.jsx';
 import CloseBooks from '../components/CloseBooks.jsx';
 import SavedReports from '../components/SavedReports.jsx';
 import ReportBuilder from '../components/ReportBuilder.jsx';
-import { downloadCsv, dollars, getLocationId } from '../api.js';
+import { api, downloadCsv, dollars, getLocationId } from '../api.js';
+import { MoreRows } from '../components/ui.jsx';
 import { ProviderSelect, CsvButton, PrintButton } from '../components/ReportControls.jsx';
 
 export default function Reports() {
@@ -49,7 +50,9 @@ function Operational() {
   const { data: prod } = useApi(view === 'production' ? `/reports/production?from=${from}&to=${to}${at}` : null);
   const [agingGroup, setAgingGroup] = useState('patient');
   const [asOf, setAsOf] = useState('');
-  const { data: aging } = useApi(view === 'aging' ? `/reports/aging?group=${agingGroup}${asOf ? `&as_of=${asOf}` : ''}` : null);
+  const [agingLimit, setAgingLimit] = useState(500);
+  const agingPath = `/reports/aging?group=${agingGroup}${asOf ? `&as_of=${asOf}` : ''}`;
+  const { data: aging } = useApi(view === 'aging' ? `${agingPath}&limit=${agingLimit}` : null);
   const { data: byProv } = useApi(view === 'production' ? `/reports/collections-by-provider?from=${from}&to=${to}${at}` : null);
   const { data: adj } = useApi(view === 'production' ? `/reports/adjustments?from=${from}&to=${to}${at}` : null);
   const [sheetDate, setSheetDate] = useState(today);
@@ -189,7 +192,8 @@ function Operational() {
               <button className={agingGroup === 'family' ? 'active' : ''} onClick={() => setAgingGroup('family')}>By family</button>
             </div>
             <input type="date" className="no-print" aria-label="As of" value={asOf} max={today} onChange={(e) => setAsOf(e.target.value)} title="As of (leave blank for today)" style={{ width: 150 }} />
-            <CsvButton name={`ar-aging-${aging?.as_of}`} rows={aging?.rows} columns={[['Patient #', (r) => r.id], ['First name', (r) => r.first_name], ['Last name', (r) => r.last_name], ['Phone', (r) => r.phone], ['0-30', (r) => dollars(r.current)], ['31-60', (r) => dollars(r.d31_60)], ['61-90', (r) => dollars(r.d61_90)], ['90+', (r) => dollars(r.d90_plus)], ['Total', (r) => dollars(r.balance)], ['Insurance pending', (r) => dollars(r.insurance_pending)], ['Patient owes', (r) => dollars(r.patient_portion)]]} />
+            {/* The download has every account, not just the ones shown. */}
+            <CsvButton name={`ar-aging-${aging?.as_of}`} rows={aging?.rows} fetchAll={aging?.total_rows > aging?.rows?.length ? async () => (await api.get(`${agingPath}&limit=100000`)).rows : null} columns={[['Patient #', (r) => r.id], ['First name', (r) => r.first_name], ['Last name', (r) => r.last_name], ['Phone', (r) => r.phone], ['0-30', (r) => dollars(r.current)], ['31-60', (r) => dollars(r.d31_60)], ['61-90', (r) => dollars(r.d61_90)], ['90+', (r) => dollars(r.d90_plus)], ['Total', (r) => dollars(r.balance)], ['Insurance pending', (r) => dollars(r.insurance_pending)], ['Patient owes', (r) => dollars(r.patient_portion)]]} />
             <button className="small no-print" onClick={() => window.print()}>Print / PDF</button>
           </TitleRow>
           <div className="muted">As of {aging?.as_of}. Payments and credits are applied to the oldest charges first.</div>
@@ -210,7 +214,7 @@ function Operational() {
               ))}
               {aging && (
                 <tr className="totals-row">
-                  <td colSpan={2}>Total ({aging.rows.length} accounts)</td>
+                  <td colSpan={2}>Total ({(aging.total_rows ?? aging.rows.length).toLocaleString()} accounts)</td>
                   <td className="num">{money(aging.totals.current)}</td><td className="num">{money(aging.totals.d31_60)}</td><td className="num">{money(aging.totals.d61_90)}</td><td className="num">{money(aging.totals.d90_plus)}</td>
                   <td className="num">{money(aging.totals.total)}</td>
                   <td className="num">{money(aging.totals.insurance_pending)}</td>
@@ -220,6 +224,7 @@ function Operational() {
             </tbody>
           </table>
         </div>
+        {aging && <MoreRows shown={aging.rows.length} total={aging.total_rows} step={500} onMore={(n) => setAgingLimit(agingLimit + n)} />}
         {aging?.credits?.length > 0 && (
           <details style={{ padding: '0 16px 14px' }}>
             <summary>{aging.credits.length} account{aging.credits.length === 1 ? '' : 's'} in credit ({money(aging.totals.credits)}) — refund or apply</summary>

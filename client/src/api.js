@@ -58,6 +58,9 @@ async function request(method, path, body) {
     window.dispatchEvent(new Event('dm:logout'));
   }
   if (!res.ok) throw new ApiError(res.status, data.error || res.statusText, data.details, data.request_id);
+  // Long lists come a page at a time; the full count rides along on the array.
+  const total = res.headers.get('X-Total-Count');
+  if (total != null && Array.isArray(data)) Object.defineProperty(data, 'total', { value: Number(total) });
   return data;
 }
 

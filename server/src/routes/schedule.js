@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { requirePermission, HttpError, can } from '../auth.js';
-import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, normalizeDateTime, practiceNow, mapSeq } from '../util.js';
+import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, normalizeDateTime, practiceNow, mapSeq, paged } from '../util.js';
 import { hoursFor, providerHours, providerHoursFor, providerHoursOn, validateHours } from '../hours.js';
 import { publish, eventStream } from '../events.js';
 import { emitAppointment } from '../webhooks.js';
@@ -727,14 +727,14 @@ export default function scheduleRoutes({ db }) {
     const pid = req.user.practice_id;
     const before = req.query.before || (await practiceNow(db, pid)).slice(0, 10);
     const statuses = String(req.query.status || 'due,contacted').split(',');
-    res.json(await db.all(
+    res.json(paged(req, res, await db.all(
       `SELECT r.*, p.first_name, p.last_name, p.phone, p.email, rt.name AS type_name, rt.appointment_type_id,
          (SELECT MAX(sent_at) FROM recall_contacts rc WHERE rc.recall_id = r.id) AS auto_contacted_at
        FROM recalls r JOIN patients p ON p.id = r.patient_id LEFT JOIN recall_types rt ON rt.practice_id = r.practice_id AND rt.key = r.type
        WHERE r.practice_id = ? AND r.due_date <= ? AND r.status IN (${statuses.map(() => '?').join(',')}) AND p.status = 'active'
        ORDER BY r.due_date`,
       pid, before, ...statuses,
-    ));
+    )));
   });
 
   r.put('/recalls/:id', requirePermission('schedule:write'), async (req, res) => {

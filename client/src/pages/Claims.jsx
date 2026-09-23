@@ -4,7 +4,7 @@ import { api, getToken } from '../api.js';
 import { useApi } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
 import { money, fmtDate, fmtDateTime, toCents } from '../format.js';
-import { Badge, ErrorBox, Modal } from '../components/ui.jsx';
+import { Badge, ErrorBox, Modal, MoreRows } from '../components/ui.jsx';
 import { PlanSummary } from '../components/patient/PaymentPlans.jsx';
 import { ChStatus, ClearinghousePanel, sendClaims, describeResponses, CallForm, CALL_OUTCOMES } from '../components/ClaimEdi.jsx';
 import InsurancePlanForm from '../components/InsurancePlanForm.jsx';
@@ -59,7 +59,8 @@ function ClaimList() {
   const [status, setStatus] = useState('attention');
   const [carrier, setCarrier] = useState('');
   const [age, setAge] = useState('');
-  const q = new URLSearchParams({ ...(status === 'attention' ? { attention: '1' } : status ? { status } : {}), ...(carrier ? { carrier_id: carrier } : {}), ...(age ? { age } : {}) });
+  const [limit, setLimit] = useState(200);
+  const q = new URLSearchParams({ ...(status === 'attention' ? { attention: '1' } : status ? { status } : {}), ...(carrier ? { carrier_id: carrier } : {}), ...(age ? { age } : {}), limit });
   const { data: claims, reload } = useApi(`/claims?${q}`);
   const carriers = useLookup('/carriers');
   const [busy, setBusy] = useState(false);
@@ -102,14 +103,14 @@ function ClaimList() {
   return (
     <>
       <div className="tabs" style={{ borderBottom: 'none', marginBottom: 8 }}>
-        {FILTERS.map(([v, text]) => <button key={v} className={status === v ? 'active' : ''} onClick={() => { setStatus(v); setSelected([]); }}>{text}</button>)}
+        {FILTERS.map(([v, text]) => <button key={v} className={status === v ? 'active' : ''} onClick={() => { setStatus(v); setSelected([]); setLimit(200); }}>{text}</button>)}
       </div>
       <div className="inline" style={{ gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
-        <select aria-label="Payer" value={carrier} onChange={(e) => { setCarrier(e.target.value); setSelected([]); }} style={{ width: 'auto' }}>
+        <select aria-label="Payer" value={carrier} onChange={(e) => { setCarrier(e.target.value); setSelected([]); setLimit(200); }} style={{ width: 'auto' }}>
           <option value="">All payers</option>
           {carriers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
-        <select aria-label="Age" value={age} onChange={(e) => { setAge(e.target.value); setSelected([]); }} style={{ width: 'auto' }}>
+        <select aria-label="Age" value={age} onChange={(e) => { setAge(e.target.value); setSelected([]); setLimit(200); }} style={{ width: 'auto' }}>
           <option value="">Any age</option>
           <option value="0-30">0–30 days</option><option value="31-60">31–60 days</option><option value="61-90">61–90 days</option><option value="90+">Over 90 days</option>
         </select>
@@ -169,11 +170,12 @@ function ClaimList() {
                 </tr>
               ))}
               {claims?.length > 0 && (
-                <tr className="totals-row"><td colSpan={8}>{claims.length} claim{claims.length === 1 ? '' : 's'}</td><td className="num">{money(totals.billed)}</td><td className="num">{money(totals.est)}</td><td className="num">{money(totals.paid)}</td></tr>
+                <tr className="totals-row"><td colSpan={8}>{claims.length} claim{claims.length === 1 ? '' : 's'}{claims.total > claims.length ? ` shown of ${claims.total.toLocaleString()}` : ''}</td><td className="num">{money(totals.billed)}</td><td className="num">{money(totals.est)}</td><td className="num">{money(totals.paid)}</td></tr>
               )}
             </tbody>
           </table>
           {claims?.length === 0 && <div className="empty">No claims here. Create claims from a patient&apos;s Insurance tab.</div>}
+          {claims && <MoreRows shown={claims.length} total={claims.total} onMore={(n) => setLimit(limit + n)} />}
         </div>
       </div>
     </>
@@ -261,11 +263,12 @@ function EraTable({ rows }) {
 
 function Plans() {
   const [filter, setFilter] = useState('active');
-  const { data: plans } = useApi(filter === 'overdue' ? '/payment-plans?overdue=true' : `/payment-plans?status=${filter}`);
+  const [limit, setLimit] = useState(200);
+  const { data: plans } = useApi(filter === 'overdue' ? `/payment-plans?overdue=true&limit=${limit}` : `/payment-plans?status=${filter}&limit=${limit}`);
   return (
     <>
       <div className="tabs" style={{ borderBottom: 'none', marginBottom: 8 }}>
-        {[['active', 'Active'], ['overdue', 'Past due'], ['completed', 'Completed'], ['all', 'All']].map(([k, l]) => <button key={k} className={filter === k ? 'active' : ''} onClick={() => setFilter(k)}>{l}</button>)}
+        {[['active', 'Active'], ['overdue', 'Past due'], ['completed', 'Completed'], ['all', 'All']].map(([k, l]) => <button key={k} className={filter === k ? 'active' : ''} onClick={() => { setFilter(k); setLimit(200); }}>{l}</button>)}
       </div>
       {plans?.length === 0 && <div className="card empty">No payment plans.</div>}
       <div className="grid grid-2">
@@ -280,6 +283,7 @@ function Plans() {
           </div>
         ))}
       </div>
+      {plans && <MoreRows shown={plans.length} total={plans.total} onMore={(n) => setLimit(limit + n)} />}
     </>
   );
 }
@@ -288,7 +292,8 @@ function InsuranceFollowup() {
   const { can } = useAuth();
   const [carrier, setCarrier] = useState('');
   const [calling, setCalling] = useState(null);
-  const { data, reload } = useApi(`/reports/outstanding-claims${carrier ? `?carrier_id=${carrier}` : ''}`);
+  const [limit, setLimit] = useState(500);
+  const { data, reload } = useApi(`/reports/outstanding-claims?limit=${limit}${carrier ? `&carrier_id=${carrier}` : ''}`);
   const carriers = useLookup('/carriers');
   if (!data) return <div className="empty">Loading…</div>;
   const B = [['d0_30', '0–30 days'], ['d31_60', '31–60 days'], ['d61_90', '61–90 days'], ['d90_plus', '90+ days']];
@@ -329,6 +334,7 @@ function InsuranceFollowup() {
             </tbody>
           </table>
           {data.rows.length === 0 && <div className="empty">No outstanding claims. 🎉</div>}
+          <MoreRows shown={data.rows.length} total={data.total_rows} step={500} onMore={(n) => setLimit(limit + n)} />
           {calling && <Modal title={`Call about claim #${calling.id} · ${calling.first_name} ${calling.last_name}`} wide onClose={() => setCalling(null)}><CallForm claim={calling} onCancel={() => setCalling(null)} onDone={() => { setCalling(null); reload(); }} /></Modal>}
         </div>
       </div>

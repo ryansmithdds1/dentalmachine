@@ -11,7 +11,7 @@ import InsurancePlanForm from '../InsurancePlanForm.jsx';
 export default function InsuranceTab({ patient, onChange }) {
   const { can } = useAuth();
   const { data: policies, reload } = useApi(`/patients/${patient.id}/insurance`);
-  const { data: claims, reload: reloadClaims } = useApi(can('billing:read') ? `/claims?patient_id=${patient.id}` : null);
+  const { data: claims, reload: reloadClaims } = useApi(can('billing:read') ? `/claims?patient_id=${patient.id}&limit=2000` : null);
   const [modal, setModal] = useState(null);
   const [selected, setSelected] = useState([]);
   const [err, setErr] = useState(null);

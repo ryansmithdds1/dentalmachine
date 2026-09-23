@@ -185,3 +185,15 @@ export function toCsv(rows, columns) {
   };
   return `﻿${[columns.map(([h]) => cell(h)).join(','), ...rows.map((r) => columns.map(([, f]) => cell(f(r))).join(','))].join('\r\n')}\r\n`;
 }
+
+// Long lists come a page at a time: ?limit (default 200, at most 2000) and ?offset. The full count goes in
+// the X-Total-Count header so the screen can offer "show more"; the response body keeps its shape.
+export const pageArgs = (req, { dflt = 200, max = 2000 } = {}) => ({
+  limit: Math.min(Math.max(Number(req.query.limit) || dflt, 1), max),
+  offset: Math.max(Number(req.query.offset) || 0, 0),
+});
+export function paged(req, res, rows, opts) {
+  const { limit, offset } = pageArgs(req, opts);
+  res.set('X-Total-Count', String(rows.length));
+  return rows.slice(offset, offset + limit);
+}

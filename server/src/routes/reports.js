@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { requirePermission, HttpError, can } from '../auth.js';
-import { practiceNow, utcRange, mapSeq } from '../util.js';
+import { practiceNow, utcRange, mapSeq, paged } from '../util.js';
 import { allocationsForRange } from '../allocation.js';
 import { agingReport } from '../aging.js';
 
@@ -203,7 +203,8 @@ export default function reportRoutes({ db }) {
     const { today: now } = await range(req, db);
     const today = /^\d{4}-\d{2}-\d{2}$/.test(req.query.as_of || '') && req.query.as_of <= now ? req.query.as_of : now;
     const family = req.query.group === 'family';
-    res.json(await agingReport(db, pid, today, { family }));
+    const report = await agingReport(db, pid, today, { family });
+    res.json({ ...report, rows: paged(req, res, report.rows, { dflt: 500, max: 100_000 }), total_rows: report.rows.length });
   });
 
   // Production and collections per provider: payments are credited to the provider whose work they paid

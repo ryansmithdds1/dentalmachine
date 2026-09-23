@@ -801,3 +801,5 @@ table.elig-freq th, table.elig-freq td { padding: 3px 8px; }
 .setup-checklist { list-style: none; padding: 0; font-size: 15px; line-height: 1.9; }
 .setup-checklist .ok { color: var(--primary, #0f766e); }
 @media (max-width: 800px) { .setup-layout { grid-template-columns: 1fr; } .setup-steps { flex-direction: row; flex-wrap: wrap; } .setup-steps button { width: auto; } }
+
+.more-rows { display: flex; gap: 10px; align-items: center; justify-content: center; padding: 10px; font-size: 13px; }

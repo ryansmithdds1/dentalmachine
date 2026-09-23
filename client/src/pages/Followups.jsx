@@ -4,7 +4,7 @@ import { api } from '../api.js';
 import { useApi } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
 import { money, fmtDate, fmtDateTime, label, shiftDate, practiceToday } from '../format.js';
-import { Badge, ErrorBox, Modal, useSubmit } from '../components/ui.jsx';
+import { Badge, ErrorBox, Modal, useSubmit, MoreRows } from '../components/ui.jsx';
 import AppointmentForm from '../components/AppointmentForm.jsx';
 
 const OUTCOMES = [['left_voicemail', 'Left voicemail'], ['texted', 'Texted'], ['emailed', 'Emailed'], ['spoke_scheduled', 'Spoke — scheduled'], ['spoke_will_call', 'Spoke — will call back'], ['declined', 'Declined'], ['wrong_number', 'Wrong number'], ['note', 'Note']];
@@ -40,7 +40,8 @@ function Recall() {
   const { can, practice } = useAuth();
   const today = practiceToday(practice?.timezone);
   const [win, setWin] = useState(30);
-  const { data: recalls, reload } = useApi(`/recalls?before=${shiftDate(today, win)}&status=due,contacted`);
+  const [limit, setLimit] = useState(200);
+  const { data: recalls, reload } = useApi(`/recalls?before=${shiftDate(today, win)}&status=due,contacted&limit=${limit}`);
   const [selected, setSelected] = useState([]);
   const [notice, setNotice] = useState(null);
   const [logFor, setLogFor] = useState(null);
@@ -88,6 +89,7 @@ function Recall() {
             </tbody>
           </table>
           {recalls?.length === 0 && <div className="empty">Nobody is due. 🎉</div>}
+          {recalls && <MoreRows shown={recalls.length} total={recalls.total} onMore={(n) => setLimit(limit + n)} />}
         </div>
       </div>
       {logFor && <LogCall kind="recall" target={logFor} onDone={() => { setLogFor(null); reload(); }} />}

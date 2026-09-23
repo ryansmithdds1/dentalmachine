@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { requirePermission, HttpError } from '../auth.js';
-import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, toCents, practiceNow, mapSeq, publicPractice } from '../util.js';
+import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, toCents, practiceNow, mapSeq, publicPractice, paged } from '../util.js';
 import { estimateCoverage } from '../services.js';
 import { build837D } from '../x12.js';
 import { recordFeeChange } from '../fees.js';
@@ -175,7 +175,7 @@ export default function ppoRoutes({ db, config }) {
     const bucket = (d) => (d <= 30 ? 'd0_30' : d <= 60 ? 'd31_60' : d <= 90 ? 'd61_90' : 'd90_plus');
     const totals = { d0_30: 0, d31_60: 0, d61_90: 0, d90_plus: 0 };
     for (const r2 of rows) totals[bucket(r2.days_out ?? 0)] += r2.estimated_amount - r2.paid_amount;
-    res.json({ as_of: today, totals, rows });
+    res.json({ as_of: today, totals, rows: paged(req, res, rows, { dflt: 500, max: 100_000 }), total_rows: rows.length });
   });
 
   return r;

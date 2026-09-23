@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { requirePermission, HttpError } from '../auth.js';
-import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, toCents, practiceNow, mapSeq, publicPractice, validTooth } from '../util.js';
+import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, toCents, practiceNow, mapSeq, publicPractice, validTooth, paged, pageArgs } from '../util.js';
 import { estimateCoverage, postClaimPayment, benefitYear, deductibleMet, reverseEntry, createClaim, checkPostingDate } from '../services.js';
 import { savePolicy, validatePlan, syncPlan, PLAN_BENEFITS, DEFAULT_FREQUENCIES, planFor } from '../benefits.js';
 
@@ -169,14 +169,20 @@ export default function insuranceRoutes({ db }) {
       where.push('ic.id = ?');
       params.push(Number(req.query.carrier_id));
     }
-    const rows = await db.all(`${CLAIM_SELECT} WHERE ${where.join(' AND ')} ORDER BY c.created_at DESC, c.id DESC`, ...params);
     // Worklist: how old each claim is (since it was sent, or created if not yet sent) and whether it needs
     // someone — rejected, denied, or no answer from the payer after 30 days. Those come first.
     // A logged call with a follow-up date quiets "no payment" until that date comes round.
+    // Only claims still in play (draft, sent, part-paid, denied) can need someone, so those are worked out
+    // here; paid and void claims (most of a practice's history) come straight from the database a page at a time.
+    const OPEN = ['draft', 'submitted', 'partially_paid', 'denied'];
+    const inList = OPEN.map(() => '?').join(',');
+    const whereSql = where.join(' AND ');
+    const closedOnly = !!req.query.status && !OPEN.includes(req.query.status);
+    const wantClosed = req.query.status ? closedOnly : req.query.attention !== '1';
     const now = Date.now();
     const today = (await practiceNow(db, req.user.practice_id)).slice(0, 10);
     const open = (c) => ['submitted', 'partially_paid'].includes(c.status);
-    for (const c of rows) {
+    const worklist = (rows) => { for (const c of rows) {
       const since = c.submitted_at || c.created_at;
       c.age_days = Math.max(0, Math.floor((now - Date.parse(since.includes('T') ? since : `${since.replace(' ', 'T')}Z`)) / 86400_000));
       const outcome = CALL_OUTCOMES[c.last_call_outcome]?.toLowerCase();
@@ -186,12 +192,23 @@ export default function insuranceRoutes({ db }) {
             : open(c) && c.follow_up_date ? null
               : open(c) && c.age_days > 30 ? `No payment after ${c.age_days} days`
                 : null;
-    }
+    } return rows; };
     const [min, max] = { '0-30': [0, 30], '31-60': [31, 60], '61-90': [61, 90], '90+': [91, Infinity] }[req.query.age] || [0, Infinity];
-    let out = rows.filter((c) => c.age_days >= min && c.age_days <= max);
+    const inAge = (c) => c.age_days >= min && c.age_days <= max;
+    let out = closedOnly ? [] : worklist(await db.all(`${CLAIM_SELECT} WHERE ${whereSql} AND c.status IN (${inList}) ORDER BY c.created_at DESC, c.id DESC`, ...params, ...OPEN)).filter(inAge);
     if (req.query.attention === '1') out = out.filter((c) => c.attention);
     out.sort((a, b) => (!!b.attention - !!a.attention) || (a.attention ? b.age_days - a.age_days : 0));
-    res.json(out);
+    if (!wantClosed) return res.json(paged(req, res, out));
+    const closedSql = `${CLAIM_SELECT} WHERE ${whereSql} AND c.status NOT IN (${inList}) ORDER BY c.created_at DESC, c.id DESC`;
+    // An age filter on closed claims is rare: work those out in full.
+    if (req.query.age) return res.json(paged(req, res, [...out, ...worklist(await db.all(closedSql, ...params, ...OPEN)).filter(inAge)]));
+    const { limit, offset } = pageArgs(req);
+    const closedCount = Number((await db.get(`SELECT COUNT(*) AS n FROM (${closedSql}) x`, ...params, ...OPEN)).n);
+    const first = out.slice(offset, offset + limit);
+    const more = limit - first.length;
+    const closed = more > 0 ? worklist(await db.all(`${closedSql} LIMIT ? OFFSET ?`, ...params, ...OPEN, more, Math.max(0, offset - out.length))) : [];
+    res.set('X-Total-Count', String(out.length + closedCount));
+    res.json([...first, ...closed]);
   });
 
   r.get('/claims/:cid', requirePermission('billing:read'), async (req, res) => {

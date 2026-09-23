@@ -149,3 +149,24 @@ test('ADA form: more than ten services spill onto a second page; only real tooth
   assert.deepEqual(f.box33, ['3', 'K']);
   assert.equal(f.box18, 'dependent child');
 });
+
+test('long lists come a page at a time: open claims first, then paid ones, with the full count', async () => {
+  const { api, claimFor } = await setup();
+  const made = [];
+  for (const [code, tooth, surfaces] of [['D2392', '30', 'MO'], ['D2391', '19', 'O'], ['D2740', '3'], ['D2750', '14'], ['D2393', '2', 'MOD']]) made.push(await claimFor(code, tooth, surfaces));
+  // Two paid, three still open (one denied, so it needs attention).
+  for (const c of made.slice(0, 2)) { await api.post(`/claims/${c.id}/submit`); await api.post(`/claims/${c.id}/payment`, { amount: 1000, write_off: 0 }); }
+  await api.post(`/claims/${made[2].id}/submit`);
+  await api.post(`/claims/${made[2].id}/deny`, { reason: 'x' });
+  const all = await api.get('/claims');
+  assert.equal(all.headers.get('x-total-count'), '5');
+  assert.equal(all.data[0].id, made[2].id, 'the denied claim first');
+  assert.deepEqual(all.data.slice(3).map((c) => c.status), ['paid', 'paid'], 'then paid ones');
+  const p1 = await api.get('/claims?limit=2');
+  const p2 = await api.get('/claims?limit=2&offset=2');
+  const p3 = await api.get('/claims?limit=2&offset=4');
+  assert.deepEqual([p1.data.length, p2.data.length, p3.data.length], [2, 2, 1]);
+  assert.deepEqual([...p1.data, ...p2.data, ...p3.data].map((c) => c.id), all.data.map((c) => c.id), 'pages join up exactly');
+  assert.equal((await api.get('/claims?status=paid&limit=1')).headers.get('x-total-count'), '2');
+  assert.equal((await api.get('/claims?attention=1')).headers.get('x-total-count'), '1');
+});

@@ -1691,6 +1691,34 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_appt_token ON appointments(confirm_token_h
 CREATE INDEX IF NOT EXISTS idx_campaign_unsub ON campaign_recipients(unsubscribe_hash);
 CREATE INDEX IF NOT EXISTS idx_webhook_due ON webhook_deliveries(status, next_attempt_at);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_user_email_ci ON users(lower(email));
+-- For large practices (see scripts/loadtest.js): the lookups reports, worklists and charts make per patient.
+CREATE INDEX IF NOT EXISTS idx_appt_patient ON appointments(patient_id, start_time);
+CREATE INDEX IF NOT EXISTS idx_proc_appt ON procedures(appointment_id);
+CREATE INDEX IF NOT EXISTS idx_proc_plan ON procedures(treatment_plan_id);
+CREATE INDEX IF NOT EXISTS idx_proc_done ON procedures(practice_id, status, completed_at);
+CREATE INDEX IF NOT EXISTS idx_ledger_date ON ledger_entries(practice_id, entry_date);
+CREATE INDEX IF NOT EXISTS idx_ledger_proc ON ledger_entries(procedure_id);
+CREATE INDEX IF NOT EXISTS idx_ledger_claim ON ledger_entries(claim_id);
+CREATE INDEX IF NOT EXISTS idx_ledger_plan ON ledger_entries(payment_plan_id);
+CREATE INDEX IF NOT EXISTS idx_claims_status ON claims(practice_id, status);
+CREATE INDEX IF NOT EXISTS idx_claims_patient ON claims(patient_id);
+CREATE INDEX IF NOT EXISTS idx_claim_items_claim ON claim_items(claim_id);
+CREATE INDEX IF NOT EXISTS idx_claim_items_proc ON claim_items(procedure_id);
+CREATE INDEX IF NOT EXISTS idx_recalls_due ON recalls(practice_id, due_date);
+CREATE INDEX IF NOT EXISTS idx_recalls_patient ON recalls(patient_id);
+CREATE INDEX IF NOT EXISTS idx_policy_patient ON patient_insurance(patient_id);
+CREATE INDEX IF NOT EXISTS idx_patients_guarantor ON patients(guarantor_id);
+CREATE INDEX IF NOT EXISTS idx_elig_policy ON eligibility_checks(patient_insurance_id);
+CREATE INDEX IF NOT EXISTS idx_tp_patient ON treatment_plans(patient_id);
+CREATE INDEX IF NOT EXISTS idx_notes_patient ON clinical_notes(patient_id);
+CREATE INDEX IF NOT EXISTS idx_conditions_patient ON tooth_conditions(patient_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(practice_id, status);
+CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(practice_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_perio_patient ON perio_exams(patient_id);
+CREATE INDEX IF NOT EXISTS idx_recall_contacts ON recall_contacts(recall_id);
+CREATE INDEX IF NOT EXISTS idx_ledger_by_patient ON ledger_entries(patient_id, entry_date);
+CREATE INDEX IF NOT EXISTS idx_proc_by_patient ON procedures(patient_id, status);
+CREATE INDEX IF NOT EXISTS idx_patients_status_name ON patients(practice_id, status, last_name, first_name);
 `;
 
 // ---------------------------------------------------------------------------

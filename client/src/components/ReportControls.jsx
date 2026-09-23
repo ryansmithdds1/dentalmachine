@@ -12,8 +12,9 @@ export function ProviderSelect({ value, onChange, type, label = 'All providers' 
   );
 }
 
-export function CsvButton({ name, rows, columns }) {
-  return <button className="small no-print" disabled={!rows?.length} onClick={() => downloadCsv(name, rows, columns)} title="Download as a spreadsheet (CSV)">⬇ CSV</button>;
+// fetchAll: for a list shown a page at a time, loads every row before downloading.
+export function CsvButton({ name, rows, columns, fetchAll = null }) {
+  return <button className="small no-print" disabled={!rows?.length} onClick={async () => downloadCsv(name, fetchAll ? await fetchAll() : rows, columns)} title="Download as a spreadsheet (CSV)">⬇ CSV</button>;
 }
 
 export function PrintButton() {

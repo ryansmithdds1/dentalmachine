@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { requirePermission, HttpError } from '../auth.js';
-import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, toCents, practiceNow, mapSeq } from '../util.js';
+import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, toCents, practiceNow, mapSeq, paged } from '../util.js';
 
 const FREQ_DAYS = { weekly: 7, biweekly: 14 };
 
@@ -253,7 +253,7 @@ export default function familyRoutes({ db }) {
       `SELECT pp.*, p.first_name, p.last_name, p.phone FROM payment_plans pp JOIN patients p ON p.id = pp.patient_id
        WHERE pp.practice_id = ? AND (? = 'all' OR pp.status = ?) ORDER BY pp.created_at DESC`, pid, status, status,
     )), async (p) => await planStatus(db, p, today));
-    res.json(req.query.overdue === 'true' ? plans.filter((p) => p.past_due > 0) : plans);
+    res.json(paged(req, res, req.query.overdue === 'true' ? plans.filter((p) => p.past_due > 0) : plans));
   });
 
   r.get('/patients/:id/payment-plans', requirePermission('billing:read'), async (req, res) => {

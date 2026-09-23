@@ -32,6 +32,9 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run build
+      # A 5,000-patient practice: every main screen and report must stay within its time budget.
+      - run: npm run loadtest -- --patients 5000
+        if: matrix.database == 'sqlite'
 
   # The core day in a real browser: new patient, insurance, book, check in, chart, check out,
   # claim, ERA, statement. Seeds and starts its own server on a fresh SQLite database.
