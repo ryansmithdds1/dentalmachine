@@ -8,6 +8,7 @@ import { runExclusive } from '../cluster.js';
 import { benefitsUsed, benefitYear } from '../services.js';
 import { savePolicy } from '../benefits.js';
 import { importEra, parseControl } from '../era.js';
+import { attachmentHints } from '../attachments.js';
 
 // Electronic claims (837D), eligibility (270/271) and remittance (835) through a clearinghouse.
 // EDI_MODE=manual (default): files are generated for upload to the clearinghouse portal and responses are imported.
@@ -48,6 +49,7 @@ export default function ediRoutes({ db, config, clearinghouse: ch }) {
     }
     return {
       claim, policy, primary,
+      attachments: await db.all("SELECT * FROM claim_attachments WHERE claim_id = ? AND status != 'rejected' ORDER BY id", claim.id),
       patient: await db.get('SELECT * FROM patients WHERE id = ?', claim.patient_id),
       carrier: await db.get('SELECT * FROM insurance_carriers WHERE id = ?', policy.carrier_id),
       items: await db.all(
@@ -69,12 +71,15 @@ export default function ediRoutes({ db, config, clearinghouse: ch }) {
     if (bundle.items.some((i) => !i.provider_npi)) p.push('Treating provider NPI missing');
     if (bundle.policy.priority === 'secondary' && !bundle.primary) p.push('Secondary claim: post the primary insurance payment first (the secondary payer needs it)');
     if (['7', '8'].includes(String(bundle.claim.frequency_code)) && !bundle.claim.original_reference) p.push("Corrected or void claim: the payer's original claim number is required");
+    if (bundle.attachments.some((a) => !a.control_number)) p.push('Send the claim’s attachments first (they need control numbers for the claim to reference)');
     return p;
   }
 
   r.get('/claims/:cid/validate', requirePermission('billing:read'), async (req, res) => {
     const practice = await db.get('SELECT * FROM practices WHERE id = ?', req.user.practice_id);
-    res.json({ problems: claimProblems(await claimBundle(req.params.cid, req.user.practice_id), practice) });
+    const bundle = await claimBundle(req.params.cid, req.user.practice_id);
+    // Warnings don't block sending: payers commonly deny these codes without attachments.
+    res.json({ problems: claimProblems(bundle, practice), warnings: attachmentHints(bundle.items, bundle.attachments) });
   });
 
   // Builds a validated 837D batch for the given claims.

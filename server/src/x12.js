@@ -61,7 +61,7 @@ export function build837D({ practice, claims, senderId, receiverId, control = 1,
     `N4*${clean(practice.city, 30)}*${clean(practice.state, 2)}*${digitsOnly(practice.zip)}`,
     `REF*EI*${digitsOnly(practice.tax_id)}`,
   );
-  for (const { claim, patient, policy, carrier, items, primary: other } of claims) {
+  for (const { claim, patient, policy, carrier, items, primary: other, attachments = [] } of claims) {
     const isSelf = policy.relationship === 'self';
     const subHl = ++hl;
     const sub = splitName(policy.subscriber_name);
@@ -91,6 +91,8 @@ export function build837D({ practice, claims, senderId, receiverId, control = 1,
     // CLM19 = PB marks a predetermination of benefits (pre-authorization) rather than a claim for payment.
     const freq = ['7', '8'].includes(String(claim.frequency_code)) ? claim.frequency_code : '1';
     segs.push(`CLM*${clean(claim.control_number, 20)}*${money(claim.total_fee)}***11:B:${freq}*Y*A*Y*Y${claim.predetermination ? `${'*'.repeat(10)}PB` : ''}`);
+    // Attachments (x-rays, perio charts, narratives) sent separately, matched by their control numbers.
+    for (const a of attachments) if (a.control_number) segs.push(`PWK*${a.report_type}*${a.transmission}***AC*${clean(a.control_number, 50)}`);
     if (claim.preauth_number) segs.push(`REF*G1*${clean(claim.preauth_number, 50)}`);
     if (freq !== '1' && claim.original_reference) segs.push(`REF*F8*${clean(claim.original_reference, 50)}`);
     const rendering = items.find((i) => i.provider_npi);

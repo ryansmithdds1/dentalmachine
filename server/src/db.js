@@ -660,6 +660,23 @@ CREATE TABLE IF NOT EXISTS portal_codes (
 CREATE INDEX IF NOT EXISTS idx_portal_codes ON portal_codes(practice_id, contact);
 
 -- Patients without an appointment who want one (or an earlier one), and when they can come.
+-- Claim attachments and the control numbers that tie them to the claim (837 PWK).
+CREATE TABLE IF NOT EXISTS claim_attachments (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  claim_id INTEGER NOT NULL REFERENCES claims(id),
+  document_id INTEGER REFERENCES documents(id),
+  report_type TEXT NOT NULL,
+  narrative TEXT,
+  transmission TEXT NOT NULL DEFAULT 'EL',
+  control_number TEXT,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','sent','accepted','rejected')),
+  vendor_ref TEXT,
+  error TEXT,
+  sent_at TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 -- Images arranged in a layout (FMX, bitewings): slot number → document.
 CREATE TABLE IF NOT EXISTS image_mounts (
   id INTEGER PRIMARY KEY,

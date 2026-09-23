@@ -26,6 +26,7 @@ const WalkoutPrint = lazy(() => import('./pages/PrintDocs.jsx').then((m) => ({ d
 const ReferralLetterPrint = lazy(() => import('./pages/PrintDocs.jsx').then((m) => ({ default: m.ReferralLetterPrint })));
 const Checkout = lazy(() => import('./pages/Checkout.jsx'));
 const LabSlipPrint = lazy(() => import('./pages/PrintDocs.jsx').then((m) => ({ default: m.LabSlipPrint })));
+const AttachmentCoverPrint = lazy(() => import('./pages/PrintDocs.jsx').then((m) => ({ default: m.AttachmentCoverPrint })));
 const CaseAcceptance = lazy(() => import('./pages/public/CaseAcceptance.jsx'));
 const Portal = lazy(() => import('./pages/public/Portal.jsx'));
 const Reports = lazy(() => import('./pages/Reports.jsx'));
@@ -113,6 +114,7 @@ function StaffApp() {
       <Route path="/treatment-plans/:id/print" element={<TreatmentPlanPrint />} />
       <Route path="/prescriptions/:id/print" element={<PrescriptionPrint />} />
       <Route path="/lab-cases/:id/slip" element={<LabSlipPrint />} />
+      <Route path="/claims/:id/attachments/print" element={<AttachmentCoverPrint />} />
       <Route path="/appointments/:id/walkout" element={<WalkoutPrint />} />
       <Route path="/referrals/:id/letter" element={<ReferralLetterPrint />} />
       <Route path="*" element={<Shell nav={nav} />} />

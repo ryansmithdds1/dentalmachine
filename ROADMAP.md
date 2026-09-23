@@ -84,7 +84,7 @@ The "OD / Curve" column shows which competitor has the feature: ✓ = has it, ~ 
 | 3 | ✅ **Shared insurance plans (employer plans)** instead of free-text subscribers per patient. Edit a plan once and every subscriber updates. | Data quality; how every PMS models it. | ✓ / ✓ | P1 | M |
 | 4 | ✅ **Bulk insurance payments / EOB batch posting.** One check spread across several claims, with procedure-level posting, plus insurance deposit batches. | Paper EOBs still happen daily. | ✓ / ✓ | P1 | M |
 | 5 | ✅ **Procedure-level ERA posting.** Post service lines (`SVC`) per procedure, handle the check-level adjustments (`PLB`), and separate contractual (CO) from other (PI/OA) adjustments for review. | Accurate write-offs and provider collections. | ✓ / ✓ | P1 | M |
-| 6 | **Claim attachments** (x-rays, perio charts, narratives) via NEA/Vyne or DentalXChange, with the attachment reference (`PWK`) in the 837. | Crowns, SRP and perio claims are denied without them. | ✓ / ✓ | P1 | L |
+| 6 | ✅ **Claim attachments** (x-rays, perio charts, narratives) via NEA/Vyne or DentalXChange, with the attachment reference (`PWK`) in the 837. | Crowns, SRP and perio claims are denied without them. | ✓ / ✓ | P1 | L |
 | 7 | ✅ **Corrected and void claims** (claim frequency codes 7 and 8), and the prior-auth reference (`REF*G1`) on the claim. | Fixing claims without phone calls. | ✓ / ✓ | P2 | S |
 | 8 | ✅ **Payment allocation.** Split payments across procedures and providers; show unapplied credit. | Collections by provider, for associate pay. | ✓ / ✓ | P1 | M |
 | 9 | ✅ **Adjustment types and write-off approval.** Configurable codes (courtesy, senior, bad debt, insurance write-off); optional manager approval above a threshold. | Reporting and loss control. | ✓ / ✓ | P2 | S |

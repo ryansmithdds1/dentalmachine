@@ -226,3 +226,45 @@ export function ReferralLetterPrint() {
     </div>
   );
 }
+
+// Cover sheet for claim attachments sent by mail or fax: the payer matches them to the claim by these numbers.
+export function AttachmentCoverPrint() {
+  const { id } = useParams();
+  const { practice } = useAuth();
+  const { data: c } = useApi(`/claims/${id}`);
+  const { data: a } = useApi(`/claims/${id}/attachments`);
+  useAutoPrint(!!(c && a));
+  if (!c || !a) return <div className="empty">Loading…</div>;
+  const sent = a.attachments.filter((x) => x.control_number);
+  return (
+    <div className="print-doc">
+      <div className="no-print" style={{ marginBottom: 12 }}><Link to={`/claims/${id}`}>← Back</Link> <button onClick={() => window.print()}>Print</button></div>
+      <header className="doc-head">
+        <div><h1>{practice?.name}</h1><div>{[practice?.address, practice?.city, practice?.state, practice?.zip].filter(Boolean).join(', ')}</div><div>{practice?.phone}</div></div>
+        <div style={{ textAlign: 'right' }}><h2>Claim attachments</h2><div>To: {c.carrier_name}{c.payer_id ? ` (payer ${c.payer_id})` : ''}</div></div>
+      </header>
+      <table>
+        <tbody>
+          <tr><th style={{ width: 200 }}>Patient</th><td>{c.first_name} {c.last_name}</td></tr>
+          <tr><th>Subscriber ID / group</th><td>{c.subscriber_id}{c.group_number ? ` / ${c.group_number}` : ''}</td></tr>
+          <tr><th>Claim</th><td>{c.control_number || `#${c.id}`}{c.submitted_at ? ` · sent ${fmtDate(c.submitted_at.slice(0, 10))}` : ''}</td></tr>
+          <tr><th>Billing NPI</th><td>{practice?.npi}</td></tr>
+        </tbody>
+      </table>
+      <h3>Enclosed</h3>
+      <table>
+        <thead><tr><th>Attachment control number</th><th>What</th><th>Pages / notes</th></tr></thead>
+        <tbody>
+          {sent.map((x) => (
+            <tr key={x.id}>
+              <td style={{ fontFamily: 'monospace', fontSize: 16 }}>{x.control_number}</td>
+              <td>{a.report_types[x.report_type]}</td>
+              <td style={{ whiteSpace: 'pre-wrap' }}>{x.filename || x.narrative}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p style={{ marginTop: 16 }}>The electronic claim references each attachment by its control number (PWK). Please file these with that claim.</p>
+    </div>
+  );
+}

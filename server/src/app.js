@@ -33,6 +33,8 @@ import backupRoutes from './routes/backup.js';
 import formRoutes from './routes/forms.js';
 import membershipRoutes from './routes/memberships.js';
 import campaignRoutes, { campaignPublicRoutes } from './routes/campaigns.js';
+import attachmentRoutes from './routes/attachments.js';
+import { createAttachmentSender, attachmentConfig } from './attachments.js';
 import { createMessenger } from './messaging.js';
 import { createStorage } from './storage.js';
 import { createClearinghouse, clearinghouseConfig } from './clearinghouse.js';
@@ -61,7 +63,7 @@ export function loadConfig(env = process.env) {
   };
 }
 
-export function createApp({ db, secret, config: overrides = {}, fetchImpl = globalThis.fetch, messenger, storage, clearinghouse, erx, payments, mailer }) {
+export function createApp({ db, secret, config: overrides = {}, fetchImpl = globalThis.fetch, messenger, storage, clearinghouse, erx, payments, mailer, attachmentSender }) {
   if (!secret) throw new Error('JWT secret is required');
   const config = { ...loadConfig(), ...overrides };
   messenger ??= createMessenger({ fetchImpl });
@@ -124,6 +126,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(formRoutes({ db, messenger, config }));
   api.use(membershipRoutes({ db, payments, messenger }));
   api.use(campaignRoutes({ db, messenger, config }));
+  api.use(attachmentRoutes({ db, storage, sender: attachmentSender ?? createAttachmentSender(attachmentConfig(process.env, config.ediMode), fetchImpl) }));
   api.use(billingRoutes({ db, payments }));
   api.use(insuranceRoutes({ db }));
   api.use(settingsRoutes({ db, secret, config }));

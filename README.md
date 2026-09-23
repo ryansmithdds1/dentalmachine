@@ -133,6 +133,7 @@ JWT_SECRET=... DOCUMENT_ENCRYPTION_KEY=... docker compose up --build --scale app
 | Mailed statements | `MAIL_DRIVER=lob` and `LOB_API_KEY` (`test_` keys never mail anything). `MAIL_DRIVER=log` records letters without sending them. |
 | Single sign-on | Set up per practice in **Settings → Practice**. Register `https://<your host>/api/auth/sso/callback` as the redirect URI with your identity provider. |
 | Imaging bridges | Set up per workstation in **Settings → Imaging bridges** (see below). |
+| Claim attachments | `ATTACHMENTS=http` with `ATTACHMENTS_URL` and `ATTACHMENTS_API_KEY` sends attachments to your attachment service (NEA/Vyne, DentalXChange, or a bridge to one), which returns the control number the claim references (PWK). `sandbox` simulates it (the default with `EDI_MODE=sandbox`); `manual` numbers them for a printed mail/fax cover sheet. |
 | Automatic backups | `BACKUP_DIR` (a mounted disk or synced folder) turns on nightly backups of every practice, kept `BACKUP_KEEP` days (default 14). SQLite installs also get a copy of the database file. Documents are included when they're stored on the server's disk; `BACKUP_DOCUMENTS=on` or `off` overrides that. |
 
 Without Twilio or SendGrid configured, messages are recorded in the log but not actually sent. **Settings → Integrations** shows which integrations are connected.
