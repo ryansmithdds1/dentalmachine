@@ -4,6 +4,7 @@ import { twilioSignature } from './sms.js';
 import { hashToken, insert, practiceNow } from '../util.js';
 import { patientLang } from '../templates.js';
 import { publish } from '../events.js';
+import { summarizeCall } from '../phones.js';
 
 // What an automated confirmation call says and does (Twilio asks these URLs as the call goes).
 const xml = (s) => String(s).replace(/[<>&'"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' })[c]);
@@ -114,6 +115,12 @@ export function voiceWebhooks({ db, config }) {
     if (sid) {
       await db.run("UPDATE calls SET status = ?, duration = COALESCE(?, duration), answered_by = COALESCE(answered_by, ?), ended_at = CASE WHEN ? IN ('completed','busy','failed','no-answer','canceled') THEN datetime('now') ELSE ended_at END WHERE provider_id = ?",
         String(req.body.CallStatus || 'unknown'), req.body.CallDuration ? Number(req.body.CallDuration) : null, req.body.AnsweredBy || null, String(req.body.CallStatus || ''), sid);
+      // An inbound call that ended: a missed one shows as missed, and an AI receptionist call the caller hung up on still gets its summary.
+      const call = await db.get("SELECT id, practice_id, purpose, outcome, summary, transcript FROM calls WHERE provider_id = ? AND direction = 'inbound'", sid);
+      if (call && req.body.CallStatus === 'completed') {
+        publish(call.practice_id, { type: 'call', event: 'ended', call_id: call.id });
+        if (call.purpose === 'receptionist' && call.transcript && !call.summary) setImmediate(() => summarizeCall(db, config, call.id).catch(() => {}));
+      }
     }
     res.status(204).end();
   });

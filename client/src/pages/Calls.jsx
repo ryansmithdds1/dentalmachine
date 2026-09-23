@@ -1,0 +1,110 @@
+import { useState } from 'react';
+import { Link } from 'react-router-dom';
+import { PhoneIncoming, PhoneOutgoing, Bot, Voicemail, MessageSquare } from 'lucide-react';
+import { api, getToken } from '../api.js';
+import { useApi } from '../hooks.js';
+import { useLiveEvents } from '../live.js';
+import { useAuth } from '../auth.jsx';
+import { fmtDateTime } from '../format.js';
+import { ErrorBox, Modal } from '../components/ui.jsx';
+
+// The office phone line: every call, who it was, what happened, and — for recorded calls, voicemails and
+// the AI receptionist — a transcript and a short summary.
+const OUTCOME = {
+  answered: ['ok', 'Answered'], missed: ['danger', 'Missed'], voicemail: ['warn', 'Voicemail'], after_hours: ['warn', 'After hours'], booked: ['ok', 'AI booked'],
+  requested: ['ok', 'AI took a booking request'], rescheduled: ['ok', 'AI rescheduled'], cancelled: ['warn', 'AI cancelled'], message: ['warn', 'AI took a message'],
+  handled: ['ok', 'AI answered'], hung_up: ['danger', 'Hung up'], confirmed: ['ok', 'Confirmed'], reschedule: ['warn', 'Wants a new time'], no_answer: ['', 'No answer'],
+};
+const dur = (s) => (s ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` : '—');
+
+export default function Calls() {
+  const { can } = useAuth();
+  const [filter, setFilter] = useState('');
+  const [days, setDays] = useState(30);
+  const { data, reload, error } = useApi(`/calls?days=${days}${filter ? `&filter=${filter}` : ''}`);
+  const [open, setOpen] = useState(null);
+  useLiveEvents((e) => e.type === 'call' && reload());
+  const s = data?.stats;
+  return (
+    <>
+      <div className="page-header">
+        <div>
+          <h1>Calls</h1>
+          <div className="muted">Every call on the office line. Missed callers get a text back; recorded calls, voicemails and the AI receptionist’s calls come with a transcript and summary.</div>
+        </div>
+      </div>
+      <ErrorBox error={error} />
+      {s && (
+        <div className="stat-strip">
+          <div><strong>{s.inbound || 0}</strong><span>calls in</span></div>
+          <div><strong>{s.missed || 0}</strong><span>missed or voicemail</span></div>
+          <div><strong>{s.texted_back || 0}</strong><span>texted back</span></div>
+          <div><strong>{s.ai_answered || 0}</strong><span>answered by the AI</span></div>
+          <div><strong>{s.ai_booked || 0}</strong><span>booked by the AI</span></div>
+        </div>
+      )}
+      <div className="inline" style={{ margin: '12px 0', gap: 8 }}>
+        <div className="tabs" style={{ margin: 0 }}>
+          {[['', 'All'], ['missed', 'Missed'], ['follow_up', 'Needs follow-up']].map(([k, l]) => <button key={k} className={filter === k ? 'active' : ''} onClick={() => setFilter(k)}>{l}</button>)}
+        </div>
+        <select value={days} onChange={(e) => setDays(Number(e.target.value))} aria-label="Period"><option value={7}>7 days</option><option value={30}>30 days</option><option value={90}>90 days</option></select>
+      </div>
+      <div className="card" style={{ padding: 0 }}>
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>When</th><th /><th>Who</th><th>What happened</th><th>Summary</th><th className="num">Length</th><th /></tr></thead>
+            <tbody>
+              {data?.calls.map((c) => (
+                <tr key={c.id} style={{ cursor: 'pointer' }} onClick={() => setOpen(c.id)}>
+                  <td style={{ whiteSpace: 'nowrap' }}>{fmtDateTime(c.created_at)}</td>
+                  <td title={c.purpose}>{c.purpose === 'receptionist' ? <Bot size={16} /> : c.outcome === 'voicemail' ? <Voicemail size={16} /> : c.direction === 'inbound' ? <PhoneIncoming size={16} /> : <PhoneOutgoing size={16} />}</td>
+                  <td>{c.patient_id ? <Link to={`/patients/${c.patient_id}`} onClick={(e) => e.stopPropagation()}>{c.first_name} {c.last_name}</Link> : (c.caller_name || c.from_number || c.to_number || '—')}</td>
+                  <td>
+                    {c.outcome && <span className={`badge ${OUTCOME[c.outcome]?.[0] || ''}`}>{OUTCOME[c.outcome]?.[1] || c.outcome}</span>}
+                    {c.texted_back_at && <span className="muted" style={{ fontSize: 11, marginLeft: 6 }}><MessageSquare size={11} /> texted back</span>}
+                  </td>
+                  <td style={{ fontSize: 13, maxWidth: 420 }}>{c.summary || <span className="muted">{c.has_transcript ? 'Transcript' : ''}</span>}{c.follow_up && !c.handled_at ? <span className="badge warn" style={{ marginLeft: 6 }}>follow up</span> : null}</td>
+                  <td className="num">{dur(c.duration)}</td>
+                  <td>{c.handled_at ? <span className="muted" style={{ fontSize: 12 }}>Done</span> : null}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {data?.calls.length === 0 && <div className="empty">No calls in this period. Connect the office line in Settings → Phone line.</div>}
+        </div>
+      </div>
+      {open && <CallDetail id={open} canWrite={can('patients:write')} onClose={() => { setOpen(null); reload(); }} />}
+    </>
+  );
+}
+
+function CallDetail({ id, canWrite, onClose }) {
+  const { data: c, reload } = useApi(`/calls/${id}`);
+  const [audio, setAudio] = useState(null);
+  const [err, setErr] = useState(null);
+  const play = async () => {
+    try {
+      const res = await fetch(`/api/calls/${id}/recording`, { headers: { Authorization: `Bearer ${getToken()}` } });
+      if (!res.ok) throw new Error('Couldn’t load the recording');
+      setAudio(URL.createObjectURL(await res.blob()));
+    } catch (e) { setErr(e); }
+  };
+  if (!c) return null;
+  return (
+    <Modal title={`Call · ${fmtDateTime(c.created_at)}`} wide onClose={onClose}>
+      <ErrorBox error={err} />
+      <div className="inline" style={{ justifyContent: 'space-between' }}>
+        <div>
+          <strong>{c.card ? `${c.card.first_name} ${c.card.last_name}` : c.from_number}</strong>
+          <div className="muted" style={{ fontSize: 12 }}>{c.from_number} · {c.direction} · {dur(c.duration)}{c.reason ? ` · ${c.reason.replace('_', ' ')}` : ''}</div>
+        </div>
+        {canWrite && <button className={c.handled_at ? '' : 'primary'} onClick={async () => { await api.patch(`/calls/${id}`, { handled: !c.handled_at }); reload(); }}>{c.handled_at ? 'Mark not done' : 'Mark done'}</button>}
+      </div>
+      {c.summary && <div className="public-notice" style={{ margin: '10px 0' }}>{c.summary}</div>}
+      {c.recording_key && (audio ? <audio controls autoPlay src={audio} style={{ width: '100%' }} /> : <button className="small" onClick={play}>Play recording</button>)}
+      {c.transcript && (
+        <div style={{ marginTop: 10, maxHeight: 360, overflow: 'auto', fontSize: 13, whiteSpace: 'pre-wrap', background: 'var(--surface-2, transparent)', padding: 10, borderRadius: 6 }}>{c.transcript}</div>
+      )}
+    </Modal>
+  );
+}

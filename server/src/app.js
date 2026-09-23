@@ -22,6 +22,8 @@ import familyRoutes from './routes/family.js';
 import conversationRoutes, { smsWebhook } from './routes/sms.js';
 import { deliveryWebhooks } from './routes/delivery.js';
 import { voiceWebhooks } from './routes/voice.js';
+import phoneRoutes, { phoneWebhooks } from './routes/phones.js';
+import { createTranscriber } from './phones.js';
 import financeRoutes, { financePublicRoutes } from './routes/finance.js';
 import scribeRoutes from './routes/scribe.js';
 import xrayAiRoutes from './routes/xrayai.js';
@@ -85,7 +87,9 @@ export function loadConfig(env = process.env) {
     stripeSecretKey: env.STRIPE_SECRET_KEY || null,
     stripeWebhookSecret: env.STRIPE_WEBHOOK_SECRET || null,
     payments: env.PAYMENTS || null,
-    twilioAuthToken: env.TWILIO_AUTH_TOKEN || null,
+    twilioAuthToken: env.TWILIO_AUTH_TOKEN || null, twilioAccountSid: env.TWILIO_ACCOUNT_SID || null,
+    // Call recordings to text: TRANSCRIBE=deepgram (with DEEPGRAM_API_KEY) or sandbox.
+    transcribe: env.TRANSCRIBE || null, deepgramKey: env.DEEPGRAM_API_KEY || null,
     sendgridWebhookKey: env.SENDGRID_WEBHOOK_KEY || null,
     // The business's bank (Plaid) and books (QuickBooks Online); PLAID=sandbox / QBO=sandbox simulate them.
     plaidClientId: env.PLAID_CLIENT_ID || null, plaidSecret: env.PLAID_SECRET || null, plaidEnv: env.PLAID_ENV || 'sandbox', plaid: env.PLAID || null,
@@ -115,7 +119,7 @@ export function loadConfig(env = process.env) {
 // Plaid Link (connecting the practice's bank) runs from Plaid's own script and frame.
 export const CSP = "default-src 'self'; script-src 'self' https://cdn.plaid.com/link/v2/stable/link-initialize.js; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://production.plaid.com https://sandbox.plaid.com; frame-src 'self' blob: https://cdn.plaid.com; media-src 'self' blob:; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'";
 
-export function createApp({ db, secret, config: overrides = {}, fetchImpl = globalThis.fetch, messenger, storage, clearinghouse, erx, payments, mailer, attachmentSender, plaid, qbo, xrayAi }) {
+export function createApp({ db, secret, config: overrides = {}, fetchImpl = globalThis.fetch, messenger, storage, clearinghouse, erx, payments, mailer, attachmentSender, plaid, qbo, xrayAi, transcriber }) {
   if (!secret) throw new Error('JWT secret is required');
   const config = { ...loadConfig(), ...overrides };
   messenger ??= createMessenger({ fetchImpl });
@@ -127,6 +131,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   xrayAi ??= createXrayAi({ config, fetchImpl });
   registerXrayAi(db, { storage, xrayAi });
   registerFill(db, messenger);
+  transcriber ??= createTranscriber({ config, fetchImpl });
   mailer ??= overrides.mailer || createMailer({ fetchImpl });
   clearinghouse ??= createClearinghouse({ db, fetchImpl, config: { ...clearinghouseConfig(), ...(config.ediMode === 'sandbox' && !process.env.CLEARINGHOUSE ? { mode: 'sandbox' } : {}) } });
   startWebhooks(db, fetchImpl);
@@ -150,6 +155,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   app.use(smsWebhook({ db, config }));
   app.use(deliveryWebhooks({ db, config }));
   app.use(voiceWebhooks({ db, config }));
+  app.use(phoneWebhooks({ db, config, messenger, storage, transcriber, fetchImpl }));
   app.use(financePublicRoutes({ db, config, secret, plaid, qbo }));
   // Signed forms can carry photos (insurance cards, ID), and documents sent to be read (benefit summaries, EOBs), so those routes take larger bodies.
   const jsonBody = express.json({ limit: '1mb' });
@@ -224,6 +230,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(xrayAiRoutes({ db, xrayAi }));
   api.use(insuranceAiRoutes({ db, config }));
   api.use(askRoutes({ db, config }));
+  api.use(phoneRoutes({ db, storage }));
   api.use(attachmentRoutes({ db, storage, sender: attachmentSender ?? createAttachmentSender(attachmentConfig(process.env, config.ediMode), fetchImpl) }));
   api.use(billingRoutes({ db, payments, config, messenger }));
   api.use(insuranceRoutes({ db }));

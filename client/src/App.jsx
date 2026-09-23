@@ -6,6 +6,7 @@ import Login from './pages/Login.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 import CommandPalette from './components/CommandPalette.jsx';
 import Assistant from './components/assistant/Assistant.jsx';
+import CallPop from './components/CallPop.jsx';
 import KeyboardHelp from './components/KeyboardHelp.jsx';
 import IdleLogout from './components/IdleLogout.jsx';
 import { Suspense, lazy, useEffect, useState } from 'react';
@@ -14,7 +15,7 @@ import { readOfflineDay } from './offline.js';
 import { ClockButton } from './components/TimeClock.jsx';
 import { useLiveEvents } from './live.js';
 import MfaSetup from './components/MfaSetup.jsx';
-import { Sun, CalendarDays, Users, MessageSquare, Inbox as InboxIcon, PhoneCall, Megaphone, Receipt, ListChecks, ChartColumn, Landmark, Settings as SettingsIcon, Search, PanelLeftClose, PanelLeftOpen, LogOut, Keyboard, Monitor, Moon, Sparkles } from 'lucide-react';
+import { Sun, CalendarDays, Users, MessageSquare, Inbox as InboxIcon, PhoneCall, Megaphone, Receipt, ListChecks, ChartColumn, Landmark, Settings as SettingsIcon, Search, PanelLeftClose, PanelLeftOpen, LogOut, Keyboard, Monitor, Moon, Sparkles, Phone } from 'lucide-react';
 import { getThemePref, setThemePref, watchTheme } from './theme.js';
 
 // Pages load on demand so the first screen appears quickly.
@@ -26,6 +27,7 @@ const ClaimDetail = lazy(() => import('./pages/ClaimDetail.jsx'));
 const Followups = lazy(() => import('./pages/Followups.jsx'));
 const Finance = lazy(() => import('./pages/Finance.jsx'));
 const Ask = lazy(() => import('./pages/Ask.jsx'));
+const Calls = lazy(() => import('./pages/Calls.jsx'));
 const Campaigns = lazy(() => import('./pages/Campaigns.jsx'));
 const UnsubscribePage = lazy(() => import('./pages/public/UnsubscribePage.jsx'));
 const RouteSlip = lazy(() => import('./pages/RouteSlip.jsx'));
@@ -150,6 +152,7 @@ function StaffApp() {
     ['/patients', Users, 'Patients', can('patients:read')],
     ['/messages', MessageSquare, 'Messages', can('patients:read')],
     ['/requests', InboxIcon, 'Online requests', can('schedule:read')],
+    ['/calls', Phone, 'Calls', can('patients:read')],
     ['/followups', PhoneCall, 'Follow-up lists', can('schedule:read')],
     ['/campaigns', Megaphone, 'Campaigns', can('patients:write')],
     ['/claims', Receipt, 'Billing', can('billing:read')],
@@ -271,6 +274,7 @@ function Shell({ nav }) {
       <CommandPalette />
       <KeyboardHelp />
       <Assistant />
+      <CallPop />
       <IdleLogout />
       <aside className="sidebar rail">
         <div className="rail-brand" title={practice?.name}>
@@ -325,6 +329,7 @@ function Shell({ nav }) {
             <Route path="/reports" element={<Reports />} />
             <Route path="/finance" element={<Finance />} />
             <Route path="/ask" element={<Ask />} />
+            <Route path="/calls" element={<Calls />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
