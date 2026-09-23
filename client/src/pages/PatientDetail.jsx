@@ -100,7 +100,7 @@ export default function PatientDetail() {
       {tab === 'treatment' && <TreatmentTab patient={p} onChange={reload} />}
       {tab === 'perio' && <PerioTab patient={p} />}
       {tab === 'notes' && <NotesTab patient={p} />}
-      {tab === 'rx' && <RxTab patient={p} />}
+      {tab === 'rx' && <RxTab patient={p} onChange={reload} />}
       {tab === 'ledger' && <LedgerTab patient={p} onChange={reload} />}
       {tab === 'insurance' && <InsuranceTab patient={p} onChange={reload} />}
       {tab === 'documents' && <DocumentsTab patient={p} />}

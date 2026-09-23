@@ -1,4 +1,5 @@
 // Loads a demo practice with realistic sample data. Usage: npm run seed
+import { SANDBOX_PHARMACIES } from './erx.js';
 import { openDb } from './db.js';
 import { hashPassword } from './auth.js';
 import { insert, localNow, addMonths, mapSeq } from './util.js';
@@ -90,6 +91,7 @@ await db.tx(async () => {
       email: `${first}.${last}${i}@example.com`.toLowerCase(), address: `${100 + i * 13} Oak Ave`, city: 'Austin', state: 'TX', zip: '78704',
       medical_alerts: pickOne(ALERTS), allergies: pickOne(ALLERGIES), primary_provider_id: rand() > 0.5 ? drChen : drRivera,
       referral_source: pickOne(REFERRALS), office_alert: pickOne(OFFICE_ALERTS),
+      preferred_pharmacy: rand() < 0.6 ? JSON.stringify(pickOne(SANDBOX_PHARMACIES.slice(0, 4))) : null,
       medical_reviewed_at: rand() > 0.35 ? `${dayOffset(-Math.floor(rand() * 500))} 09:00:00` : null,
       created_at: `${dayOffset(-Math.floor(rand() * 400))} 10:00:00`,
     });

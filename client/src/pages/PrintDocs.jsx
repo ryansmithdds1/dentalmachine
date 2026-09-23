@@ -77,6 +77,7 @@ export function PrescriptionPrint() {
         <div className="rx-symbol">℞</div>
         <div>
           <div style={{ fontSize: 18 }}><strong>{rx.drug}</strong> {rx.strength}</div>
+          {rx.schedule && <div><strong>Schedule {rx.schedule} controlled substance</strong></div>}
           <div><strong>Sig:</strong> {rx.sig}</div>
           <div><strong>Disp:</strong> {rx.quantity}</div>
           <div><strong>Refills:</strong> {rx.refills || 'None'}</div>
@@ -84,7 +85,10 @@ export function PrescriptionPrint() {
           {rx.notes && <div style={{ marginTop: 6 }}>{rx.notes}</div>}
         </div>
       </div>
-      <div className="doc-sign"><div>______________________________</div><div>{rx.provider_name}</div></div>
+      {rx.pharmacy && <div className="muted" style={{ fontSize: 13 }}>Pharmacy: {rx.pharmacy.name}{rx.pharmacy.phone ? ` · ${rx.pharmacy.phone}` : ''}</div>}
+      {rx.status === 'transmitted'
+        ? <div className="doc-sign"><div><strong>COPY — sent electronically to the pharmacy</strong>{rx.erx_reference ? ` (ref ${rx.erx_reference})` : ''}. Not valid for dispensing.</div><div>{rx.provider_name}</div></div>
+        : <div className="doc-sign"><div>______________________________</div><div>{rx.provider_name}</div></div>}
     </div>
   );
 }

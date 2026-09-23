@@ -3,6 +3,8 @@ import { requirePermission, HttpError, rateLimit } from '../auth.js';
 import { pick, requireFields, insert, findOr404, audit, newToken, hashToken } from '../util.js';
 import { estimateCoverage, primaryPolicy } from '../services.js';
 import { sendMessage, preferredChannel } from '../messaging.js';
+import { checkEpcs } from '../erx.js';
+import { allergyWarning } from '../drugs.js';
 
 // Common dental prescriptions for one-click entry.
 export const RX_FAVORITES = [
@@ -12,6 +14,8 @@ export const RX_FAVORITES = [
   { drug: 'Ibuprofen', strength: '600 mg tablet', sig: 'Take 1 tablet by mouth every 6 hours as needed for pain, with food', quantity: '20 (twenty)' },
   { drug: 'Acetaminophen', strength: '500 mg tablet', sig: 'Take 1-2 tablets by mouth every 6 hours as needed for pain (max 3,000 mg/day)', quantity: '20 (twenty)' },
   { drug: 'Chlorhexidine gluconate 0.12% oral rinse', strength: '473 mL', sig: 'Rinse with 15 mL for 30 seconds twice daily after brushing; do not swallow', quantity: '1 bottle' },
+  { drug: 'Hydrocodone/acetaminophen', strength: '5 mg/325 mg tablet', sig: 'Take 1 tablet by mouth every 6 hours as needed for severe pain', quantity: '12 (twelve)', refills: 0, schedule: 'II' },
+  { drug: 'Tramadol', strength: '50 mg tablet', sig: 'Take 1 tablet by mouth every 6 hours as needed for pain', quantity: '12 (twelve)', refills: 0, schedule: 'IV' },
   { drug: 'Sodium fluoride 1.1% (PreviDent 5000)', strength: '1.1% paste', sig: 'Brush with a thin ribbon once daily at bedtime; spit, do not rinse', quantity: '1 tube' },
 ];
 
@@ -23,7 +27,7 @@ const planView = async (db, plan) => {
   };
 };
 
-export default function casePresentationRoutes({ db, messenger, config }) {
+export default function casePresentationRoutes({ db, messenger, config, erx }) {
   const r = Router();
 
   // Staff: send the plan to the patient to review and sign remotely, or get a link for a chairside tablet.
@@ -63,35 +67,84 @@ export default function casePresentationRoutes({ db, messenger, config }) {
 
   r.get('/patients/:id/prescriptions', requirePermission('clinical:read'), async (req, res) => {
     const patient = await findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient');
-    res.json(await db.all(
-      `SELECT rx.*, pv.name AS provider_name FROM prescriptions rx JOIN providers pv ON pv.id = rx.provider_id
-       WHERE rx.practice_id = ? AND rx.patient_id = ? ORDER BY rx.id DESC`, req.user.practice_id, patient.id,
-    ));
+    res.json((await db.all(
+      `${RX_SELECT} WHERE rx.practice_id = ? AND rx.patient_id = ? ORDER BY rx.id DESC`, req.user.practice_id, patient.id,
+    )).map(rxView));
+  });
+
+  // ---- E-prescribing ----
+  const RX_SELECT = 'SELECT rx.*, pv.name AS provider_name, pv.npi AS provider_npi, pv.license_number, pv.dea_number FROM prescriptions rx JOIN providers pv ON pv.id = rx.provider_id';
+  const rxView = (rx) => rx && { ...rx, pharmacy: rx.pharmacy ? JSON.parse(rx.pharmacy) : null };
+  r.get('/erx', (_req, res) => res.json({ mode: erx.mode, name: erx.name, electronic: erx.electronic, in_app: erx.inApp, epcs: erx.epcs, pharmacy_search: !!erx.searchPharmacies }));
+  r.get('/pharmacies', requirePermission('clinical:read'), (req, res) => {
+    if (!erx.searchPharmacies) throw new HttpError(409, `Pharmacy search happens in ${erx.name}`);
+    res.json(erx.searchPharmacies(String(req.query.q || '')));
+  });
+  r.put('/patients/:id/pharmacy', requirePermission('patients:write'), async (req, res) => {
+    const patient = await findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient');
+    const p = req.body?.pharmacy ? pick(req.body.pharmacy, ['ncpdp', 'name', 'address', 'city', 'state', 'zip', 'phone', 'fax']) : null;
+    if (p) requireFields(p, ['name']);
+    await db.run('UPDATE patients SET preferred_pharmacy = ? WHERE id = ?', p ? JSON.stringify(p) : null, patient.id);
+    await audit(db, req, 'patient.pharmacy', 'patients', patient.id);
+    res.json({ preferred_pharmacy: p });
+  });
+  // DoseSpot: open the patient's chart in the certified e-prescribing screens (single sign-on).
+  r.get('/erx/launch', requirePermission('clinical:sign'), async (req, res) => {
+    if (!erx.ssoUrl) throw new HttpError(409, 'Single sign-on e-prescribing is not configured');
+    const patient = await findOr404(db, 'patients', req.query.patient_id, req.user.practice_id, 'Patient');
+    const provider = await db.get('SELECT * FROM providers WHERE practice_id = ? AND user_id = ? AND erx_user_id IS NOT NULL', req.user.practice_id, req.user.id);
+    if (!provider) throw new HttpError(403, `Your login isn't linked to a ${erx.name} prescriber (Settings → Providers → e-Rx user ID)`);
+    await audit(db, req, 'erx.launch', 'patients', patient.id);
+    res.json({ url: erx.ssoUrl({ userId: provider.erx_user_id, patient }) });
   });
 
   r.post('/patients/:id/prescriptions', requirePermission('clinical:sign'), async (req, res) => {
     const patient = await findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient');
-    const row = pick(req.body, ['provider_id', 'drug', 'strength', 'sig', 'quantity', 'refills', 'dispense_as_written', 'notes']);
+    const row = pick(req.body, ['provider_id', 'drug', 'strength', 'sig', 'quantity', 'refills', 'dispense_as_written', 'notes', 'schedule']);
     requireFields(row, ['provider_id', 'drug', 'sig', 'quantity']);
     const provider = await findOr404(db, 'providers', row.provider_id, req.user.practice_id, 'Provider');
     if (provider.type === 'hygienist') throw new HttpError(400, 'Prescriptions must be written by a dentist or specialist');
     row.refills = Math.max(0, Math.min(11, Number(row.refills) || 0));
     // Surface allergies at the moment of prescribing.
-    const allergy = patient.allergies && row.drug && patient.allergies.toLowerCase().split(/[,;/\s]+/).find((a) => a.length > 3 && row.drug.toLowerCase().includes(a));
-    if (allergy && !req.body.override_allergy) throw new HttpError(409, `Allergy warning: patient is allergic to ${allergy}`, { allergy_warning: true });
-    if (/amoxicillin|penicillin|ampicillin/i.test(row.drug) && /penicillin|amoxicillin/i.test(patient.allergies || '') && !req.body.override_allergy) {
-      throw new HttpError(409, 'Allergy warning: patient has a penicillin allergy', { allergy_warning: true });
+    const allergy = allergyWarning(patient.allergies, `${row.drug} ${row.strength || ''}`);
+    if (allergy && !req.body.override_allergy) throw new HttpError(409, allergy, { allergy_warning: true });
+    if (row.schedule) {
+      if (!['II', 'III', 'IV', 'V'].includes(row.schedule)) throw new HttpError(400, 'schedule must be II, III, IV or V');
+      if (!provider.dea_number) throw new HttpError(400, `${provider.name} needs a DEA number (Settings → Providers) to prescribe controlled substances`);
+      if (row.schedule === 'II' && row.refills > 0) throw new HttpError(400, 'Schedule II prescriptions cannot have refills');
     }
-    const id = await insert(db, 'prescriptions', { ...row, practice_id: req.user.practice_id, patient_id: patient.id, created_by: req.user.id });
-    await audit(db, req, 'prescription.create', 'prescriptions', id, { drug: row.drug });
-    res.status(201).json(await db.get('SELECT rx.*, pv.name AS provider_name, pv.npi AS provider_npi, pv.license_number, pv.dea_number FROM prescriptions rx JOIN providers pv ON pv.id = rx.provider_id WHERE rx.id = ?', id));
+    const send = !!req.body.send;
+    let signature = null;
+    let pharmacy = null;
+    if (send) {
+      if (!erx.inApp) throw new HttpError(409, erx.ssoUrl ? `Write electronic prescriptions in ${erx.name}` : 'Electronic prescribing is not set up — print instead');
+      pharmacy = patient.preferred_pharmacy ? JSON.parse(patient.preferred_pharmacy) : null;
+      if (!pharmacy?.ncpdp) throw new HttpError(400, "Choose the patient's pharmacy first");
+      signature = await checkEpcs(db, { user: req.user, provider, schedule: row.schedule, refills: row.refills, otp: req.body.otp });
+    }
+    const id = await insert(db, 'prescriptions', {
+      ...row, practice_id: req.user.practice_id, patient_id: patient.id, created_by: req.user.id,
+      status: send ? 'signed' : 'printed', pharmacy: pharmacy ? JSON.stringify(pharmacy) : null,
+      signed_by: signature?.signed_by ?? (send ? req.user.id : null), signed_two_factor: signature?.two_factor ? 1 : 0,
+    });
+    await audit(db, req, send ? 'prescription.sign' : 'prescription.create', 'prescriptions', id, { drug: row.drug, schedule: row.schedule || null, electronic: send, two_factor: !!signature, ...(allergy ? { allergy_override: allergy } : {}) });
+    if (send) {
+      try {
+        const out = await erx.transmit({ ...row, id, pharmacy_ncpdp: pharmacy.ncpdp, patient, provider });
+        await db.run("UPDATE prescriptions SET status = ?, erx_reference = ?, transmitted_at = datetime('now') WHERE id = ?", out.status, out.reference, id);
+        await audit(db, req, 'prescription.transmit', 'prescriptions', id, { reference: out.reference, pharmacy: pharmacy.ncpdp });
+      } catch (err) {
+        await db.run("UPDATE prescriptions SET status = 'error', erx_error = ? WHERE id = ?", String(err.message).slice(0, 300), id);
+      }
+    }
+    res.status(201).json(rxView(await db.get(`${RX_SELECT} WHERE rx.id = ?`, id)));
   });
 
   r.get('/prescriptions/:rid', requirePermission('clinical:read'), async (req, res) => {
     const rx = await findOr404(db, 'prescriptions', req.params.rid, req.user.practice_id, 'Prescription');
     await audit(db, req, 'prescription.print', 'prescriptions', rx.id);
     res.json({
-      ...(await db.get('SELECT rx.*, pv.name AS provider_name, pv.npi AS provider_npi, pv.license_number, pv.dea_number FROM prescriptions rx JOIN providers pv ON pv.id = rx.provider_id WHERE rx.id = ?', rx.id)),
+      ...rxView(await db.get(`${RX_SELECT} WHERE rx.id = ?`, rx.id)),
       patient: await db.get('SELECT first_name, last_name, dob, address, city, state, zip, allergies FROM patients WHERE id = ?', rx.patient_id),
       practice: await db.get('SELECT name, address, city, state, zip, phone FROM practices WHERE id = ?', req.user.practice_id),
     });

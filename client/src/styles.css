@@ -467,3 +467,14 @@ button.active, .seg button.active { background: var(--primary-soft); color: var(
 .timeline li.tl-danger::before { background: var(--danger); }
 .timeline li.tl-warn::before { background: var(--warn); }
 .badge.nocap { text-transform: none; }
+
+/* Prescriptions */
+.pharmacy-card { margin-top: 10px; display: flex; flex-direction: column; gap: 2px; }
+.pharmacy-results { max-height: 260px; overflow-y: auto; margin-top: 8px; }
+.erx-launch { margin-top: 10px; padding: 12px; background: var(--primary-soft); border-radius: 10px; display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.csched { margin-left: 6px; font-size: 10px; font-weight: 800; color: #9a3412; background: #ffedd5; border-radius: 4px; padding: 1px 5px; vertical-align: 1px; }
+.chip.active .csched { background: rgba(255, 255, 255, 0.25); color: #fff; }
+.epcs-sign { display: flex; flex-direction: column; gap: 6px; padding: 12px; border: 1px solid #fde68a; background: #fffbeb; border-radius: 10px; }
+.epcs-sign input { max-width: 180px; font-size: 18px; letter-spacing: 0.2em; text-align: center; }
+.rx-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+.rx-actions .badge { white-space: nowrap; }

@@ -26,6 +26,7 @@ import growthRoutes from './routes/growth.js';
 import { createMessenger } from './messaging.js';
 import { createStorage } from './storage.js';
 import { createClearinghouse, clearinghouseConfig } from './clearinghouse.js';
+import { createErx, erxConfig } from './erx.js';
 
 // Runtime configuration, from the environment unless overridden (tests pass their own).
 export function loadConfig(env = process.env) {
@@ -42,11 +43,12 @@ export function loadConfig(env = process.env) {
   };
 }
 
-export function createApp({ db, secret, config: overrides = {}, fetchImpl = globalThis.fetch, messenger, storage, clearinghouse }) {
+export function createApp({ db, secret, config: overrides = {}, fetchImpl = globalThis.fetch, messenger, storage, clearinghouse, erx }) {
   if (!secret) throw new Error('JWT secret is required');
   const config = { ...loadConfig(), ...overrides };
   messenger ??= createMessenger({ fetchImpl });
   storage ??= createStorage({ dir: config.uploadDir, key: config.documentKey });
+  erx ??= createErx(overrides.erx || erxConfig());
   clearinghouse ??= createClearinghouse({ db, fetchImpl, config: { ...clearinghouseConfig(), ...(config.ediMode === 'sandbox' && !process.env.CLEARINGHOUSE ? { mode: 'sandbox' } : {}) } });
   const app = express();
   app.locals.clearinghouse = clearinghouse;
@@ -94,7 +96,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(officeRoutes({ db }));
   api.use(ppoRoutes({ db, config }));
   api.use(frontDeskRoutes({ db }));
-  api.use(casePresentationRoutes({ db, messenger, config }));
+  api.use(casePresentationRoutes({ db, messenger, config, erx }));
   api.use(growthRoutes({ db, messenger, config }));
   app.use('/api', api);
   app.use('/api', (_req, _res, next) => next(new HttpError(404, 'Not found')));

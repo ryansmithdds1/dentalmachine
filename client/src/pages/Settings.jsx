@@ -13,7 +13,7 @@ const CATEGORIES = ['diagnostic', 'preventive', 'restorative', 'endodontics', 'p
 const RESOURCES = {
   providers: {
     title: 'Providers', singular: 'provider', path: '/providers', columns: ['name', 'type', 'npi', 'color', 'working_hours'],
-    fields: [['name', 'Name', 'text'], ['type', 'Type', 'select', ['dentist', 'hygienist', 'specialist']], ['npi', 'NPI (10 digits)', 'text'], ['license_number', 'License #', 'text'], ['dea_number', 'DEA # (for printed Rx)', 'text'], ['color', 'Schedule color', 'color'], ['active', 'Active', 'checkbox'], ['working_hours', 'Working hours', 'hours']],
+    fields: [['name', 'Name', 'text'], ['type', 'Type', 'select', ['dentist', 'hygienist', 'specialist']], ['npi', 'NPI (10 digits)', 'text'], ['license_number', 'License #', 'text'], ['dea_number', 'DEA # (controlled substances)', 'text'], ['erx_user_id', 'e-Rx user ID (DoseSpot)', 'text'], ['color', 'Schedule color', 'color'], ['active', 'Active', 'checkbox'], ['working_hours', 'Working hours', 'hours']],
   },
   operatories: { title: 'Operatories', singular: 'operatory', path: '/operatories', columns: ['name'], fields: [['name', 'Name', 'text'], ['active', 'Active', 'checkbox']] },
   codes: {

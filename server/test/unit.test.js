@@ -37,3 +37,15 @@ test('SQLite SQL is translated for Postgres', () => {
   assert.match(toPostgres("UPDATE t SET x = datetime('now')"), /to_char\(timezone\('UTC', now\(\)\)/);
   assert.equal(toPostgres("GROUP_CONCAT(code, ', ')"), "string_agg(code, ', ')");
 });
+
+test('allergy screening catches drug classes, not just exact names', async () => {
+  const { allergyWarning } = await import('../src/drugs.js');
+  assert.match(allergyWarning('Codeine', 'Hydrocodone/acetaminophen 5/325'), /opioid/);
+  assert.match(allergyWarning('Penicillin', 'Amoxicillin 500 mg'), /penicillin/);
+  assert.match(allergyWarning('penicillin (hives)', 'Cephalexin 500 mg'), /cross-react/);
+  assert.match(allergyWarning('Aspirin', 'Ibuprofen 600 mg'), /NSAID/);
+  assert.match(allergyWarning('Latex, Clindamycin', 'Clindamycin 300 mg'), /allergic to clindamycin/);
+  assert.equal(allergyWarning('Sulfa', 'Ibuprofen 600 mg'), null);
+  assert.equal(allergyWarning('NKDA', 'Amoxicillin'), null);
+  assert.equal(allergyWarning(null, 'Amoxicillin'), null);
+});

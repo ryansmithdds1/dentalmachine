@@ -654,6 +654,16 @@ const COLUMNS = [
   ['claims', 'ch_message', 'TEXT'],
   ['claims', 'ch_updated_at', 'TEXT'],
   ['claims', 'batch_id', 'INTEGER'],
+  ['patients', 'preferred_pharmacy', 'TEXT'],
+  ['providers', 'erx_user_id', 'TEXT'],
+  ['prescriptions', 'schedule', 'TEXT'],
+  ['prescriptions', 'status', "TEXT NOT NULL DEFAULT 'printed'"],
+  ['prescriptions', 'pharmacy', 'TEXT'],
+  ['prescriptions', 'erx_reference', 'TEXT'],
+  ['prescriptions', 'erx_error', 'TEXT'],
+  ['prescriptions', 'signed_by', 'INTEGER'],
+  ['prescriptions', 'signed_two_factor', 'INTEGER NOT NULL DEFAULT 0'],
+  ['prescriptions', 'transmitted_at', 'TEXT'],
   ['appointments', 'series_id', 'INTEGER REFERENCES appointment_series(id)'],
 ];
 
