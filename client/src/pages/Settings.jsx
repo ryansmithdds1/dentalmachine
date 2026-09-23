@@ -26,6 +26,10 @@ const RESOURCES = {
     fields: [['name', 'Name', 'text'], ['duration', 'Length (minutes)', 'number'], ['color', 'Calendar color', 'color'], ['procedure_codes', 'Procedures added when booked (e.g. D0120, D1110)', 'codes'],
       ['provider_type', 'Usually booked with', 'select', ['dentist', 'hygienist', 'specialist']], ['online_bookable', 'Patients can book online', 'checkbox'], ['sort', 'Sort order', 'number'], ['active', 'Active', 'checkbox']],
   },
+  referrals: {
+    title: 'Referral contacts', singular: 'referral contact', path: '/referral-contacts', columns: ['name', 'practice_name', 'specialty', 'phone', 'referred_in', 'referred_out'], writePerm: 'patients:write',
+    fields: [['name', 'Name', 'text'], ['practice_name', 'Practice', 'text'], ['specialty', 'Specialty', 'text'], ['phone', 'Phone', 'text'], ['fax', 'Fax', 'text'], ['email', 'Email', 'email'], ['address', 'Address', 'text'], ['npi', 'NPI', 'text'], ['notes', 'Notes', 'text'], ['active', 'Active', 'checkbox']],
+  },
   carriers: {
     title: 'Insurance carriers', singular: 'insurance carrier', path: '/carriers', columns: ['name', 'payer_id', 'phone'], writePerm: 'billing:write',
     fields: [['name', 'Name', 'text'], ['payer_id', 'Payer ID', 'text'], ['phone', 'Phone', 'text'], ['address', 'Claims address', 'text'], ['active', 'Active', 'checkbox']],
@@ -38,7 +42,7 @@ export default function Settings() {
   const groups = [
     ['You', [['account', 'My account', true]]],
     ['Practice', [['practice', 'Practice & security', admin], ['users', 'Users & roles', admin], ['providers', 'Providers', true], ['operatories', 'Operatories', true], ['types', 'Appointment types', true]]],
-    ['Clinical', [['templates', 'Note templates', can('clinical:write')], ['labs', 'Labs', can('clinical:read')]]],
+    ['Clinical', [['templates', 'Note templates', can('clinical:write')], ['labs', 'Labs', can('clinical:read')], ['referrals', 'Referral contacts', can('patients:read')]]],
     ['Billing', [['codes', 'Fee schedule', true], ['ppo', 'PPO fee schedules', can('billing:read')], ['carriers', 'Insurance carriers', can('billing:read')]]],
     ['Patients', [['messaging', 'Messages & reviews', admin]]],
     ['Connections', [['integrations', 'Integrations', admin], ['imaging', 'Imaging bridges', admin]]],

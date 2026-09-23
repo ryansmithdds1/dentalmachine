@@ -7,6 +7,7 @@ const FIELDS = [
   'first_name', 'last_name', 'preferred_name', 'dob', 'gender', 'email', 'phone', 'address', 'city', 'state', 'zip',
   'emergency_contact', 'medical_alerts', 'allergies', 'medications', 'notes', 'primary_provider_id', 'status', 'sms_opt_in', 'email_opt_in', 'guarantor_id', 'referral_source', 'office_alert',
   'asa_class', 'premed_required', 'medical_conditions',
+  'phone_home', 'phone_work', 'preferred_contact', 'language', 'primary_hygienist_id', 'photo',
 ];
 
 export const MEDICAL_CONDITIONS = [
@@ -20,6 +21,14 @@ function validate(row) {
   if (row.dob && !/^\d{4}-\d{2}-\d{2}$/.test(row.dob)) throw new HttpError(400, 'dob must be YYYY-MM-DD');
   if (row.email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(row.email)) throw new HttpError(400, 'Invalid email');
   requireOneOf(row.asa_class || undefined, ['I', 'II', 'III', 'IV', 'V', 'VI'], 'asa_class');
+  requireOneOf(row.preferred_contact || undefined, ['text', 'call', 'email'], 'preferred_contact');
+  if (row.preferred_contact === '') row.preferred_contact = null;
+  if (row.language != null) row.language = String(row.language).trim().slice(0, 40) || null;
+  // A small profile photo, as a data URL (resized in the browser).
+  if (row.photo) {
+    if (!/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(row.photo)) throw new HttpError(400, 'photo must be a JPEG, PNG or WebP image');
+    if (row.photo.length > 400_000) throw new HttpError(400, 'That photo is too large');
+  } else if ('photo' in row) row.photo = null;
   if (row.asa_class === '') row.asa_class = null;
   if (row.premed_required != null) row.premed_required = row.premed_required ? 1 : 0;
   if (row.medical_conditions != null) {
@@ -68,6 +77,8 @@ export default function patientRoutes({ db }) {
     requireFields(row, ['first_name', 'last_name']);
     validate(row);
     if (row.primary_provider_id) await findOr404(db, 'providers', row.primary_provider_id, req.user.practice_id, 'Provider');
+    if (row.primary_hygienist_id) await findOr404(db, 'providers', row.primary_hygienist_id, req.user.practice_id, 'Hygienist');
+    else if ('primary_hygienist_id' in row) row.primary_hygienist_id = null;
     if (row.guarantor_id && (await findOr404(db, 'patients', row.guarantor_id, req.user.practice_id, 'Guarantor')).guarantor_id) throw new HttpError(400, 'Choose the head of household as guarantor');
     const id = await insert(db, 'patients', { ...row, practice_id: req.user.practice_id });
     await audit(db, req, 'patient.create', 'patients', id);
@@ -110,6 +121,8 @@ export default function patientRoutes({ db }) {
     validate(row);
     if (row.first_name === null || row.last_name === null) throw new HttpError(400, 'Name cannot be blank');
     if (row.primary_provider_id) await findOr404(db, 'providers', row.primary_provider_id, req.user.practice_id, 'Provider');
+    if (row.primary_hygienist_id) await findOr404(db, 'providers', row.primary_hygienist_id, req.user.practice_id, 'Hygienist');
+    else if ('primary_hygienist_id' in row) row.primary_hygienist_id = null;
     if (row.guarantor_id) {
       const g = await findOr404(db, 'patients', row.guarantor_id, req.user.practice_id, 'Guarantor');
       if (g.id === existing.id) row.guarantor_id = null;

@@ -6,13 +6,14 @@ import { ErrorBox, useSubmit } from './ui.jsx';
 const EMPTY = {
   first_name: '', last_name: '', preferred_name: '', dob: '', gender: '', phone: '', email: '', address: '', city: '', state: '', zip: '',
   emergency_contact: '', referral_source: '', office_alert: '', medical_alerts: '', allergies: '', medications: '', notes: '', primary_provider_id: '', status: 'active',
+  phone_home: '', phone_work: '', preferred_contact: '', language: '', primary_hygienist_id: '',
 };
 
 export default function PatientForm({ patient, onSaved, onCancel }) {
   const [form, setForm] = useState(() => ({ ...EMPTY, ...Object.fromEntries(Object.entries(patient || {}).filter(([k]) => k in EMPTY).map(([k, v]) => [k, v ?? ''])) }));
   const providers = useLookup('/providers?active=true');
   const { submit, busy, error } = useSubmit(async () => {
-    const body = { ...form, primary_provider_id: form.primary_provider_id ? Number(form.primary_provider_id) : null };
+    const body = { ...form, primary_provider_id: form.primary_provider_id ? Number(form.primary_provider_id) : null, primary_hygienist_id: form.primary_hygienist_id ? Number(form.primary_hygienist_id) : null };
     const saved = patient ? await api.put(`/patients/${patient.id}`, body) : await api.post('/patients', body);
     onSaved(saved);
   });
@@ -43,8 +44,21 @@ export default function PatientForm({ patient, onSaved, onCancel }) {
             <option value="">—</option><option value="female">Female</option><option value="male">Male</option><option value="other">Other</option>
           </select>
         </label>
-        {field('phone', 'Phone', { type: 'tel' })}
+        {field('phone', 'Mobile phone (texts go here)', { type: 'tel' })}
         {field('email', 'Email', { type: 'email' })}
+        {field('phone_home', 'Home phone', { type: 'tel' })}
+        {field('phone_work', 'Work phone', { type: 'tel' })}
+        <label>
+          Prefers
+          <select value={form.preferred_contact} onChange={(e) => setForm({ ...form, preferred_contact: e.target.value })}>
+            <option value="">No preference</option><option value="text">Text</option><option value="call">Phone call</option><option value="email">Email</option>
+          </select>
+        </label>
+        <label>
+          Language
+          <input list="languages" value={form.language} onChange={(e) => setForm({ ...form, language: e.target.value })} placeholder="English" />
+          <datalist id="languages">{['English', 'Spanish', 'Vietnamese', 'Chinese', 'Tagalog', 'Arabic', 'Korean', 'Russian', 'French', 'Portuguese'].map((x) => <option key={x} value={x} />)}</datalist>
+        </label>
         {field('address', 'Address', { full: true })}
         {field('city', 'City')}
         {field('state', 'State', { maxLength: 2 })}
@@ -60,6 +74,13 @@ export default function PatientForm({ patient, onSaved, onCancel }) {
           <select value={form.primary_provider_id} onChange={(e) => setForm({ ...form, primary_provider_id: e.target.value })}>
             <option value="">—</option>
             {providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        </label>
+        <label>
+          Primary hygienist
+          <select value={form.primary_hygienist_id} onChange={(e) => setForm({ ...form, primary_hygienist_id: e.target.value })}>
+            <option value="">—</option>
+            {providers.filter((p) => p.type === 'hygienist').map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
         </label>
         {patient && (

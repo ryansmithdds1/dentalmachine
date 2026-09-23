@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { useApi } from '../hooks.js';
+import { useApi, useLookup } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
 import { money, fullName, age, fmtDate, fmtDateTime, fmtUtcDate, label, practiceToday } from '../format.js';
 import { Modal, Badge, ErrorBox, useSubmit } from '../components/ui.jsx';
@@ -62,7 +62,7 @@ export default function PatientDetail() {
       <div className="card">
         <div className="page-header" style={{ marginBottom: 0 }}>
           <div className="patient-banner">
-            <div className="avatar">{p.first_name[0]}{p.last_name[0]}</div>
+            <PatientPhoto p={p} canEdit={can('patients:write')} onChange={reload} />
             <div>
               <h1>{fullName(p)} {p.status !== 'active' && <Badge value={p.status} />}</h1>
               <div className="muted">
@@ -149,8 +149,11 @@ function Overview({ p, reload }) {
       <div className="card">
         <h2>Contact</h2>
         <dl className="kv">
-          <dt>Phone</dt><dd>{p.phone || '—'}</dd>
+          <dt>Mobile</dt><dd>{p.phone || '—'}</dd>
+          {p.phone_home && (<><dt>Home</dt><dd>{p.phone_home}</dd></>)}
+          {p.phone_work && (<><dt>Work</dt><dd>{p.phone_work}</dd></>)}
           <dt>Email</dt><dd>{p.email || '—'}</dd>
+          {(p.preferred_contact || p.language) && (<><dt>Prefers</dt><dd>{[p.preferred_contact && { text: 'Text', call: 'Phone call', email: 'Email' }[p.preferred_contact], p.language].filter(Boolean).join(' · ')}</dd></>)}
           <dt>Address</dt><dd>{[p.address, p.city, p.state, p.zip].filter(Boolean).join(', ') || '—'}</dd>
           <dt>Emergency contact</dt><dd>{p.emergency_contact || '—'}</dd>
           <dt>Referred by</dt><dd>{p.referral_source || '—'}</dd>
@@ -193,6 +196,7 @@ function Overview({ p, reload }) {
           )}
         </div>
         <VisitHistory visits={p.past_appointments || []} />
+        <Referrals patient={p} onChange={reload} />
         <div className="card">
           <h2>Recall</h2>
           {p.recalls.length === 0 ? <div className="muted">No recall set. Completing a prophy creates one automatically.</div> : p.recalls.map((r) => (
@@ -345,6 +349,139 @@ function HealthHistoryEditor({ p, conditions, onDone }) {
         <div className="form-actions"><button className="primary" disabled={busy}>Save</button></div>
       </form>
     </Modal>
+  );
+}
+
+// Profile photo: tap to take or choose one; it's shrunk to a small JPEG in the browser.
+function PatientPhoto({ p, canEdit, onChange }) {
+  const [err, setErr] = useState(null);
+  const pick = async (file) => {
+    setErr(null);
+    try {
+      const img = await createImageBitmap(file);
+      const size = 256;
+      const scale = Math.max(size / img.width, size / img.height);
+      const canvas = document.createElement('canvas');
+      canvas.width = size;
+      canvas.height = size;
+      canvas.getContext('2d').drawImage(img, (size - img.width * scale) / 2, (size - img.height * scale) / 2, img.width * scale, img.height * scale);
+      await api.put(`/patients/${p.id}`, { photo: canvas.toDataURL('image/jpeg', 0.85) });
+      onChange();
+    } catch (e) {
+      setErr(e.message || 'Could not use that image');
+    }
+  };
+  const inner = p.photo ? <img src={p.photo} alt="" className="avatar photo" /> : <div className="avatar">{p.first_name[0]}{p.last_name[0]}</div>;
+  if (!canEdit) return inner;
+  return (
+    <label className="avatar-edit" title={p.photo ? 'Change photo' : 'Add a photo'}>
+      {inner}
+      <input type="file" accept="image/*" capture="user" hidden onChange={(e) => e.target.files?.[0] && pick(e.target.files[0])} />
+      {err && <span className="error" style={{ position: 'absolute', fontSize: 11 }}>{err}</span>}
+    </label>
+  );
+}
+
+const REF_STATUS = { open: 'Sent', scheduled: 'Scheduled with them', seen: 'Seen', report_received: 'Report received', closed: 'Closed' };
+
+// Who referred the patient in, and specialists they've been referred out to.
+function Referrals({ patient, onChange }) {
+  const { can } = useAuth();
+  const { data: list, reload } = useApi(`/patients/${patient.id}/referrals`);
+  const [adding, setAdding] = useState(null);
+  const done = () => { setAdding(null); reload(); onChange?.(); };
+  return (
+    <div className="card">
+      <div className="inline" style={{ justifyContent: 'space-between' }}>
+        <h2 style={{ margin: 0 }}>Referrals</h2>
+        {can('patients:write') && (
+          <span className="inline">
+            <button className="small" onClick={() => setAdding('in')}>Referred by…</button>
+            <button className="small" onClick={() => setAdding('out')}>Refer out…</button>
+          </span>
+        )}
+      </div>
+      {list?.length === 0 && <div className="muted" style={{ marginTop: 6 }}>None.</div>}
+      {list?.map((r) => (
+        <div key={r.id} className="inline" style={{ justifyContent: 'space-between', marginTop: 8, flexWrap: 'wrap' }}>
+          <span>
+            {r.direction === 'in' ? 'Referred by ' : 'To '}<strong>{r.contact_name}</strong>{r.specialty ? ` (${r.specialty})` : ''}
+            {r.reason ? ` · ${r.reason}` : ''} <span className="muted">· {fmtDate(r.referral_date)}</span>
+          </span>
+          {r.direction === 'out' && (
+            <span className="inline">
+              {can('patients:write') ? (
+                <select value={r.status} onChange={async (e) => { await api.put(`/referrals/${r.id}`, { status: e.target.value }); reload(); }} style={{ width: 'auto' }}>
+                  {Object.entries(REF_STATUS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                </select>
+              ) : <Badge value={r.status} />}
+              <a href={`/referrals/${r.id}/letter`} target="_blank" rel="noreferrer" style={{ fontSize: 12 }}>letter</a>
+            </span>
+          )}
+        </div>
+      ))}
+      {adding && (
+        <Modal title={adding === 'in' ? 'Who referred this patient?' : 'Refer to a specialist'} onClose={() => setAdding(null)}>
+          <ReferralForm patient={patient} direction={adding} onDone={done} />
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function ReferralForm({ patient, direction, onDone }) {
+  const { data: contacts, reload } = useApi('/referral-contacts');
+  const providers = useLookup('/providers?active=true');
+  const [form, setForm] = useState({ contact_id: '', reason: '', teeth: '', urgency: 'routine', provider_id: patient.primary_provider_id || '', notes: '' });
+  const [newContact, setNewContact] = useState(null);
+  const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
+  const { submit, busy, error } = useSubmit(async () => {
+    let contactId = form.contact_id;
+    if (newContact) contactId = (await api.post('/referral-contacts', newContact)).id;
+    const r = await api.post(`/patients/${patient.id}/referrals`, {
+      direction, contact_id: Number(contactId), reason: form.reason || null, notes: form.notes || null,
+      ...(direction === 'out' ? { teeth: form.teeth || null, urgency: form.urgency, provider_id: form.provider_id ? Number(form.provider_id) : null } : {}),
+    });
+    if (direction === 'out') window.open(`/referrals/${r.id}/letter`, '_blank');
+    reload();
+    onDone();
+  });
+  return (
+    <form onSubmit={(e) => { e.preventDefault(); submit(); }}>
+      <ErrorBox error={error} />
+      <div className="form-grid">
+        {newContact ? (
+          <>
+            <label>Name<input required value={newContact.name} onChange={(e) => setNewContact({ ...newContact, name: e.target.value })} placeholder="Dr. Jane Smith" /></label>
+            <label>Practice<input value={newContact.practice_name} onChange={(e) => setNewContact({ ...newContact, practice_name: e.target.value })} /></label>
+            <label>Specialty<input list="specialties" value={newContact.specialty} onChange={(e) => setNewContact({ ...newContact, specialty: e.target.value })} /></label>
+            <label>Phone<input value={newContact.phone} onChange={(e) => setNewContact({ ...newContact, phone: e.target.value })} /></label>
+            <label>Fax<input value={newContact.fax} onChange={(e) => setNewContact({ ...newContact, fax: e.target.value })} /></label>
+            <label>Email<input type="email" value={newContact.email} onChange={(e) => setNewContact({ ...newContact, email: e.target.value })} /></label>
+            <datalist id="specialties">{['Endodontics', 'Oral surgery', 'Periodontics', 'Orthodontics', 'Pediatric dentistry', 'Prosthodontics', 'General dentist', 'Physician', 'Patient'].map((x) => <option key={x} value={x} />)}</datalist>
+          </>
+        ) : (
+          <label className="full">
+            {direction === 'in' ? 'Referred by' : 'Refer to'}
+            <select required value={form.contact_id} onChange={(e) => (e.target.value === 'new' ? setNewContact({ name: '', practice_name: '', specialty: '', phone: '', fax: '', email: '' }) : setForm({ ...form, contact_id: e.target.value }))}>
+              <option value="">Choose…</option>
+              {contacts?.filter((c) => c.active).map((c) => <option key={c.id} value={c.id}>{c.name}{c.practice_name ? ` — ${c.practice_name}` : ''}{c.specialty ? ` (${c.specialty})` : ''}</option>)}
+              <option value="new">+ Someone new…</option>
+            </select>
+          </label>
+        )}
+        <label className="full">{direction === 'in' ? 'Note' : 'Reason for referral'}<input value={form.reason} onChange={set('reason')} placeholder={direction === 'out' ? 'e.g. RCT #19, symptomatic irreversible pulpitis' : ''} /></label>
+        {direction === 'out' && (
+          <>
+            <label>Teeth<input value={form.teeth} onChange={set('teeth')} /></label>
+            <label>Urgency<select value={form.urgency} onChange={set('urgency')}><option value="routine">Routine</option><option value="soon">Soon</option><option value="urgent">Urgent</option></select></label>
+            <label>Referring provider<select value={form.provider_id} onChange={set('provider_id')}><option value="">—</option>{providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
+            <label className="full">Notes for the specialist<textarea rows={2} value={form.notes} onChange={set('notes')} /></label>
+          </>
+        )}
+      </div>
+      <div className="form-actions"><button className="primary" disabled={busy}>{direction === 'out' ? 'Save & print letter' : 'Save'}</button></div>
+    </form>
   );
 }
 

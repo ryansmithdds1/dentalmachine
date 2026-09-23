@@ -2,6 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { createHash } from 'node:crypto';
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS practices (
@@ -658,6 +659,40 @@ CREATE TABLE IF NOT EXISTS portal_codes (
 );
 CREATE INDEX IF NOT EXISTS idx_portal_codes ON portal_codes(practice_id, contact);
 
+-- Referral sources and destinations: other dentists and specialists, and people who send patients.
+CREATE TABLE IF NOT EXISTS referral_contacts (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  name TEXT NOT NULL,
+  practice_name TEXT,
+  specialty TEXT,
+  phone TEXT,
+  fax TEXT,
+  email TEXT,
+  address TEXT,
+  npi TEXT,
+  notes TEXT,
+  active INTEGER NOT NULL DEFAULT 1
+);
+
+-- A patient referred in (by a contact) or out (to a specialist), and where it stands.
+CREATE TABLE IF NOT EXISTS referrals (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  contact_id INTEGER NOT NULL REFERENCES referral_contacts(id),
+  direction TEXT NOT NULL CHECK (direction IN ('in','out')),
+  referral_date TEXT NOT NULL,
+  reason TEXT,
+  teeth TEXT,
+  urgency TEXT,
+  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','scheduled','seen','report_received','closed')),
+  provider_id INTEGER REFERENCES providers(id),
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Recall types (prophy, perio maintenance, bitewings…): which codes reset them and how often they come due.
 CREATE TABLE IF NOT EXISTS recall_types (
   id INTEGER PRIMARY KEY,
@@ -933,6 +968,13 @@ const COLUMNS = [
   ['era_imports', 'provider_adjustments', 'TEXT'],
   ['tooth_conditions', 'resolved_at', 'TEXT'],
   ['practices', 'reminder_steps', 'TEXT'],
+  ['patients', 'phone_home', 'TEXT'],
+  ['patients', 'phone_work', 'TEXT'],
+  ['patients', 'preferred_contact', 'TEXT'],
+  ['patients', 'language', 'TEXT'],
+  ['patients', 'primary_hygienist_id', 'INTEGER'],
+  ['patients', 'photo', 'TEXT'],
+  ['patients', 'referred_by_id', 'INTEGER'],
   ['practices', 'recall_steps', 'TEXT'],
   ['practices', 'recall_auto', 'INTEGER NOT NULL DEFAULT 0'],
   ['appointments', 'arrived_at', 'TEXT'],
@@ -1138,20 +1180,30 @@ async function openPostgres(url, { freshSchema = false } = {}) {
     ...(schema ? { options: `-c search_path=${schema}` } : {}),
   });
   const setup = await pool.connect();
-  // One server migrates at a time. The lock is transaction-scoped so it also works behind a
-  // transaction-mode connection pooler (Supabase/PgBouncer), where session locks can leak.
-  try {
-    await setup.query('BEGIN');
-    await setup.query('SELECT pg_advisory_xact_lock(424242)');
-    await setup.query(pgSchema(SCHEMA));
-    for (const [table, column, def] of COLUMNS) await setup.query(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${column} ${pgSchema(def)}`);
-    await setup.query(pgSchema(INDEXES));
-    await setup.query('COMMIT');
-  } catch (err) {
-    await setup.query('ROLLBACK').catch(() => {});
-    throw err;
-  } finally {
-    setup.release();
+  // Skip the migration when this exact schema is already in place (serverless cold starts would
+  // otherwise re-run hundreds of statements each time).
+  const version = createHash('sha256').update(JSON.stringify([SCHEMA, COLUMNS, INDEXES])).digest('hex').slice(0, 16);
+  const current = await setup.query('SELECT version FROM schema_meta').then((r) => r.rows[0]?.version, () => null);
+  if (current === version && !freshSchema) setup.release();
+  else {
+    // One server migrates at a time. The lock is transaction-scoped so it also works behind a
+    // transaction-mode connection pooler (Supabase/PgBouncer), where session locks can leak.
+    try {
+      await setup.query('BEGIN');
+      await setup.query('SELECT pg_advisory_xact_lock(424242)');
+      await setup.query(pgSchema(SCHEMA));
+      for (const [table, column, def] of COLUMNS) await setup.query(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${column} ${pgSchema(def)}`);
+      await setup.query(pgSchema(INDEXES));
+      await setup.query('CREATE TABLE IF NOT EXISTS schema_meta (version TEXT NOT NULL)');
+      await setup.query('DELETE FROM schema_meta');
+      await setup.query('INSERT INTO schema_meta (version) VALUES ($1)', [version]);
+      await setup.query('COMMIT');
+    } catch (err) {
+      await setup.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      setup.release();
+    }
   }
 
   const inTx = new AsyncLocalStorage();

@@ -100,17 +100,20 @@ function AcceptForm({ request, onDone }) {
   const [patientId, setPatientId] = useState(request.matches[0]?.id ? String(request.matches[0].id) : '');
   const [providerId, setProviderId] = useState(String(request.provider_id || ''));
   const [operatoryId, setOperatoryId] = useState('');
+  // The front desk can book a different time or length than the patient asked for.
+  const [when, setWhen] = useState({ date: request.requested_start.slice(0, 10), time: request.requested_start.slice(11, 16), duration: request.duration });
   const [result, setResult] = useState(null);
   const { submit, busy, error } = useSubmit(async () => {
     setResult(await api.post(`/booking-requests/${request.id}/accept`, {
       patient_id: patientId ? Number(patientId) : null, provider_id: Number(providerId), operatory_id: operatoryId ? Number(operatoryId) : null,
+      start_time: `${when.date} ${when.time}`, duration: Number(when.duration),
     }));
   });
 
   if (result) {
     return (
       <div>
-        <div className="badge ok" style={{ fontSize: 13, padding: '6px 12px' }}>Booked for {fmtDateTime(request.requested_start)}</div>
+        <div className="badge ok" style={{ fontSize: 13, padding: '6px 12px' }}>Booked for {fmtDateTime(result.start_time || `${when.date} ${when.time}`)}</div>
         <p>{result.message ? `Confirmation ${result.message.channel === 'sms' ? 'text' : 'email'} ${result.message.status === 'sent' ? 'sent' : 'failed'} to ${result.message.to_address}.` : 'No confirmation sent (no phone/email).'}</p>
         <div className="form-actions"><button className="primary" onClick={onDone}>Done</button></div>
       </div>
@@ -129,6 +132,9 @@ function AcceptForm({ request, onDone }) {
             {request.matches.map((m) => <option key={m.id} value={m.id}>Existing: {m.first_name} {m.last_name} · #{m.id} {m.dob ? `· DOB ${m.dob}` : ''} {m.phone ? `· ${m.phone}` : ''}</option>)}
           </select>
         </label>
+        <label>Date<input type="date" required value={when.date} onChange={(e) => setWhen({ ...when, date: e.target.value })} /></label>
+        <label>Time<input type="time" required step={300} value={when.time} onChange={(e) => setWhen({ ...when, time: e.target.value })} /></label>
+        <label>Length (minutes)<input type="number" min="10" step="5" value={when.duration} onChange={(e) => setWhen({ ...when, duration: e.target.value })} /></label>
         <label>
           Provider
           <select value={providerId} onChange={(e) => setProviderId(e.target.value)} required>

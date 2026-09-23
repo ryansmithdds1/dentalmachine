@@ -134,7 +134,7 @@ export default function engagementRoutes({ db, messenger, config }) {
     await audit(db, req, 'booking.accept', 'booking_requests', b.id, { appointment_id: apptId });
     publish(pid, { type: 'schedule', dates: [start.slice(0, 10)], by: req.user.id });
     const message = await sendAppointmentReminder(db, messenger, { appointmentId: apptId, appUrl: config.appUrl, userId: req.user.id, kind: 'booking_confirmation' });
-    res.json({ appointment_id: apptId, message });
+    res.json({ appointment_id: apptId, start_time: (await db.get('SELECT start_time FROM appointments WHERE id = ?', apptId)).start_time, message });
   });
 
   r.post('/booking-requests/:bid/decline', requirePermission('schedule:write'), async (req, res) => {

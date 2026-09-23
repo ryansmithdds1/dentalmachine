@@ -595,3 +595,6 @@ span.perio-site { border-color: transparent; }
 .checkout-money span { font-size: 12px; color: var(--muted); }
 .checkout-money strong { font-size: 18px; }
 .alt-weeks { border-left: 3px solid var(--primary-soft); padding-left: 12px; margin-top: 8px; }
+.avatar.photo { object-fit: cover; padding: 0; }
+.avatar-edit { position: relative; cursor: pointer; display: inline-block; }
+.avatar-edit:hover .avatar { outline: 2px solid var(--primary); }

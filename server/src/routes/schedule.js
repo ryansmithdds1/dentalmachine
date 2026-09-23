@@ -119,6 +119,11 @@ export async function openSlots(db, practiceId, providerId, date, { duration = 6
       `SELECT start_time, end_time FROM blockouts WHERE practice_id = ? AND start_time < ? AND end_time > ?
        AND ((provider_id IS NULL AND operatory_id IS NULL) OR provider_id = ?)`, practiceId, `${date} 24:00`, `${date} 00:00`, providerId,
     )),
+    // A pending online request holds its slot so it isn't offered to someone else meanwhile.
+    ...(await db.all(
+      "SELECT requested_start, duration FROM booking_requests WHERE practice_id = ? AND provider_id = ? AND status = 'pending' AND requested_start >= ? AND requested_start < ?",
+      practiceId, providerId, `${date} 00:00`, `${date} 24:00`,
+    )).map((b) => ({ start_time: b.requested_start, end_time: addMinutes(b.requested_start, b.duration || 60) })),
   ].map((a) => [a.start_time.slice(0, 10) < date ? 0 : toMin(a.start_time.slice(11)), a.end_time.slice(0, 10) > date ? 24 * 60 : toMin(a.end_time.slice(11))]);
   const slots = [];
   for (const [o, c] of ranges) {

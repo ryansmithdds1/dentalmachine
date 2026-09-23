@@ -15,8 +15,9 @@ export default function Reports() {
       <div className="tabs">
         <button className={tab === 'kpis' ? 'active' : ''} onClick={() => setParams({ tab: 'kpis' })}>Practice KPIs</button>
         <button className={tab === 'ops' ? 'active' : ''} onClick={() => setParams({ tab: 'ops' })}>Day sheet, production & A/R</button>
+        <button className={tab === 'referrals' ? 'active' : ''} onClick={() => setParams({ tab: 'referrals' })}>Referrals</button>
       </div>
-      {tab === 'kpis' ? <Analytics /> : <Operational />}
+      {tab === 'kpis' ? <Analytics /> : tab === 'referrals' ? <ReferralReport /> : <Operational />}
     </>
   );
 }
@@ -186,6 +187,62 @@ function Operational() {
             </table>
           </details>
         )}
+      </div>
+    </>
+  );
+}
+
+// Where new patients come from (and what they've produced), and how outgoing referrals are going.
+function ReferralReport() {
+  const { practice } = useAuth();
+  const today = practiceToday(practice?.timezone);
+  const [from, setFrom] = useState(`${today.slice(0, 4)}-01-01`);
+  const [to, setTo] = useState(today);
+  const { data } = useApi(`/reports/referrals?from=${from}&to=${to}`);
+  const { data: open } = useApi('/referrals?open=true');
+  return (
+    <>
+      <div className="inline" style={{ margin: '12px 0', gap: 8 }}>
+        <label className="inline">From<input type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></label>
+        <label className="inline">To<input type="date" value={to} onChange={(e) => setTo(e.target.value)} /></label>
+      </div>
+      <div className="grid grid-2">
+        <div className="card">
+          <div className="inline" style={{ justifyContent: 'space-between' }}>
+            <h2 style={{ margin: 0 }}>Referring doctors and people</h2>
+            <CsvButton name={`referral-sources-${from}-to-${to}`} rows={data?.sources} columns={[['Source', (r) => r.name], ['Practice', (r) => r.practice_name || ''], ['Patients', (r) => r.patients], ['Production since referral', (r) => dollars(r.production)]]} />
+          </div>
+          <table className="compact-table">
+            <thead><tr><th>Source</th><th className="num">Patients</th><th className="num">Production since</th></tr></thead>
+            <tbody>
+              {data?.sources.map((s) => <tr key={s.id}><td>{s.name}<div className="muted" style={{ fontSize: 12 }}>{[s.practice_name, s.specialty].filter(Boolean).join(' · ')}</div></td><td className="num">{s.patients}</td><td className="num">{money(s.production)}</td></tr>)}
+              {data?.sources.length === 0 && <tr><td colSpan={3} className="muted">No referrals recorded in this period.</td></tr>}
+            </tbody>
+          </table>
+          <h3>Other new-patient sources</h3>
+          <table className="compact-table">
+            <tbody>{data?.free_text.map((s) => <tr key={s.source}><td>{s.source}</td><td className="num">{s.patients}</td></tr>)}</tbody>
+          </table>
+        </div>
+        <div className="card">
+          <h2>Referred out</h2>
+          <table className="compact-table">
+            <thead><tr><th>Specialist</th><th className="num">Sent</th><th className="num">Seen</th><th className="num">Report back</th></tr></thead>
+            <tbody>
+              {data?.outgoing.map((s) => <tr key={s.name}><td>{s.name}{s.specialty ? <span className="muted"> · {s.specialty}</span> : null}</td><td className="num">{s.referrals}</td><td className="num">{s.seen}</td><td className="num">{s.reports}</td></tr>)}
+              {data?.outgoing.length === 0 && <tr><td colSpan={4} className="muted">None in this period.</td></tr>}
+            </tbody>
+          </table>
+          <h3>Waiting on the specialist</h3>
+          <table className="compact-table">
+            <tbody>
+              {open?.map((r) => (
+                <tr key={r.id}><td><Link to={`/patients/${r.patient_id}`}>{r.first_name} {r.last_name}</Link></td><td>{r.contact_name}</td><td>{r.reason || ''}</td><td className="muted">{r.referral_date}</td><td>{label(r.status)}</td></tr>
+              ))}
+              {open?.length === 0 && <tr><td className="muted">Nothing outstanding.</td></tr>}
+            </tbody>
+          </table>
+        </div>
       </div>
     </>
   );

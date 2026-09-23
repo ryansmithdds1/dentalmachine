@@ -182,3 +182,47 @@ export function WalkoutPrint() {
     </div>
   );
 }
+
+// Referral letter to a specialist.
+export function ReferralLetterPrint() {
+  const { id } = useParams();
+  const { data: d } = useApi(`/referrals/${id}/letter`);
+  useAutoPrint(!!d);
+  if (!d) return <div className="empty">Loading…</div>;
+  const r = d.referral;
+  const c = d.contact;
+  return (
+    <div className="print-doc">
+      <div className="no-print" style={{ marginBottom: 12 }}><Link to={`/patients/${d.patient.id}`}>← Back</Link> <button onClick={() => window.print()}>Print</button></div>
+      <header className="doc-head">
+        <div><h1>{d.practice.name}</h1><div>{[d.practice.address, d.practice.city, d.practice.state, d.practice.zip].filter(Boolean).join(', ')}</div><div>{d.practice.phone}{d.practice.email ? ` · ${d.practice.email}` : ''}</div></div>
+        <div style={{ textAlign: 'right' }}><h2>Referral</h2><div>{fmtDate(r.referral_date)}</div>{r.urgency && r.urgency !== 'routine' && <div><strong>{r.urgency.toUpperCase()}</strong></div>}</div>
+      </header>
+      <p>
+        <strong>To:</strong> {c.name}{c.practice_name ? `, ${c.practice_name}` : ''}{c.specialty ? ` (${c.specialty})` : ''}<br />
+        {c.address && <>{c.address}<br /></>}
+        {[c.phone && `Phone ${c.phone}`, c.fax && `Fax ${c.fax}`].filter(Boolean).join(' · ')}
+      </p>
+      <p>Dear {c.name},</p>
+      <p>
+        I am referring <strong>{d.patient.first_name} {d.patient.last_name}</strong>{d.patient.dob ? ` (DOB ${fmtDate(d.patient.dob)})` : ''} to you
+        {r.reason ? <> for <strong>{r.reason}</strong></> : ''}{r.teeth ? ` (tooth ${r.teeth})` : ''}. Thank you for seeing them.
+      </p>
+      {r.notes && <p style={{ whiteSpace: 'pre-wrap' }}>{r.notes}</p>}
+      <table>
+        <tbody>
+          <tr><th style={{ width: 170 }}>Patient phone</th><td>{d.patient.phone || '—'}{d.patient.email ? ` · ${d.patient.email}` : ''}</td></tr>
+          <tr><th>Medical alerts</th><td>{d.patient.premed_required ? 'Premedication required. ' : ''}{d.patient.medical_alerts || 'None reported'}</td></tr>
+          <tr><th>Allergies</th><td>{d.patient.allergies || 'None reported'}</td></tr>
+          <tr><th>Medications</th><td>{d.patient.medications || 'None reported'}</td></tr>
+          <tr><th>Insurance</th><td>{d.insurance ? `${d.insurance.carrier_name} · ${d.insurance.subscriber_id}${d.insurance.group_number ? ` · group ${d.insurance.group_number}` : ''}` : 'None on file'}</td></tr>
+        </tbody>
+      </table>
+      <p>Please send your findings and treatment report back to our office. Radiographs are available on request.</p>
+      <div className="doc-sign">
+        <div>______________________________</div>
+        <div>{d.provider?.name || d.practice.name}{d.provider?.npi ? ` · NPI ${d.provider.npi}` : ''}</div>
+      </div>
+    </div>
+  );
+}
