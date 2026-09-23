@@ -290,7 +290,7 @@ const MAX_CHARS = 200_000;
 export default function assistantRoutes({ db, config, secret, app: getApp }) {
   const r = Router();
   const cfg = config.assistant || assistantConfig();
-  const client = cfg.enabled ? new Anthropic({ apiKey: cfg.apiKey, baseURL: cfg.baseURL, maxRetries: 2, timeout: 60_000 }) : null;
+  const client = cfg.enabled ? new Anthropic({ apiKey: cfg.apiKey, baseURL: cfg.baseURL, maxRetries: 2, timeout: 60_000, ...(config.aiFetch ? { fetch: config.aiFetch } : {}) }) : null;
   const limiter = rateLimit({ windowMs: 60_000, max: 40, name: 'assistant' });
   // Screen notes stay in the conversation (the history is append-only, which newer models check), so
   // the browser keeps them — signed, so a note it sends back is one this server wrote for this user.

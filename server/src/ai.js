@@ -9,7 +9,7 @@ export function aiClient(config) {
   const cfg = config.assistant || assistantConfig();
   if (!cfg.enabled) return null;
   if (!cached || cached.key !== `${cfg.apiKey}|${cfg.baseURL}`) {
-    cached = { key: `${cfg.apiKey}|${cfg.baseURL}`, client: new Anthropic({ apiKey: cfg.apiKey, baseURL: cfg.baseURL, maxRetries: 2, timeout: 120_000 }) };
+    cached = { key: `${cfg.apiKey}|${cfg.baseURL}`, client: new Anthropic({ apiKey: cfg.apiKey, baseURL: cfg.baseURL, maxRetries: 2, timeout: 120_000, ...(config.aiFetch ? { fetch: config.aiFetch } : {}) }) };
   }
   return { client: cached.client, cfg };
 }

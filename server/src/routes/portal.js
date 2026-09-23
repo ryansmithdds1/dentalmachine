@@ -1,4 +1,5 @@
 import express, { Router } from 'express';
+import { raiseIssue, resolveIssue, failed } from '../issues.js';
 import { openSlotLater } from '../fill.js';
 import { createHash, randomInt, timingSafeEqual } from 'node:crypto';
 import { HttpError, rateLimit, signToken, verifyToken } from '../auth.js';
@@ -72,7 +73,7 @@ export function portalPublicRoutes({ db, secret, messenger }) {
         practiceId: practice.id, patientId: patient.id, kind: 'portal_code', channel: isEmail ? 'email' : 'sms', to: isEmail ? patient.email : patient.phone,
         subject: subjectFor(patientLang(patient), 'portal_code', `Your ${practice.name} sign-in code`, practice.name),
         body: await messageText(db, practice.id, 'portal_code', { code, minutes: String(CODE_TTL_MINUTES) }, patientLang(patient)),
-      }))().catch(() => {});
+      }))().catch(failed(db, { practiceId: practice.id, kind: 'message', key: `portal-code:${patient.id}`, role: 'front_desk', patientId: patient.id, title: 'A patient’s portal sign-in code couldn’t be sent' }));
     }
     res.json({ sent: true, channel: isEmail ? 'email' : 'sms' });
   });

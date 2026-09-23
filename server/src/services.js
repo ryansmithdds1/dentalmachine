@@ -1,4 +1,5 @@
 import { HttpError } from './auth.js';
+import { raiseIssue, resolveIssue, failed } from './issues.js';
 import { insert, practiceNow, recorded } from './util.js';
 import { benefitYear, deductibleMet, estimateCoverage } from './benefits.js';
 import { resetRecalls } from './recalls.js';
@@ -154,7 +155,12 @@ export async function postClaimPayment(
     }
     await db.run('UPDATE claims SET paid_date = ? WHERE id = ?', date, claim.id);
   });
-  if (final) await createSecondaryClaim(db, claim.id, { userId }).catch(() => null);
+  if (final) {
+    await createSecondaryClaim(db, claim.id, { userId }).catch((err) => raiseIssue(db, {
+      practiceId: claim.practice_id, kind: 'claim', key: `secondary:${claim.id}`, role: 'billing', entity: 'claims', entityId: claim.id, patientId: claim.patient_id,
+      title: `The secondary claim for claim #${claim.id} couldn't be created — create it by hand`, detail: err.message,
+    }));
+  }
 }
 
 // Records what a payment paid per procedure: the payer's own lines (835 service lines or an EOB entered

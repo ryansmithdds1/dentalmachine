@@ -1,4 +1,5 @@
 import express, { Router } from 'express';
+import { raiseIssue, resolveIssue, failed } from '../issues.js';
 import { requirePermission, HttpError, signToken, verifyToken } from '../auth.js';
 import { insert, findOr404, audit } from '../util.js';
 import { CATEGORIES } from '../finance/categories.js';
@@ -287,7 +288,7 @@ export function financePublicRoutes({ db, config, secret, plaid, qbo }) {
       if (have) await db.run(`UPDATE qbo_connections SET ${Object.keys(row).map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, ...Object.values(row), have.id);
       else await insert(db, 'qbo_connections', { practice_id: state.pid, ...row, created_by: state.sub });
       await audit(db, { ip: req.ip, user: { practice_id: state.pid, id: state.sub } }, 'finance.qbo_connect', 'qbo_connections', null, { realm: realmId });
-      await syncQbo(db, qbo, secret, state.pid).catch(() => {});
+      await syncQbo(db, qbo, secret, state.pid).catch(failed(db, { practiceId: state.pid, kind: 'sync', key: 'qbo-sync', role: 'admin', title: 'QuickBooks couldn’t be synced' }));
       back({ qbo: 'connected' });
     } catch (err) {
       back({ qbo: 'error', message: String(err.message).slice(0, 120) });
@@ -299,9 +300,10 @@ export function financePublicRoutes({ db, config, secret, plaid, qbo }) {
     const body = JSON.parse(req.body.toString('utf8'));
     const conn = await db.get("SELECT * FROM bank_connections WHERE item_id = ? AND status != 'removed'", String(body.item_id || ''));
     if (conn && body.webhook_type === 'TRANSACTIONS' && ['SYNC_UPDATES_AVAILABLE', 'DEFAULT_UPDATE', 'INITIAL_UPDATE', 'HISTORICAL_UPDATE'].includes(body.webhook_code)) {
-      syncBank(db, plaid, secret, conn).catch(() => {});
+      syncBank(db, plaid, secret, conn).catch(failed(db, { practiceId: conn.practice_id, kind: 'sync', key: `bank-sync:${conn.id}`, role: 'admin', title: 'The bank account couldn’t be synced' }));
     } else if (conn && body.webhook_type === 'ITEM' && ['ERROR', 'PENDING_EXPIRATION', 'PENDING_DISCONNECT'].includes(body.webhook_code)) {
       await db.run("UPDATE bank_connections SET status = 'relink', error = ? WHERE id = ?", String(body.error?.error_message || body.webhook_code).slice(0, 300), conn.id);
+      await raiseIssue(db, { practiceId: conn.practice_id, kind: 'sync', key: `bank-sync:${conn.id}`, role: 'admin', severity: 'high', title: 'The bank connection needs to be signed in again (Finance → Connections)', detail: body.error?.error_message || body.webhook_code });
     }
     res.json({ ok: true });
   });
@@ -313,7 +315,12 @@ export async function runFinanceSync(db, { plaid, qbo, secret }) {
   let n = 0;
   if (plaid.enabled) {
     for (const c of await db.all("SELECT * FROM bank_connections WHERE status IN ('active','error')")) {
-      try { n += (await syncBank(db, plaid, secret, c)).added; } catch { /* recorded on the connection */ }
+      try {
+        n += (await syncBank(db, plaid, secret, c)).added;
+        await resolveIssue(db, c.practice_id, `bank-sync:${c.id}`);
+      } catch (err) {
+        await raiseIssue(db, { practiceId: c.practice_id, kind: 'sync', key: `bank-sync:${c.id}`, role: 'admin', title: 'The bank account couldn’t be synced', detail: err.message });
+      }
     }
   }
   if (qbo.enabled) {
@@ -321,7 +328,10 @@ export async function runFinanceSync(db, { plaid, qbo, secret }) {
       try {
         await syncQbo(db, qbo, secret, c.practice_id);
         n += (await pushDeposits(db, qbo, secret, c.practice_id)).pushed;
-      } catch { /* recorded on the connection */ }
+        await resolveIssue(db, c.practice_id, 'qbo-sync');
+      } catch (err) {
+        await raiseIssue(db, { practiceId: c.practice_id, kind: 'sync', key: 'qbo-sync', role: 'admin', title: 'QuickBooks couldn’t be synced', detail: err.message });
+      }
     }
   }
   return n;

@@ -40,6 +40,8 @@ export default function Dashboard() {
   const [date, setDate] = useState(today);
   const { data: h, reload } = useApi(`/huddle?date=${date}`, [date]);
   const { data: d } = useApi('/dashboard');
+  const { data: attention, reload: reloadAttention } = useApi(can('patients:read') ? '/issues?role=mine' : null);
+  useLiveEvents((e) => e.type === 'issues' && reloadAttention());
   const [filter, setFilter] = useState('');
   useLiveEvents((e) => e.type === 'schedule' && (!e.dates || e.dates.includes(date)) && reload());
 
@@ -76,6 +78,7 @@ export default function Dashboard() {
           <Stat label="Balances to collect" value={money(h.summary.balances_to_collect).replace('.00', '')} sub="Family balances of today's patients" tone={h.summary.balances_to_collect ? 'danger' : undefined} />
           <Stat label="Unscheduled treatment" value={money(h.summary.unscheduled_treatment).replace('.00', '')} sub="Diagnosed for today's patients — schedule it" />
           <Stat label="Insurance to verify" value={h.summary.verify_insurance} sub="Not verified in 30 days" tone={h.summary.verify_insurance ? 'warn' : 'ok'} />
+          {attention?.issues.length > 0 && <Stat label="Needs attention" value={attention.issues.length} sub={attention.issues[0].title} tone={attention.issues.some((i) => i.severity === 'high') ? 'danger' : 'warn'} to="/attention" />}
           {d?.recalls_due != null && <Stat label="Recalls due" value={d.recalls_due} to="/followups" sub="Work the follow-up list →" />}
           {d?.production != null && <Stat label="Production (month)" value={money(d.production).replace('.00', '')} sub={`Collections ${money(d.collections).replace('.00', '')}`} to="/reports" />}
         </div>

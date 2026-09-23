@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import ConnectionActivity from '../components/ConnectionActivity.jsx';
 import PhoneLineSettings from '../components/PhoneLineSettings.jsx';
 import EducationSettings from '../components/EducationSettings.jsx';
 import CheckinSettings from '../components/CheckinSettings.jsx';
@@ -92,7 +93,7 @@ export default function Settings() {
     ['Clinical', [['templates', 'Note templates', can('clinical:write')], ['forms', 'Forms & consents', can('patients:read')], ['labs', 'Labs', can('clinical:read')], ['education', 'Patient education', can('patients:read')], ['referrals', 'Referral contacts', can('patients:read')]]],
     ['Billing', [['codes', 'Fee schedule', true], ['ppo', 'Fee schedules', can('billing:read')], ['carriers', 'Insurance carriers', can('billing:read')], ['memberships', 'Membership plans', can('billing:read')]]],
     ['Patients', [['messaging', 'Messages & reviews', admin], ['phone', 'Phone line', admin], ['checkin', 'Mobile check-in', admin], ['booking', 'Online booking links', admin], ['custom', 'Custom patient fields', admin], ['duplicates', 'Duplicate charts', admin]]],
-    ['Connections', [['integrations', 'Integrations', admin], ['imaging', 'Imaging bridges', admin], ['assistant', 'Assistant', admin], ['developer', 'API & webhooks', admin]]],
+    ['Connections', [['integrations', 'Integrations', admin], ['imaging', 'Imaging bridges', admin], ['assistant', 'Assistant', admin], ['developer', 'API & webhooks', admin], ['activity', 'Connection activity', admin]]],
     ['Compliance', [['audit', 'Audit log', admin], ['backups', 'Backups', admin]]],
   ].map(([g, items]) => [g, items.filter((t) => t[2])]).filter(([, items]) => items.length);
   const all = groups.flatMap(([, items]) => items);
@@ -161,6 +162,7 @@ export default function Settings() {
       {tab === 'assistant' && <AssistantLog />}
       {tab === 'integrations' && <Integrations />}
       {tab === 'audit' && <AuditLog />}
+      {tab === 'activity' && <ConnectionActivity />}
         </div>
       </div>
     </>

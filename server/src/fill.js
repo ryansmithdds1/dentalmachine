@@ -1,4 +1,5 @@
 import { insert, localNow, friendlyDateTime, recorded } from './util.js';
+import { raiseIssue, resolveIssue, failed } from './issues.js';
 import { sendMessage, withinSendHours, recipientFor } from './messaging.js';
 import { templatesFor, renderTemplate, patientLang, fixedText } from './templates.js';
 import { validateAppt } from './routes/schedule.js';
@@ -43,7 +44,10 @@ export const registerFill = (db, messenger) => deps.set(db, messenger);
 export function openSlotLater(db, appointmentId) {
   const messenger = deps.get(db);
   if (!messenger) return;
-  openSlot(db, messenger, appointmentId).catch(() => {});
+  openSlot(db, messenger, appointmentId).catch(async (err) => {
+    const a = await db.get('SELECT practice_id, patient_id FROM appointments WHERE id = ?', appointmentId);
+    await raiseIssue(db, { practiceId: a?.practice_id, kind: 'schedule', key: `fill:${appointmentId}`, role: 'front_desk', entity: 'appointments', entityId: appointmentId, title: 'A cancelled time couldn’t be offered to the waitlist', detail: err.message });
+  });
 }
 
 // Called whenever a visit is cancelled. Makes an opening and texts it now (or when sending hours start).

@@ -15,7 +15,7 @@ import { readOfflineDay } from './offline.js';
 import { ClockButton } from './components/TimeClock.jsx';
 import { useLiveEvents } from './live.js';
 import MfaSetup from './components/MfaSetup.jsx';
-import { Sun, CalendarDays, Users, MessageSquare, Inbox as InboxIcon, PhoneCall, Megaphone, Receipt, ListChecks, ChartColumn, Landmark, Settings as SettingsIcon, Search, PanelLeftClose, PanelLeftOpen, LogOut, Keyboard, Monitor, Moon, Sparkles, Phone, Building2, Star, HelpCircle } from 'lucide-react';
+import { Sun, CalendarDays, Users, MessageSquare, Inbox as InboxIcon, PhoneCall, Megaphone, Receipt, ListChecks, ChartColumn, Landmark, Settings as SettingsIcon, Search, PanelLeftClose, PanelLeftOpen, LogOut, Keyboard, Monitor, Moon, Sparkles, Phone, Building2, Star, HelpCircle, AlertTriangle } from 'lucide-react';
 import { getThemePref, setThemePref, watchTheme } from './theme.js';
 
 // Pages load on demand so the first screen appears quickly.
@@ -53,6 +53,8 @@ const Reports = lazy(() => import('./pages/Reports.jsx'));
 const Settings = lazy(() => import('./pages/Settings.jsx'));
 const Statement = lazy(() => import('./pages/Statement.jsx'));
 const Requests = lazy(() => import('./pages/Requests.jsx'));
+const Attention = lazy(() => import('./pages/Attention.jsx'));
+const AttentionBadge = lazy(() => import('./pages/Attention.jsx').then((m) => ({ default: m.AttentionBadge })));
 const Inbox = lazy(() => import('./pages/Inbox.jsx'));
 const Office = lazy(() => import('./pages/Office.jsx'));
 const BookingPage = lazy(() => import('./pages/public/BookingPage.jsx'));
@@ -159,6 +161,7 @@ function StaffApp() {
 
   const nav = [
     ['/', Sun, 'Today', true],
+    ['/attention', AlertTriangle, 'Needs attention', can('patients:read')],
     ['/schedule', CalendarDays, 'Schedule', can('schedule:read')],
     ['/patients', Users, 'Patients', can('patients:read')],
     ['/messages', MessageSquare, 'Messages', can('patients:read')],
@@ -306,6 +309,7 @@ function Shell({ nav }) {
               <Icon size={19} strokeWidth={1.9} aria-hidden />
               <span className="rail-label">{text}</span>
               {to === '/messages' && <UnreadBadge />}
+              {to === '/attention' && <Suspense fallback={null}><AttentionBadge /></Suspense>}
             </NavLink>
           ))}
         </nav>
@@ -336,6 +340,7 @@ function Shell({ nav }) {
             <Route path="/campaigns" element={<Campaigns />} />
             <Route path="/recalls" element={<Navigate to="/followups" replace />} />
             <Route path="/requests" element={<Requests />} />
+            <Route path="/attention" element={<Attention />} />
             <Route path="/messages" element={<Inbox />} />
             <Route path="/office" element={<Office />} />
             <Route path="/claims" element={<Claims />} />

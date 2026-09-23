@@ -1,4 +1,5 @@
 import express, { Router } from 'express';
+import { raiseIssue, resolveIssue, failed } from '../issues.js';
 import { timingSafeEqual } from 'node:crypto';
 import { twilioSignature } from './sms.js';
 import { requirePermission, HttpError } from '../auth.js';
@@ -10,7 +11,8 @@ import { aiClient } from '../ai.js';
 const xml = (s) => String(s).replace(/[<>&'"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' })[c]);
 const twiml = (body) => `<?xml version="1.0" encoding="UTF-8"?><Response>${body}</Response>`;
 const say = (text) => `<Say voice="Polly.Joanna-Neural">${xml(text)}</Say>`;
-const later = (label, fn) => setImmediate(() => fn().catch((err) => console.error(`${label}:`, err.message)));
+// Work done after answering Twilio; a failure becomes a Needs-attention item for the practice.
+const laterFor = (db) => (label, fn, practiceId) => setImmediate(() => fn().catch((err) => raiseIssue(db, { practiceId, kind: 'integration', key: `phone:${label}`, role: 'front_desk', title: `Phone line: ${label} failed`, detail: err.message })));
 
 // Twilio's webhooks for the office line. Point the number's "A call comes in" at /api/webhooks/twilio/voice/inbound
 // and its call status callback at /api/webhooks/twilio/call-status.
@@ -23,6 +25,7 @@ export function phoneWebhooks({ db, config, messenger, storage, transcriber, fet
     const given = Buffer.from(String(req.headers['x-twilio-signature'] || ''));
     return given.length === expected.length && timingSafeEqual(given, expected);
   };
+  const later = laterFor(db);
   const guard = (req, res, next) => (signed(req) ? next() : res.status(403).type('text/xml').send(twiml('')));
   const url = (path) => xml(`${config.appUrl}/api/webhooks/twilio/voice/${path}`);
   const callOf = (req) => db.get('SELECT * FROM calls WHERE id = ?', Number(req.query.call));
@@ -60,7 +63,7 @@ export function phoneWebhooks({ db, config, messenger, storage, transcriber, fet
     if (!open || !practice.forward_to) {
       if (!open) {
         await db.run("UPDATE calls SET outcome = 'after_hours' WHERE id = ?", id);
-        later('text-back', () => textBack(db, messenger, call, practice, config.appUrl));
+        later('text-back', () => textBack(db, messenger, call, practice, config.appUrl), practice.id);
       }
       if (!ai) return send(res, voicemail(practice, call));
       await db.run("UPDATE calls SET purpose = 'receptionist' WHERE id = ?", id);
@@ -85,7 +88,7 @@ export function phoneWebhooks({ db, config, messenger, storage, transcriber, fet
     const practice = await db.get('SELECT * FROM practices WHERE id = ?', call.practice_id);
     await db.run("UPDATE calls SET outcome = 'missed' WHERE id = ?", call.id);
     publish(call.practice_id, { type: 'call', event: 'missed', call_id: call.id });
-    later('text-back', () => textBack(db, messenger, call, practice, config.appUrl));
+    later('text-back', () => textBack(db, messenger, call, practice, config.appUrl), practice.id);
     if (receptionist(practice) && ['missed', 'always'].includes(practice.ai_receptionist)) {
       await db.run("UPDATE calls SET purpose = 'receptionist' WHERE id = ?", call.id);
       return send(res, greetAi(call));
@@ -102,14 +105,14 @@ export function phoneWebhooks({ db, config, messenger, storage, transcriber, fet
     const call = await callOf(req);
     if (call && req.body.TranscriptionText) {
       await db.run('UPDATE calls SET transcript = COALESCE(transcript, ?) WHERE id = ?', `Caller (voicemail): ${String(req.body.TranscriptionText).slice(0, 8000)}`, call.id);
-      later('summary', () => summarizeCall(db, config, call.id));
+      later('call summary', () => summarizeCall(db, config, call.id), call.practice_id);
     }
     res.status(204).end();
   });
   r.post('/api/webhooks/twilio/voice/recording', form, guard, async (req, res) => {
     const call = await callOf(req);
     if (call && req.body.RecordingUrl && (req.body.RecordingStatus || 'completed') === 'completed') {
-      later('recording', () => processRecording(db, { storage, transcriber, config, fetchImpl }, call.id, String(req.body.RecordingUrl)));
+      later('recording', () => processRecording(db, { storage, transcriber, config, fetchImpl }, call.id, String(req.body.RecordingUrl)), call.practice_id);
     }
     res.status(204).end();
   });
@@ -130,13 +133,13 @@ export function phoneWebhooks({ db, config, messenger, storage, transcriber, fet
     const silences = JSON.parse(call.ai_turns || '[]').filter((t) => t.role === 'caller' && t.text === '(silence)').length;
     if (!heard && silences >= 1) {
       await db.run("UPDATE calls SET outcome = COALESCE(outcome, 'hung_up') WHERE id = ?", call.id);
-      later('summary', () => summarizeCall(db, config, call.id));
+      later('call summary', () => summarizeCall(db, config, call.id), call.practice_id);
       return send(res, say('I didn’t catch that. Please call back anytime. Goodbye.') + '<Hangup/>');
     }
     const { say: text, hangup } = await receptionistTurn(db, config, call.id, heard || '(silence)');
     if (hangup) {
       await db.run("UPDATE calls SET status = 'completed', outcome = COALESCE(outcome, 'handled'), ended_at = datetime('now') WHERE id = ?", call.id);
-      later('summary', () => summarizeCall(db, config, call.id));
+      later('call summary', () => summarizeCall(db, config, call.id), call.practice_id);
       return send(res, say(text) + '<Hangup/>');
     }
     send(res, gather(call, text));

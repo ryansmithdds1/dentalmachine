@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { raiseIssue, resolveIssue, failed } from '../issues.js';
 import { requirePermission, HttpError, signToken, verifyToken } from '../auth.js';
 import { findOr404, audit, insert, practiceNow } from '../util.js';
 import { structured } from '../ai.js';
@@ -32,7 +33,13 @@ export async function runReviewSync(db, { gbp, secret }) {
   let n = 0;
   for (const c of await db.all('SELECT practice_id FROM review_connections')) {
     const since = new Date().toISOString().slice(0, 19).replace('T', ' ');
-    try { n += (await syncReviews(db, gbp, secret, c.practice_id)).synced; await newReviewTasks(db, c.practice_id, since); } catch { /* next time */ }
+    try {
+      n += (await syncReviews(db, gbp, secret, c.practice_id)).synced;
+      await newReviewTasks(db, c.practice_id, since);
+      await resolveIssue(db, c.practice_id, 'reviews-sync');
+    } catch (err) {
+      await raiseIssue(db, { practiceId: c.practice_id, kind: 'sync', key: 'reviews-sync', role: 'admin', title: 'Google reviews couldn’t be checked', detail: err.message });
+    }
   }
   return n;
 }
@@ -128,7 +135,7 @@ export function reputationPublicRoutes({ db, secret, gbp, config }) {
       if (have) await db.run('UPDATE review_connections SET location = ?, location_title = ?, access_token = ?, refresh_token = COALESCE(?, refresh_token), expires_at = ? WHERE id = ?', row.location, row.location_title, row.access_token, row.refresh_token, row.expires_at, have.id);
       else await insert(db, 'review_connections', { practice_id: state.pid, ...row, created_by: state.sub });
       await audit(db, { ip: req.ip, user: { practice_id: state.pid, id: state.sub } }, 'reputation.connect', 'practices', state.pid, { location: row.location_title });
-      await syncReviews(db, gbp, secret, state.pid).catch(() => {});
+      await syncReviews(db, gbp, secret, state.pid).catch(failed(db, { practiceId: state.pid, kind: 'sync', key: 'reviews-sync', role: 'admin', title: 'Google reviews couldn’t be checked' }));
       back({ google: 'connected' });
     } catch (err) {
       back({ google: 'error', message: err.message.slice(0, 200) });

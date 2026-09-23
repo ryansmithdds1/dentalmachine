@@ -1,4 +1,5 @@
 import { createHmac, randomBytes } from 'node:crypto';
+import { raiseIssue, resolveIssue } from './issues.js';
 import { insert } from './util.js';
 import { assertPublicUrl } from './netguard.js';
 
@@ -73,6 +74,7 @@ export async function deliverWebhooks(db, { ids = null, fetchImpl = globalThis.f
       ok++;
       await db.run("UPDATE webhook_deliveries SET status = 'delivered', attempts = ?, response_code = ?, delivered_at = datetime('now'), last_error = NULL WHERE id = ?", attempts, code, d.id);
       await db.run('UPDATE webhook_endpoints SET failures = 0 WHERE id = ?', d.endpoint_id);
+      await resolveIssue(db, d.practice_id, `webhook:${d.endpoint_id}`, 'Resolved: a later delivery to this address worked');
     } else {
       const gaveUp = attempts >= BACKOFF_MIN.length + 1;
       const next = new Date(now.getTime() + (BACKOFF_MIN[attempts - 1] || 1440) * 60_000).toISOString();
@@ -81,6 +83,13 @@ export async function deliverWebhooks(db, { ids = null, fetchImpl = globalThis.f
       await db.run('UPDATE webhook_endpoints SET failures = failures + 1 WHERE id = ?', d.endpoint_id);
       const { failures } = await db.get('SELECT failures FROM webhook_endpoints WHERE id = ?', d.endpoint_id);
       if (failures >= 50) await db.run('UPDATE webhook_endpoints SET active = 0 WHERE id = ?', d.endpoint_id);
+      if (gaveUp || failures >= 50) {
+        await raiseIssue(db, {
+          practiceId: d.practice_id, kind: 'integration', key: `webhook:${d.endpoint_id}`, role: 'admin', entity: 'webhook_endpoints', entityId: d.endpoint_id,
+          title: failures >= 50 ? `A webhook address kept failing and was switched off (${d.url.split('?')[0]})` : `A webhook couldn't be delivered to ${d.url.split('?')[0]} after every retry`,
+          detail: `${d.event}: ${error}`,
+        });
+      }
     }
   }
   return ok;

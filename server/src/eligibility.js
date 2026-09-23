@@ -1,4 +1,5 @@
 import { HttpError } from './auth.js';
+import { raiseIssue, resolveIssue } from './issues.js';
 import { insert, practiceNow, localNow } from './util.js';
 import { build270, parse271, x12Type } from './x12.js';
 import { benefitsUsed } from './services.js';
@@ -121,7 +122,17 @@ export async function runEligibilityBatches(db, eligibility, now = new Date()) {
     const tomorrow = new Date(Date.parse(`${local.slice(0, 10)}T12:00:00Z`) + 86400_000).toISOString().slice(0, 10);
     if (p.eligibility_batch_date === tomorrow) continue;
     await db.run('UPDATE practices SET eligibility_batch_date = ? WHERE id = ?', tomorrow, p.id);
-    done.push({ practice_id: p.id, ...(await eligibility.batch(p.id, tomorrow)) });
+    const out = await eligibility.batch(p.id, tomorrow);
+    done.push({ practice_id: p.id, ...out });
+    // Patients whose insurance couldn't be checked are one item for the front desk, not a log line.
+    const key = `eligibility:${tomorrow}`;
+    if (out.failed.length) {
+      await raiseIssue(db, {
+        practiceId: p.id, kind: 'eligibility', key, role: 'front_desk',
+        title: `Insurance couldn't be checked for ${out.failed.length} patient${out.failed.length === 1 ? '' : 's'} on ${tomorrow}`,
+        detail: [...new Set(out.failed.map((f) => f.error))].slice(0, 5).join('; '),
+      });
+    } else await resolveIssue(db, p.id, key);
   }
   return done;
 }

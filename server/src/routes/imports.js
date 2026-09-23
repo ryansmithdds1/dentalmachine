@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { raiseIssue } from '../issues.js';
 import { HttpError } from '../auth.js';
 import { insert, audit } from '../util.js';
 import { FIELDS, KINDS, SOURCES, SOURCE_NAMES, Importer, detectMapping, missingRequired, undoBatch } from '../importer.js';
@@ -186,6 +187,12 @@ export default function importRoutes({ db }) {
     });
     const b = await db.get('SELECT * FROM import_batches WHERE id = ?', batch.id);
     await audit(db, req, 'import.finish', 'import_batches', batch.id, { created: b.created_count, updated: b.updated_count, errors: b.error_count });
+    if (b.error_count) {
+      await raiseIssue(db, {
+        practiceId: req.user.practice_id, kind: 'import', key: `import:${batch.id}`, role: 'admin', entity: 'import_batches', entityId: batch.id,
+        title: `Import of ${b.kind}${b.filename ? ` (${b.filename})` : ''}: ${b.error_count} row${b.error_count === 1 ? '' : 's'} couldn't be brought in`, detail: 'Open Settings → Imports to see each row and why.',
+      });
+    }
     res.json({ ...b, errors: JSON.parse(b.errors || '[]'), mapping: JSON.parse(b.mapping || '{}') });
   });
 

@@ -1,4 +1,5 @@
 import { localNow } from './util.js';
+import { raiseIssue } from './issues.js';
 import { agingReport } from './aging.js';
 
 // Reports that can be saved and emailed: each turns its saved filters into a plain-text summary.
@@ -97,7 +98,10 @@ export async function sendSaved(db, messenger, report, today) {
     try {
       await messenger.send({ channel: 'email', to, subject, body });
       sent++;
-    } catch { /* one bad address doesn't stop the rest */ }
+    } catch (err) {
+      // One bad address doesn't stop the rest, but someone should know it didn't go.
+      await raiseIssue(db, { practiceId: report.practice_id, kind: 'message', key: `saved-report:${report.id}:${to}`, role: 'admin', title: `Scheduled report "${report.name}" couldn't be emailed to ${to}`, detail: err.message });
+    }
   }
   await db.run("UPDATE saved_reports SET last_sent_at = datetime('now'), last_sent_for = ? WHERE id = ?", today, report.id);
   return sent;

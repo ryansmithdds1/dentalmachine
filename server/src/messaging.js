@@ -1,4 +1,5 @@
 import { insert, friendlyDateTime, newToken, localNow, zonedToUtc, recorded } from './util.js';
+import { raiseIssue, resolveIssue, failed } from './issues.js';
 import { templatesFor, renderTemplate, patientLang, fixedText, subjectFor } from './templates.js';
 
 // Delivery drivers. "log" records the message without sending it (development / not yet configured).
@@ -146,8 +147,14 @@ export async function sendMessage(db, messenger, { practiceId, patientId, appoin
   try {
     const { provider_id } = await messenger.send({ channel, to, subject, body, html, attachments, headers, messageId: id });
     await db.run("UPDATE messages SET status = 'sent', provider_id = ?, sent_at = datetime('now') WHERE id = ?", provider_id, id);
+    await resolveIssue(db, practiceId, `message:${patientId || to}:${channel}`, 'Resolved: a later message went through');
   } catch (err) {
     await db.run("UPDATE messages SET status = 'failed', error = ?, error_code = ? WHERE id = ?", String(err.message).slice(0, 500), err.code ? String(err.code) : null, id);
+    const who = patientId ? await db.get('SELECT first_name, last_name FROM patients WHERE id = ?', patientId) : null;
+    await raiseIssue(db, {
+      practiceId, kind: 'message', key: `message:${patientId || to}:${channel}`, role: 'front_desk', entity: 'messages', entityId: id, patientId: patientId ?? null,
+      title: `${channel === 'sms' ? 'A text' : 'An email'} to ${who ? `${who.first_name} ${who.last_name}` : 'a patient'} didn't go (${kind.replace(/_/g, ' ')})`, detail: err.message,
+    });
     // Twilio refuses some numbers outright: not a mobile number, or not a valid one. Stop texting them.
     if (channel === 'sms' && patientId && ['21614', '21211', '21612'].includes(String(err.code))) await markBad(db, practiceId, 'sms', to, String(err.code) === '21614' ? 'Not a mobile number' : 'Not a valid number');
   }

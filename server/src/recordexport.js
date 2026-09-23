@@ -1,4 +1,5 @@
 // A patient's copy of their record (HIPAA right of access): one ZIP with a readable summary (record.pdf),
+import { raiseIssue } from './issues.js';
 // everything on file as data (record.json), and their x-rays, photos and documents as the original files.
 import { crc32, deflateRawSync } from 'node:zlib';
 import { PdfDoc } from './pdf.js';
@@ -136,6 +137,13 @@ export async function buildRecordExport(db, storage, practiceId, patientId) {
     while (used.has(fname)) fname = fname.replace(/(\.[^./]*)?$/, `-${d.id}$1`);
     used.add(fname);
     files.push({ name: fname, data: bytes });
+  }
+  if (missing) {
+    await raiseIssue(db, {
+      practiceId, kind: 'records', key: `record-export-missing:${patientId}`, role: 'admin', severity: 'high', entity: 'patients', entityId: patientId, patientId,
+      title: `${missing} chart file${missing === 1 ? '' : 's'} couldn't be read from storage while exporting a patient's record`,
+      detail: 'The files are listed in the record but their contents are missing — check storage and backups.',
+    });
   }
   if (missing) files.push({ name: 'documents/MISSING.txt', data: `${missing} file(s) listed in record.json could not be read from storage. Ask the office for copies.\n` });
   return { zip: zip(files), filename: safeName(`Health record ${name} ${data.exported_at.slice(0, 10)}.zip`), files: files.length };

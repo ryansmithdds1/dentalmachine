@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { raiseIssue } from '../issues.js';
 import { setActor } from '../actor.js';
 import { requirePermission, HttpError, rateLimit } from '../auth.js';
 import { findOr404, audit, newToken, hashToken, insert, practiceNow } from '../util.js';
@@ -48,7 +49,10 @@ export default function labRxRoutes({ db, messenger, config }) {
           body: `${practice.name} sent you a case.\n\n${c.description}${rx.teeth ? ` · teeth ${rx.teeth}` : ''}${c.due_date ? `\nNeeded back by ${c.due_date}` : ''}\n\nOpen the prescription and files (and update the case status) here:\n${link}\n\nThis link is private to your lab and works for ${LINK_DAYS} days. Questions: ${practice.phone || 'reply to the office'}.`,
         });
         emailed = true;
-      } catch { /* the link is still shown to staff to send another way */ }
+      } catch (err) {
+        // The link is still shown to staff to send another way; the failure is kept so it isn't assumed sent.
+        await raiseIssue(db, { practiceId: req.user.practice_id, kind: 'message', key: `lab-rx-email:${c.id}`, role: 'clinical', entity: 'lab_cases', entityId: c.id, patientId: c.patient_id, title: `The lab prescription email to ${email} didn't go — send the link another way`, detail: err.message });
+      }
     }
     await audit(db, req, 'lab_case.send_rx', 'lab_cases', c.id, { emailed, files: docs.length });
     res.json({ link, emailed, expires });

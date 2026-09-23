@@ -6,6 +6,7 @@ import { runFinanceSync } from './routes/finance.js';
 import { runFillOffers } from './fill.js';
 import { runReviewSync } from './routes/reputation.js';
 import { purgeIdempotencyKeys } from './idempotency.js';
+import { purgeIntegrationLog } from './issues.js';
 import { initCluster, runExclusive } from './cluster.js';
 import { pollClearinghouse } from './clearinghouse.js';
 import { runRecallSequences } from './recalls.js';
@@ -138,6 +139,11 @@ if (process.env.FINANCE_SYNC !== 'off') {
 {
   const run = () => runExclusive('idempotency-purge', 10 * 60 * 1000, () => purgeIdempotencyKeys(db)).catch(jobFailed('Idempotency purge'));
   setInterval(run, 60 * 60 * 1000).unref();
+}
+// Outside-service activity is kept for 90 days.
+{
+  const run = () => runExclusive('integration-log-purge', 10 * 60 * 1000, () => purgeIntegrationLog(db)).catch(jobFailed('Integration log purge'));
+  setInterval(run, 24 * 60 * 60 * 1000).unref();
 }
 // Online reviews, every two hours (low ratings become a task to reply).
 {

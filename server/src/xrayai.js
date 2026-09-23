@@ -1,4 +1,5 @@
 import { HttpError } from './auth.js';
+import { raiseIssue } from './issues.js';
 import { insert } from './util.js';
 import { structured, aiClient } from './ai.js';
 import { log } from './monitoring.js';
@@ -121,6 +122,8 @@ export async function analyzeDocument(db, doc) {
   const data = await d.storage.read(doc.storage_key, !!doc.encrypted);
   const out = await d.xrayAi.analyze({ data, mime: doc.mime, docId: doc.id, tooth: doc.tooth });
   await db.tx(async () => {
+    // Lock the image (Postgres) so two reads finishing together (automatic and by hand) don't both keep their findings.
+    await db.run('UPDATE documents SET ai_read_at = ai_read_at WHERE id = ?', doc.id);
     await db.run("DELETE FROM xray_findings WHERE document_id = ? AND status = 'suggested'", doc.id);
     for (const f of out.findings) {
       await insert(db, 'xray_findings', {
@@ -141,5 +144,9 @@ export function autoAnalyze(db, docId) {
     const doc = await db.get('SELECT d.*, p.xray_ai_auto FROM documents d JOIN practices p ON p.id = d.practice_id WHERE d.id = ?', docId);
     if (!doc?.xray_ai_auto || doc.category !== 'xray' || !/^image\//.test(doc.mime)) return;
     await analyzeDocument(db, doc);
-  })().catch((err) => log.warn('x-ray AI read failed', { document: docId, error: err.message }));
+  })().catch(async (err) => {
+    log.warn('x-ray AI read failed', { document: docId, error: err.message });
+    const doc = await db.get('SELECT practice_id, patient_id FROM documents WHERE id = ?', docId).catch(() => null);
+    if (doc) await raiseIssue(db, { practiceId: doc.practice_id, kind: 'ai', key: `xray-ai:${docId}`, role: 'clinical', entity: 'documents', entityId: docId, patientId: doc.patient_id, title: 'The automatic AI read of an x-ray failed — run it again from the image', detail: err.message });
+  });
 }

@@ -1,4 +1,5 @@
 import express from 'express';
+import { loggedFetch } from './issues.js';
 import { idempotency } from './idempotency.js';
 import { actorMiddleware, setActor } from './actor.js';
 import { flushChanges } from './util.js';
@@ -34,6 +35,7 @@ import insuranceAiRoutes from './routes/insuranceai.js';
 import askRoutes, { mcpRoutes } from './routes/ask.js';
 import orgRoutes from './routes/org.js';
 import claimAiRoutes from './routes/claimai.js';
+import issueRoutes from './routes/issues.js';
 import labRxRoutes, { labPublicRoutes } from './routes/labrx.js';
 import patientCareRoutes, { learnPublicRoutes } from './routes/patientcare.js';
 import checkinRoutes, { checkinPublicRoutes } from './routes/checkin.js';
@@ -137,6 +139,9 @@ export const CSP = "default-src 'self'; script-src 'self' https://cdn.plaid.com/
 export function createApp({ db, secret, config: overrides = {}, fetchImpl = globalThis.fetch, messenger, storage, clearinghouse, erx, payments, mailer, attachmentSender, plaid, qbo, xrayAi, transcriber, gbp }) {
   if (!secret) throw new Error('JWT secret is required');
   const config = { ...loadConfig(), ...overrides };
+  // Every call to an outside service is logged (Settings → Connections activity), Claude's included.
+  fetchImpl = loggedFetch(db, fetchImpl);
+  config.aiFetch ??= loggedFetch(db, globalThis.fetch);
   messenger ??= createMessenger({ fetchImpl });
   storage ??= createStorage({ dir: config.uploadDir, key: config.documentKey, previousKeys: config.documentKeysPrevious });
   erx ??= createErx(overrides.erx || erxConfig());
@@ -267,6 +272,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(orgRoutes({ db }));
   api.use(claimAiRoutes({ db, config }));
   api.use(labRxRoutes({ db, messenger, config }));
+  api.use(issueRoutes({ db }));
   api.use(patientCareRoutes({ db, messenger, config }));
   api.use(checkinRoutes({ db, messenger }));
   api.use(lenderRoutes({ db, messenger }));

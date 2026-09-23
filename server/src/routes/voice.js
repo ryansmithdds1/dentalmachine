@@ -1,4 +1,5 @@
 import express, { Router } from 'express';
+import { raiseIssue, resolveIssue, failed } from '../issues.js';
 import { setActor } from '../actor.js';
 import { timingSafeEqual } from 'node:crypto';
 import { twilioSignature } from './sms.js';
@@ -122,7 +123,7 @@ export function voiceWebhooks({ db, config }) {
       const call = await db.get("SELECT id, practice_id, purpose, outcome, summary, transcript FROM calls WHERE provider_id = ? AND direction = 'inbound'", sid);
       if (call && req.body.CallStatus === 'completed') {
         publish(call.practice_id, { type: 'call', event: 'ended', call_id: call.id });
-        if (call.purpose === 'receptionist' && call.transcript && !call.summary) setImmediate(() => summarizeCall(db, config, call.id).catch(() => {}));
+        if (call.purpose === 'receptionist' && call.transcript && !call.summary) setImmediate(() => summarizeCall(db, config, call.id).catch(failed(db, { practiceId: call.practice_id, kind: 'ai', key: `call-summary:${call.id}`, role: 'front_desk', title: 'An AI receptionist call couldn’t be summarized — read its transcript in Calls' })));
       }
     }
     res.status(204).end();

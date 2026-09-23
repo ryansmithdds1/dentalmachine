@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { raiseIssue, resolveIssue, failed } from '../issues.js';
 import { randomBytes } from 'node:crypto';
 import { hashPassword, verifyPassword, signToken, verifyToken, authenticate, rateLimit, HttpError, effectivePermissions, USER_PERMISSION_SQL } from '../auth.js';
 import { pick, requireFields, insert, audit, newToken, hashToken, staffPractice } from '../util.js';
@@ -283,7 +284,7 @@ export default function authRoutes({ db, secret, config = {}, fetchImpl = global
       messenger.send({
         channel: 'email', to: user.email, subject: 'Reset your Dental Machine password',
         body: `Hi ${user.name},\n\nSomeone (hopefully you) asked to reset your password for ${practice.name}. Choose a new one here within ${RESET_MINUTES} minutes:\n\n${link}\n\nIf you didn't ask, you can ignore this email — your password hasn't changed.`,
-      }).catch(() => {});
+      }).catch(failed(db, { practiceId: user.practice_id, kind: 'integration', key: `password-reset:${user.id}`, role: 'admin', title: `The password reset email to ${user.name} couldn't be sent` }));
       await audit(db, { ip: req.ip, user: { id: user.id, practice_id: user.practice_id } }, 'auth.password_reset_requested', 'users', user.id);
     }
     res.json({ ok: true });

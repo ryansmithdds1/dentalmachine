@@ -1,4 +1,5 @@
 import { autoReceipt } from './receipts.js';
+import { raiseIssue, resolveIssue, failed } from './issues.js';
 import { randomBytes } from 'node:crypto';
 import { HttpError } from './auth.js';
 import { insert, practiceNow } from './util.js';
@@ -224,7 +225,7 @@ async function autopayPlan(db, payments, messenger, plan, today) {
         practiceId: plan.practice_id, patientId: patient.id, kind: 'payment_request', channel: target.channel, to: target.to,
         subject: subjectFor(patientLang(patient), 'card_declined', `Payment plan payment didn't go through — ${practice.name}`, practice.name),
         body: await messageText(db, plan.practice_id, 'card_declined', { first_name: patient.first_name, amount, reason: out.reason }, patientLang(patient)),
-      }).catch(() => {});
+      }).catch(failed(db, { practiceId: plan.practice_id, kind: 'payment', key: `decline-notice:${plan.id}`, role: 'billing', patientId: patient.id, title: 'The patient couldn’t be told their payment-plan card was declined' }));
     }
     return { plan_id: plan.id, ok: false, reason: out.reason, paused: !!paused };
   }

@@ -1,4 +1,5 @@
 import { autoReceipt } from './receipts.js';
+import { raiseIssue, resolveIssue, failed } from './issues.js';
 import { HttpError } from './auth.js';
 import { insert, practiceNow } from './util.js';
 import { preferredChannel, sendMessage } from './messaging.js';
@@ -151,7 +152,7 @@ async function billPeriod(db, payments, m, today, messenger) {
               practiceId: m.practice_id, patientId: patient.id, kind: 'payment_request', channel: target.channel, to: target.to,
               subject: subjectFor(patientLang(patient), 'card_declined', `Membership payment didn't go through — ${practice.name}`, practice.name),
               body: await messageText(db, m.practice_id, 'card_declined', { first_name: patient.first_name, amount: m.price, reason: out.reason }, patientLang(patient)),
-            }).catch(() => {});
+            }).catch(failed(db, { practiceId: m.practice_id, kind: 'payment', key: `decline-notice:m${m.id}`, role: 'billing', patientId: patient.id, title: 'The patient couldn’t be told their membership card was declined' }));
           }
         }
         return { ...result, declined: true, reason: out.reason };

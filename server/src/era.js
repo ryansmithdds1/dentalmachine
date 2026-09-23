@@ -1,4 +1,5 @@
 import { HttpError } from './auth.js';
+import { raiseIssue, resolveIssue, failed } from './issues.js';
 import { insert, practiceNow, recorded } from './util.js';
 import { parse835All, CARC } from './x12.js';
 import { postClaimPayment } from './services.js';
@@ -143,6 +144,13 @@ export async function postEra(db, practiceId, era, { userId = null, filename = n
       provider_adjustments: era.provider_adjustments?.length ? JSON.stringify(era.provider_adjustments) : null,
     });
     await db.run('UPDATE insurance_checks SET era_import_id = ? WHERE id = ?', importId, checkId);
+    const review = details.filter((d) => d.result === 'needs_review' || d.result === 'unmatched').length;
+    if (review) {
+      await raiseIssue(db, {
+        practiceId, kind: 'era', key: `era:${importId}`, role: 'billing', severity: 'high', entity: 'era_imports', entityId: importId,
+        title: `ERA ${era.check_number || ''} from ${era.payer_name || 'the payer'}: ${review} claim line${review === 1 ? '' : 's'} couldn't be posted automatically`, detail: 'Open Billing → Remittance to match or post them.',
+      });
+    }
     return importId;
   });
   return { id, practice_id: practiceId, payer_name: era.payer_name, check_number: era.check_number, payment_date: era.payment_date, total_paid: era.total_paid, claims: details, provider_adjustments: era.provider_adjustments || [] };
@@ -151,5 +159,14 @@ export async function postEra(db, practiceId, era, { userId = null, filename = n
 // Timeline entry for a claim's electronic journey, and its latest status on the claim itself.
 export async function claimEvent(db, claim, source, status, message) {
   await insert(db, 'claim_events', { practice_id: claim.practice_id, claim_id: claim.id, source, status, message: message ? String(message).slice(0, 500) : null });
+  // A rejection, denial or payer question needs someone in billing; it's closed when the claim moves on.
+  const key = `claim:${claim.id}`;
+  if (['rejected', 'denied', 'request'].includes(status)) {
+    const who = await db.get('SELECT first_name, last_name FROM patients WHERE id = ?', claim.patient_id);
+    await raiseIssue(db, {
+      practiceId: claim.practice_id, kind: 'claim', key, role: 'billing', severity: status === 'request' ? 'normal' : 'high', entity: 'claims', entityId: claim.id, patientId: claim.patient_id,
+      title: `Claim #${claim.id}${who ? ` (${who.first_name} ${who.last_name})` : ''} ${status === 'rejected' ? 'was rejected' : status === 'denied' ? 'was denied' : 'needs a look'}`, detail: message,
+    });
+  } else if (['sent', 'accepted', 'paid'].includes(status)) await resolveIssue(db, claim.practice_id, key, `Resolved: claim ${status}`);
   await db.run("UPDATE claims SET ch_status = ?, ch_message = ?, ch_updated_at = datetime('now') WHERE id = ?", status, message ? String(message).slice(0, 500) : null, claim.id);
 }

@@ -1792,6 +1792,44 @@ CREATE TABLE IF NOT EXISTS idempotency_keys (
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE (scope, key)
 );
+-- "Needs attention": failures turned into work items (see issues.js).
+CREATE TABLE IF NOT EXISTS issues (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  kind TEXT NOT NULL,
+  dedupe_key TEXT NOT NULL,
+  title TEXT NOT NULL,
+  detail TEXT,
+  severity TEXT NOT NULL DEFAULT 'normal',
+  role TEXT NOT NULL DEFAULT 'admin',
+  entity TEXT,
+  entity_id INTEGER,
+  patient_id INTEGER,
+  status TEXT NOT NULL DEFAULT 'open',
+  occurrences INTEGER NOT NULL DEFAULT 1,
+  source TEXT,
+  assigned_to INTEGER REFERENCES users(id),
+  first_seen TEXT NOT NULL DEFAULT (datetime('now')),
+  last_seen TEXT NOT NULL DEFAULT (datetime('now')),
+  resolved_at TEXT,
+  resolved_by INTEGER REFERENCES users(id),
+  resolution TEXT
+);
+-- Every call to an outside service (see issues.js): no bodies, no query strings.
+CREATE TABLE IF NOT EXISTS integration_log (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER,
+  service TEXT NOT NULL,
+  operation TEXT NOT NULL,
+  ok INTEGER NOT NULL,
+  http_status INTEGER,
+  duration_ms INTEGER,
+  external_id TEXT,
+  attempt INTEGER NOT NULL DEFAULT 1,
+  error TEXT,
+  source TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 CREATE TABLE IF NOT EXISTS organizations (
   id INTEGER PRIMARY KEY,
   name TEXT NOT NULL,
@@ -2181,6 +2219,8 @@ CREATE INDEX IF NOT EXISTS idx_proc_plan ON procedures(treatment_plan_id);
 CREATE INDEX IF NOT EXISTS idx_proc_done ON procedures(practice_id, status, completed_at);
 CREATE INDEX IF NOT EXISTS idx_ledger_date ON ledger_entries(practice_id, entry_date);
 CREATE INDEX IF NOT EXISTS idx_audit_patient ON audit_log(practice_id, patient_id, id);
+CREATE INDEX IF NOT EXISTS idx_issues_open ON issues(practice_id, status, dedupe_key);
+CREATE INDEX IF NOT EXISTS idx_integration_log ON integration_log(practice_id, created_at);
 -- A completed procedure is charged once: a second live charge for it is refused by the database.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_one_charge_per_procedure ON ledger_entries(procedure_id) WHERE type = 'charge' AND procedure_id IS NOT NULL AND voided_at IS NULL AND reverses_id IS NULL;
 CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log(practice_id, user_id, id);
