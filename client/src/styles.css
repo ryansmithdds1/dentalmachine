@@ -507,3 +507,4 @@ button.active, .seg button.active { background: var(--primary-soft); color: var(
 .portal-activity { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
 .portal-activity .num { white-space: nowrap; font-variant-numeric: tabular-nums; }
 .portal-activity .paid { color: var(--ok); }
+.sso-button { justify-content: center; gap: 10px; font-weight: 600; }

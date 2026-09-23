@@ -1,8 +1,10 @@
 import { Router } from 'express';
+import { randomBytes } from 'node:crypto';
 import { hashPassword, verifyPassword, signToken, authenticate, rateLimit, HttpError, PERMISSIONS } from '../auth.js';
-import { pick, requireFields, insert, audit } from '../util.js';
+import { pick, requireFields, insert, audit, newToken, hashToken } from '../util.js';
 import { seedPracticeDefaults } from '../defaults.js';
 import { generateSecret, verifyTotp, otpauthUrl } from '../totp.js';
+import { PROVIDERS, issuerFor, pkcePair, discover, exchangeCode, verifyIdToken, claimEmail, openSecret } from '../sso.js';
 
 export function validatePassword(pw) {
   if (typeof pw !== 'string' || pw.length < 10) {
@@ -23,7 +25,7 @@ async function session(user, secret, db) {
   };
 }
 
-export default function authRoutes({ db, secret }) {
+export default function authRoutes({ db, secret, config = {}, fetchImpl = globalThis.fetch }) {
   const r = Router();
   const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20 });
 
@@ -52,6 +54,10 @@ export default function authRoutes({ db, secret }) {
   r.post('/login', limiter, async (req, res) => {
     const { email, password } = req.body || {};
     const user = email && (await db.get('SELECT * FROM users WHERE lower(email) = lower(?)', String(email).trim()));
+    if (user?.active && user.role !== 'admin') {
+      const p = await db.get('SELECT sso_only, sso_provider FROM practices WHERE id = ?', user.practice_id);
+      if (p.sso_only && p.sso_provider) throw new HttpError(403, `Your practice signs in with ${PROVIDERS[p.sso_provider].name} — use the single sign-on button`, { sso_required: true });
+    }
     if (!user || !user.active || !verifyPassword(String(password || ''), user.password_hash)) {
       await audit(db, { ip: req.ip, user: user ? { id: user.id, practice_id: user.practice_id } : null }, 'auth.login_failed', 'users', user?.id, { email });
       throw new HttpError(401, 'Invalid email or password');
@@ -71,9 +77,75 @@ export default function authRoutes({ db, secret }) {
     res.json(await session(user, secret, db));
   });
 
+  // ---- Single sign-on (OpenID Connect) ----
+  const redirectUri = () => `${config.appUrl}/api/auth/sso/callback`;
+  const back = (res, params) => res.redirect(302, `${config.appUrl}/#${new URLSearchParams(params)}`);
+  const ssoPractice = async (practiceId) => {
+    const p = await db.get('SELECT * FROM practices WHERE id = ?', practiceId);
+    const issuer = p && issuerFor(p);
+    if (!issuer || !p.sso_client_id || !p.sso_client_secret) return null;
+    return { practice: p, issuer, clientSecret: openSecret(p.sso_client_secret, secret) };
+  };
+
+  // Which button to show on the sign-in page for this email (no secrets, and the same answer for unknown emails).
+  r.get('/sso/lookup', limiter, async (req, res) => {
+    const email = String(req.query.email || '').trim().toLowerCase();
+    const user = email && (await db.get('SELECT practice_id FROM users WHERE lower(email) = ? AND active = 1', email));
+    const p = user && (await db.get('SELECT sso_provider, sso_only FROM practices WHERE id = ?', user.practice_id));
+    res.json(p?.sso_provider ? { sso: true, provider: p.sso_provider, name: PROVIDERS[p.sso_provider].name, required: !!p.sso_only } : { sso: false });
+  });
+
+  r.get('/sso/start', limiter, async (req, res) => {
+    const email = String(req.query.email || '').trim().toLowerCase();
+    const user = email && (await db.get('SELECT * FROM users WHERE lower(email) = ? AND active = 1', email));
+    const cfg = user && (await ssoPractice(user.practice_id));
+    if (!cfg) return back(res, { sso_error: 'Single sign-on is not set up for that email' });
+    const oidc = await discover(cfg.issuer, fetchImpl);
+    const { verifier, challenge } = pkcePair();
+    const nonce = randomBytes(16).toString('base64url');
+    // One-time state; the PKCE verifier and nonce stay on the server.
+    const { token: state, hash } = newToken();
+    await insert(db, 'sso_logins', { state_hash: hash, practice_id: cfg.practice.id, nonce, verifier, expires_at: new Date(Date.now() + 10 * 60_000).toISOString().slice(0, 19).replace('T', ' ') });
+    const url = new URL(oidc.authorization_endpoint);
+    for (const [k, v] of Object.entries({
+      response_type: 'code', client_id: cfg.practice.sso_client_id, redirect_uri: redirectUri(), scope: 'openid email profile', state, nonce,
+      code_challenge: challenge, code_challenge_method: 'S256', login_hint: email, ...(cfg.practice.sso_provider === 'google' && cfg.practice.sso_domain ? { hd: cfg.practice.sso_domain } : {}),
+    })) url.searchParams.set(k, v);
+    res.redirect(302, url.toString());
+  });
+
+  r.get('/sso/callback', async (req, res) => {
+    try {
+      if (req.query.error) throw new HttpError(401, String(req.query.error_description || req.query.error));
+      const login = await db.get('SELECT * FROM sso_logins WHERE state_hash = ? AND used_at IS NULL', hashToken(String(req.query.state || '')));
+      if (!login || login.expires_at < new Date().toISOString().slice(0, 19).replace('T', ' ')) throw new HttpError(401, 'Sign-in link expired — please try again');
+      await db.run("UPDATE sso_logins SET used_at = datetime('now') WHERE id = ?", login.id);
+      const state = { pid: login.practice_id, nonce: login.nonce, verifier: login.verifier };
+      const cfg = await ssoPractice(state.pid);
+      if (!cfg) throw new HttpError(401, 'Single sign-on is not set up');
+      const oidc = await discover(cfg.issuer, fetchImpl);
+      const tokens = await exchangeCode({ config: oidc, code: String(req.query.code || ''), redirectUri: redirectUri(), verifier: state.verifier, clientId: cfg.practice.sso_client_id, clientSecret: cfg.clientSecret, fetchImpl });
+      const claims = await verifyIdToken(tokens.id_token, { config: oidc, clientId: cfg.practice.sso_client_id, nonce: state.nonce, fetchImpl });
+      const email = claimEmail(claims);
+      if (claims.email_verified === false) throw new HttpError(401, 'Your email address is not verified with your identity provider');
+      const domain = cfg.practice.sso_domain?.toLowerCase();
+      if (domain && !email.endsWith(`@${domain}`) && claims.hd !== domain) throw new HttpError(403, `Only @${domain} accounts can sign in`);
+      const user = await db.get('SELECT * FROM users WHERE practice_id = ? AND lower(email) = ? AND active = 1', cfg.practice.id, email);
+      if (!user) throw new HttpError(403, `${email} doesn't have an account at this practice — ask your administrator to add you`);
+      const subject = `${claims.iss}|${claims.sub}`;
+      if (user.sso_subject && user.sso_subject !== subject) throw new HttpError(403, 'This account is linked to a different sign-in identity');
+      await db.run("UPDATE users SET sso_subject = ?, last_login_at = datetime('now') WHERE id = ?", subject, user.id);
+      await audit(db, { ip: req.ip, user }, 'auth.sso_login', 'users', user.id, { provider: cfg.practice.sso_provider });
+      back(res, { sso: (await session(user, secret, db)).token });
+    } catch (err) {
+      await audit(db, { ip: req.ip, user: null }, 'auth.sso_failed', null, null, { error: err.message }).catch(() => {});
+      back(res, { sso_error: err instanceof HttpError ? err.message : 'Single sign-on failed' });
+    }
+  });
+
   r.get('/me', authenticate(db, secret, { allowMfaSetup: true }), async (req, res) => {
     const practice = await db.get('SELECT * FROM practices WHERE id = ?', req.user.practice_id);
-    res.json({ ...(await session(req.user, secret, db)), practice });
+    res.json({ ...(await session(req.user, secret, db)), practice: { ...practice, sso_client_secret: undefined } });
   });
 
   r.post('/change-password', authenticate(db, secret, { allowMfaSetup: true }), async (req, res) => {

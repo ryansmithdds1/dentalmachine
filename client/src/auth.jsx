@@ -3,6 +3,20 @@ import { api, getToken, setToken } from './api.js';
 
 const AuthContext = createContext(null);
 
+// Returning from single sign-on: the server redirects to /#sso=<token> (or #sso_error=…).
+let ssoError = null;
+if (typeof window !== 'undefined' && /^#(sso|sso_error)=/.test(window.location.hash)) {
+  const params = new URLSearchParams(window.location.hash.slice(1));
+  if (params.get('sso')) setToken(params.get('sso'));
+  ssoError = params.get('sso_error');
+  window.history.replaceState(null, '', window.location.pathname + window.location.search);
+}
+export const takeSsoError = () => {
+  const e = ssoError;
+  ssoError = null;
+  return e;
+};
+
 export function AuthProvider({ children }) {
   const [state, setState] = useState({ loading: !!getToken(), user: null, practice: null });
 

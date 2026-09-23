@@ -658,6 +658,17 @@ CREATE TABLE IF NOT EXISTS portal_codes (
 );
 CREATE INDEX IF NOT EXISTS idx_portal_codes ON portal_codes(practice_id, contact);
 
+CREATE TABLE IF NOT EXISTS sso_logins (
+  id INTEGER PRIMARY KEY,
+  state_hash TEXT NOT NULL UNIQUE,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  nonce TEXT NOT NULL,
+  verifier TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  used_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS tasks (
   id INTEGER PRIMARY KEY,
   practice_id INTEGER NOT NULL REFERENCES practices(id),
@@ -747,6 +758,14 @@ const COLUMNS = [
   ['payment_plans', 'autopay_message', 'TEXT'],
   ['statement_runs', 'mailed', 'INTEGER NOT NULL DEFAULT 0'],
   ['practices', 'portal_enabled', 'INTEGER NOT NULL DEFAULT 1'],
+  ['practices', 'sso_provider', 'TEXT'],
+  ['practices', 'sso_tenant', 'TEXT'],
+  ['practices', 'sso_issuer', 'TEXT'],
+  ['practices', 'sso_client_id', 'TEXT'],
+  ['practices', 'sso_client_secret', 'TEXT'],
+  ['practices', 'sso_domain', 'TEXT'],
+  ['practices', 'sso_only', 'INTEGER NOT NULL DEFAULT 0'],
+  ['users', 'sso_subject', 'TEXT'],
   ['appointments', 'series_id', 'INTEGER REFERENCES appointment_series(id)'],
 ];
 

@@ -77,7 +77,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   });
 
   app.get('/api/health', (_req, res) => res.json({ ok: true }));
-  app.use('/api/auth', authRoutes({ db, secret }));
+  app.use('/api/auth', authRoutes({ db, secret, config, fetchImpl }));
   app.use('/api/public', (_req, res, next) => {
     res.set('Cache-Control', 'no-store');
     next();
@@ -100,7 +100,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(clinicalRoutes({ db }));
   api.use(billingRoutes({ db }));
   api.use(insuranceRoutes({ db }));
-  api.use(settingsRoutes({ db }));
+  api.use(settingsRoutes({ db, secret, config }));
   api.use(reportRoutes({ db }));
   api.use(engagementRoutes({ db, messenger, config }));
   api.use(documentRoutes({ db, storage }));

@@ -221,6 +221,8 @@ export default function growthRoutes({ db, messenger, config, mailer = { enabled
     'practices', 'providers', 'operatories', 'appointment_types', 'procedure_codes', 'fee_schedules', 'insurance_carriers', 'patients', 'patient_insurance',
     'appointments', 'blockouts', 'procedures', 'treatment_plans', 'tooth_conditions', 'perio_exams', 'clinical_notes', 'prescriptions', 'ledger_entries',
     'claims', 'preauths', 'payment_plans', 'recalls', 'patient_forms', 'documents', 'lab_cases', 'tasks', 'messages', 'followups', 'audit_log',
+    'appointment_series', 'claim_events', 'edi_batches', 'eligibility_checks', 'era_imports', 'payment_methods', 'payment_requests',
+    'statement_runs', 'statement_deliveries', 'form_requests', 'booking_requests',
   ];
   r.get('/export', requireAdmin, async (req, res) => {
     const pid = req.user.practice_id;
@@ -228,7 +230,7 @@ export default function growthRoutes({ db, messenger, config, mailer = { enabled
     for (const t of EXPORT_TABLES) {
       const col = t === 'practices' ? 'id' : 'practice_id';
       out.tables[t] = (await db.all(`SELECT * FROM ${t} WHERE ${col} = ?`, pid)).map((row) => {
-        const { password_hash: _p, mfa_secret: _m, confirm_token_hash: _c, sign_token_hash: _s, token_hash: _t, ...rest } = row;
+        const { password_hash: _p, mfa_secret: _m, confirm_token_hash: _c, sign_token_hash: _s, token_hash: _t, sso_client_secret: _k, ...rest } = row;
         return rest;
       });
     }

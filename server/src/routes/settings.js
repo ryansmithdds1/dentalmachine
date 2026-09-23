@@ -3,6 +3,7 @@ import { HttpError, hashPassword } from '../auth.js';
 import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, toCents } from '../util.js';
 import { validatePassword } from './auth.js';
 import { validateHours } from '../hours.js';
+import { PROVIDERS, sealSecret } from '../sso.js';
 import { validateTemplates, DEFAULT_TEMPLATES } from '../templates.js';
 
 const ROLES = ['admin', 'dentist', 'hygienist', 'assistant', 'front_desk', 'billing'];
@@ -34,10 +35,37 @@ function resource(r, db, { path, table, fields, required, validate = () => {}, o
   });
 }
 
-export default function settingsRoutes({ db }) {
+export default function settingsRoutes({ db, secret, config = {} }) {
   const r = Router();
 
-  r.get('/practice', async (req, res) => res.json(await db.get('SELECT * FROM practices WHERE id = ?', req.user.practice_id)));
+  r.get('/practice', async (req, res) => res.json({ ...(await db.get('SELECT * FROM practices WHERE id = ?', req.user.practice_id)), sso_client_secret: undefined }));
+  // ---- Single sign-on settings (the client secret is write-only) ----
+  const ssoView = (p) => ({
+    provider: p.sso_provider, tenant: p.sso_tenant, issuer: p.sso_issuer, client_id: p.sso_client_id, has_secret: !!p.sso_client_secret,
+    domain: p.sso_domain, sso_only: !!p.sso_only, redirect_uri: `${config.appUrl}/api/auth/sso/callback`,
+  });
+  r.get('/practice/sso', requireAdmin, async (req, res) => res.json(ssoView(await db.get('SELECT * FROM practices WHERE id = ?', req.user.practice_id))));
+  r.put('/practice/sso', requireAdmin, async (req, res) => {
+    const b = req.body || {};
+    const provider = b.provider || null;
+    requireOneOf(provider, Object.keys(PROVIDERS), 'provider');
+    const row = {
+      sso_provider: provider, sso_tenant: b.tenant?.trim() || null, sso_issuer: b.issuer?.trim().replace(/\/$/, '') || null,
+      sso_client_id: b.client_id?.trim() || null, sso_domain: b.domain?.trim().toLowerCase().replace(/^@/, '') || null, sso_only: provider && b.sso_only ? 1 : 0,
+    };
+    if (b.client_secret) row.sso_client_secret = sealSecret(String(b.client_secret).trim(), secret);
+    if (!provider) Object.assign(row, { sso_client_secret: null, sso_only: 0 });
+    if (provider === 'microsoft' && !row.sso_tenant) throw new HttpError(400, 'Enter your Microsoft Entra tenant ID (Azure portal → Entra ID → Overview)');
+    if (provider === 'oidc' && !/^(https:\/\/|http:\/\/(localhost|127\.0\.0\.1)[:/])/.test(row.sso_issuer || '')) throw new HttpError(400, 'Enter the issuer URL (https://…) from your identity provider');
+    if (provider && !row.sso_client_id) throw new HttpError(400, 'Enter the client ID from your identity provider');
+    const current = await db.get('SELECT sso_client_secret FROM practices WHERE id = ?', req.user.practice_id);
+    if (provider && !row.sso_client_secret && !current.sso_client_secret) throw new HttpError(400, 'Enter the client secret from your identity provider');
+    const keys = Object.keys(row);
+    await db.run(`UPDATE practices SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, ...keys.map((k) => row[k]), req.user.practice_id);
+    await audit(db, req, 'practice.sso_update', 'practices', req.user.practice_id, { provider, sso_only: !!row.sso_only });
+    res.json(ssoView(await db.get('SELECT * FROM practices WHERE id = ?', req.user.practice_id)));
+  });
+
   r.get('/message-templates/defaults', (_req, res) => res.json(DEFAULT_TEMPLATES));
   r.put('/practice', requireAdmin, async (req, res) => {
     const row = pick(req.body, ['name', 'address', 'city', 'state', 'zip', 'phone', 'email', 'tax_id', 'npi', 'timezone', 'slug', 'online_booking', 'reminder_hours', 'require_mfa', 'office_hours', 'daily_goal', 'sms_number', 'review_url', 'review_requests', 'idle_timeout_minutes', 'message_templates', 'hygiene_goal', 'portal_enabled']);
@@ -72,7 +100,7 @@ export default function settingsRoutes({ db }) {
     const keys = Object.keys(row);
     if (keys.length) await db.run(`UPDATE practices SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, ...keys.map((k) => row[k]), req.user.practice_id);
     await audit(db, req, 'practice.update', 'practices', req.user.practice_id);
-    res.json(await db.get('SELECT * FROM practices WHERE id = ?', req.user.practice_id));
+    res.json({ ...(await db.get('SELECT * FROM practices WHERE id = ?', req.user.practice_id)), sso_client_secret: undefined });
   });
 
   // ---- Users ----

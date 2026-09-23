@@ -223,6 +223,7 @@ function Practice() {
         {saved && <span className="badge ok">Saved</span>}
         <button className="primary" disabled={busy} onClick={submit}>Save</button>
       </div>
+      <SingleSignOn />
     </>
   );
 }
@@ -701,5 +702,59 @@ function ImagingBridges() {
         </div>
       </div>
     </>
+  );
+}
+
+const SSO_HELP = {
+  google: 'Google Cloud console → APIs & Services → Credentials → Create OAuth client ID (Web application).',
+  microsoft: 'Azure portal → Microsoft Entra ID → App registrations → New registration (Web). Create a client secret under Certificates & secrets.',
+  oidc: 'Create an OpenID Connect web application in your identity provider (Okta, Auth0, Keycloak, JumpCloud…).',
+};
+
+// Staff sign-in through Google Workspace, Microsoft 365 or another OpenID Connect provider.
+function SingleSignOn() {
+  const { data, reload } = useApi('/practice/sso');
+  const [form, setForm] = useState(null);
+  const [saved, setSaved] = useState(false);
+  const cur = form || (data && { provider: data.provider || '', tenant: data.tenant || '', issuer: data.issuer || '', client_id: data.client_id || '', client_secret: '', domain: data.domain || '', sso_only: data.sso_only });
+  const { submit, busy, error } = useSubmit(async () => {
+    await api.put('/practice/sso', { ...cur, provider: cur.provider || null });
+    setForm(null);
+    setSaved(true);
+    reload();
+  });
+  if (!cur) return null;
+  const set = (k) => (e) => { setSaved(false); setForm({ ...cur, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value }); };
+  return (
+    <div className="card">
+      <h2>Single sign-on</h2>
+      <p className="muted" style={{ fontSize: 13 }}>Let staff sign in with their work Google or Microsoft account (or another identity provider). Their email must match a user here; turning off someone&apos;s work account ends their access.</p>
+      <div className="form-grid">
+        <label>
+          Identity provider
+          <select value={cur.provider} onChange={set('provider')}>
+            <option value="">Off — passwords only</option>
+            <option value="google">Google Workspace</option>
+            <option value="microsoft">Microsoft 365 / Entra ID</option>
+            <option value="oidc">Other (OpenID Connect)</option>
+          </select>
+        </label>
+        {cur.provider && (
+          <>
+            {cur.provider === 'microsoft' && <label>Tenant ID<input value={cur.tenant} onChange={set('tenant')} placeholder="00000000-0000-0000-0000-000000000000" /></label>}
+            {cur.provider === 'oidc' && <label>Issuer URL<input value={cur.issuer} onChange={set('issuer')} placeholder="https://yourcompany.okta.com" /></label>}
+            <label>Client ID<input value={cur.client_id} onChange={set('client_id')} /></label>
+            <label>Client secret<input type="password" value={cur.client_secret} onChange={set('client_secret')} placeholder={data.has_secret ? 'Saved — leave blank to keep' : ''} autoComplete="new-password" /></label>
+            <label>Allowed email domain (optional)<input value={cur.domain} onChange={set('domain')} placeholder="brightsmiles.com" /></label>
+            <label className="checkbox full"><input type="checkbox" checked={!!cur.sso_only} onChange={set('sso_only')} /> Require single sign-on (passwords stop working for everyone except administrators)</label>
+            <div className="full muted" style={{ fontSize: 12 }}>
+              {SSO_HELP[cur.provider]} Add this redirect URI: <code>{data.redirect_uri}</code>
+            </div>
+          </>
+        )}
+      </div>
+      <ErrorBox error={error} />
+      <div className="form-actions">{saved && <span className="badge ok">Saved</span>}<button className="primary" disabled={busy} onClick={submit}>Save sign-in settings</button></div>
+    </div>
   );
 }
