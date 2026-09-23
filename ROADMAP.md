@@ -19,53 +19,55 @@ Size: **S** is under a day, **M** is 1–3 days, **L** is a week or more.
 
 ## Part 1 — Fix first: bugs found in the audit (P0)
 
+**Status: all fixed (September 2026)**, with tests on SQLite and Postgres.
+
 These are defects in features we already ship. Most are small, and they matter more than anything new, because an office judges a PMS on whether its numbers can be trusted.
 
 ### Money and insurance correctness
-- [ ] **Secondary claims can't be created.** A procedure already on a primary claim is rejected (`insurance.js:129`). Allow one claim per coverage level. **S**, but it blocks item 2.1.
-- [ ] **Deductible never resets.** `deductible_met` never resets for a new benefit year, while annual max used does. Needs a benefit-year start per plan and a reset. **S**
-- [ ] **Statements overstate the PPO patient portion.** They ignore the expected write-off, so in-network patients are billed amounts they will never owe. Post the expected write-off when the claim is created, or show it as pending, and make the ledger, statements and portal agree. **M**
-- [ ] **Two different "pending insurance" figures.** The ledger counts only `submitted` at the full estimate; the statement run uses estimate − paid over submitted and partially_paid. Use one shared function. **S**
-- [ ] **No void or reversal for ledger entries,** and a completed procedure can't be un-completed. Add void-with-reason: the entry stays, a reversing entry is added, and it's audited. **M**
-- [ ] **Backdating and period locks.** Payments and adjustments accept any date. Add a "lock date" before which nothing can be posted or changed (admin override). **S**
-- [ ] **Refunds.** They aren't checked against a credit, never call a Stripe refund, and have no UI. **M**
-- [ ] **Negative final installment.** Payment-plan rounding can make the last installment negative (`family.js:154`). **S**
-- [ ] **Autopay caps at the wrong balance.** It uses the whole family's balance instead of the plan's own. **S**
-- [ ] **Aging.** Refunds and debit adjustments are counted as charges, credits are ignored, and it runs one query per patient. Rewrite it as a single query. **M**
-- [ ] **Day-sheet deposit doesn't subtract refunds.** **S**
-- [ ] **Manual EOBs.** A $0 manual EOB can't be posted; write-offs aren't capped at the fee; paid claims can't be reopened or reversed. **M**
-- [ ] **Deductible credit.** It is taken from our estimate instead of the payer's reported deductible (`PR-1` on the ERA). **S**
-- [ ] **Benefits used.** Counted by the paid date instead of the date of service, and pending claims are ignored. **S**
-- [ ] **Top procedures in the production report** sums fees by completion date while every other figure uses the ledger. Unify. **S**
-- [ ] **Hygiene reappointment KPI is overstated.** It counts appointments booked later, not ones that existed when the patient left, and doesn't limit to hygiene visits. **S**
+- [x] **Secondary claims can't be created.** A procedure already on a primary claim is rejected (`insurance.js:129`). Allow one claim per coverage level. **S**, but it blocks item 2.1.
+- [x] **Deductible never resets.** `deductible_met` never resets for a new benefit year, while annual max used does. Needs a benefit-year start per plan and a reset. **S**
+- [x] **Statements overstate the PPO patient portion.** They ignore the expected write-off, so in-network patients are billed amounts they will never owe. Post the expected write-off when the claim is created, or show it as pending, and make the ledger, statements and portal agree. **M**
+- [x] **Two different "pending insurance" figures.** The ledger counts only `submitted` at the full estimate; the statement run uses estimate − paid over submitted and partially_paid. Use one shared function. **S**
+- [x] **No void or reversal for ledger entries,** and a completed procedure can't be un-completed. Add void-with-reason: the entry stays, a reversing entry is added, and it's audited. **M**
+- [x] **Backdating and period locks.** Payments and adjustments accept any date. Add a "lock date" before which nothing can be posted or changed (admin override). **S**
+- [x] **Refunds.** They aren't checked against a credit, never call a Stripe refund, and have no UI. **M**
+- [x] **Negative final installment.** Payment-plan rounding can make the last installment negative (`family.js:154`). **S**
+- [x] **Autopay caps at the wrong balance.** It uses the whole family's balance instead of the plan's own. **S**
+- [x] **Aging.** Refunds and debit adjustments are counted as charges, credits are ignored, and it runs one query per patient. Rewrite it as a single query. **M**
+- [x] **Day-sheet deposit doesn't subtract refunds.** **S**
+- [x] **Manual EOBs.** A $0 manual EOB can't be posted; write-offs aren't capped at the fee; paid claims can't be reopened or reversed. **M**
+- [x] **Deductible credit.** It is taken from our estimate instead of the payer's reported deductible (`PR-1` on the ERA). **S**
+- [x] **Benefits used.** Counted by the paid date instead of the date of service, and pending claims are ignored. **S**
+- [x] **Top procedures in the production report** sums fees by completion date while every other figure uses the ledger. Unify. **S**
+- [x] **Hygiene reappointment KPI is overstated.** It counts appointments booked later, not ones that existed when the patient left, and doesn't limit to hygiene visits. **S**
 
 ### Scheduling correctness
-- [ ] **Cancelling from the Edit form** leaves planned procedures attached, so they fall off unscheduled treatment. **S**
-- [ ] **Recall marked scheduled by any appointment.** Booking any appointment marks every recall "scheduled", even an emergency visit, and cancelling never reverts it. Only a hygiene or recall appointment should, and only that recall type. **S**
-- [ ] **Texting "CANCEL" opts the patient out** instead of cancelling (or asking to cancel) the appointment. **S**
-- [ ] **Office hours aren't enforced** when a provider has no hours of their own. **S**
-- [ ] **Finished appointments can still be resized** (completed or cancelled). **S**
-- [ ] **Practice timezone ignored in places.** Follow-up "Book", task overdue and "Book appointment" defaults use the UTC date. **S**
-- [ ] **Phone search.** Searching `5551234567` doesn't find `(555) 123-4567` on the Patients page. **S**
+- [x] **Cancelling from the Edit form** leaves planned procedures attached, so they fall off unscheduled treatment. **S**
+- [x] **Recall marked scheduled by any appointment.** Booking any appointment marks every recall "scheduled", even an emergency visit, and cancelling never reverts it. Only a hygiene or recall appointment should, and only that recall type. **S**
+- [x] **Texting "CANCEL" opts the patient out** instead of cancelling (or asking to cancel) the appointment. **S**
+- [x] **Office hours aren't enforced** when a provider has no hours of their own. **S**
+- [x] **Finished appointments can still be resized** (completed or cancelled). **S**
+- [x] **Practice timezone ignored in places.** Follow-up "Book", task overdue and "Book appointment" defaults use the UTC date. **S**
+- [x] **Phone search.** Searching `5551234567` doesn't find `(555) 123-4567` on the Patients page. **S**
 
 ### Clinical correctness
-- [ ] **Intake overwrites staff entries.** A submitted intake form replaces the medical alerts, allergies and medications staff typed in. Merge instead, and queue the changes for staff review. **M**
-- [ ] **Signed treatment plans aren't frozen.** The signed view is rebuilt from live procedures. Snapshot the plan (lines, fees, estimates, PDF) when it's signed, and expire sign links. **M**
-- [ ] **Clinical notes.** There's no `signed_by`, anyone with sign permission can sign another provider's note, and the promised addendum doesn't exist. **M**
-- [ ] **Perio sites display backwards** on teeth 9–24; mesial should face the midline. **S**
-- [ ] **Completed extractions** don't mark the tooth missing on the chart. **S**
-- [ ] **Blank allergies display as "NKDA".** Show "Not recorded" until someone confirms. **S**
-- [ ] **Note templates overwrite typed text**, and "Sign now" can create duplicate notes on retry. **S**
-- [ ] **Browser DICOM uploads fail** with a 415 (the MIME type is empty). TIFF doesn't preview in Chrome. **S**
+- [x] **Intake overwrites staff entries.** A submitted intake form replaces the medical alerts, allergies and medications staff typed in. Merge instead, and queue the changes for staff review. **M**
+- [x] **Signed treatment plans aren't frozen.** The signed view is rebuilt from live procedures. Snapshot the plan (lines, fees, estimates, PDF) when it's signed, and expire sign links. **M**
+- [x] **Clinical notes.** There's no `signed_by`, anyone with sign permission can sign another provider's note, and the promised addendum doesn't exist. **M**
+- [x] **Perio sites display backwards** on teeth 9–24; mesial should face the midline. **S**
+- [x] **Completed extractions** don't mark the tooth missing on the chart. **S**
+- [x] **Blank allergies display as "NKDA".** Show "Not recorded" until someone confirms. **S**
+- [x] **Note templates overwrite typed text**, and "Sign now" can create duplicate notes on retry. **S**
+- [x] **Browser DICOM uploads fail** with a 415 (the MIME type is empty). TIFF doesn't preview in Chrome. **S**
 
 ### Security and access
-- [ ] **Sessions can't be revoked.** Password change, 2FA reset or "sign out everywhere" should end live sessions; add a session table or a token version. **M**
-- [ ] **Account lockout.** Add a per-account lockout or slow-down alongside the per-IP limit. **S**
-- [ ] **`GET /users` and `GET /practice` are open to every role**; limit them to what each role needs. Task routes have no permission check. **S**
-- [ ] **Family unlink.** Removing a family member doesn't check that they belong to that family (`family.js:101`). **S**
-- [ ] **Decline messages ignore opt-out.** Online-booking decline messages force `sms_opt_in`. **S**
-- [ ] **Recall campaigns include inactive patients**, and a failed reminder is never retried. **S**
-- [ ] **Forgot password / self-service reset.** It doesn't exist yet. **S**
+- [x] **Sessions can't be revoked.** Password change, 2FA reset or "sign out everywhere" should end live sessions; add a session table or a token version. **M**
+- [x] **Account lockout.** Add a per-account lockout or slow-down alongside the per-IP limit. **S**
+- [x] **`GET /users` and `GET /practice` are open to every role**; limit them to what each role needs. Task routes have no permission check. **S**
+- [x] **Family unlink.** Removing a family member doesn't check that they belong to that family (`family.js:101`). **S**
+- [x] **Decline messages ignore opt-out.** Online-booking decline messages force `sms_opt_in`. **S**
+- [x] **Recall campaigns include inactive patients**, and a failed reminder is never retried. **S**
+- [x] **Forgot password / self-service reset.** It doesn't exist yet. **S**
 
 ---
 
@@ -101,7 +103,7 @@ The "OD / Curve" column shows which competitor has the feature: ✓ = has it, ~ 
 | 17 | **Data conversion importer.** Open Dental (MySQL dump / CSV), Dentrix, Eaglesoft and Curve CSV: patients, families, insurance, ledger balances, appointments, recalls, treatment plans, documents. | **No office switches without their data.** Probably the single most important item for adoption. | ✓ / ✓ | P1 | L |
 | 18 | **Multi-location (clinics).** Location entity; users across locations; per-location chairs, hours, fees and reports; consolidated reporting. | DSOs and growing practices; Curve Enterprise's main selling point. | ✓ / ✓ | P2 | L |
 | 19 | **Custom roles and per-user permission overrides.** For example, a hygienist who can see their own production. | Every office has a different org chart. | ✓ / ✓ | P2 | M |
-| 20 | **Report exports** to CSV/Excel and PDF, on every report. | Accountants and consultants ask on day one. | ✓ / ✓ | P1 | S |
+| 20 | ✅ **Report exports** to CSV/Excel and PDF, on every report. | Accountants and consultants ask on day one. | ✓ / ✓ | P1 | S |
 | 21 | **Report filters** by provider, location, payer and date on every report; **saved and scheduled reports** emailed on a schedule. | Owners want the Monday-morning email. | ✓ / ✓ | P2 | M |
 | 22 | **Custom query / report builder** (read-only SQL for admins, or a guided builder). | Open Dental's "User Query" is heavily used. | ✓ / ~ | P3 | M |
 | 23 | **Public API and outbound webhooks** (appointments, patients, payments), with API keys and scopes. | Third-party integrations: Weave, NexHealth, Dental Intelligence. | ✓ / ~ | P2 | L |
@@ -125,14 +127,14 @@ The "OD / Curve" column shows which competitor has the feature: ✓ = has it, ~ 
 | 36 | **Recall types:** configurable (prophy, perio, BWX, FMX, pano, custom), with automated multi-touch recall sequences. | Hygiene revenue. | ✓ / ✓ | P1 | M |
 | 37 | **Check-out workflow.** Collect payment, book the next visit or recall, print a walkout, all in one step. | Front-desk speed and reappointment rate. | ✓ / ✓ | P1 | M |
 | 38 | **Patient flow timestamps** (arrived, seated, dismissed), with wait-time and running-late indicators. | Chair utilization. | ✓ / ✓ | P2 | S |
-| 39 | **Complete appointment → complete its procedures** (and post charges) in one click. | The normal end-of-visit flow. | ✓ / ✓ | P1 | S |
-| 40 | **Provider schedule exceptions:** date-specific hours, time off, alternating weeks. | Real provider schedules. | ✓ / ✓ | P1 | S |
+| 39 | ✅ **Complete appointment → complete its procedures** (and post charges) in one click. | The normal end-of-visit flow. | ✓ / ✓ | P1 | S |
+| 40 | ✅ (alternating weeks still to do) **Provider schedule exceptions:** date-specific hours, time off, alternating weeks. | Real provider schedules. | ✓ / ✓ | P1 | S |
 | 41 | **Book the whole family** into back-to-back or side-by-side slots. | Common for kids. | ✓ / ✓ | P2 | M |
 | 42 | **Instant online booking** into approved slots (optional), holding the slot while a request is pending; collect insurance and a deposit. | Curve and NexHealth-style self-scheduling. | ✓ / ✓ | P2 | M |
 | 43 | **Referral tracking.** Referring doctors and referred-out, with referral letters and a report. | Specialists depend on it; GPs track sources. | ✓ / ✓ | P2 | M |
 | 44 | **Texting inbox upgrades.** Unknown numbers (attach to patient), email threads, assignment, archiving, editable quick replies, MMS photos. | Front-desk communication hub. | ✓ / ✓ | P2 | M |
 | 45 | **Custom forms builder:** consents (extraction, endo, sedation), HIPAA, financial policy, COVID/pre-op; auto-sent before visits; insurance card and ID photo upload. | Paperless office, Curve Forms. | ✓ / ✓ | P1 | L |
-| 46 | **Patient appointment history** on the chart (past visits, no-shows, cancellations). | Basic context. | ✓ / ✓ | P1 | S |
+| 46 | ✅ **Patient appointment history** on the chart (past visits, no-shows, cancellations). | Basic context. | ✓ / ✓ | P1 | S |
 | 47 | **Command palette actions** ("book for…", "text…", "take payment…"). | Speed. | ~ / ~ | P3 | S |
 
 ### 2.4 Clinical
@@ -144,7 +146,7 @@ The "OD / Curve" column shows which competitor has the feature: ✓ = has it, ~ 
 | 50 | **Full perio chart:** recession, CAL (computed), mobility, furcation, plaque, suppuration, gingival margin; auto-advance entry; site-by-site exam comparison and graphs; touch-friendly bleeding entry. | Hygienists need a complete perio chart; perio claims need it as an attachment. | ✓ / ✓ | P1 | M |
 | 51 | **Treatment plan editor.** Add or remove procedures, reorder, phases, alternative plans ("Option A implant / Option B bridge"), per-line fee override and discount, schedule straight from a phase. | Case acceptance workflow. | ✓ / ✓ | P1 | M |
 | 52 | **Auto notes / procedure notes.** Completing a procedure pre-fills a note from a template with prompts (anesthetic, shade, materials); editable template library. | Documentation speed and compliance. | ✓ / ✓ | P1 | M |
-| 53 | **Addenda on signed notes.** | Legal requirement. | ✓ / ✓ | P0 | S |
+| 53 | ✅ **Addenda on signed notes.** | Legal requirement. | ✓ / ✓ | P0 | S |
 | 54 | **Structured medical history.** Coded allergies and medications, vitals and blood pressure, ASA class, premedication flag driving alerts, history versions with side-by-side review. | Safety. | ✓ / ✓ | P2 | M |
 | 55 | **Image viewer.** Zoom, pan, brightness and contrast, rotate, measure, annotate; FMX mount templates; side-by-side comparison; DICOM rendering (dcmjs / cornerstone). | Curve ships integrated imaging; this is a visible gap. | ✓ / ✓ | P1 | L |
 | 56 | **Direct sensor capture** (TWAIN bridge) as well as imaging-program bridges. | Offices without DEXIS or similar software. | ✓ / ✓ | P3 | L |
@@ -175,7 +177,7 @@ The "OD / Curve" column shows which competitor has the feature: ✓ = has it, ~ 
 | 71 | **Hygiene report:** production, reappointment, perio vs prophy ratio, recall effectiveness. | P2 | S |
 | 72 | **Treatment plan report:** presented vs accepted vs scheduled vs completed, by provider. | P2 | S |
 | 73 | **Write-off and adjustment report** by type. | P2 | S |
-| 74 | **Audit log search** (date range, patient, user, action) with CSV export, beyond the current 500-row cap. | P1 | S |
+| 74 | ✅ **Audit log search** (date range, patient, user, action) with CSV export, beyond the current 500-row cap. | P1 | S |
 | 75 | **End-of-day / month-end close** with locking (pairs with the lock date in Part 1). | P2 | S |
 
 ---
@@ -196,11 +198,11 @@ Works well: drag, resize and create; undo; live updates; conflict checks; open-t
 8. **P3** Colour by provider, type or status as a toggle; print the day's schedule per provider.
 
 ### Front desk: huddle, route slip, follow-ups, requests
-1. **P1** Follow-ups "Book" should carry the patient and their planned procedures into the booking form.
-2. **P1** Recall tab gets a Book action, with the recall's due window pre-selected.
+1. ✅ **P1** Follow-ups "Book" should carry the patient and their planned procedures into the booking form.
+2. ✅ **P1** Recall tab gets a Book action, with the recall's due window pre-selected.
 3. **P1** Online-booking Accept can change the time and chair; a pending request holds the slot.
 4. **P2** Huddle performance: batch its queries (it runs about 8 per patient now).
-5. **P2** Declined/hidden follow-ups should be stored on the server, not just hidden in the browser.
+5. ✅ **P2** Declined/hidden follow-ups should be stored on the server, not just hidden in the browser.
 6. **P2** Referral source captured on online requests and on intake.
 
 ### Patients and families
@@ -225,7 +227,7 @@ Beyond item 50: editable exams, provider and notes, missing teeth greyed out, an
 2. **P1** Signed-plan snapshot and PDF (see Part 1).
 3. **P2** Show insurance-remaining-this-year vs next year, and suggest splitting across benefit years.
 4. **P2** Financing options on the plan (in-house plan, CareCredit/Sunbit link).
-5. **P2** Don't offer "Accepted verbally" on a plan that was declined.
+5. ✅ **P2** Don't offer "Accepted verbally" on a plan that was declined.
 
 ### Clinical notes
 1. **P1** Editable template library, merge fields and prompts (pairs with item 52).
@@ -270,7 +272,7 @@ Beyond item 50: editable exams, provider and notes, missing teeth greyed out, an
 ### Settings and admin
 1. **P1** Settings search box.
 2. **P2** Practice setup wizard for new offices (practice info → providers → chairs → fees → insurance → messaging → go live).
-3. **P2** Audit log: date range, patient filter, export (item 74).
+3. ✅ **P2** Audit log: date range, patient filter, export (item 74).
 4. **P2** Admin-only visibility of SSO and integration settings.
 
 ### Platform quality
