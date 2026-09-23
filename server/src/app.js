@@ -1,4 +1,5 @@
 import express from 'express';
+import { idempotency } from './idempotency.js';
 import { actorMiddleware, setActor } from './actor.js';
 import { flushChanges } from './util.js';
 import { existsSync } from 'node:fs';
@@ -179,7 +180,9 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   // Signed forms can carry photos (insurance cards, ID), and documents sent to be read (benefit summaries, EOBs), so those routes take larger bodies.
   const jsonBody = express.json({ limit: '1mb' });
   const formBody = express.json({ limit: '15mb' });
+  // (after the body is read, below) repeats of a request with the same Idempotency-Key aren't done twice
   app.use((req, res, next) => (/^\/api\/public\/forms\/[^/]+\/\d+$|^\/api\/insurance-plans\/\d+\/read-benefits$|^\/api\/eobs\/read$/.test(req.path) ? formBody : jsonBody)(req, res, next));
+  app.use('/api', idempotency(db));
   app.use((req, res, next) => {
     // Patient data isn't left in the browser's or a proxy's disk cache.
     if (req.path.startsWith('/api/')) res.set('Cache-Control', 'no-store');

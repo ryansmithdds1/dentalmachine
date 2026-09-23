@@ -17,10 +17,11 @@ test('mobile check-in: text HERE, or the QR code with phone and birth date; then
   const now = new Date(Date.now() + 30 * 60_000).toISOString();
   const at = `${now.slice(0, 10)} ${now.slice(11, 16)}`;
   const end = new Date(Date.now() + 90 * 60_000).toISOString();
-  const book = (p) => api.post('/appointments', { patient_id: p.id, provider_id: provider.id, start_time: at, end_time: `${end.slice(0, 10)} ${end.slice(11, 16)}`, override_blockout: true, notify: false }).then((r) => r.data);
+  const hygienist = (await api.post('/providers', { name: 'Hy Gienist', type: 'hygienist' })).data;
+  const book = (p, prov = provider) => api.post('/appointments', { patient_id: p.id, provider_id: prov.id, start_time: at, end_time: `${end.slice(0, 10)} ${end.slice(11, 16)}`, override_blockout: true, notify: false }).then((r) => r.data);
   if (at.slice(0, 10) !== end.slice(0, 10)) return; // the test can't run in the last 90 minutes of a UTC day
   const mine = await book(patient);
-  const theirs = await book(kid);
+  const theirs = await book(kid, hygienist);
 
   const reply = await post('/api/webhooks/twilio/sms', { From: '+15125550100', To: '+15125558800', Body: "I'm here", MessageSid: 'SM1' });
   assert.match(reply, /Jane and Kit are checked in\. We&apos;ll text you when we&apos;re ready for you\./);

@@ -38,6 +38,9 @@ export function phoneWebhooks({ db, config, messenger, storage, transcriber, fet
     if (!practice) return send(res, say('Sorry, this number is not in service.') + '<Hangup/>');
     const from = String(req.body.From || '');
     const patient = await patientForNumber(db, practice.id, from);
+    // A resent webhook for a call already under way continues it rather than logging a second call.
+    const again = req.body.CallSid ? await db.get("SELECT id FROM calls WHERE provider_id = ? AND direction = 'inbound'", String(req.body.CallSid)) : null;
+    if (again) return send(res, practice.forward_to ? `<Dial timeout="${Math.min(60, Math.max(5, practice.ring_seconds || 20))}" action="${url(`dial-done?call=${again.id}`)}">${/^sip:/i.test(practice.forward_to) ? `<Sip>${xml(practice.forward_to)}</Sip>` : `<Number>${xml(practice.forward_to)}</Number>`}</Dial>` : `<Redirect method="POST">${url(`ai?call=${again.id}`)}</Redirect>`);
     const tracked = (await db.all('SELECT number, source FROM tracking_numbers WHERE practice_id = ? AND active = 1', practice.id)).find((t) => t.number.replace(/\D/g, '').slice(-10) === String(req.body.To || '').replace(/\D/g, '').slice(-10));
     const id = await insert(db, 'calls', {
       source: tracked?.source ?? null, new_caller: patient ? 0 : 1,

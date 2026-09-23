@@ -48,6 +48,8 @@ export function smsWebhook({ db, config }) {
       return hit ? db.get('SELECT * FROM practices WHERE id = ?', hit.practice_id) : null;
     };
     setActor({ source: 'patient', actor: 'Patient (text message)' });
+    // Twilio can deliver the same text twice; the second is acknowledged and ignored.
+    if (req.body.MessageSid && await db.get("SELECT id FROM messages WHERE provider_id = ? AND direction = 'inbound'", String(req.body.MessageSid))) return res.type('text/xml').send(twiml());
     const practice = own || (await lastTexted())
       || ((await db.get('SELECT COUNT(*) AS n FROM practices')).n === 1 ? await db.get('SELECT * FROM practices LIMIT 1') : null);
     if (!practice) return res.type('text/xml').send(twiml());

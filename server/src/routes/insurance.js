@@ -434,6 +434,11 @@ export default function insuranceRoutes({ db }) {
     const claimsTotal = rows.reduce((s, x) => s + toCents(x.paid ?? 0), 0);
     const expected = claimsTotal - provAdj.reduce((s, a) => s + a.amount, 0);
     if (expected !== amount) throw new HttpError(400, `The claims total $${(claimsTotal / 100).toFixed(2)}${provAdj.length ? ` less $${((claimsTotal - expected) / 100).toFixed(2)} of provider adjustments` : ''}, but the check is $${(amount / 100).toFixed(2)}`);
+    // The same check (payer, number and amount) posted a second time is almost always a mistake.
+    if (b.check_number && !b.confirm_duplicate) {
+      const dup = await db.get('SELECT id, check_date FROM insurance_checks WHERE practice_id = ? AND check_number = ? AND amount = ? AND COALESCE(carrier_id, 0) = ?', pid, String(b.check_number).slice(0, 50), amount, carrier?.id ?? 0);
+      if (dup) throw new HttpError(409, `Check ${b.check_number} for $${(amount / 100).toFixed(2)} was already posted on ${dup.check_date}. Post it again only if the payer really sent it twice.`, { duplicate_of: dup.id });
+    }
     const checkId = await db.tx(async () => {
       const id = await insert(db, 'insurance_checks', {
         practice_id: pid, carrier_id: carrier?.id ?? null, payer_name: carrier?.name ?? b.payer_name ?? null, check_number: b.check_number ? String(b.check_number).slice(0, 50) : null,

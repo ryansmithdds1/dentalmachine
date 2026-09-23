@@ -5,6 +5,7 @@ import { createMessenger, runReminders } from './messaging.js';
 import { runFinanceSync } from './routes/finance.js';
 import { runFillOffers } from './fill.js';
 import { runReviewSync } from './routes/reputation.js';
+import { purgeIdempotencyKeys } from './idempotency.js';
 import { initCluster, runExclusive } from './cluster.js';
 import { pollClearinghouse } from './clearinghouse.js';
 import { runRecallSequences } from './recalls.js';
@@ -132,6 +133,11 @@ if (process.env.FINANCE_SYNC !== 'off') {
     .catch(jobFailed('Finance sync'));
   setInterval(run, 4 * 60 * 60 * 1000).unref();
   setTimeout(run, 70_000).unref();
+}
+// Answers kept for repeated requests are dropped after a day.
+{
+  const run = () => runExclusive('idempotency-purge', 10 * 60 * 1000, () => purgeIdempotencyKeys(db)).catch(jobFailed('Idempotency purge'));
+  setInterval(run, 60 * 60 * 1000).unref();
 }
 // Online reviews, every two hours (low ratings become a task to reply).
 {

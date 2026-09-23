@@ -45,8 +45,25 @@ export class ApiError extends Error {
   }
 }
 
+// Every change carries an Idempotency-Key, so a double click or a resend never does the work twice:
+// the same request again within a few seconds reuses its key and gets the first answer back.
+const recent = new Map();
+function idempotencyKey(method, path, body) {
+  if (method === 'GET') return null;
+  const sig = `${method} ${path} ${body === undefined ? '' : JSON.stringify(body)}`;
+  const now = Date.now();
+  for (const [k, v] of recent) if (now - v.at > 8000) recent.delete(k);
+  const hit = recent.get(sig);
+  if (hit) return hit.key;
+  const key = globalThis.crypto?.randomUUID?.() || `${now}-${Math.random().toString(36).slice(2)}`;
+  recent.set(sig, { key, at: now });
+  return key;
+}
+
 async function request(method, path, body, extraHeaders = {}) {
   const token = getToken();
+  const key = idempotencyKey(method, path, body);
+  if (key) extraHeaders = { 'Idempotency-Key': key, ...extraHeaders };
   const res = await fetch(`/api${path}`, {
     method,
     headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...locationHeader(), ...extraHeaders },

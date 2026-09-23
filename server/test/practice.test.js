@@ -192,7 +192,7 @@ test('two-way texting: signed inbound webhook, C to confirm, STOP opts out', asy
     headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Twilio-Signature': sig ?? twilioSignature('twilio-secret', 'https://app.example.com/api/webhooks/twilio/sms', params) },
     body: new URLSearchParams(params),
   });
-  const base = { From: '+15125550100', To: '+15125559999', MessageSid: 'SM1' };
+  const base = { From: '+15125550100', To: '+15125559999', get MessageSid() { return `SM${Math.random()}`; } }; // each text its own id, as with Twilio
   assert.equal((await send({ ...base, Body: 'C' }, 'bogus')).status, 403);
   const confirm = await send({ ...base, Body: ' c ' });
   assert.match(await confirm.text(), /confirmed for Wed, May 1 at 9:00 AM/);

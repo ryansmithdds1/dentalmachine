@@ -600,14 +600,21 @@ function CheckForm({ onDone }) {
     setErr(null);
     setBusy(true);
     try {
-      await api.post('/insurance-checks', {
+      const body = {
         ...head, carrier_id: Number(head.carrier_id), amount: toCents(head.amount || 0),
         claims: chosen.map((c) => {
           const r = row(c.id);
           const lines = lineMode[c.id] ? c.items.map((i) => ({ claim_item_id: i.id, paid: toCents(r.lines[i.id]?.paid || 0), write_off: toCents(r.lines[i.id]?.write_off || 0) })) : null;
           return { claim_id: c.id, paid: toCents(r.paid || 0), write_off: toCents(r.write_off || 0), final: r.final, ...(lines ? { lines } : {}) };
         }),
-      });
+      };
+      try {
+        await api.post('/insurance-checks', body);
+      } catch (e) {
+        // Already posted: only post again if the payer really sent the same check twice.
+        if (e.status !== 409 || !e.details?.duplicate_of || !window.confirm(`${e.message}\n\nPost it again anyway?`)) throw e;
+        await api.post('/insurance-checks', { ...body, confirm_duplicate: true });
+      }
       onDone();
     } catch (e) {
       setErr(e);

@@ -113,7 +113,7 @@ test('families: one text for everyone that day to the parent; the link and a "C"
   // By text: "C" from the parent's phone confirms the family's next day of visits.
   const day2 = ymd(Date.now() + 6 * DAY);
   const more = (await api.post('/appointments/family', { mode: 'back_to_back', start_time: `${day2} 13:00`, provider_id: provider.id, override_blockout: true, members: [{ patient_id: jane.id }, { patient_id: emma.id }] })).data;
-  const base = { From: '+15125550100', To: '+15125558888', MessageSid: 'SMfam' };
+  const base = { From: '+15125550100', To: '+15125558888', get MessageSid() { return `SM${Math.random()}`; } }; // each text its own id, as with Twilio
   const c = await (await twilio('/api/webhooks/twilio/sms', { ...base, Body: 'Yes' })).text();
   assert.match(c, /Thanks! Confirmed at Practice \d+: .*: Jane at 1:00 PM, Emma at 2:00 PM\./);
   for (const v of more) assert.equal((await api.get(`/appointments/${v.id}`)).data.status, 'confirmed');

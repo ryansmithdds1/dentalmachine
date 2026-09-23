@@ -103,7 +103,9 @@ export function labPublicRoutes({ db, storage }) {
     const due = /^\d{4}-\d{2}-\d{2}$/.test(req.body?.due_date || '') ? req.body.due_date : null;
     await db.run("UPDATE lab_cases SET lab_status = ?, lab_note = ?, tracking_number = COALESCE(?, tracking_number), due_date = COALESCE(?, due_date), lab_updated_at = datetime('now') WHERE id = ?", status, note, tracking, due, c.id);
     // Shipped cases and questions need someone at the office.
-    if (status === 'question' || status === 'shipped' || due) {
+    // The same update sent twice (a double click, a resend) doesn't make a second task.
+    const repeat = c.lab_status === status && (c.lab_note ?? null) === note && (!tracking || c.tracking_number === tracking) && (!due || c.due_date === due);
+    if (!repeat && (status === 'question' || status === 'shipped' || due)) {
       const p = await db.get('SELECT first_name, last_name FROM patients WHERE id = ?', c.patient_id);
       const today = (await practiceNow(db, c.practice_id)).slice(0, 10);
       await insert(db, 'tasks', {
