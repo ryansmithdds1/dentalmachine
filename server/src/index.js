@@ -17,13 +17,17 @@ import { runScheduledReports } from './savedreports.js';
 import { runSurveys } from './surveys.js';
 import { runOrthoBilling } from './ortho.js';
 import { log } from './monitoring.js';
+import { productionProblems } from './preflight.js';
 
 let secret = process.env.JWT_SECRET;
-if (!secret) {
-  if (process.env.NODE_ENV === 'production') {
-    log.error('JWT_SECRET must be set in production');
+if (process.env.NODE_ENV === 'production') {
+  const problems = productionProblems();
+  if (problems.length) {
+    for (const p of problems) log.error(`Refusing to start: ${p}`);
     process.exit(1);
   }
+}
+if (!secret) {
   secret = randomBytes(32).toString('hex');
   log.warn('JWT_SECRET not set; using a random secret (sessions reset on restart)');
 }
@@ -78,7 +82,7 @@ if (process.env.MEMBERSHIP_BILLING !== 'off') {
 // Documents are included when they live on this server's disk, unless BACKUP_DOCUMENTS says otherwise.
 if (config.backupDir) {
   const storage = app.locals.storage;
-  const backup = () => runExclusive('backups', 60 * 60 * 1000, () => runAutomaticBackups(db, { dir: config.backupDir, keep: config.backupKeep, storage, documents: config.backupDocuments ?? storage.driver === 'disk' }))
+  const backup = () => runExclusive('backups', 60 * 60 * 1000, () => runAutomaticBackups(db, { dir: config.backupDir, keep: config.backupKeep, storage, documents: config.backupDocuments ?? storage.driver === 'disk', key: config.backupKey }))
     .then((made) => made?.length && log.info(`Backups written: ${made.join(', ')}`))
     .catch(jobFailed('Backup'));
   setInterval(backup, 60 * 60 * 1000).unref();

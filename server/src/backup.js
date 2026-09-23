@@ -1,6 +1,6 @@
-import { randomBytes } from 'node:crypto';
-import { createGzip } from 'node:zlib';
-import { mkdir, readdir, rename, stat, unlink } from 'node:fs/promises';
+import { randomBytes, createCipheriv, createDecipheriv, createHash } from 'node:crypto';
+import { createGzip, gunzipSync } from 'node:zlib';
+import { mkdir, readdir, rename, stat, unlink, readFile, writeFile } from 'node:fs/promises';
 import { createWriteStream } from 'node:fs';
 import { join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
@@ -32,14 +32,23 @@ export function backupTables() {
 }
 
 // Streams the backup as JSON text, a table at a time, so big practices don't have to fit in memory.
-export async function* exportPractice(db, practiceId, { storage, documents = false } = {}) {
+// Without `secrets` (a download that leaves the server unencrypted), sign-in secrets are left out: staff
+// re-enroll two-factor and webhook signing secrets are replaced after a restore.
+const scrub = (table, row) => {
+  if (table === 'users' && row.mfa_secret) return { ...row, mfa_secret: null, mfa_enabled: 0, mfa_last_step: null };
+  if (table === 'webhook_endpoints') return { ...row, secret: `rotate-${randomBytes(16).toString('hex')}` };
+  if (table === 'practices' && row.sso_client_secret) return { ...row, sso_client_secret: null };
+  return row;
+};
+
+export async function* exportPractice(db, practiceId, { storage, documents = false, secrets = true } = {}) {
   yield `{"format":${JSON.stringify(FORMAT)},"version":1,"exported_at":${JSON.stringify(new Date().toISOString())},"practice_id":${Number(practiceId)},"tables":{`;
   let first = true;
   for (const { table, cols, where } of backupTables()) {
     const rows = await db.all(`SELECT * FROM ${table} WHERE ${where}${cols.some((c) => c.name === 'id') ? ' ORDER BY id' : ''}`, practiceId);
     yield `${first ? '' : ','}${JSON.stringify(table)}:[`;
     first = false;
-    for (let i = 0; i < rows.length; i += 500) yield `${i ? ',' : ''}${rows.slice(i, i + 500).map((r) => JSON.stringify(r)).join(',')}`;
+    for (let i = 0; i < rows.length; i += 500) yield `${i ? ',' : ''}${rows.slice(i, i + 500).map((r) => JSON.stringify(secrets ? r : scrub(table, r))).join(',')}`;
     yield ']';
   }
   yield '}';
@@ -189,30 +198,84 @@ export async function restorePractice(db, backup, { storage = null, copy = false
   return { practice_id: dryRun ? null : newPractice, counts, documents: Object.keys(backup.documents || {}).length };
 }
 
+// ---- Encryption ----
+// With BACKUP_ENCRYPTION_KEY set, backup files are AES-256-GCM encrypted: "DMBK1" · 12-byte IV · ciphertext
+// of the gzipped JSON · 16-byte tag. Files are written readable by the server's user only (0600).
+const MAGIC = Buffer.from('DMBK1');
+const aesKey = (key) => createHash('sha256').update(String(key)).digest();
+export const isEncryptedBackup = (buf) => Buffer.isBuffer(buf) && buf.subarray(0, MAGIC.length).equals(MAGIC);
+
+// Gzips (and, with a key, encrypts) a stream of text into a file.
+export async function writeBackupFile(path, source, key = null) {
+  const gz = Readable.from(source).pipe(createGzip());
+  if (!key) return pipeline(gz, createWriteStream(path, { mode: 0o600 }));
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', aesKey(key), iv);
+  async function* sealed() {
+    yield MAGIC;
+    yield iv;
+    for await (const chunk of gz) yield cipher.update(chunk);
+    yield cipher.final();
+    yield cipher.getAuthTag();
+  }
+  return pipeline(Readable.from(sealed()), createWriteStream(path, { mode: 0o600 }));
+}
+
+// A backup file's JSON text: decrypted (with the key) and unzipped as needed.
+export function readBackupFile(buf, key = null) {
+  let data = buf;
+  if (isEncryptedBackup(buf)) {
+    if (!key) throw new HttpError(400, 'This backup is encrypted — set BACKUP_ENCRYPTION_KEY to the key it was made with');
+    const iv = buf.subarray(MAGIC.length, MAGIC.length + 12);
+    const decipher = createDecipheriv('aes-256-gcm', aesKey(key), iv);
+    decipher.setAuthTag(buf.subarray(buf.length - 16));
+    try {
+      data = Buffer.concat([decipher.update(buf.subarray(MAGIC.length + 12, buf.length - 16)), decipher.final()]);
+    } catch {
+      throw new HttpError(400, 'This backup could not be decrypted — wrong BACKUP_ENCRYPTION_KEY, or the file is damaged');
+    }
+  }
+  return (data[0] === 0x1f && data[1] === 0x8b ? gunzipSync(data) : data).toString('utf8');
+}
+
 // ---- Automatic backups to a folder (a mounted volume or synced bucket) ----
 const stamp = (d = new Date()) => d.toISOString().slice(0, 10);
+export const BACKUP_FILE = /^practice-(\d+)-(\d{4}-\d{2}-\d{2})\.json\.gz(\.enc)?$/;
 
-export async function runAutomaticBackups(db, { dir, keep = 14, storage, documents = false, now = new Date() }) {
-  await mkdir(dir, { recursive: true });
+export async function runAutomaticBackups(db, { dir, keep = 14, storage, documents = false, now = new Date(), key = null }) {
+  await mkdir(dir, { recursive: true, mode: 0o700 });
   const existing = new Set(await readdir(dir));
   const made = [];
+  const ext = key ? '.json.gz.enc' : '.json.gz';
   const practices = await db.all('SELECT id FROM practices ORDER BY id');
   for (const { id } of practices) {
-    const name = `practice-${id}-${stamp(now)}.json.gz`;
+    const name = `practice-${id}-${stamp(now)}${ext}`;
     if (existing.has(name)) continue;
     const tmp = join(dir, `.${name}.tmp`);
-    await pipeline(Readable.from(exportPractice(db, id, { storage, documents })), createGzip(), createWriteStream(tmp));
+    await writeBackupFile(tmp, exportPractice(db, id, { storage, documents }), key);
     await rename(tmp, join(dir, name));
     made.push(name);
   }
-  if (db.dialect === 'sqlite' && db.snapshot && !existing.has(`database-${stamp(now)}.sqlite`)) {
-    await db.snapshot(join(dir, `database-${stamp(now)}.sqlite`));
-    made.push(`database-${stamp(now)}.sqlite`);
+  // SQLite: a copy of the whole database file too (encrypted the same way when there's a key).
+  const snap = `database-${stamp(now)}.sqlite${key ? '.enc' : ''}`;
+  if (db.dialect === 'sqlite' && db.snapshot && !existing.has(snap)) {
+    const raw = join(dir, `.database-${stamp(now)}.tmp`);
+    await db.snapshot(raw);
+    if (key) {
+      const iv = randomBytes(12);
+      const cipher = createCipheriv('aes-256-gcm', aesKey(key), iv);
+      const body = Buffer.concat([cipher.update(await readFile(raw)), cipher.final()]);
+      await writeFile(join(dir, snap), Buffer.concat([MAGIC, iv, body, cipher.getAuthTag()]), { mode: 0o600 });
+      await unlink(raw);
+    } else {
+      await rename(raw, join(dir, snap));
+    }
+    made.push(snap);
   }
   // Keep the newest `keep` days of each series.
   const cutoff = stamp(new Date(now.getTime() - keep * 86400000));
   for (const f of await readdir(dir)) {
-    const m = /-(\d{4}-\d{2}-\d{2})\.(json\.gz|sqlite)$/.exec(f);
+    const m = /-(\d{4}-\d{2}-\d{2})\.(json\.gz|sqlite)(\.enc)?$/.exec(f);
     if (m && m[1] < cutoff) await unlink(join(dir, f)).catch(() => {});
   }
   return made;
@@ -226,6 +289,6 @@ export async function listBackups(dir, practiceId) {
   } catch {
     return [];
   }
-  const mine = files.filter((f) => f.startsWith(`practice-${Number(practiceId)}-`) && f.endsWith('.json.gz')).sort().reverse();
+  const mine = files.filter((f) => BACKUP_FILE.test(f) && Number(BACKUP_FILE.exec(f)[1]) === Number(practiceId)).sort().reverse();
   return Promise.all(mine.map(async (f) => ({ name: f, date: /(\d{4}-\d{2}-\d{2})/.exec(f)[1], size: (await stat(join(dir, f))).size })));
 }

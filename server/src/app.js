@@ -74,6 +74,7 @@ export function loadConfig(env = process.env) {
     // Automatic nightly backups to a folder (a mounted volume or a synced bucket); off when unset.
     backupDir: env.BACKUP_DIR || null,
     backupKeep: Number(env.BACKUP_KEEP) || 14,
+    backupKey: env.BACKUP_ENCRYPTION_KEY || null,
     backupDocuments: env.BACKUP_DOCUMENTS ? env.BACKUP_DOCUMENTS === 'on' : null,
     // Error monitoring: a Sentry (or compatible) DSN; off when unset.
     sentryDsn: env.SENTRY_DSN || null,

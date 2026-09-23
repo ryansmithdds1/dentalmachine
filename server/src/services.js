@@ -48,8 +48,12 @@ export async function completeProcedure(db, user, procedure, { providerId, appoi
   if (!provider) throw new HttpError(400, 'A provider is required to complete a procedure');
   const today = (await practiceNow(db, procedure.practice_id)).slice(0, 10);
   // Production counts at the office of the visit, else where the procedure was entered.
+  // A visit named by the caller must be this patient's, in this practice.
+  if (appointmentId != null && !(await db.get('SELECT id FROM appointments WHERE id = ? AND practice_id = ? AND patient_id = ?', Number(appointmentId), procedure.practice_id, procedure.patient_id))) {
+    throw new HttpError(404, 'Appointment not found');
+  }
   const visit = appointmentId ?? procedure.appointment_id;
-  const location = (visit && (await db.get('SELECT location_id FROM appointments WHERE id = ?', visit))?.location_id) || locationId;
+  const location = (visit && (await db.get('SELECT location_id FROM appointments WHERE id = ? AND practice_id = ?', visit, procedure.practice_id))?.location_id) || locationId;
 
   await db.tx(async () => {
     await db.run(

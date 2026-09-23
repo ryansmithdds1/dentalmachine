@@ -53,6 +53,15 @@ export async function findBlockouts(db, practiceId, { start_time, end_time, prov
   );
 }
 
+// Every id an appointment points at must belong to the practice, whatever the appointment's status.
+export async function checkApptRefs(db, practiceId, row) {
+  await findOr404(db, 'patients', row.patient_id, practiceId, 'Patient');
+  await findOr404(db, 'providers', row.provider_id, practiceId, 'Provider');
+  if (row.operatory_id) await findOr404(db, 'operatories', row.operatory_id, practiceId, 'Operatory');
+  if (row.location_id) await findOr404(db, 'locations', row.location_id, practiceId, 'Location');
+  if (row.appointment_type_id) await findOr404(db, 'appointment_types', row.appointment_type_id, practiceId, 'Appointment type');
+}
+
 export async function validateAppt(db, practiceId, row, { overrideBlockout = false } = {}) {
   row.start_time = normalizeDateTime(row.start_time, 'start_time');
   row.end_time = normalizeDateTime(row.end_time, 'end_time');
@@ -394,10 +403,13 @@ export default function scheduleRoutes({ db }) {
     const changes = pick(req.body, FIELDS);
     const merged = { ...existing, ...changes };
     if (!['cancelled', 'no_show'].includes(merged.status)) await validateAppt(db, req.user.practice_id, merged, { overrideBlockout: !!req.body.override_blockout });
-    else requireOneOf(merged.status, STATUSES, 'status');
+    else {
+      requireOneOf(merged.status, STATUSES, 'status');
+      await checkApptRefs(db, req.user.practice_id, merged);
+    }
     const row = pick(merged, FIELDS);
     if (req.body.video !== undefined) {
-      row.video_url = req.body.video ? existing.video_url || videoRoomFor(await db.get('SELECT * FROM providers WHERE id = ?', Number(row.provider_id))) : null;
+      row.video_url = req.body.video ? existing.video_url || videoRoomFor(await findOr404(db, 'providers', row.provider_id, req.user.practice_id, 'Provider')) : null;
     }
     const inactive = ['cancelled', 'no_show'];
     // A moved appointment needs a fresh reminder and confirmation.

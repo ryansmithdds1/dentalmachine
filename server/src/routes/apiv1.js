@@ -97,6 +97,7 @@ export default function apiV1Routes({ db }) {
     const p = await patientOr404(req, req.params.id);
     const row = cleanPatient(req.body || {}, false);
     if (!Object.keys(row).length) throw new HttpError(400, 'Nothing to update');
+    if (row.primary_provider_id && !(await db.get('SELECT id FROM providers WHERE id = ? AND practice_id = ?', row.primary_provider_id, pid(req)))) throw new HttpError(400, 'primary_provider_id not found');
     await db.run(`UPDATE patients SET ${Object.keys(row).map((k) => `${k} = ?`).join(', ')}, updated_at = datetime('now') WHERE id = ?`, ...Object.values(row), p.id);
     const after = await db.get('SELECT * FROM patients WHERE id = ?', p.id);
     await audit(db, req, 'patient.update', 'patients', p.id, { via: 'api', fields: Object.keys(row) });

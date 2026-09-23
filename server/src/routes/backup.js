@@ -5,7 +5,7 @@ import { createGzip } from 'node:zlib';
 import { Readable } from 'node:stream';
 import { HttpError } from '../auth.js';
 import { audit } from '../util.js';
-import { exportPractice, exportToObject, restorePractice, listBackups } from '../backup.js';
+import { exportPractice, exportToObject, restorePractice, listBackups, BACKUP_FILE } from '../backup.js';
 
 const requireAdmin = (req, _res, next) => (req.user.role === 'admin' ? next() : next(new HttpError(403, 'Only administrators can manage backups')));
 
@@ -19,24 +19,26 @@ export default function backupRoutes({ db, storage, config }) {
     await audit(db, req, 'backup.download', 'practices', req.user.practice_id, { documents });
     const day = new Date().toISOString().slice(0, 10);
     res.set({ 'Content-Type': 'application/gzip', 'Content-Disposition': `attachment; filename="dental-machine-backup-${day}.json.gz"`, 'Cache-Control': 'no-store' });
-    Readable.from(exportPractice(db, req.user.practice_id, { storage, documents })).pipe(createGzip()).pipe(res);
+    // A download leaves the server unencrypted, so two-factor and signing secrets stay behind.
+    Readable.from(exportPractice(db, req.user.practice_id, { storage, documents, secrets: false })).pipe(createGzip()).pipe(res);
   });
 
   r.get('/backup/status', async (req, res) => {
     res.json({
       automatic: !!config.backupDir, keep_days: config.backupKeep, documents: config.backupDocuments,
-      database: db.dialect, file_storage: storage.driver, encrypted_files: storage.encrypted,
+      database: db.dialect, file_storage: storage.driver, encrypted_files: storage.encrypted, encrypted_backups: !!config.backupKey,
       files: await listBackups(config.backupDir, req.user.practice_id),
     });
   });
 
   r.get('/backup/files/:name', async (req, res) => {
     const name = String(req.params.name);
-    if (!config.backupDir || !new RegExp(`^practice-${req.user.practice_id}-\\d{4}-\\d{2}-\\d{2}\\.json\\.gz$`).test(name)) throw new HttpError(404, 'Backup not found');
+    const m = BACKUP_FILE.exec(name);
+    if (!config.backupDir || !m || Number(m[1]) !== req.user.practice_id) throw new HttpError(404, 'Backup not found');
     const files = await listBackups(config.backupDir, req.user.practice_id);
     if (!files.some((f) => f.name === name)) throw new HttpError(404, 'Backup not found');
     await audit(db, req, 'backup.download', 'practices', req.user.practice_id, { file: name });
-    res.set({ 'Content-Type': 'application/gzip', 'Content-Disposition': `attachment; filename="${name}"`, 'Cache-Control': 'no-store' });
+    res.set({ 'Content-Type': m[3] ? 'application/octet-stream' : 'application/gzip', 'Content-Disposition': `attachment; filename="${name}"`, 'Cache-Control': 'no-store' });
     createReadStream(join(config.backupDir, name)).pipe(res);
   });
 

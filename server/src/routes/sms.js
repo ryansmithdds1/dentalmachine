@@ -31,7 +31,18 @@ export function smsWebhook({ db, config }) {
     const from = String(req.body.From || '');
     const to = String(req.body.To || '');
     const body = String(req.body.Body || '').trim().slice(0, 1600);
-    const practice = (await db.all('SELECT * FROM practices WHERE sms_number IS NOT NULL')).find((p) => digits(p.sms_number) === digits(to))
+    // Which practice the reply is for: one with its own texting number (never the shared platform number),
+    // else whichever practice last texted this phone, else the only practice on a single-office server.
+    const shared = digits(process.env.TWILIO_FROM || '');
+    const own = digits(to) !== shared ? (await db.all('SELECT * FROM practices WHERE sms_number IS NOT NULL')).find((p) => digits(p.sms_number) === digits(to)) : null;
+    const lastTexted = async () => {
+      const tail = digits(from).slice(-4);
+      if (tail.length < 4) return null;
+      const hit = (await db.all("SELECT practice_id, to_address FROM messages WHERE channel = 'sms' AND (direction IS NULL OR direction != 'inbound') AND to_address LIKE ? ORDER BY id DESC LIMIT 200", `%${tail}`))
+        .find((m) => digits(m.to_address) === digits(from));
+      return hit ? db.get('SELECT * FROM practices WHERE id = ?', hit.practice_id) : null;
+    };
+    const practice = own || (await lastTexted())
       || ((await db.get('SELECT COUNT(*) AS n FROM practices')).n === 1 ? await db.get('SELECT * FROM practices LIMIT 1') : null);
     if (!practice) return res.type('text/xml').send(twiml());
     // Match on the last 10 digits; prefer the head of household if several share a number.

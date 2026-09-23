@@ -4,11 +4,14 @@ import { openDb } from '../server/src/db.js';
 import { createApp, loadConfig } from '../server/src/app.js';
 import { createMessenger } from '../server/src/messaging.js';
 import { seedDemo } from '../server/src/demo.js';
+import { productionProblems } from '../server/src/preflight.js';
 
 let ready = null;
 
 async function boot() {
   if (!process.env.JWT_SECRET) throw new Error('JWT_SECRET must be set');
+  const problems = process.env.NODE_ENV === 'production' || process.env.VERCEL_ENV === 'production' ? productionProblems() : [];
+  if (problems.length) throw new Error(`Refusing to start: ${problems.join('; ')}`);
   const db = await openDb();
   if (process.env.DEMO_SEED === 'on') await seedDemo(db);
   return createApp({ db, secret: process.env.JWT_SECRET, config: loadConfig(), messenger: createMessenger() });

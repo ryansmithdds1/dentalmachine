@@ -1,12 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readdirSync, writeFileSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { harness } from './helpers.js';
 import { seedDemo, DEMO_EMAIL } from '../src/demo.js';
-import { exportToObject, restorePractice, runAutomaticBackups, backupTables } from '../src/backup.js';
+import { exportToObject, restorePractice, runAutomaticBackups, backupTables, isEncryptedBackup, readBackupFile } from '../src/backup.js';
+import { productionProblems } from '../src/preflight.js';
 
 const h = harness();
 
@@ -115,4 +116,45 @@ test('only administrators can back up', async () => {
   const hyg = h.client(login.data.token);
   assert.equal((await hyg.get('/backup/status')).status, 403);
   assert.equal((await hyg.post('/backup/test')).status, 403);
+});
+
+test('encrypted automatic backups: sealed with the key, owner-only, and restorable only with the right key', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dm-backups-enc-'));
+  const key = 'k'.repeat(40);
+  try {
+    const made = await runAutomaticBackups(h.db, { dir, keep: 14, storage: h.app.locals.storage, now: new Date('2031-06-01T03:00:00Z'), key });
+    const one = made.find((f) => f.endsWith('.json.gz.enc'));
+    assert.ok(one);
+    const buf = readFileSync(join(dir, one));
+    assert.ok(isEncryptedBackup(buf));
+    assert.equal(buf.includes(Buffer.from('dentalmachine-backup')), false, 'no plaintext inside');
+    assert.equal(statSync(join(dir, one)).mode & 0o777, 0o600);
+    assert.equal(JSON.parse(readBackupFile(buf, key)).format, 'dentalmachine-backup');
+    assert.throws(() => readBackupFile(buf, 'x'.repeat(40)), /could not be decrypted/);
+    assert.throws(() => readBackupFile(buf, null), /encrypted/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a backup downloaded from the browser leaves two-factor secrets behind', async () => {
+  const { api, token } = await h.practice();
+  const me = (await api.get('/auth/me')).data.user;
+  await h.db.run("UPDATE users SET mfa_secret = 'JBSWY3DPEHPK3PXP', mfa_enabled = 1 WHERE id = ?", me.id);
+  const res = await fetch(`${h.origin}/api/backup`, { headers: { Authorization: `Bearer ${token}` } });
+  assert.equal(res.status, 200);
+  const text = gunzipSync(Buffer.from(await res.arrayBuffer())).toString();
+  assert.equal(text.includes('JBSWY3DPEHPK3PXP'), false);
+  await h.db.run('UPDATE users SET mfa_secret = NULL, mfa_enabled = 0 WHERE id = ?', me.id);
+});
+
+test('production refuses to start without its security settings', () => {
+  const ok = { JWT_SECRET: 'a'.repeat(64), DOCUMENT_ENCRYPTION_KEY: 'b'.repeat(64), APP_URL: 'https://app.example.com' };
+  assert.deepEqual(productionProblems(ok), []);
+  assert.match(productionProblems({ ...ok, JWT_SECRET: 'dev' }).join(), /JWT_SECRET/);
+  assert.match(productionProblems({ ...ok, DOCUMENT_ENCRYPTION_KEY: '' }).join(), /DOCUMENT_ENCRYPTION_KEY/);
+  assert.deepEqual(productionProblems({ ...ok, DOCUMENT_ENCRYPTION_KEY: '', ALLOW_UNENCRYPTED_FILES: '1' }), []);
+  assert.match(productionProblems({ ...ok, APP_URL: 'http://dental.example.com' }).join(), /https/);
+  assert.deepEqual(productionProblems({ ...ok, APP_URL: 'http://localhost:4000' }), [], 'local testing is fine');
+  assert.match(productionProblems({ ...ok, BACKUP_DIR: '/backups' }).join(), /BACKUP_ENCRYPTION_KEY/);
 });

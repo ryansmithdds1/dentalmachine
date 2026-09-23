@@ -85,7 +85,7 @@ export default function clinicalRoutes({ db }) {
     if (code.requires_surface && !row.surfaces) throw new HttpError(400, `${code.code} requires surfaces`);
     checkArea(code, row);
     if (row.provider_id) await findOr404(db, 'providers', row.provider_id, pid, 'Provider');
-    if (row.appointment_id) await findOr404(db, 'appointments', row.appointment_id, pid, 'Appointment');
+    if (row.appointment_id && (await findOr404(db, 'appointments', row.appointment_id, pid, 'Appointment')).patient_id !== Number(patientId)) throw new HttpError(400, "That appointment is another patient's");
     if (row.treatment_plan_id) {
       const plan = await findOr404(db, 'treatment_plans', row.treatment_plan_id, pid, 'Treatment plan');
       if (plan.patient_id !== patientId) throw new HttpError(400, 'Treatment plan belongs to another patient');
@@ -151,7 +151,7 @@ export default function clinicalRoutes({ db }) {
     if ('area' in row) checkArea(await db.get('SELECT * FROM procedure_codes WHERE id = ?', existing.code_id) || { code: existing.code }, row);
     if (row.phase != null) row.phase = checkPhase(row.phase);
     if (row.provider_id) await findOr404(db, 'providers', row.provider_id, req.user.practice_id, 'Provider');
-    if (row.appointment_id) await findOr404(db, 'appointments', row.appointment_id, req.user.practice_id, 'Appointment');
+    if (row.appointment_id && (await findOr404(db, 'appointments', row.appointment_id, req.user.practice_id, 'Appointment')).patient_id !== existing.patient_id) throw new HttpError(400, "That appointment is another patient's");
     if (row.treatment_plan_id) {
       const plan = await findOr404(db, 'treatment_plans', row.treatment_plan_id, req.user.practice_id, 'Treatment plan');
       if (plan.patient_id !== existing.patient_id) throw new HttpError(400, 'Treatment plan belongs to another patient');

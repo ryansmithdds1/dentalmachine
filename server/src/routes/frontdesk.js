@@ -19,7 +19,7 @@ export default function frontDeskRoutes({ db, messenger }) {
   async function checkoutSummary(pid, apptId) {
     const a = await db.get(
       `SELECT a.*, p.first_name, p.last_name, p.email, p.phone, pv.name AS provider_name, o.name AS operatory_name
-       FROM appointments a JOIN patients p ON p.id = a.patient_id JOIN providers pv ON pv.id = a.provider_id LEFT JOIN operatories o ON o.id = a.operatory_id
+       FROM appointments a JOIN patients p ON p.id = a.patient_id AND p.practice_id = a.practice_id JOIN providers pv ON pv.id = a.provider_id AND pv.practice_id = a.practice_id LEFT JOIN operatories o ON o.id = a.operatory_id
        WHERE a.id = ? AND a.practice_id = ?`, apptId, pid,
     );
     if (!a) throw new HttpError(404, 'Appointment not found');
@@ -264,7 +264,7 @@ export default function frontDeskRoutes({ db, messenger }) {
   r.get('/appointments/:aid/route-slip', requirePermission('schedule:read'), async (req, res) => {
     const pid = req.user.practice_id;
     const a = await findOr404(db, 'appointments', req.params.aid, pid, 'Appointment');
-    const patient = await db.get('SELECT * FROM patients WHERE id = ?', a.patient_id);
+    const patient = await findOr404(db, 'patients', a.patient_id, pid, 'Patient');
     await audit(db, req, 'route_slip.print', 'appointments', a.id);
     res.json({
       appointment: await db.get(
@@ -273,9 +273,9 @@ export default function frontDeskRoutes({ db, messenger }) {
       ),
       patient,
       practice: await db.get('SELECT name, phone FROM practices WHERE id = ?', pid),
-      guarantor: patient.guarantor_id ? await db.get('SELECT id, first_name, last_name FROM patients WHERE id = ?', patient.guarantor_id) : null,
+      guarantor: patient.guarantor_id ? await db.get('SELECT id, first_name, last_name FROM patients WHERE id = ? AND practice_id = ?', patient.guarantor_id, pid) : null,
       policy: (await primaryPolicy(db, pid, patient.id)) || null,
-      balance: (await db.get('SELECT COALESCE(SUM(amount),0) AS n FROM ledger_entries WHERE patient_id = ?', patient.id)).n,
+      balance: (await db.get('SELECT COALESCE(SUM(amount),0) AS n FROM ledger_entries WHERE patient_id = ? AND practice_id = ?', patient.id, pid)).n,
       todays_procedures: await db.all("SELECT code, description, tooth, surfaces, fee FROM procedures WHERE appointment_id = ? AND status != 'cancelled'", a.id),
       unscheduled: await db.all("SELECT code, description, tooth, surfaces, fee FROM procedures WHERE patient_id = ? AND status = 'planned' AND appointment_id IS NULL ORDER BY priority", patient.id),
       recall: await db.all("SELECT type, due_date FROM recalls WHERE patient_id = ? AND status != 'inactive'", patient.id),

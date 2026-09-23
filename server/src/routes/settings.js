@@ -117,6 +117,15 @@ export default function settingsRoutes({ db, secret, config = {} }) {
     const row = pick(req.body, ['name', 'address', 'city', 'state', 'zip', 'phone', 'email', 'tax_id', 'npi', 'timezone', 'slug', 'online_booking', 'reminder_hours', 'require_mfa', 'office_hours', 'daily_goal', 'sms_number', 'review_url', 'review_requests', 'review_threshold', 'instant_booking', 'idle_timeout_minutes', 'message_templates', 'hygiene_goal', 'portal_enabled', 'lock_date', 'adjustment_approval_limit', 'reminder_steps', 'recall_steps', 'recall_auto', 'finance_charge_bps', 'finance_charge_min', 'late_fee', 'collection_agency', 'financing', 'auto_receipts', 'kpi_targets']);
     if (row.financing !== undefined) row.financing = cleanFinancing(row.financing);
     if (row.kpi_targets !== undefined) row.kpi_targets = cleanKpiTargets(row.kpi_targets);
+    if (row.sms_number) {
+      // A texting number belongs to one practice, and can't be the platform's shared sending number
+      // (inbound replies are routed by it).
+      const d = String(row.sms_number).replace(/\D/g, '').slice(-10);
+      if (d.length !== 10) throw new HttpError(400, 'Enter the texting number with its area code');
+      if (d === String(process.env.TWILIO_FROM || '').replace(/\D/g, '').slice(-10)) throw new HttpError(400, "That's the shared sending number — enter a number that belongs to this practice, or leave it blank");
+      const taken = (await db.all('SELECT id, sms_number FROM practices WHERE sms_number IS NOT NULL AND id != ?', req.user.practice_id)).some((p) => String(p.sms_number).replace(/\D/g, '').slice(-10) === d);
+      if (taken) throw new HttpError(409, 'That texting number is already in use by another practice');
+    }
     if (row.message_templates != null) row.message_templates = validateTemplates(row.message_templates);
     if (row.review_url && !/^https:\/\/\S+$/.test(row.review_url)) throw new HttpError(400, 'Review link must start with https://');
     if (row.review_threshold != null && ![3, 4, 5].includes(Number(row.review_threshold))) throw new HttpError(400, 'review_threshold must be 3, 4 or 5 stars');
