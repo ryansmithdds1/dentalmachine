@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useApi } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
 import { money, fullName, age, fmtDateTime } from '../format.js';
@@ -16,6 +16,13 @@ export default function Patients() {
   const [status, setStatus] = useState('active');
   const [offset, setOffset] = useState(0);
   const [adding, setAdding] = useState(false);
+  // ?new=1 (from quick search "New patient") opens the form.
+  const [urlParams, setUrlParams] = useSearchParams();
+  useEffect(() => {
+    if (urlParams.get('new') !== '1') return;
+    setAdding(true);
+    setUrlParams({}, { replace: true });
+  }, [urlParams, setUrlParams]);
   useEffect(() => {
     const t = setTimeout(() => { setDebounced(q); setOffset(0); }, 250);
     return () => clearTimeout(t);

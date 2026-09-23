@@ -135,7 +135,7 @@ The "OD / Curve" column shows which competitor has the feature: ✓ = has it, ~ 
 | 44 | ✅ **Texting inbox upgrades.** Unknown numbers (attach to patient), email threads, assignment, archiving, editable quick replies, MMS photos. | Front-desk communication hub. | ✓ / ✓ | P2 | M |
 | 45 | ✅ **Custom forms builder:** consents (extraction, endo, sedation), HIPAA, financial policy, COVID/pre-op; auto-sent before visits; insurance card and ID photo upload. | Paperless office, Curve Forms. | ✓ / ✓ | P1 | L |
 | 46 | ✅ **Patient appointment history** on the chart (past visits, no-shows, cancellations). | Basic context. | ✓ / ✓ | P1 | S |
-| 47 | **Command palette actions** ("book for…", "text…", "take payment…"). | Speed. | ~ / ~ | P3 | S |
+| 47 | ✅ _(Done: Ctrl K offers Book for / Text / Take payment from the best match, “book …”, “text …”, “pay …” shortcuts, and New patient / New appointment.)_ **Command palette actions** ("book for…", "text…", "take payment…"). | Speed. | ~ / ~ | P3 | S |
 
 ### 2.4 Clinical
 

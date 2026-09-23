@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useApi, useLookup } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
 import { money, fullName, age, fmtDate, fmtDateTime, fmtUtcDate, label, practiceToday } from '../format.js';
@@ -25,7 +25,12 @@ export default function PatientDetail() {
   const { id } = useParams();
   const { can, practice, user } = useAuth();
   const { data: p, error, reload } = useApi(`/patients/${id}`);
-  const [tab, setTab] = useState('overview');
+  // Links can open a tab directly (?tab=ledger, ?tab=insurance…).
+  const [params] = useSearchParams();
+  const [tab, setTab] = useState(() => params.get('tab') || 'overview');
+  useEffect(() => {
+    if (params.get('tab')) setTab(params.get('tab'));
+  }, [params]);
   const [modal, setModal] = useState(null);
   const [popup, setPopup] = useState(null);
 

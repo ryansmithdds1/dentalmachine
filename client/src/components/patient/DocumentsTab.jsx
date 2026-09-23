@@ -122,7 +122,7 @@ export default function DocumentsTab({ patient }) {
       <div className="card">
         <div className="page-header" style={{ marginBottom: 10 }}>
           <h2 style={{ margin: 0 }}>Documents & imaging</h2>
-          <select value={filter} onChange={(e) => setFilter(e.target.value)} style={{ width: 170 }}>
+          <select aria-label="Show" value={filter} onChange={(e) => setFilter(e.target.value)} style={{ width: 170 }}>
             <option value="">All types</option>
             {CATEGORIES.map((c) => <option key={c} value={c}>{catLabel(c)}</option>)}
           </select>
@@ -140,7 +140,7 @@ export default function DocumentsTab({ patient }) {
             <>
               <div className="inline" style={{ gap: 8, marginBottom: 8 }}>
                 <label className="inline" style={{ gap: 6 }}>Compare with
-                  <select value={compare?.id || ''} onChange={(e) => setCompare((docs || []).find((d) => d.id === Number(e.target.value)) || null)}>
+                  <select aria-label="Compare with" value={compare?.id || ''} onChange={(e) => setCompare((docs || []).find((d) => d.id === Number(e.target.value)) || null)}>
                     <option value="">—</option>
                     {(docs || []).filter((d) => d.id !== viewing.doc.id && viewerable(d.mime)).map((d) => <option key={d.id} value={d.id}>{d.filename} · {fmtDate(d.taken_at || d.created_at)}{d.tooth ? ` · #${d.tooth}` : ''}</option>)}
                   </select>
@@ -214,7 +214,7 @@ function ImagingBar({ patient }) {
     <div className="card imaging-bar">
       <label className="imaging-ws">
         <span className="muted">This computer</span>
-        <select value={agent ? agent.id : ''} onChange={(e) => choose(e.target.value)} style={{ width: 'auto' }}>
+        <select aria-label="Imaging workstation" value={agent ? agent.id : ''} onChange={(e) => choose(e.target.value)} style={{ width: 'auto' }}>
           <option value="">Choose workstation…</option>
           {agents.map((a) => <option key={a.id} value={a.id}>{a.name}{a.online ? '' : ' (offline)'}</option>)}
         </select>
@@ -283,12 +283,12 @@ function Mounts({ patient, docs, onOpen, canEdit }) {
         <h2 style={{ margin: 0 }}>Mounts</h2>
         <div className="inline" style={{ gap: 6 }}>
           {mounts.length > 0 && (
-            <select value={current?.id || ''} onChange={(e) => setOpen(Number(e.target.value))}>
+            <select aria-label="Mount" value={current?.id || ''} onChange={(e) => setOpen(Number(e.target.value))}>
               {mounts.map((m) => <option key={m.id} value={m.id}>{MOUNTS[m.template]?.label} · {fmtDate(m.taken_at)}</option>)}
             </select>
           )}
           {canEdit && (
-            <select value="" onChange={async (e) => { if (!e.target.value) return; try { const m = await api.post(`/patients/${patient.id}/mounts`, { template: e.target.value }); setOpen(m.id); reload(); } catch (err) { setError(err); } }}>
+            <select aria-label="New mount" value="" onChange={async (e) => { if (!e.target.value) return; try { const m = await api.post(`/patients/${patient.id}/mounts`, { template: e.target.value }); setOpen(m.id); reload(); } catch (err) { setError(err); } }}>
               <option value="">+ New mount…</option>
               {Object.entries(MOUNTS).map(([k, m]) => <option key={k} value={k}>{m.label}</option>)}
             </select>

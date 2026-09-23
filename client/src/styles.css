@@ -569,7 +569,7 @@ tr.voided td { color: var(--muted); } tr.voided td:nth-child(3), tr.voided td.nu
 .perio-table td.missing, .perio-table th.missing { background: repeating-linear-gradient(45deg, #f1f5f9 0 4px, #e2e8f0 4px 8px); color: var(--muted); }
 .perio-numbers th { text-align: center; font-size: 12px; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
 .perio-label { width: 110px; font-size: 11px; white-space: nowrap; }
-.perio-label span { opacity: .6; }
+.perio-label span { color: var(--muted); }
 .perio-cell { display: flex; gap: 1px; justify-content: center; }
 .perio-site { width: 16px; min-width: 0; flex: 1; padding: 1px 0; text-align: center; font-size: 12px; border: 1px solid var(--border); border-radius: 3px; display: inline-block; }
 span.perio-site { border-color: transparent; }

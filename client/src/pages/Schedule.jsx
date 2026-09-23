@@ -157,6 +157,16 @@ export default function Schedule() {
   const [selectedId, setSelectedId] = useState(null);
   const [modal, setModal] = useState(null);
   const [placing, setPlacing] = useState(null);
+  // ?book=<patient id> (from quick search "Book for…"): open a new appointment for them.
+  useEffect(() => {
+    const id = params.get('book');
+    if (!id) return;
+    const next = new URLSearchParams(params);
+    next.delete('book');
+    setParams(next, { replace: true });
+    if (id === 'new') setModal({ type: 'new', defaults: { date } });
+    else api.get(`/patients/${id}`).then((p) => setModal({ type: 'new', defaults: { date }, patient: p })).catch(() => {});
+  }, [params.get('book')]); // eslint-disable-line react-hooks/exhaustive-deps
   // Pinboard: appointments parked here (on this computer) to be placed on another day or time.
   const [pins, setPinsState] = useState(() => { try { return JSON.parse(localStorage.getItem('dm_pinboard') || '[]'); } catch { return []; } });
   const setPins = (fn) => setPinsState((cur) => {
@@ -500,7 +510,7 @@ export default function Schedule() {
 
       {modal?.type === 'new' && (
         <Modal title="New appointment" onClose={() => setModal(null)}>
-          <AppointmentForm defaults={modal.defaults} onCancel={() => setModal(null)}
+          <AppointmentForm defaults={modal.defaults} patient={modal.patient} onCancel={() => setModal(null)}
             onBlock={() => setModal({ type: 'block', defaults: modal.defaults })}
             onSaved={(a) => {
               setModal(null);

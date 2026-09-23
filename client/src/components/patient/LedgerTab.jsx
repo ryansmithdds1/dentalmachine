@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../../api.js';
 import { useApi } from '../../hooks.js';
 import { useAuth } from '../../auth.jsx';
@@ -15,6 +15,15 @@ export default function LedgerTab({ patient, onChange }) {
   const { data: payConfig } = useApi('/payments/config');
   const { data: payRequests, reload: reloadRequests } = useApi(`/patients/${patient.id}/payment-requests`);
   const [modal, setModal] = useState(null);
+  // ?pay=1 (from quick search "Take payment…") opens the payment form.
+  const [params, setParams] = useSearchParams();
+  useEffect(() => {
+    if (!params.get('pay')) return;
+    setModal('payment');
+    const next = new URLSearchParams(params);
+    next.delete('pay');
+    setParams(next, { replace: true });
+  }, [params, setParams]);
   const done = () => { setModal(null); reload(); onChange?.(); };
   if (!data) return <div className="empty">Loading…</div>;
 
