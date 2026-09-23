@@ -1572,6 +1572,8 @@ const COLUMNS = [
   ['practices', 'financing', 'TEXT'],
   ['practices', 'auto_receipts', 'INTEGER NOT NULL DEFAULT 1'],
   ['practices', 'kpi_targets', 'TEXT'],
+  ['practices', 'setup_status', "TEXT NOT NULL DEFAULT 'done'"],
+  ['practices', 'setup_fees_reviewed', 'INTEGER NOT NULL DEFAULT 0'],
   ['practices', 'stripe_terminal_location', 'TEXT'],
   ['payment_plans', 'schedule', 'TEXT'],
   ['claims', 'follow_up_date', 'TEXT'],

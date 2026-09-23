@@ -26,6 +26,7 @@ const RouteSlip = lazy(() => import('./pages/RouteSlip.jsx'));
 const SchedulePrint = lazy(() => import('./pages/SchedulePrint.jsx'));
 const NotesPrint = lazy(() => import('./pages/NotesPrint.jsx'));
 const AdaClaimForm = lazy(() => import('./pages/AdaClaimForm.jsx'));
+const Setup = lazy(() => import('./pages/Setup.jsx'));
 const TreatmentPlanPrint = lazy(() => import('./pages/PrintDocs.jsx').then((m) => ({ default: m.TreatmentPlanPrint })));
 const PrescriptionPrint = lazy(() => import('./pages/PrintDocs.jsx').then((m) => ({ default: m.PrescriptionPrint })));
 const WalkoutPrint = lazy(() => import('./pages/PrintDocs.jsx').then((m) => ({ default: m.WalkoutPrint })));
@@ -188,6 +189,15 @@ function LocationPicker({ user }) {
   );
 }
 
+// A new office's admin lands on the setup wizard once per session; the banner stays until it's finished.
+const seenSetup = () => {
+  try {
+    if (sessionStorage.getItem('dm_setup_seen')) return true;
+    sessionStorage.setItem('dm_setup_seen', '1');
+  } catch { /* storage unavailable: just show the banner */ return true; }
+  return false;
+};
+
 function Shell({ nav }) {
   const location = useLocation();
   const { user, practice, logout } = useAuth();
@@ -224,12 +234,17 @@ function Shell({ nav }) {
         </div>
       </aside>
       <main className="main" id="main" tabIndex={-1}>
+        {user.role === 'admin' && practice?.setup_status === 'pending' && location.pathname !== '/setup' && (
+          <div className="setup-banner no-print">Finish setting up {practice.name} — providers, fees, insurance and reminders. <NavLink to="/setup">Continue setup →</NavLink></div>
+        )}
+        {user.role === 'admin' && practice?.setup_status === 'pending' && location.pathname === '/' && !seenSetup() && <Navigate to="/setup" replace />}
         <ErrorBoundary key={location.pathname}>
         <Suspense fallback={<div className="empty">Loading…</div>}>
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/schedule" element={<Schedule />} />
             <Route path="/checkout/:id" element={<Checkout />} />
+            <Route path="/setup" element={<Setup />} />
             <Route path="/patients" element={<Patients />} />
             <Route path="/patients/:id" element={<PatientDetail />} />
             <Route path="/patients/:id/statement" element={<Statement />} />

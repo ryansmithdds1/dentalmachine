@@ -271,7 +271,7 @@ Works well: drag, resize and create; undo; live updates; conflict checks; open-t
 
 ### Settings and admin
 1. ✅ **P1** Settings search box. _(Done: searches section names and what's inside them (field labels, e.g. “lock date”, “payer id”, “twain”); Enter opens the first match and scrolls to the field.)_
-2. **P2** Practice setup wizard for new offices (practice info → providers → chairs → fees → insurance → messaging → go live).
+2. ✅ **P2** Practice setup wizard for new offices (practice info → providers → chairs → fees → insurance → messaging → go live). _(Done: a new office's admin lands on /setup — practice details for claims, providers with NPIs, chairs, keep or scale the starting fees (with a preview), common payers with their payer IDs in one click, reminders/texting number/online booking, then a go-live checklist with links to integrations and the importer; each step checks itself off, a banner stays until it's finished, and practices from before the wizard aren't asked.)_
 3. ✅ **P2** Audit log: date range, patient filter, export (item 74).
 4. **P2** Admin-only visibility of SSO and integration settings.
 

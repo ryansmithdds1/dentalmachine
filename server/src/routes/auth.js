@@ -48,7 +48,7 @@ export default function authRoutes({ db, secret, config = {}, fetchImpl = global
 
     const user = await db.tx(async () => {
       const practiceId = await insert(db, 'practices', {
-        name: body.practice_name, phone: body.phone ?? null, email: body.email, timezone: body.timezone || 'America/New_York',
+        name: body.practice_name, phone: body.phone ?? null, email: body.email, timezone: body.timezone || 'America/New_York', setup_status: 'pending',
       });
       const userId = await insert(db, 'users', {
         practice_id: practiceId, email: body.email, name: body.name, role: 'admin', password_hash: hashPassword(req.body.password),
