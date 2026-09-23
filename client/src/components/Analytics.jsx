@@ -43,6 +43,7 @@ function Kpi({ label: l, value, suffix = '', target, invert, sub }) {
 // The headline numbers as rows, for the spreadsheet download.
 const kpiRows = (k) => [
   ['From', k.from], ['To', k.to], ['Gross production', dollars(k.production)], ['Collections', dollars(k.collections)], ['Adjustments', dollars(k.adjustments)],
+  ['  Insurance write-offs', dollars(k.insurance_write_offs)], ['  Discounts', dollars(k.discounts)], ['  Other write-offs (bad debt, small balances)', dollars(k.other_write_offs)],
   ['Net production', dollars(k.net_production)], ['Collection rate %', k.collection_rate ?? ''], ['Average daily production', dollars(k.avg_daily_production)],
   ['Case acceptance %', k.case_acceptance.rate ?? ''], ['Hygiene reappointment %', k.hygiene_reappointment.rate ?? ''], ['No-show & cancel rate %', k.appointments.no_show_rate ?? ''],
   ['Patients current on recall %', k.recall_current_rate ?? ''], ['New patients', k.new_patients.total], ['Hygiene production', dollars(k.hygiene_production)],
@@ -88,6 +89,8 @@ export default function Analytics() {
         <Kpi label="No-show & cancel rate" value={k.appointments.no_show_rate} suffix="%" target={T.no_show_rate} invert sub={`${k.appointments.broken} broken · ${k.appointments.kept} kept`} />
         <Kpi label="Patients current on recall" value={k.recall_current_rate} suffix="%" target={T.recall_current} sub={`${k.active_patients} active patients`} />
         <Kpi label="New patients" value={k.new_patients.total} target={npTarget} sub={`hygiene production ${short(k.hygiene_production)}`} />
+        <Kpi label="Insurance write-offs" value={short(k.insurance_write_offs)} sub={`${k.production ? Math.round((k.insurance_write_offs / k.production) * 1000) / 10 : 0}% of production · PPO contracts`} />
+        <Kpi label="Discounts & other write-offs" value={short(k.discounts + k.other_write_offs)} sub={`discounts ${short(k.discounts)} · bad debt & other ${short(k.other_write_offs)}`} />
       </div>
 
       <div className="grid grid-2" style={{ marginTop: 16 }}>

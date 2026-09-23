@@ -267,7 +267,7 @@ Works well: drag, resize and create; undo; live updates; conflict checks; open-t
 1. ✅ **P1** CSV/PDF export and provider filter on every report (items 20–21). _(Done: provider filter on KPIs (collections credited by allocation), day sheet, production, hygiene (by hygienist), treatment plans, referrals and reviews; CSV and Print/PDF on every report.)_
 2. ✅ **P1** Load only the selected tab; aging as one query. _(Done: the operational report is split into Day sheet / Production & collections / A/R aging and loads only the one shown; aging runs three grouped queries however many accounts there are.)_
 3. ✅ **P2** Configurable KPI targets (currently hard-coded). _(Done: “Edit goals” on the KPI dashboard (admins) sets the practice's own collection rate, case acceptance, hygiene reappointment, no-show ceiling, recall and new-patients-a-month goals; blanks keep the usual benchmarks; the new-patient goal scales to the range shown.)_
-4. **P2** Separate insurance write-offs from discounts in the KPIs.
+4. ✅ **P2** Separate insurance write-offs from discounts in the KPIs. _(Done: the dashboard and its CSV split credit adjustments into insurance write-offs (PPO contracts, with their share of production), discounts the office gave, and other write-offs (bad debt, small balances) — also per provider; voided adjustments no longer count.)_
 
 ### Settings and admin
 1. ✅ **P1** Settings search box. _(Done: searches section names and what's inside them (field labels, e.g. “lock date”, “payer id”, “twain”); Enter opens the first match and scrolls to the field.)_

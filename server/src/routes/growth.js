@@ -15,6 +15,10 @@ const addDays = (d, n) => new Date(Date.parse(`${d}T12:00:00Z`) + n * 86400_000)
 const pct = (a, b) => (b ? Math.round((a / b) * 1000) / 10 : null);
 
 // Practice analytics (KPIs), statement batches, bulk recall and full data export.
+// Which kind of credit adjustment an entry is, for the KPI split.
+export const adjustmentKind = (e) => (e.adjustment_type === 'Insurance write-off' || e.claim_id ? 'insurance_write_offs'
+  : /write-?off|bad debt|collection/i.test(e.adjustment_type || '') ? 'other_write_offs' : 'discounts');
+
 export default function growthRoutes({ db, messenger, config, mailer = { enabled: false } }) {
   const r = Router();
 
@@ -35,13 +39,30 @@ export default function growthRoutes({ db, messenger, config, mailer = { enabled
     const production = await one(`SELECT COALESCE(SUM(amount),0) AS n FROM ledger_entries WHERE practice_id = ? AND type = 'charge' AND entry_date BETWEEN ? AND ?${byProv()}`, ...range);
     let collections;
     let adjustments;
+    // Credit adjustments split three ways: insurance write-offs (the PPO contract), discounts the office
+    // chose to give, and other write-offs (bad debt, small balances). Voided ones don't count.
+    const split = { insurance_write_offs: 0, discounts: 0, other_write_offs: 0 };
     if (prov) {
       const alloc = (await allocationsForRange(db, pid, from, to)).filter((a) => a.provider_id === prov);
       collections = alloc.filter((a) => ['payment', 'insurance_payment'].includes(a.credit_type)).reduce((s, a) => s + a.amount, 0);
-      adjustments = alloc.filter((a) => a.credit_type === 'adjustment').reduce((s, a) => s + a.amount, 0);
+      const adj = alloc.filter((a) => a.credit_type === 'adjustment');
+      const ids = [...new Set(adj.map((a) => a.credit_id))];
+      const kinds = new Map();
+      for (let i = 0; i < ids.length; i += 500) {
+        const chunk = ids.slice(i, i + 500);
+        for (const e of await db.all(`SELECT id, adjustment_type, claim_id, voided_at, reverses_id FROM ledger_entries WHERE id IN (${chunk.map(() => '?').join(',')})`, ...chunk)) kinds.set(e.id, e);
+      }
+      for (const a of adj) {
+        const e = kinds.get(a.credit_id);
+        if (!e || e.voided_at || e.reverses_id) continue;
+        split[adjustmentKind(e)] += a.amount;
+      }
+      adjustments = split.insurance_write_offs + split.discounts + split.other_write_offs;
     } else {
       collections = -(await one("SELECT COALESCE(SUM(amount),0) AS n FROM ledger_entries WHERE practice_id = ? AND type IN ('payment','insurance_payment') AND entry_date BETWEEN ? AND ?", ...range));
-      adjustments = -(await one("SELECT COALESCE(SUM(amount),0) AS n FROM ledger_entries WHERE practice_id = ? AND type = 'adjustment' AND amount < 0 AND entry_date BETWEEN ? AND ?", ...range));
+      const rows = await db.all("SELECT adjustment_type, claim_id IS NOT NULL AS on_claim, -SUM(amount) AS n FROM ledger_entries WHERE practice_id = ? AND type = 'adjustment' AND amount < 0 AND voided_at IS NULL AND reverses_id IS NULL AND entry_date BETWEEN ? AND ? GROUP BY adjustment_type, claim_id IS NOT NULL", ...range);
+      for (const r2 of rows) split[adjustmentKind({ adjustment_type: r2.adjustment_type, claim_id: Number(r2.on_claim) ? 1 : null })] += Number(r2.n);
+      adjustments = split.insurance_write_offs + split.discounts + split.other_write_offs;
     }
     const hygieneProduction = await one(
       `SELECT COALESCE(SUM(l.amount),0) AS n FROM ledger_entries l JOIN providers pv ON pv.id = l.provider_id
@@ -112,7 +133,7 @@ export default function growthRoutes({ db, messenger, config, mailer = { enabled
 
     res.json({
       from, to, provider_id: prov,
-      production, collections, adjustments, hygiene_production: hygieneProduction,
+      production, collections, adjustments, ...split, hygiene_production: hygieneProduction,
       net_production: production - adjustments,
       collection_rate: pct(collections, production - adjustments),
       avg_daily_production: Math.round(production / days),

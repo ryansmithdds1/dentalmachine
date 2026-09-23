@@ -191,3 +191,23 @@ test('aging: credits listed separately, voided payments age as owed; manual EOBs
   assert.ok(!aging.rows.some((r) => r.id === other.id));
   assert.equal(aging.rows.find((r) => r.id === patient.id).current, 23500);
 });
+
+test('KPIs split insurance write-offs from discounts and other write-offs; voided adjustments drop out', async () => {
+  const ctx = await h.practice();
+  const { api, patient } = ctx;
+  const { primary } = await insured(ctx, { ppo: true });
+  const proc = await completed(ctx);
+  const claim = (await api.post('/claims', { patient_insurance_id: primary.id, procedure_ids: [proc.id] })).data;
+  await api.post(`/claims/${claim.id}/submit`);
+  assert.equal((await api.post(`/claims/${claim.id}/payment`, { amount: 15000, write_off: 4700 })).status, 200);
+  await api.post(`/patients/${patient.id}/adjustments`, { amount: -1000, description: 'Courtesy', adjustment_type: 'Courtesy discount' });
+  await api.post(`/patients/${patient.id}/adjustments`, { amount: -800, description: 'Bad debt', adjustment_type: 'Bad debt write-off' });
+  const voided = (await api.post(`/patients/${patient.id}/adjustments`, { amount: -600, description: 'Oops', adjustment_type: 'Senior discount' })).data;
+  const voidedId = voided.entry?.id ?? voided.id;
+  assert.equal((await api.post(`/ledger/${voidedId}/void`, { reason: 'entered twice' })).status, 201);
+  const today = new Date().toISOString().slice(0, 10);
+  const k = (await api.get(`/analytics?from=2000-01-01&to=${today}`)).data;
+  assert.deepEqual([k.insurance_write_offs, k.discounts, k.other_write_offs, k.adjustments], [4700, 1000, 800, 6500]);
+  const byProv = (await api.get(`/analytics?from=2000-01-01&to=${today}&provider_id=${ctx.provider.id}`)).data;
+  assert.equal(byProv.insurance_write_offs, 4700, "the provider's share of the contract write-off");
+});
