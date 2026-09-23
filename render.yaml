@@ -1,0 +1,34 @@
+# One-click demo on Render: the app plus a Postgres database, loaded with the demo practice.
+# Every integration runs in sandbox mode (nothing is sent to real payers, pharmacies, card processors or patients).
+databases:
+  - name: dental-machine-db
+    plan: free
+    databaseName: dentalmachine
+
+services:
+  - type: web
+    name: dental-machine
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/health
+    # Loads the demo practice on first start (skipped once it exists), then runs the server.
+    dockerCommand: sh -c "node --disable-warning=ExperimentalWarning server/src/seed.js; exec node --disable-warning=ExperimentalWarning server/src/index.js"
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: dental-machine-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: DOCUMENT_ENCRYPTION_KEY
+        generateValue: true
+      - key: EDI_MODE
+        value: sandbox
+      - key: ERX
+        value: sandbox
+      - key: PAYMENTS
+        value: sandbox
+      - key: MAIL_DRIVER
+        value: log
+      - key: UPLOAD_DIR
+        value: /tmp/uploads

@@ -85,6 +85,14 @@ To try every integration without any accounts, set `EDI_MODE=sandbox ERX=sandbox
 
 ## Deploying
 
+### Try it in five minutes (Render)
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/ryansmithdds1/dentalmachine)
+
+The button uses `render.yaml`. It creates the app and a Postgres database, loads the demo practice, and runs every integration in sandbox mode (nothing reaches real payers, pharmacies, card processors or patients). Sign in as `admin@demo.dentalmachine.app` / `demo-password-123`. On the free plan the app sleeps when idle, and uploaded files don't survive a restart.
+
+### Your own server
+
 The Docker image serves both the API and the web app on one port. For a **single server** with SQLite:
 
 ```bash

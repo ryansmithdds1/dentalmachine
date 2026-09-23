@@ -36,7 +36,8 @@ import { createMailer } from './mail.js';
 // Runtime configuration, from the environment unless overridden (tests pass their own).
 export function loadConfig(env = process.env) {
   return {
-    appUrl: (env.APP_URL || `http://localhost:${env.PORT || 4000}`).replace(/\/$/, ''),
+    // Render and similar hosts publish the public URL themselves.
+    appUrl: (env.APP_URL || env.RENDER_EXTERNAL_URL || `http://localhost:${env.PORT || 4000}`).replace(/\/$/, ''),
     uploadDir: env.UPLOAD_DIR || './data/uploads',
     documentKey: env.DOCUMENT_ENCRYPTION_KEY || null,
     stripeSecretKey: env.STRIPE_SECRET_KEY || null,
