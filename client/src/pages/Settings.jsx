@@ -6,6 +6,7 @@ import { useAuth } from '../auth.jsx';
 import { money, fmtDateTime, fmtUtcDateTime, label, toCents, fromCents } from '../format.js';
 import { ErrorBox, Modal, useSubmit } from '../components/ui.jsx';
 import { CustomFieldsSettings, DuplicateCharts } from '../components/Switching.jsx';
+import ImportData from '../components/ImportData.jsx';
 import MfaSetup from '../components/MfaSetup.jsx';
 
 const ROLES = ['admin', 'dentist', 'hygienist', 'assistant', 'front_desk', 'billing'];
@@ -42,7 +43,7 @@ export default function Settings() {
   const admin = user.role === 'admin';
   const groups = [
     ['You', [['account', 'My account', true]]],
-    ['Practice', [['practice', 'Practice & security', admin], ['users', 'Users & roles', admin], ['providers', 'Providers', true], ['operatories', 'Operatories', true], ['types', 'Appointment types', true]]],
+    ['Practice', [['practice', 'Practice & security', admin], ['users', 'Users & roles', admin], ['providers', 'Providers', true], ['operatories', 'Operatories', true], ['types', 'Appointment types', true], ['import', 'Import from another system', admin]]],
     ['Clinical', [['templates', 'Note templates', can('clinical:write')], ['labs', 'Labs', can('clinical:read')], ['referrals', 'Referral contacts', can('patients:read')]]],
     ['Billing', [['codes', 'Fee schedule', true], ['ppo', 'PPO fee schedules', can('billing:read')], ['carriers', 'Insurance carriers', can('billing:read')]]],
     ['Patients', [['messaging', 'Messages & reviews', admin], ['custom', 'Custom patient fields', admin], ['duplicates', 'Duplicate charts', admin]]],
@@ -81,6 +82,7 @@ export default function Settings() {
       {tab === 'ppo' && <FeeSchedules admin={admin} />}
       {tab === 'messaging' && <Messaging />}
       {tab === 'custom' && <CustomFieldsSettings />}
+      {tab === 'import' && admin && <ImportData />}
       {tab === 'duplicates' && <DuplicateCharts />}
       {tab === 'imaging' && <ImagingBridges />}
       {tab === 'integrations' && <Integrations />}

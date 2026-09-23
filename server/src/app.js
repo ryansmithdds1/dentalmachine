@@ -28,6 +28,7 @@ import { portalPublicRoutes, portalRoutes } from './routes/portal.js';
 import systemRoutes from './routes/system.js';
 import chartingRoutes from './routes/charting.js';
 import referralRoutes from './routes/referrals.js';
+import importRoutes from './routes/imports.js';
 import { createMessenger } from './messaging.js';
 import { createStorage } from './storage.js';
 import { createClearinghouse, clearinghouseConfig } from './clearinghouse.js';
@@ -106,6 +107,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(clinicalRoutes({ db }));
   api.use(chartingRoutes({ db }));
   api.use(referralRoutes({ db }));
+  api.use(importRoutes({ db }));
   api.use(billingRoutes({ db, payments }));
   api.use(insuranceRoutes({ db }));
   api.use(settingsRoutes({ db, secret, config }));

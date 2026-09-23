@@ -182,6 +182,8 @@ export default function patientRoutes({ db }) {
       if (Object.keys(fill).length) await update(db, 'patients', keep.id, req.user.practice_id, fill);
       await db.run('DELETE FROM conversation_state WHERE practice_id = ? AND thread = ? AND EXISTS (SELECT 1 FROM conversation_state x WHERE x.practice_id = ? AND x.thread = ?)', req.user.practice_id, `p${from.id}`, req.user.practice_id, `p${keep.id}`);
       await db.run('UPDATE conversation_state SET thread = ? WHERE practice_id = ? AND thread = ?', `p${keep.id}`, req.user.practice_id, `p${from.id}`);
+      // Old-system IDs from a data import follow the chart, so a re-import updates the kept one.
+      await db.run("UPDATE external_ids SET local_id = ? WHERE practice_id = ? AND kind = 'patients' AND local_id = ?", keep.id, req.user.practice_id, from.id);
       await db.run('DELETE FROM patients WHERE id = ?', from.id);
     });
     await audit(db, req, 'patient.merge', 'patients', keep.id, { merged: from.id, name: `${from.first_name} ${from.last_name}`, moved });

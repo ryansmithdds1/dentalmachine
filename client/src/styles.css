@@ -600,3 +600,5 @@ span.perio-site { border-color: transparent; }
 .avatar-edit:hover .avatar { outline: 2px solid var(--primary); }
 .appt-history { list-style: none; padding: 0; margin: 6px 0 0; font-size: 12px; display: flex; flex-direction: column; gap: 4px; }
 .waitlist-offer { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border); }
+.progress { height: 6px; background: var(--border, #e5e7eb); border-radius: 3px; overflow: hidden; margin-top: 8px; }
+.progress > div { height: 100%; background: var(--primary, #0f766e); transition: width 0.2s; }

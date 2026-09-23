@@ -100,7 +100,7 @@ The "OD / Curve" column shows which competitor has the feature: ✓ = has it, ~ 
 
 | # | Feature | Why | OD / Curve | Pri | Size |
 |---|---|---|---|---|---|
-| 17 | **Data conversion importer.** Open Dental (MySQL dump / CSV), Dentrix, Eaglesoft and Curve CSV: patients, families, insurance, ledger balances, appointments, recalls, treatment plans, documents. | **No office switches without their data.** Probably the single most important item for adoption. | ✓ / ✓ | P1 | L |
+| 17 | ✅ **Data conversion importer.** Open Dental (MySQL dump / CSV), Dentrix, Eaglesoft and Curve CSV: patients, families, insurance, ledger balances, appointments, recalls, treatment plans, documents. *(CSV import of everything but documents is done, with preview, re-runs and undo; bulk document import is still to do.)* | **No office switches without their data.** Probably the single most important item for adoption. | ✓ / ✓ | P1 | L |
 | 18 | **Multi-location (clinics).** Location entity; users across locations; per-location chairs, hours, fees and reports; consolidated reporting. | DSOs and growing practices; Curve Enterprise's main selling point. | ✓ / ✓ | P2 | L |
 | 19 | **Custom roles and per-user permission overrides.** For example, a hygienist who can see their own production. | Every office has a different org chart. | ✓ / ✓ | P2 | M |
 | 20 | ✅ **Report exports** to CSV/Excel and PDF, on every report. | Accountants and consultants ask on day one. | ✓ / ✓ | P1 | S |
@@ -108,8 +108,8 @@ The "OD / Curve" column shows which competitor has the feature: ✓ = has it, ~ 
 | 22 | **Custom query / report builder** (read-only SQL for admins, or a guided builder). | Open Dental's "User Query" is heavily used. | ✓ / ~ | P3 | M |
 | 23 | **Public API and outbound webhooks** (appointments, patients, payments), with API keys and scopes. | Third-party integrations: Weave, NexHealth, Dental Intelligence. | ✓ / ~ | P2 | L |
 | 24 | **Automated backups and restore**, including documents; point-in-time recovery guidance for Postgres. | HIPAA contingency plan. | ✓ / ✓ | P1 | M |
-| 25 | **Custom patient fields.** | Every office tracks something unique. | ✓ / ✓ | P2 | S |
-| 26 | **Patient merge,** plus a duplicate check on create. | Duplicates appear within weeks. | ✓ / ✓ | P2 | M |
+| 25 | ✅ **Custom patient fields.** | Every office tracks something unique. | ✓ / ✓ | P2 | S |
+| 26 | ✅ **Patient merge,** plus a duplicate check on create. | Duplicates appear within weeks. | ✓ / ✓ | P2 | M |
 | 27 | **Time clock and simple payroll export.** | Open Dental has it; small offices use it. | ✓ / ✗ | P3 | M |
 | 28 | **Supply inventory.** | Open Dental has basic inventory. | ✓ / ✗ | P3 | M |
 | 29 | **Installable app (PWA)** with an offline read-only view of today's schedule. | Resilience when the internet drops. | ~ / ~ | P3 | M |

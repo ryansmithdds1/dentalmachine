@@ -660,6 +660,39 @@ CREATE TABLE IF NOT EXISTS portal_codes (
 CREATE INDEX IF NOT EXISTS idx_portal_codes ON portal_codes(practice_id, contact);
 
 -- Patients without an appointment who want one (or an earlier one), and when they can come.
+-- Data conversion from another practice system: one batch per imported file.
+CREATE TABLE IF NOT EXISTS import_batches (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  source TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  filename TEXT,
+  mapping TEXT,
+  status TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running','done','undone')),
+  total_rows INTEGER NOT NULL DEFAULT 0,
+  created_count INTEGER NOT NULL DEFAULT 0,
+  updated_count INTEGER NOT NULL DEFAULT 0,
+  skipped_count INTEGER NOT NULL DEFAULT 0,
+  error_count INTEGER NOT NULL DEFAULT 0,
+  errors TEXT,
+  pending TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  finished_at TEXT
+);
+-- What each imported record was called in the old system, so a re-import updates instead of duplicating.
+CREATE TABLE IF NOT EXISTS external_ids (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  source TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  external_id TEXT NOT NULL,
+  local_id INTEGER NOT NULL,
+  batch_id INTEGER REFERENCES import_batches(id),
+  created INTEGER NOT NULL DEFAULT 0,
+  UNIQUE (practice_id, source, kind, external_id)
+);
+
 CREATE TABLE IF NOT EXISTS waitlist (
   id INTEGER PRIMARY KEY,
   practice_id INTEGER NOT NULL REFERENCES practices(id),
@@ -1185,6 +1218,20 @@ function openSqlite(path) {
       queue = p.catch(() => {});
       return p;
     },
+    // Inside a transaction: undo just this part if it fails, and keep the transaction going.
+    async savepoint(fn) {
+      if (!inTx.getStore()) return fn();
+      db.exec('SAVEPOINT sp');
+      try {
+        const out = await fn();
+        db.exec('RELEASE sp');
+        return out;
+      } catch (err) {
+        db.exec('ROLLBACK TO sp');
+        db.exec('RELEASE sp');
+        throw err;
+      }
+    },
     async close() {
       db.close();
     },
@@ -1316,6 +1363,20 @@ async function openPostgres(url, { freshSchema = false } = {}) {
         throw err;
       } finally {
         client.release();
+      }
+    },
+    async savepoint(fn) {
+      const client = inTx.getStore();
+      if (!client) return fn();
+      await client.query('SAVEPOINT sp');
+      try {
+        const out = await fn();
+        await client.query('RELEASE SAVEPOINT sp');
+        return out;
+      } catch (err) {
+        await client.query('ROLLBACK TO SAVEPOINT sp');
+        await client.query('RELEASE SAVEPOINT sp');
+        throw err;
       }
     },
     async close() {
