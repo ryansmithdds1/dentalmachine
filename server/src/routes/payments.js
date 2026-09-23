@@ -3,7 +3,7 @@ import { messageText, patientLang, subjectFor } from '../templates.js';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { requirePermission, HttpError } from '../auth.js';
 import { findOr404, insert, audit, toCents, practiceNow } from '../util.js';
-import { patientBalance } from '../services.js';
+import { patientBalance, pendingInsurance } from '../services.js';
 import { runAutopay } from '../payments.js';
 import { finishBooking } from '../onlinebooking.js';
 import { sendMessage, preferredChannel, sendAppointmentReminder } from '../messaging.js';
@@ -88,7 +88,9 @@ export default function paymentRoutes({ db, config, messenger, payments, mailer 
     if (!enabled()) throw new HttpError(501, 'Card payments are not configured. Set STRIPE_SECRET_KEY on the server.');
     const patient = await findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient');
     const practice = await db.get('SELECT name FROM practices WHERE id = ?', req.user.practice_id);
-    const amount = toCents(req.body?.amount ?? (await patientBalance(db, req.user.practice_id, patient.id)));
+    // No amount given: ask for what the patient owes, not what insurance is still expected to pay.
+    const portion = async () => (await patientBalance(db, req.user.practice_id, patient.id)) - (await pendingInsurance(db, req.user.practice_id, patient.id)).total;
+    const amount = toCents(req.body?.amount ?? (await portion()));
     if (amount < 50) throw new HttpError(400, 'Amount must be at least $0.50');
     const id = await insert(db, 'payment_requests', { practice_id: req.user.practice_id, patient_id: patient.id, amount, created_by: req.user.id });
     const session = await stripe('checkout/sessions', {

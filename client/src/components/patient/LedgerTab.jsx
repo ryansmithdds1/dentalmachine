@@ -129,7 +129,7 @@ export default function LedgerTab({ patient, onChange }) {
           </table>
         </div>
       )}
-      {modal === 'paylink' && <Modal title="Send card payment link" onClose={() => setModal(null)}><PayLinkForm patient={patient} balance={data.patient_portion} onDone={() => { setModal(null); reloadRequests(); }} /></Modal>}
+      {modal === 'paylink' && <Modal title="Send card payment link" onClose={() => setModal(null)}><PayLinkForm patient={patient} balance={data.patient_portion} fullBalance={data.balance} onDone={() => { setModal(null); reloadRequests(); }} /></Modal>}
       {modal === 'adjustment' && <Modal title="Ledger adjustment" onClose={() => setModal(null)}><AdjustmentForm patient={patient} lockDate={data.lock_date} onDone={done} /></Modal>}
       {modal === 'transfer' && <Modal title="Transfer within the family" onClose={() => setModal(null)}><TransferForm patient={patient} balance={data.balance} onDone={done} /></Modal>}
       {modal === 'refund' && <Modal title="Refund credit" onClose={() => setModal(null)}><RefundForm patient={patient} credit={-data.balance} entries={data.entries} onDone={done} /></Modal>}
@@ -237,7 +237,7 @@ function PaymentForm({ patient, balance, lockDate, onDone }) {
   );
 }
 
-function PayLinkForm({ patient, balance, onDone }) {
+function PayLinkForm({ patient, balance, fullBalance, onDone }) {
   const [amount, setAmount] = useState(balance > 0 ? (balance / 100).toFixed(2) : '');
   const [send, setSend] = useState(patient.phone && patient.sms_opt_in ? 'sms' : patient.email && patient.email_opt_in ? 'email' : '');
   const [result, setResult] = useState(null);
@@ -258,7 +258,14 @@ function PayLinkForm({ patient, balance, onDone }) {
     <form onSubmit={(e) => { e.preventDefault(); submit(); }}>
       <ErrorBox error={error} />
       <div className="form-grid">
-        <label>Amount ($)<input type="number" step="0.01" min="0.50" required value={amount} onChange={(e) => setAmount(e.target.value)} /></label>
+        <label>Amount ($)<input type="number" step="0.01" min="0.50" required value={amount} onChange={(e) => setAmount(e.target.value)} />
+          {fullBalance > balance && (
+            <span className="inline" style={{ gap: 6, marginTop: 4 }}>
+              <button type="button" className={`small${amount === (Math.max(0, balance) / 100).toFixed(2) ? ' primary' : ''}`} onClick={() => setAmount((Math.max(0, balance) / 100).toFixed(2))}>Patient portion {money(Math.max(0, balance))}</button>
+              <button type="button" className={`small${amount === (fullBalance / 100).toFixed(2) ? ' primary' : ''}`} onClick={() => setAmount((fullBalance / 100).toFixed(2))}>Full balance {money(fullBalance)}</button>
+            </span>
+          )}
+        </label>
         <label>
           Send link by
           <select value={send} onChange={(e) => setSend(e.target.value)}>

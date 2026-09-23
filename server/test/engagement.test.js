@@ -291,6 +291,20 @@ test('text-to-pay: Stripe checkout link, then signed webhook posts the payment o
   assert.equal((await api.get(`/patients/${patient.id}/payment-requests`)).data[0].status, 'paid');
 });
 
+test('text-to-pay asks for the patient portion, not what insurance is still expected to pay', async () => {
+  const { api, provider, patient } = await setup();
+  const carrier = (await api.post('/carriers', { name: 'Delta Dental', payer_id: '94276' })).data;
+  const policy = (await api.post(`/patients/${patient.id}/insurance`, { carrier_id: carrier.id, subscriber_name: 'Jane Doe', subscriber_id: 'W1', annual_max: 150000, deductible: 0, pct_basic: 80 })).data;
+  const proc = (await api.post(`/patients/${patient.id}/procedures`, { code: 'D2392', tooth: '30', surfaces: 'MO', provider_id: provider.id, complete: true })).data;
+  assert.equal((await api.post('/claims', { patient_insurance_id: policy.id, procedure_ids: [proc.id] })).status, 201);
+  const ledger = (await api.get(`/patients/${patient.id}/ledger`)).data;
+  assert.ok(ledger.pending_insurance > 0 && ledger.patient_portion < ledger.balance);
+  const reqd = (await api.post(`/patients/${patient.id}/payment-requests`, {})).data;
+  assert.equal(reqd.amount, ledger.patient_portion);
+  // Staff can still ask for more.
+  assert.equal((await api.post(`/patients/${patient.id}/payment-requests`, { amount: ledger.balance })).data.amount, ledger.balance);
+});
+
 test('two-factor authentication: enrol, required at login, replay blocked, enforceable per practice', async () => {
   const { api, email } = await setup();
   const setupRes = (await api.post('/auth/mfa/setup')).data;
