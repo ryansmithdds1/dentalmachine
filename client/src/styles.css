@@ -631,3 +631,9 @@ a.button.primary { background: var(--primary); color: #fff; }
 .cal-block.reserved span { color: #0369a1; }
 .cal-col-sub.goal-met { color: #15803d; font-weight: 600; }
 .cal-col-sub.goal-short { color: #b45309; }
+.pinboard { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; padding: 8px 12px; background: #fff; border: 1px dashed var(--border); border-radius: var(--radius); font-size: 13px; }
+.pinboard.empty { opacity: 0.8; }
+.pinboard:hover { border-color: var(--primary); }
+.pin-item { display: inline-flex; align-items: center; gap: 6px; background: #f8fafc; border: 1px solid var(--border); border-left: 4px solid; border-radius: 6px; padding: 3px 8px; }
+.pin-item.active { background: #fef3c7; border-color: #f59e0b; }
+.pin-item .muted { font-size: 12px; }

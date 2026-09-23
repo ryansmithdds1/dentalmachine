@@ -154,6 +154,17 @@ export default function Schedule() {
   const [selectedId, setSelectedId] = useState(null);
   const [modal, setModal] = useState(null);
   const [placing, setPlacing] = useState(null);
+  // Pinboard: appointments parked here (on this computer) to be placed on another day or time.
+  const [pins, setPinsState] = useState(() => { try { return JSON.parse(localStorage.getItem('dm_pinboard') || '[]'); } catch { return []; } });
+  const setPins = (fn) => setPinsState((cur) => {
+    const next = typeof fn === 'function' ? fn(cur) : fn;
+    try { localStorage.setItem('dm_pinboard', JSON.stringify(next)); } catch { /* private mode */ }
+    return next;
+  });
+  const onPin = useCallback((a) => {
+    setPins((cur) => [...cur.filter((p) => p.id !== a.id), a]);
+    toast(`${a.first_name} ${a.last_name} pinned — tap it on the pinboard, then tap a new time`);
+  }, [toast]); // eslint-disable-line react-hooks/exhaustive-deps
   const [showAsap, setShowAsap] = useState(false);
   const [asap, setAsap] = useState([]);
   useEffect(() => {
@@ -204,8 +215,9 @@ export default function Schedule() {
     const appt = placing;
     setPlacing(null);
     const dur = toMin(appt.end_time) - toMin(appt.start_time);
-    saveMove(appt, { start_time: `${col.date} ${start}`, end_time: `${col.date} ${hhmm(toMin(start) + dur)}`, ...col.assign });
-  }, [placing, saveMove]);
+    saveMove(appt, { start_time: `${col.date} ${start}`, end_time: `${col.date} ${hhmm(toMin(start) + dur)}`, ...col.assign })
+      .then((saved) => saved && setPins((cur) => cur.filter((p) => p.id !== appt.id)));
+  }, [placing, saveMove]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const setStatus = async (a, status, scope, extra = {}) => {
     replaceAppt({ ...a, status, _pending: true });
@@ -420,6 +432,7 @@ export default function Schedule() {
             onSelectRange={onSelectRange} onOpen={(a) => setSelectedId(a.id)}
             onOpenBlockout={(b) => can('schedule:write') && setModal({ type: 'block', blockout: b })}
             placing={placing} onPlace={onPlace} selectedId={selectedId} scrollKey={`${view}|${from}`}
+            onPin={can('schedule:write') ? onPin : undefined}
           />
         )}
 
@@ -441,8 +454,24 @@ export default function Schedule() {
         )}
       </div>
 
+      {can('schedule:write') && view !== 'agenda' && (
+        <div className={`pinboard${pins.length ? '' : ' empty'}`} data-pin-drop>
+          <strong>📌 Pinboard</strong>
+          {!pins.length && <span className="muted">Drag an appointment here to move it to another day.</span>}
+          {pins.map((p) => (
+            <span key={p.id} className={`pin-item${placing?.id === p.id ? ' active' : ''}`} style={{ borderLeftColor: p.type_color || p.provider_color || '#64748b' }}>
+              <button className="link" onClick={() => setPlacing(placing?.id === p.id ? null : p)} title="Tap, then tap a new time on the schedule">
+                {p.first_name} {p.last_name} <span className="muted">· {p.type_name || p.reason || 'Visit'} · {toMin(p.end_time) - toMin(p.start_time)} min · was {dayName(p.start_time.slice(0, 10), { month: 'short', day: 'numeric' })} {fmtTime(p.start_time)}</span>
+              </button>
+              <button className="link" aria-label="Unpin" title="Leave it where it is" onClick={() => { setPins((cur) => cur.filter((x) => x.id !== p.id)); if (placing?.id === p.id) setPlacing(null); }}>✕</button>
+            </span>
+          ))}
+        </div>
+      )}
+
       {selected && (
         <AppointmentDrawer
+          onPin={() => { onPin(selected); setSelectedId(null); }}
           appt={selected} can={can} onClose={() => setSelectedId(null)}
           onStatus={(s, scope, extra) => setStatus(selected, s, scope, extra)}
           onEdit={() => setModal({ type: 'edit', appt: selected })}

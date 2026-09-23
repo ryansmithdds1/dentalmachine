@@ -36,7 +36,7 @@ function layoutLanes(items) {
  * columns: [{ key, label, sub, date, hours, isToday, accepts(appt) -> bool, blockouts: [] , assign: {date, provider_id?, operatory_id?} }]
  */
 export default function CalendarGrid({
-  columns, appointments, range, pxPerMin, nowMin, onMove, onResize, onSelectRange, onOpen, onOpenBlockout,
+  columns, appointments, range, pxPerMin, nowMin, onMove, onResize, onSelectRange, onOpen, onOpenBlockout, onPin,
   placing, onPlace, selectedId, scrollKey, headerExtra, readOnly = false, step = 10,
 }) {
   // The grid step (5, 10 or 15 minutes) is what drags and new appointments snap to.
@@ -110,13 +110,15 @@ export default function CalendarGrid({
         setDrag({ ...d, active: d.active || moved, cur: m });
       }
     };
-    const up = () => {
+    const up = (e) => {
       const d = dragRef.current;
       setDrag(null);
       if (!d) return;
       if (d.kind === 'move') {
         if (!d.active) return;
         suppressClick.current = true;
+        // Dropped on the pinboard: park it there to place later, maybe on another day.
+        if (onPin && document.elementFromPoint(e.clientX, e.clientY)?.closest('[data-pin-drop]')) return onPin(d.appt);
         if (d.s2 === d.s && d.col === d.col0) return;
         onMove(d.appt, columns[d.col], fmtMin(d.s2), fmtMin(d.e2));
       } else if (d.kind === 'resize') {
@@ -138,7 +140,7 @@ export default function CalendarGrid({
       window.removeEventListener('pointerup', up);
       window.removeEventListener('keydown', key);
     };
-  }, [drag !== null, geometry, columns, range, onMove, onResize, onSelectRange, onOpen]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [drag !== null, geometry, columns, range, onMove, onResize, onSelectRange, onOpen, onPin]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const startMove = (e, appt, colIdx, s, eMin) => {
     if (e.button !== 0) return;

@@ -18,7 +18,7 @@ export const CONFIRMED_VIA = { phone: 'by phone', text: 'by text', email: 'by em
 // Minutes between two practice-local 'YYYY-MM-DD HH:MM' times.
 const mins = (a, b) => (a && b ? Math.round((Date.parse(`${b.replace(' ', 'T')}Z`) - Date.parse(`${a.replace(' ', 'T')}Z`)) / 60000) : null);
 
-export default function AppointmentDrawer({ appt: a, can, onClose, onStatus, onEdit, onChart, onMove, onToggleAsap, onReminder, onCheckout }) {
+export default function AppointmentDrawer({ appt: a, can, onClose, onStatus, onEdit, onChart, onMove, onPin, onToggleAsap, onReminder, onCheckout }) {
   useEffect(() => {
     const onKey = (e) => e.key === 'Escape' && onClose();
     window.addEventListener('keydown', onKey);
@@ -111,6 +111,7 @@ export default function AppointmentDrawer({ appt: a, can, onClose, onStatus, onE
         <div className="drawer-actions">
           <button onClick={onChart}>Open chart</button>
           {w && active && <button onClick={onMove}>Move…</button>}
+          {w && active && onPin && <button onClick={onPin} title="Park it on the pinboard, then place it on any day">Pin</button>}
           {w && active && <button onClick={onEdit}>Edit</button>}
           {w && active && ['scheduled', 'confirmed'].includes(a.status) && <button onClick={onReminder}>Send reminder</button>}
           {w && active && <button onClick={onToggleAsap}>{a.asap ? 'Remove from ASAP' : 'Add to ASAP list'}</button>}
