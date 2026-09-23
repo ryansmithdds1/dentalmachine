@@ -59,6 +59,24 @@ export function cleanFinancing(v) {
   return JSON.stringify({ in_house_months: months, in_house_apr: apr, links, min_amount: Math.max(0, Math.round(Number(f.min_amount) || 0)) });
 }
 
+// The practice's own goals for the dashboard KPIs (percentages, and new patients a month). Blank = industry default.
+export const KPI_DEFAULTS = { collection_rate: 98, case_acceptance: 60, hygiene_reappointment: 90, no_show_rate: 10, recall_current: 70, new_patients: null };
+export function cleanKpiTargets(input) {
+  if (input == null || input === '') return null;
+  const obj = typeof input === 'string' ? JSON.parse(input) : input;
+  const out = {};
+  for (const k of Object.keys(KPI_DEFAULTS)) {
+    const v = obj?.[k];
+    if (v === undefined || v === null || v === '') continue;
+    const n = Number(v);
+    if (!Number.isFinite(n) || n < 0 || (k !== 'new_patients' && n > 100) || (k === 'new_patients' && n > 10000)) {
+      throw new HttpError(400, k === 'new_patients' ? 'New patients a month must be a number' : 'Targets are percentages from 0 to 100');
+    }
+    out[k] = k === 'new_patients' ? Math.round(n) : Math.round(n * 10) / 10;
+  }
+  return Object.keys(out).length ? JSON.stringify(out) : null;
+}
+
 export default function settingsRoutes({ db, secret, config = {} }) {
   const r = Router();
 
@@ -96,8 +114,9 @@ export default function settingsRoutes({ db, secret, config = {} }) {
   r.get('/message-templates/defaults', (_req, res) => res.json(DEFAULT_TEMPLATES));
   r.get('/message-templates/meta', (_req, res) => res.json(TEMPLATE_META));
   r.put('/practice', requireAdmin, async (req, res) => {
-    const row = pick(req.body, ['name', 'address', 'city', 'state', 'zip', 'phone', 'email', 'tax_id', 'npi', 'timezone', 'slug', 'online_booking', 'reminder_hours', 'require_mfa', 'office_hours', 'daily_goal', 'sms_number', 'review_url', 'review_requests', 'review_threshold', 'instant_booking', 'idle_timeout_minutes', 'message_templates', 'hygiene_goal', 'portal_enabled', 'lock_date', 'adjustment_approval_limit', 'reminder_steps', 'recall_steps', 'recall_auto', 'finance_charge_bps', 'finance_charge_min', 'late_fee', 'collection_agency', 'financing', 'auto_receipts']);
+    const row = pick(req.body, ['name', 'address', 'city', 'state', 'zip', 'phone', 'email', 'tax_id', 'npi', 'timezone', 'slug', 'online_booking', 'reminder_hours', 'require_mfa', 'office_hours', 'daily_goal', 'sms_number', 'review_url', 'review_requests', 'review_threshold', 'instant_booking', 'idle_timeout_minutes', 'message_templates', 'hygiene_goal', 'portal_enabled', 'lock_date', 'adjustment_approval_limit', 'reminder_steps', 'recall_steps', 'recall_auto', 'finance_charge_bps', 'finance_charge_min', 'late_fee', 'collection_agency', 'financing', 'auto_receipts', 'kpi_targets']);
     if (row.financing !== undefined) row.financing = cleanFinancing(row.financing);
+    if (row.kpi_targets !== undefined) row.kpi_targets = cleanKpiTargets(row.kpi_targets);
     if (row.message_templates != null) row.message_templates = validateTemplates(row.message_templates);
     if (row.review_url && !/^https:\/\/\S+$/.test(row.review_url)) throw new HttpError(400, 'Review link must start with https://');
     if (row.review_threshold != null && ![3, 4, 5].includes(Number(row.review_threshold))) throw new HttpError(400, 'review_threshold must be 3, 4 or 5 stars');

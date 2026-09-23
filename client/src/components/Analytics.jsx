@@ -2,12 +2,29 @@ import { useState } from 'react';
 import { useApi } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
 import { money, shiftDate, practiceToday, label } from '../format.js';
-import { downloadCsv, dollars } from '../api.js';
+import { api, downloadCsv, dollars } from '../api.js';
+import { ErrorBox, Modal, useSubmit } from './ui.jsx';
 import { ProviderSelect, CsvButton, PrintButton } from './ReportControls.jsx';
 
 const RANGES = [[29, '30 days'], [89, '90 days'], [364, '12 months']];
-// Industry rules of thumb, shown as context next to each KPI.
-const BENCH = { collection_rate: 98, case_acceptance: 60, hygiene_reappointment: 90, no_show_rate: 10, recall_current: 70 };
+// Industry rules of thumb, used where the practice hasn't set its own goal.
+const BENCH = { collection_rate: 98, case_acceptance: 60, hygiene_reappointment: 90, no_show_rate: 10, recall_current: 70, new_patients: null };
+const TARGET_LABELS = [['collection_rate', 'Collection rate (%)'], ['case_acceptance', 'Case acceptance (%)'], ['hygiene_reappointment', 'Hygiene reappointment (%)'], ['no_show_rate', 'No-show & cancel rate, at most (%)'], ['recall_current', 'Patients current on recall (%)'], ['new_patients', 'New patients a month']];
+
+function TargetsForm({ saved, onDone }) {
+  const [form, setForm] = useState(Object.fromEntries(TARGET_LABELS.map(([k]) => [k, saved[k] ?? ''])));
+  const { submit, busy, error } = useSubmit(async () => { await api.put('/practice', { kpi_targets: form }); onDone(); });
+  return (
+    <form onSubmit={(e) => { e.preventDefault(); submit(); }}>
+      <ErrorBox error={error} />
+      <p className="muted" style={{ fontSize: 13 }}>Leave one blank to use the usual benchmark (shown greyed).</p>
+      <div className="form-grid">
+        {TARGET_LABELS.map(([k, l]) => <label key={k}>{l}<input type="number" min="0" step={k === 'new_patients' ? 1 : 0.5} value={form[k]} placeholder={BENCH[k] ?? 'none'} onChange={(e) => setForm({ ...form, [k]: e.target.value })} /></label>)}
+      </div>
+      <div className="form-actions"><button className="primary" disabled={busy}>Save goals</button></div>
+    </form>
+  );
+}
 const short = (c) => money(c).replace('.00', '');
 
 function Kpi({ label: l, value, suffix = '', target, invert, sub }) {
@@ -37,7 +54,14 @@ export default function Analytics() {
   const [days, setDays] = useState(89);
   const [prov, setProv] = useState('');
   const { data: k } = useApi(`/analytics?from=${shiftDate(today, -days)}&to=${today}${prov ? `&provider_id=${prov}` : ''}`);
+  const { data: settings, reload: reloadSettings } = useApi('/practice');
+  const { user } = useAuth();
+  const [editing, setEditing] = useState(false);
   if (!k) return <div className="empty">Crunching numbers…</div>;
+  const saved = (() => { try { return JSON.parse(settings?.kpi_targets || '{}') || {}; } catch { return {}; } })();
+  const T = { ...BENCH, ...saved };
+  // New patients: the monthly goal, scaled to the range shown.
+  const npTarget = T.new_patients != null ? Math.round((T.new_patients * (days + 1)) / 30.4) : null;
   const maxMonth = Math.max(1, ...k.monthly.map((m) => Math.max(m.production, m.collections)));
   const maxProv = Math.max(1, ...k.by_provider.map((p) => p.production));
   const totalNp = k.new_patients.total || 1;
@@ -51,17 +75,19 @@ export default function Analytics() {
         <ProviderSelect value={prov} onChange={setProv} />
         <CsvButton name={`kpis-${k.from}-to-${k.to}`} rows={kpiRows(k)} columns={[['Measure', (r) => r[0]], ['Value', (r) => r[1]]]} />
         <PrintButton />
+        {user?.role === 'admin' && <button className="small" onClick={() => setEditing(true)}>Edit goals</button>}
       </div>
+      {editing && <Modal title="KPI goals" onClose={() => setEditing(false)}><TargetsForm saved={saved} onDone={() => { setEditing(false); reloadSettings(); }} /></Modal>}
       {prov && <p className="muted" style={{ marginTop: -6 }}>One provider: their production, visits and plans; collections and write-offs are the payments credited to their work. New patients and recall are practice-wide.</p>}
       <div className="grid grid-4">
         <Kpi label="Gross production" value={short(k.production)} sub={`${short(k.avg_daily_production)} / day avg`} />
         <Kpi label="Collections" value={short(k.collections)} sub={`net production ${short(k.net_production)}`} />
-        <Kpi label="Collection rate" value={k.collection_rate} suffix="%" target={BENCH.collection_rate} sub="of net production" />
-        <Kpi label="Case acceptance" value={k.case_acceptance.rate} suffix="%" target={BENCH.case_acceptance} sub={`${short(k.case_acceptance.accepted)} of ${short(k.case_acceptance.presented)} presented`} />
-        <Kpi label="Hygiene reappointment" value={k.hygiene_reappointment.rate} suffix="%" target={BENCH.hygiene_reappointment} sub={`${k.hygiene_reappointment.reappointed} of ${k.hygiene_reappointment.visits} left booked`} />
-        <Kpi label="No-show & cancel rate" value={k.appointments.no_show_rate} suffix="%" target={BENCH.no_show_rate} invert sub={`${k.appointments.broken} broken · ${k.appointments.kept} kept`} />
-        <Kpi label="Patients current on recall" value={k.recall_current_rate} suffix="%" target={BENCH.recall_current} sub={`${k.active_patients} active patients`} />
-        <Kpi label="New patients" value={k.new_patients.total} sub={`hygiene production ${short(k.hygiene_production)}`} />
+        <Kpi label="Collection rate" value={k.collection_rate} suffix="%" target={T.collection_rate} sub="of net production" />
+        <Kpi label="Case acceptance" value={k.case_acceptance.rate} suffix="%" target={T.case_acceptance} sub={`${short(k.case_acceptance.accepted)} of ${short(k.case_acceptance.presented)} presented`} />
+        <Kpi label="Hygiene reappointment" value={k.hygiene_reappointment.rate} suffix="%" target={T.hygiene_reappointment} sub={`${k.hygiene_reappointment.reappointed} of ${k.hygiene_reappointment.visits} left booked`} />
+        <Kpi label="No-show & cancel rate" value={k.appointments.no_show_rate} suffix="%" target={T.no_show_rate} invert sub={`${k.appointments.broken} broken · ${k.appointments.kept} kept`} />
+        <Kpi label="Patients current on recall" value={k.recall_current_rate} suffix="%" target={T.recall_current} sub={`${k.active_patients} active patients`} />
+        <Kpi label="New patients" value={k.new_patients.total} target={npTarget} sub={`hygiene production ${short(k.hygiene_production)}`} />
       </div>
 
       <div className="grid grid-2" style={{ marginTop: 16 }}>

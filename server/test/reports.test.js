@@ -119,3 +119,13 @@ test('A/R aging groups families and splits what insurance still owes, in a fixed
   assert.equal(row.patient_portion, row.balance - 18800);
   assert.equal(row.first_name, 'Jane');
 });
+
+test('KPI targets: the practice sets its own goals; blanks fall back to the defaults', async () => {
+  const { api } = await h.practice();
+  assert.equal((await api.put('/practice', { kpi_targets: { collection_rate: 140 } })).status, 400);
+  assert.equal((await api.put('/practice', { kpi_targets: { case_acceptance: 'lots' } })).status, 400);
+  assert.equal((await api.put('/practice', { kpi_targets: { collection_rate: 97.5, case_acceptance: '', new_patients: 25, bogus: 3 } })).status, 200);
+  assert.deepEqual(JSON.parse((await api.get('/practice')).data.kpi_targets), { collection_rate: 97.5, new_patients: 25 });
+  await api.put('/practice', { kpi_targets: {} });
+  assert.equal((await api.get('/practice')).data.kpi_targets, null);
+});
