@@ -787,6 +787,16 @@ CREATE TABLE IF NOT EXISTS fee_history (
 );
 CREATE INDEX IF NOT EXISTS idx_fee_history ON fee_history(practice_id, code);
 
+-- Saved custom queries from the report builder (a JSON description, never SQL).
+CREATE TABLE IF NOT EXISTS custom_queries (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  name TEXT NOT NULL,
+  spec TEXT NOT NULL,
+  created_by INTEGER,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Supplies: what's on the shelf, every change to it, and what each procedure uses up.
 CREATE TABLE IF NOT EXISTS inventory_items (
   id INTEGER PRIMARY KEY,
