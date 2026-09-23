@@ -61,7 +61,7 @@ export default function Login() {
           )}
           {mode === 'reset' ? (
             <label>New password (min 10 characters)<input type="password" required minLength={10} autoComplete="new-password" autoFocus value={form.password} onChange={set('password')} /></label>
-          ) : <label>Email<input type="email" required autoComplete="username" value={form.email} onChange={set('email')} /></label>}
+          ) : <label>Email or username<input type="text" required autoComplete="username" autoCapitalize="none" value={form.email} onChange={set('email')} /></label>}
           {sso && (
             <button type="button" className="primary sso-button" onClick={startSso}>
               {{ google: 'G', microsoft: '⊞' }[sso.provider] || '🔑'} Sign in with {sso.name}
