@@ -1,4 +1,5 @@
-import { NavLink, Navigate, Route, Routes } from 'react-router-dom';
+import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { ErrorBoundary } from './errors.jsx';
 import { useAuth } from './auth.jsx';
 import { label } from './format.js';
 import Login from './pages/Login.jsx';
@@ -180,6 +181,7 @@ function LocationPicker({ user }) {
 }
 
 function Shell({ nav }) {
+  const location = useLocation();
   const { user, practice, logout } = useAuth();
   return (
     <div className="app">
@@ -214,6 +216,7 @@ function Shell({ nav }) {
         </div>
       </aside>
       <main className="main" id="main" tabIndex={-1}>
+        <ErrorBoundary key={location.pathname}>
         <Suspense fallback={<div className="empty">Loading…</div>}>
           <Routes>
             <Route path="/" element={<Dashboard />} />
@@ -235,6 +238,7 @@ function Shell({ nav }) {
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Suspense>
+        </ErrorBoundary>
       </main>
     </div>
   );

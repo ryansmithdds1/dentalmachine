@@ -15,15 +15,16 @@ import { createEligibility, runEligibilityBatches } from './eligibility.js';
 import { runScheduledReports } from './savedreports.js';
 import { runSurveys } from './surveys.js';
 import { runOrthoBilling } from './ortho.js';
+import { log } from './monitoring.js';
 
 let secret = process.env.JWT_SECRET;
 if (!secret) {
   if (process.env.NODE_ENV === 'production') {
-    console.error('JWT_SECRET must be set in production');
+    log.error('JWT_SECRET must be set in production');
     process.exit(1);
   }
   secret = randomBytes(32).toString('hex');
-  console.warn('JWT_SECRET not set; using a random secret (sessions reset on restart)');
+  log.warn('JWT_SECRET not set; using a random secret (sessions reset on restart)');
 }
 
 const db = await openDb();
@@ -31,12 +32,21 @@ const cluster = await initCluster();
 const config = loadConfig();
 const messenger = createMessenger();
 const app = createApp({ db, secret, config, messenger });
+// Background jobs: failures are logged and reported like request errors.
+const jobFailed = (name) => (err) => {
+  log.error(`${name} failed:`, err);
+  app.locals.reporter.capture(err, { tags: { job: name } });
+};
+process.on('unhandledRejection', (err) => {
+  log.error('Unhandled promise rejection:', err instanceof Error ? err : new Error(String(err)));
+  app.locals.reporter.capture(err instanceof Error ? err : new Error(String(err)), { tags: { source: 'unhandledRejection' } });
+});
 
 // Appointment reminders every 10 minutes. With Redis, only one server runs each pass (REMINDERS=off disables).
 if (process.env.REMINDERS !== 'off') {
   const tick = () => runExclusive('reminders', 5 * 60 * 1000, async () => (await runReminders(db, messenger, { appUrl: config.appUrl })) + (await runRecallSequences(db, messenger, { appUrl: config.appUrl })) + (await runFormSends(db, messenger, { appUrl: config.appUrl })) + (await runCampaigns(db, messenger, { appUrl: config.appUrl })))
-    .then((n) => n && console.log(`Sent ${n} appointment reminder(s)`))
-    .catch((err) => console.error('Reminder job failed:', err));
+    .then((n) => n && log.info(`Sent ${n} appointment reminder(s)`))
+    .catch(jobFailed('Reminder job'));
   setInterval(tick, 10 * 60 * 1000).unref();
   setTimeout(tick, 5000).unref();
 }
@@ -44,22 +54,22 @@ if (process.env.REMINDERS !== 'off') {
 const ch = app.locals.clearinghouse;
 if (ch?.batch && process.env.CLEARINGHOUSE_POLL !== 'off') {
   const poll = () => runExclusive('clearinghouse-poll', 10 * 60 * 1000, () => pollClearinghouse(db, ch))
-    .then((files) => files?.length && console.log(`Clearinghouse: processed ${files.length} file(s)`))
-    .catch((err) => console.error('Clearinghouse poll failed:', err.message));
+    .then((files) => files?.length && log.info(`Clearinghouse: processed ${files.length} file(s)`))
+    .catch(jobFailed('Clearinghouse poll'));
   setInterval(poll, ch.pollMinutes * 60 * 1000).unref();
   setTimeout(poll, 15_000).unref();
 }
 // Webhooks: retry failed deliveries and announce new payments, every minute.
 if (process.env.WEBHOOKS !== 'off') {
   const hooks = () => runExclusive('webhooks', 55 * 1000, async () => (await scanPayments(db)) + (await deliverWebhooks(db)))
-    .catch((err) => console.error('Webhooks failed:', err.message));
+    .catch(jobFailed('Webhooks'));
   setInterval(hooks, 60 * 1000).unref();
 }
 // Membership fees: each period is posted (and the card on file charged) on its billing date; checked hourly.
 if (process.env.MEMBERSHIP_BILLING !== 'off') {
   const bill = () => runExclusive('memberships', 30 * 60 * 1000, () => runMembershipBilling(db, app.locals.payments, { messenger }))
-    .then((r) => r?.length && console.log(`Memberships: ${r.filter((x) => x.charged).length} charged, ${r.filter((x) => x.declined).length} declined, ${r.length} billed`))
-    .catch((err) => console.error('Membership billing failed:', err.message));
+    .then((r) => r?.length && log.info(`Memberships: ${r.filter((x) => x.charged).length} charged, ${r.filter((x) => x.declined).length} declined, ${r.length} billed`))
+    .catch(jobFailed('Membership billing'));
   setInterval(bill, 60 * 60 * 1000).unref();
   setTimeout(bill, 45_000).unref();
 }
@@ -68,16 +78,16 @@ if (process.env.MEMBERSHIP_BILLING !== 'off') {
 if (config.backupDir) {
   const storage = app.locals.storage;
   const backup = () => runExclusive('backups', 60 * 60 * 1000, () => runAutomaticBackups(db, { dir: config.backupDir, keep: config.backupKeep, storage, documents: config.backupDocuments ?? storage.driver === 'disk' }))
-    .then((made) => made?.length && console.log(`Backups written: ${made.join(', ')}`))
-    .catch((err) => console.error('Backup failed:', err.message));
+    .then((made) => made?.length && log.info(`Backups written: ${made.join(', ')}`))
+    .catch(jobFailed('Backup'));
   setInterval(backup, 60 * 60 * 1000).unref();
   setTimeout(backup, 60_000).unref();
 }
 // Payment-plan autopay: due installments are charged once a day (checked hourly).
 if (app.locals.payments.enabled && process.env.AUTOPAY !== 'off') {
   const charge = () => runExclusive('autopay', 30 * 60 * 1000, () => runAutopay(db, app.locals.payments, messenger))
-    .then((r) => r?.length && console.log(`Autopay: ${r.filter((x) => x.ok).length} charged, ${r.filter((x) => !x.ok).length} declined`))
-    .catch((err) => console.error('Autopay failed:', err.message));
+    .then((r) => r?.length && log.info(`Autopay: ${r.filter((x) => x.ok).length} charged, ${r.filter((x) => !x.ok).length} declined`))
+    .catch(jobFailed('Autopay'));
   setInterval(charge, 60 * 60 * 1000).unref();
   setTimeout(charge, 30_000).unref();
 }
@@ -86,8 +96,8 @@ if (app.locals.payments.enabled && process.env.AUTOPAY !== 'off') {
   const eligibility = createEligibility({ db, config, clearinghouse: ch });
   if (eligibility.automatic && process.env.ELIGIBILITY_BATCH !== 'off') {
     const run = () => runExclusive('eligibility', 30 * 60 * 1000, () => runEligibilityBatches(db, eligibility))
-      .then((r) => r?.length && console.log(`Eligibility: ${r.map((x) => `${x.checked} checked for ${x.date}`).join(', ')}`))
-      .catch((err) => console.error('Eligibility batch failed:', err.message));
+      .then((r) => r?.length && log.info(`Eligibility: ${r.map((x) => `${x.checked} checked for ${x.date}`).join(', ')}`))
+      .catch(jobFailed('Eligibility batch'));
     setInterval(run, 60 * 60 * 1000).unref();
     setTimeout(run, 90_000).unref();
   }
@@ -95,29 +105,29 @@ if (app.locals.payments.enabled && process.env.AUTOPAY !== 'off') {
 // Ortho contracts: each month's charge (and card payment, with autopay) once a day.
 if (process.env.ORTHO_BILLING !== 'off') {
   const run = () => runExclusive('ortho-billing', 30 * 60 * 1000, () => runOrthoBilling(db, app.locals.payments))
-    .then((r) => r?.length && console.log(`Ortho billing: ${r.length} months billed`))
-    .catch((err) => console.error('Ortho billing failed:', err.message));
+    .then((r) => r?.length && log.info(`Ortho billing: ${r.length} months billed`))
+    .catch(jobFailed('Ortho billing'));
   setInterval(run, 60 * 60 * 1000).unref();
   setTimeout(run, 50_000).unref();
 }
 // After-visit patient surveys (the day after, from 10am practice time).
 {
   const run = () => runExclusive('surveys', 30 * 60 * 1000, () => runSurveys(db, messenger, { appUrl: config.appUrl }))
-    .then((n) => n && console.log(`Surveys: ${n} sent`))
-    .catch((err) => console.error('Surveys failed:', err.message));
+    .then((n) => n && log.info(`Surveys: ${n} sent`))
+    .catch(jobFailed('Surveys'));
   setInterval(run, 60 * 60 * 1000).unref();
   setTimeout(run, 150_000).unref();
 }
 // Saved reports emailed on their schedule (checked hourly; each goes out once a day at most, after 7am).
 {
   const run = () => runExclusive('scheduled-reports', 30 * 60 * 1000, () => runScheduledReports(db, messenger))
-    .then((n) => n && console.log(`Scheduled reports: ${n} emailed`))
-    .catch((err) => console.error('Scheduled reports failed:', err.message));
+    .then((n) => n && log.info(`Scheduled reports: ${n} emailed`))
+    .catch(jobFailed('Scheduled reports'));
   setInterval(run, 60 * 60 * 1000).unref();
   setTimeout(run, 120_000).unref();
 }
-console.log(`Clearinghouse: ${ch?.name || 'manual'}${ch?.realtime ? ' + real-time eligibility/status' : ''}`);
-console.log(`Database: ${db.dialect} · cluster: ${cluster.mode}`);
-console.log(`Messaging drivers: sms=${messenger.status.sms} email=${messenger.status.email}`);
+log.info(`Clearinghouse: ${ch?.name || 'manual'}${ch?.realtime ? ' + real-time eligibility/status' : ''}`);
+log.info(`Database: ${db.dialect} · cluster: ${cluster.mode}`);
+log.info(`Messaging drivers: sms=${messenger.status.sms} email=${messenger.status.email}`);
 const port = Number(process.env.PORT) || 4000;
-app.listen(port, () => console.log(`Dental Machine API listening on http://localhost:${port}`));
+app.listen(port, () => log.info(`Dental Machine API listening on http://localhost:${port}`));

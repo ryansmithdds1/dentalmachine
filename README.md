@@ -135,6 +135,7 @@ JWT_SECRET=... DOCUMENT_ENCRYPTION_KEY=... docker compose up --build --scale app
 | Imaging bridges | Set up per workstation in **Settings → Imaging bridges** (see below). |
 | Claim attachments | `ATTACHMENTS=http` with `ATTACHMENTS_URL` and `ATTACHMENTS_API_KEY` sends attachments to your attachment service (NEA/Vyne, DentalXChange, or a bridge to one), which returns the control number the claim references (PWK). `sandbox` simulates it (the default with `EDI_MODE=sandbox`); `manual` numbers them for a printed mail/fax cover sheet. |
 | Automatic backups | `BACKUP_DIR` (a mounted disk or synced folder) turns on nightly backups of every practice, kept `BACKUP_KEEP` days (default 14). SQLite installs also get a copy of the database file. Documents are included when they're stored on the server's disk; `BACKUP_DOCUMENTS=on` or `off` overrides that. |
+| Error monitoring and logs | `SENTRY_DSN` sends unexpected server errors, failed background jobs and browser errors to Sentry or any service that accepts its format (GlitchTip, Bugsink). `SENTRY_ENVIRONMENT` labels them. Reports carry the error, stack, route and request id, never request bodies or patient details. Logs are one line per event: JSON in production (`LOG_FORMAT=json` or `text`), with `LOG_LEVEL` (`debug`, `info`, `warn`, `error`). Every response has an `X-Request-Id`, and a 500 error shows it so staff can quote it. |
 
 Without Twilio or SendGrid configured, messages are recorded in the log but not actually sent. **Settings → Integrations** shows which integrations are connected.
 

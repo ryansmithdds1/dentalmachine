@@ -36,10 +36,12 @@ export const setLocationId = (id) => {
 const locationHeader = () => (getLocationId() ? { 'X-Location-Id': getLocationId() } : {});
 
 export class ApiError extends Error {
-  constructor(status, message, details) {
+  constructor(status, message, details, requestId) {
     super(message);
+    this.name = 'ApiError';
     this.status = status;
     this.details = details;
+    this.requestId = requestId || null;
   }
 }
 
@@ -55,7 +57,7 @@ async function request(method, path, body) {
     setToken(null);
     window.dispatchEvent(new Event('dm:logout'));
   }
-  if (!res.ok) throw new ApiError(res.status, data.error || res.statusText, data.details);
+  if (!res.ok) throw new ApiError(res.status, data.error || res.statusText, data.details, data.request_id);
   return data;
 }
 

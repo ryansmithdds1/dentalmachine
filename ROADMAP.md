@@ -276,7 +276,7 @@ Works well: drag, resize and create; undo; live updates; conflict checks; open-t
 4. **P2** Admin-only visibility of SSO and integration settings.
 
 ### Platform quality
-1. **P1** Error monitoring (Sentry-compatible) and structured logs.
+1. ✅ **P1** Error monitoring (Sentry-compatible) and structured logs. _(Done: `SENTRY_DSN` reports server errors, failed background jobs and browser errors (no request bodies or patient data; rate-limited); JSON log lines with request ids, route, status and timing; 500s show a reference id; a crashed screen shows a recovery page.)_
 2. **P1** End-to-end browser tests in CI for the core flows: book → check in → chart → complete → claim → ERA → statement.
 3. **P2** Load test with a 50,000-patient database; add indexes; add pagination everywhere.
 4. **P2** Keyboard shortcuts help sheet (`?`).

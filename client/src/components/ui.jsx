@@ -40,7 +40,7 @@ export function Modal({ title, onClose, children, wide }) {
   );
 }
 
-export const ErrorBox = ({ error }) => (error ? <div className="error">{error.message || String(error)}</div> : null);
+export const ErrorBox = ({ error }) => (error ? <div className="error">{error.message || String(error)}{error.requestId && error.status >= 500 ? <span className="muted" style={{ fontSize: 12 }}> · reference {error.requestId}</span> : null}</div> : null);
 
 export const Badge = ({ value }) => <span className={`badge ${value}`}>{String(value).replace(/_/g, ' ')}</span>;
 

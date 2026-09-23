@@ -2,7 +2,7 @@ import express from 'express';
 import { existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { authenticate, HttpError } from './auth.js';
+import { authenticate, HttpError, rateLimit } from './auth.js';
 import authRoutes from './routes/auth.js';
 import patientRoutes from './routes/patients.js';
 import scheduleRoutes from './routes/schedule.js';
@@ -53,6 +53,7 @@ import { createClearinghouse, clearinghouseConfig } from './clearinghouse.js';
 import { createErx, erxConfig } from './erx.js';
 import { createPayments } from './payments.js';
 import { createMailer } from './mail.js';
+import { createErrorReporter, requestLogger, routeOf, log } from './monitoring.js';
 
 // Runtime configuration, from the environment unless overridden (tests pass their own).
 export function loadConfig(env = process.env) {
@@ -72,6 +73,8 @@ export function loadConfig(env = process.env) {
     backupDir: env.BACKUP_DIR || null,
     backupKeep: Number(env.BACKUP_KEEP) || 14,
     backupDocuments: env.BACKUP_DOCUMENTS ? env.BACKUP_DOCUMENTS === 'on' : null,
+    // Error monitoring: a Sentry (or compatible) DSN; off when unset.
+    sentryDsn: env.SENTRY_DSN || null,
   };
 }
 
@@ -85,7 +88,9 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   mailer ??= overrides.mailer || createMailer({ fetchImpl });
   clearinghouse ??= createClearinghouse({ db, fetchImpl, config: { ...clearinghouseConfig(), ...(config.ediMode === 'sandbox' && !process.env.CLEARINGHOUSE ? { mode: 'sandbox' } : {}) } });
   startWebhooks(db, fetchImpl);
+  const reporter = overrides.reporter || createErrorReporter({ dsn: config.sentryDsn, fetchImpl });
   const app = express();
+  app.locals.reporter = reporter;
   app.locals.clearinghouse = clearinghouse;
   app.locals.payments = payments;
   app.locals.messenger = messenger;
@@ -94,6 +99,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   // by default one on a private network (a load balancer in the same VPC). Set TRUST_PROXY for others.
   app.set('trust proxy', process.env.TRUST_PROXY ? (/^\d+$/.test(process.env.TRUST_PROXY) ? Number(process.env.TRUST_PROXY) : process.env.TRUST_PROXY) : 'loopback, linklocal, uniquelocal');
   app.disable('x-powered-by');
+  app.use(requestLogger());
   app.use(stripeWebhook({ db, config, payments, messenger })); // needs the raw body, so before express.json
   app.use(smsWebhook({ db, config }));
   // Signed forms can carry photos (insurance cards, ID), so that one route takes larger bodies.
@@ -123,6 +129,20 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
     res.set('Cache-Control', 'no-store');
     next();
   }, bridgeAgentRoutes({ db, storage }));
+
+  // Errors in the browser app, passed on to error monitoring (the DSN stays on the server). Only the
+  // message, stack and page route are kept — nothing typed into the page.
+  const clientErrorLimit = rateLimit({ windowMs: 60_000, max: 20, name: 'client-errors' });
+  app.post('/api/client-errors', clientErrorLimit, (req, res) => {
+    const b = req.body || {};
+    const message = String(b.message || '').slice(0, 500);
+    if (!message) return res.status(400).json({ error: 'message is required' });
+    const page = String(b.path || '').split('?')[0].replace(/\/\d+(?=\/|$)/g, '/:id').replace(/\/[A-Za-z0-9_-]{24,}(?=\/|$)/g, '/:token').slice(0, 200);
+    const err = Object.assign(new Error(message), { name: String(b.name || 'Error').slice(0, 60), stack: `${b.name || 'Error'}: ${message}\n${String(b.stack || '').split('\n').filter((l) => /^\s*at |@/.test(l)).slice(0, 30).join('\n')}` });
+    log.warn('Browser error', { message, page, request_id: req.id });
+    const id = reporter.capture(err, { platform: 'javascript', tags: { source: 'browser', route: page, release: b.release || null } });
+    res.status(202).json({ ok: true, reported: !!id });
+  });
 
   const api = express.Router();
   api.use(authenticate(db, secret));
@@ -179,7 +199,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   }
 
   // eslint-disable-next-line no-unused-vars
-  app.use((err, _req, res, _next) => {
+  app.use((err, req, res, _next) => {
     if (err instanceof HttpError) {
       return res.status(err.status).json({ error: err.message, details: err.details });
     }
@@ -192,8 +212,11 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
       const field = String(err.message).split('.').pop();
       return res.status(400).json({ error: `${field} is required` });
     }
-    console.error(err);
-    res.status(500).json({ error: 'Internal server error' });
+    // Unexpected: logged with the request id (shown to the user so they can quote it) and reported.
+    const where = { method: req.method, route: routeOf(req), request_id: req.id, ...(req.user ? { user_id: req.user.id, practice_id: req.user.practice_id } : {}) };
+    log.error('Unhandled error', err, where);
+    reporter.capture(err, { tags: where, user: req.user ? { id: String(req.user.id) } : null, request: { method: req.method, url: routeOf(req) } });
+    res.status(500).json({ error: 'Internal server error', request_id: req.id });
   });
 
   return app;
