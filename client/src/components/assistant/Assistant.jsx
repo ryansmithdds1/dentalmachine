@@ -1,23 +1,31 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Mic, MicOff, Send, X, Sparkles, Volume2, VolumeX, RotateCcw, Check, Ban } from 'lucide-react';
+import { Mic, MicOff, Send, X, Sparkles, RotateCcw, Check, Settings2, Undo2 } from 'lucide-react';
 import { api } from '../../api.js';
 import { useAuth } from '../../auth.jsx';
-import { READERS, WRITERS, describe, stepLabel, screenPath } from './tools.js';
+import { WRITERS, screenPath } from './tools.js';
+import { localCommand, isYes, isNo, isUndo } from './intents.js';
+import { chime } from './chime.js';
 
-// The assistant: a microphone on every screen. Say (or type) what you want — "book Ryan Smith for a
-// crown prep with Dr. Lee next Tuesday afternoon", "take a hundred twenty dollar card payment", "note:
-// patient reports cold sensitivity on 19" — and it looks things up, shows exactly what it will change,
-// and does it when you say "yes" (or press Confirm). Nothing is changed without that confirmation.
-//
-// F2 starts and stops listening from anywhere.
+// The assistant: hold the talk key (F2, or a foot pedal set to send it), say what you want, let go.
+// Moving around the app ("open her x-rays", "schedule tomorrow", "start perio") happens instantly,
+// without the AI. Everything else goes to Claude, which looks things up on the server and comes back
+// with the change it wants to make: low-risk ones (check-in, seating, perio readings) happen at once
+// with Undo; the rest show a card — tap the talk key or say "yes" to do it, Esc or "no" to drop it.
+// It stays quiet: a chime and a line on screen, not a voice.
 
 const SR = typeof window !== 'undefined' ? window.SpeechRecognition || window.webkitSpeechRecognition : null;
-const YES = /^(yes|yeah|yep|yup|confirm(ed)?|do it|go ahead|correct|ok(ay)?|sure|sounds good|please do|that's right)\b/i;
-const NO = /^(no|nope|cancel|stop|don't|do not|wait|never ?mind)\b/i;
-const SPEAK_KEY = 'dm_assistant_speak';
-const readPref = () => { try { return localStorage.getItem(SPEAK_KEY) !== '0'; } catch { return true; } };
-const MAX_STEPS = 12;
+const pref = (k, d) => { try { return localStorage.getItem(`dm_assistant_${k}`) ?? d; } catch { return d; } };
+const setPref = (k, v) => { try { localStorage.setItem(`dm_assistant_${k}`, v); } catch { /* per computer */ } };
+const HOLD_MS = 350;
+// "Check in Emma's 3 PM visit" → "Checked in Emma's 3 PM visit" for the done message.
+const PAST = [['Book', 'Booked'], ['Move', 'Moved'], ['Check in', 'Checked in'], ['Seat', 'Seated'], ['Confirm', 'Confirmed'], ['Complete', 'Completed'], ['Cancel', 'Cancelled'],
+  ['Mark no-show:', 'Marked no-show:'], ['Post', 'Posted'], ['Add', 'Added'], ['Plan', 'Planned'], ['Chart', 'Charted'], ['Perio', 'Recorded perio']];
+const done = (line) => {
+  const first = line.split('\n')[0].replace(/:$/, '');
+  const hit = PAST.find(([v]) => first.startsWith(`${v} `));
+  return hit ? `${hit[1]}${first.slice(hit[0].length)}` : first;
+};
 
 export default function Assistant() {
   const { user } = useAuth();
@@ -31,139 +39,187 @@ export default function Assistant() {
   const [text, setText] = useState('');
   const [listening, setListening] = useState(false);
   const [interim, setInterim] = useState('');
-  const [speakReplies, setSpeakReplies] = useState(readPref);
+  const [toasts, setToasts] = useState([]);
+  const [showPrefs, setShowPrefs] = useState(false);
+  const [talkKey, setTalkKey] = useState(() => pref('key', 'F2'));
+  const [learning, setLearning] = useState(false);
+  const [chairId, setChairId] = useState(() => pref('chair', ''));
+  const [speak, setSpeak] = useState(() => pref('speak', '0') === '1');
+  const [chairs, setChairs] = useState([]);
+  const [undoId, setUndoId] = useState(null);
   const history = useRef([]);
+  const carry = useRef([]); // results to send with the next request (keeps the conversation whole without a round trip now)
+  const lastUndo = useRef(null);
   const rec = useRef(null);
-  const lastWasVoice = useRef(false);
-  const kinds = useRef({});
+  const keyState = useRef({});
   const feedEnd = useRef(null);
+  const inputRef = useRef(null);
+  const pendingRef = useRef(null);
+  pendingRef.current = pending;
 
   useEffect(() => {
-    api.get('/assistant').then((s) => {
-      setStatus(s);
-      kinds.current = Object.fromEntries(s.tools.map((t) => [t.name, t.kind]));
-    }).catch(() => setStatus({ enabled: false, tools: [] }));
+    api.get('/assistant').then(setStatus).catch(() => setStatus({ enabled: false, tools: [] }));
   }, []);
-  useEffect(() => { feedEnd.current?.scrollIntoView({ block: 'end' }); }, [feed, pending, interim]);
+  useEffect(() => { feedEnd.current?.scrollIntoView({ block: 'end' }); }, [feed, pending]);
+  useEffect(() => { if (showPrefs && !chairs.length) api.get('/operatories').then((o) => setChairs(o.filter((c) => c.active !== 0))).catch(() => {}); }, [showPrefs]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const add = (item) => setFeed((f) => [...f, { key: `${Date.now()}-${Math.random()}`, ...item }]);
-  const say = useCallback((t) => {
-    if (!speakReplies || !lastWasVoice.current || !t || !window.speechSynthesis) return;
+  const add = (item) => setFeed((f) => [...f.slice(-60), { key: `${Date.now()}-${Math.random()}`, ...item }]);
+  const toast = useCallback((t) => {
+    const id = `${Date.now()}-${Math.random()}`;
+    setToasts((list) => [...list.slice(-3), { id, ...t }]);
+    setTimeout(() => setToasts((list) => list.filter((x) => x.id !== id)), t.undo ? 8000 : 4500);
+  }, []);
+  const say = (t) => {
+    if (!speak || !t || !window.speechSynthesis) return;
     window.speechSynthesis.cancel();
-    window.speechSynthesis.speak(Object.assign(new SpeechSynthesisUtterance(t.replace(/[*_#`]/g, '')), { rate: 1.05 }));
-  }, [speakReplies]);
+    window.speechSynthesis.speak(Object.assign(new SpeechSynthesisUtterance(t), { rate: 1.1 }));
+  };
+  const logOutcome = (id, outcome) => id && api.post(`/assistant/log/${id}`, { outcome }).catch(() => {});
 
+  const patientId = () => Number(/^\/patients\/(\d+)/.exec(location.pathname)?.[1]) || null;
   const context = () => {
-    const m = /^\/patients\/(\d+)/.exec(location.pathname);
-    const tab = new URLSearchParams(location.search).get('tab');
-    return m ? { patient_id: Number(m[1]), tab } : { screen: location.pathname === '/' ? 'today' : location.pathname.slice(1).split('/')[0] };
+    const pid = patientId();
+    const base = chairId ? { chair_id: Number(chairId) } : {};
+    return pid ? { ...base, patient_id: pid, tab: new URLSearchParams(location.search).get('tab') } : { ...base, screen: location.pathname === '/' ? 'today' : location.pathname.slice(1).split('/')[0] };
+  };
+  const go = (path, perioVoice) => {
+    if (perioVoice) { try { sessionStorage.setItem('dm_perio_voice', '1'); } catch { /* same tab */ } }
+    navigate(path);
+    if (perioVoice) setTimeout(() => window.dispatchEvent(new Event('dm:perio-voice')), 400);
   };
 
-  // Ask Claude for the next turn, run what it looked up, and stop at anything that needs a yes.
-  const run = async () => {
+  // Make the changes (after a yes, or at once for low-risk ones), keep their results for the next request,
+  // and remember how to take them back.
+  const execute = async (items, logId) => {
+    const undos = [];
+    const lines = [];
+    let failed = false;
+    for (const it of items) {
+      try {
+        const { result, undo } = await WRITERS[it.name](it.input);
+        carry.current.push({ type: 'tool_result', tool_use_id: it.id, content: JSON.stringify(result) });
+        if (undo) undos.push(undo);
+        lines.push(done(it.line));
+      } catch (err) {
+        failed = true;
+        carry.current.push({ type: 'tool_result', tool_use_id: it.id, content: `Failed: ${err.message}`, is_error: true });
+        add({ kind: 'error', text: `${it.line.split('\n')[0]}: ${err.message}` });
+        toast({ kind: 'error', text: err.message });
+      }
+    }
+    if (lines.length) {
+      window.dispatchEvent(new Event('dm:refresh'));
+      const label = lines.join(' · ');
+      add({ kind: 'done', text: label });
+      const id = undos.length ? `${Date.now()}` : null;
+      lastUndo.current = id ? { id, label, logId, run: async () => { for (const u of undos.reverse()) await u(); } } : null;
+      setUndoId(id);
+      toast({ kind: 'done', text: label, undo: id || undefined });
+    }
+    chime(failed ? 'error' : 'done');
+    logOutcome(logId, failed ? 'failed' : 'confirmed');
+  };
+
+  const ask = async (said) => {
+    const content = carry.current.length ? [...carry.current, { type: 'text', text: said }] : said;
+    carry.current = [];
+    history.current.push({ role: 'user', content });
     setBusy(true);
     try {
-      for (let step = 0; step < MAX_STEPS; step++) {
-        const turn = await api.post('/assistant/turn', { messages: history.current, context: context() });
-        // Append-only: the screen note the server added, then Claude's turn exactly as returned.
-        if (turn.note) history.current.push(turn.note);
-        history.current.push({ role: 'assistant', content: turn.content });
-        const said = turn.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
-        const uses = turn.content.filter((b) => b.type === 'tool_use');
-        if (turn.refused) { add({ kind: 'error', text: 'The assistant can’t help with that one.' }); return; }
-        if (said && !uses.length) { add({ kind: 'assistant', text: said }); say(said); return; }
-        if (said) add({ kind: 'assistant', text: said, quiet: true });
-        if (!uses.length) return;
-
-        const results = [];
-        const writes = [];
-        const steps = [];
-        for (const u of uses) {
-          const kind = kinds.current[u.name];
-          if (kind === 'write') { writes.push(u); continue; }
-          try {
-            let out;
-            if (kind === 'ui') {
-              navigate(screenPath(u.input));
-              out = { ok: true };
-              steps.push('Opened the screen');
-            } else if (READERS[u.name]) {
-              out = await READERS[u.name](u.input);
-              steps.push(stepLabel(u.name, u.input, out));
-            } else throw new Error(`Unknown tool ${u.name}`);
-            results.push({ type: 'tool_result', tool_use_id: u.id, content: JSON.stringify(out) });
-          } catch (err) {
-            results.push({ type: 'tool_result', tool_use_id: u.id, content: err.message, is_error: true });
-            steps.push(`${stepLabel(u.name, u.input, null)} — ${err.message}`);
-          }
-        }
-        if (steps.length) add({ kind: 'steps', steps });
-        if (writes.length) {
-          const lines = await Promise.all(writes.map((w) => describe(w.name, w.input)));
-          setPending({ results, writes, lines });
-          say(writes.length > 1 ? `I'm ready to make ${writes.length} changes. Confirm?` : `${lines[0].split('\n')[0]}. Confirm?`);
-          return;
-        }
-        history.current.push({ role: 'user', content: results });
+      const out = await api.post('/assistant/turn', { messages: history.current, context: context() });
+      history.current.push(...out.append);
+      if (out.steps.length) add({ kind: 'steps', steps: out.steps, ms: out.ms });
+      const nav = out.ui.at(-1);
+      if (nav) go(screenPath(nav), nav.name === 'start_voice_perio');
+      if (out.refused) { add({ kind: 'error', text: 'The assistant can’t help with that one.' }); chime('error'); return; }
+      if (out.pending.length) {
+        carry.current = [...out.results];
+        if (out.text) add({ kind: 'assistant', text: out.text, quiet: true });
+        if (out.pending.every((p) => p.auto)) { await execute(out.pending, out.log_id); return; }
+        setPending({ items: out.pending, logId: out.log_id });
+        setOpen(true);
+        chime('ask');
+        say('Confirm?');
+        return;
       }
-      add({ kind: 'error', text: 'That took too many steps — try saying it a different way.' });
+      if (out.text) {
+        add({ kind: 'assistant', text: out.text });
+        const question = /\?\s*$/.test(out.text);
+        if (question) { setOpen(true); chime('ask'); } else { toast({ kind: 'info', text: out.text }); chime('done'); }
+        say(out.text);
+      } else if (nav) chime('done');
     } catch (err) {
       add({ kind: 'error', text: err.message });
-      // Keep the conversation usable: drop the unanswered turn (and its screen note).
-      while (history.current.length && ['assistant', 'system'].includes(history.current.at(-1).role)) history.current.pop();
+      toast({ kind: 'error', text: err.message });
+      chime('error');
+      // Keep the conversation usable: drop the request that didn't get an answer.
+      history.current.pop();
     } finally {
       setBusy(false);
     }
   };
 
   const decide = async (yes, instead = null) => {
-    const p = pending;
+    const p = pendingRef.current;
     if (!p) return;
     setPending(null);
-    setBusy(true);
-    const results = [...p.results];
-    let changed = false;
-    for (const [i, w] of p.writes.entries()) {
-      if (!yes) {
-        results.push({ type: 'tool_result', tool_use_id: w.id, content: 'Not done: the user did not confirm this change. Nothing was changed.', is_error: true });
-        continue;
-      }
-      try {
-        const out = await WRITERS[w.name](w.input);
-        changed = true;
-        results.push({ type: 'tool_result', tool_use_id: w.id, content: JSON.stringify(out) });
-        add({ kind: 'done', text: p.lines[i].split('\n')[0] });
-      } catch (err) {
-        results.push({ type: 'tool_result', tool_use_id: w.id, content: `Failed: ${err.message}`, is_error: true });
-        add({ kind: 'error', text: `${p.lines[i].split('\n')[0]} — ${err.message}` });
-      }
+    if (yes) await execute(p.items, p.logId);
+    else {
+      for (const it of p.items) carry.current.push({ type: 'tool_result', tool_use_id: it.id, content: 'Not done: the person did not confirm. Nothing was changed.', is_error: true });
+      logOutcome(p.logId, 'cancelled');
+      if (!instead) { add({ kind: 'cancelled', text: 'Cancelled — nothing changed.' }); chime('stop'); }
     }
-    if (!yes) add({ kind: 'cancelled', text: 'Cancelled — nothing was changed.' });
-    if (changed) window.dispatchEvent(new Event('dm:refresh'));
-    history.current.push({ role: 'user', content: instead ? [...results, { type: 'text', text: instead }] : results });
-    setBusy(false);
-    await run();
+    if (instead) await ask(instead);
   };
 
-  const submit = async (raw, { voice = false } = {}) => {
-    const said = raw.trim();
-    if (!said || busy) return;
-    lastWasVoice.current = voice;
+  const undo = async () => {
+    const u = lastUndo.current;
+    if (!u) { toast({ kind: 'info', text: 'Nothing to undo.' }); return; }
+    lastUndo.current = null;
+    setUndoId(null);
+    try {
+      await u.run();
+      carry.current.push({ type: 'text', text: `(The person undid: ${u.label})` });
+      window.dispatchEvent(new Event('dm:refresh'));
+      add({ kind: 'cancelled', text: `Undone: ${u.label}` });
+      toast({ kind: 'info', text: `Undone: ${u.label}` });
+      logOutcome(u.logId, 'undone');
+      chime('stop');
+    } catch (err) {
+      toast({ kind: 'error', text: `Couldn’t undo: ${err.message}` });
+      chime('error');
+    }
+  };
+
+  const submit = async (raw) => {
+    const said = String(raw || '').trim();
+    if (!said) return;
     setText('');
-    if (pending) {
-      if (YES.test(said)) return decide(true);
+    if (pendingRef.current) {
       add({ kind: 'user', text: said });
-      if (NO.test(said) && said.split(/\s+/).length <= 3) return decide(false);
-      return decide(false, said); // something else instead: treat it as the next instruction
+      if (isYes(said)) return decide(true);
+      if (isNo(said)) return decide(false);
+      return decide(false, said); // something else instead: that's the next request
     }
+    if (isUndo(said)) return undo();
+    const local = localCommand(said, { patientId: patientId() });
+    if (local) {
+      add({ kind: 'user', text: said });
+      go(local.go, local.perioVoice);
+      toast({ kind: 'info', text: local.label });
+      chime('done');
+      return;
+    }
+    if (busy || !status?.enabled) return;
     add({ kind: 'user', text: said });
-    history.current.push({ role: 'user', content: said });
-    await run();
+    await ask(said);
   };
+  const submitRef = useRef(submit);
+  submitRef.current = submit;
 
-  const listen = useCallback(() => {
-    if (!SR) { setOpen(true); return; } // no speech in this browser: type instead
-    if (rec.current) { rec.current.stop(); return; }
+  const startListening = useCallback(() => {
+    if (!SR) { setOpen(true); setTimeout(() => inputRef.current?.focus(), 50); return; }
+    if (rec.current) return;
     window.speechSynthesis?.cancel();
     const r = new SR();
     r.lang = navigator.language || 'en-US';
@@ -174,54 +230,101 @@ export default function Assistant() {
     r.onresult = (e) => {
       let now = '';
       for (const res of e.results) {
-        if (res.isFinal) final = res[0].transcript;
+        if (res.isFinal) final += res[0].transcript;
         else now += res[0].transcript;
       }
-      setInterim(final || now);
+      setInterim(final + now);
     };
-    r.onerror = (e) => { if (e.error !== 'no-speech' && e.error !== 'aborted') add({ kind: 'error', text: e.error === 'not-allowed' ? 'Microphone access was blocked — allow it in the browser’s address bar.' : `Didn’t catch that (${e.error}).` }); };
+    r.onerror = (e) => {
+      if (e.error === 'not-allowed') toast({ kind: 'error', text: 'Microphone access was blocked — allow it in the address bar.' });
+    };
     r.onend = () => {
       rec.current = null;
       setListening(false);
       setInterim('');
-      if (final) submitRef.current(final, { voice: true });
+      if (final.trim()) submitRef.current(final);
+      else chime('stop');
     };
     rec.current = r;
-    setOpen(true);
     setListening(true);
-    r.start();
-  }, []);
-  const submitRef = useRef(submit);
-  submitRef.current = submit;
+    chime('listen');
+    try { r.start(); } catch { rec.current = null; setListening(false); }
+  }, [toast]);
+  const stopListening = () => rec.current?.stop();
 
+  // Hold the talk key to speak, let go to send. With a change waiting, a quick tap says yes.
   useEffect(() => {
-    const onKey = (e) => {
-      if (e.key === 'F2') { e.preventDefault(); if (status?.enabled) listen(); else setOpen((o) => !o); }
-      if (e.key === 'Escape' && open && !e.defaultPrevented && !document.querySelector('.modal')) setOpen(false);
+    if (!status?.enabled) return undefined;
+    const typing = (e) => e.target.closest?.('input, textarea, select, [contenteditable="true"]') && !/^F\d+$/.test(e.key);
+    const down = (e) => {
+      if (learning) {
+        e.preventDefault();
+        if (e.key !== 'Escape') { setTalkKey(e.key); setPref('key', e.key); }
+        setLearning(false);
+        return;
+      }
+      if (e.key === 'Escape') {
+        if (pendingRef.current) { e.preventDefault(); decide(false); return; }
+        if (rec.current) { rec.current.abort(); return; }
+        if (open && !document.querySelector('.modal')) setOpen(false);
+        return;
+      }
+      if (e.key !== talkKey || e.repeat || typing(e)) return;
+      e.preventDefault();
+      const k = keyState.current;
+      k.down = Date.now();
+      k.held = false;
+      if (pendingRef.current) {
+        k.timer = setTimeout(() => { k.held = true; startListening(); }, HOLD_MS);
+      } else if (rec.current) {
+        stopListening();
+      } else {
+        k.held = true;
+        startListening();
+      }
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [listen, open, status]);
+    const up = (e) => {
+      if (e.key !== talkKey || learning) return;
+      const k = keyState.current;
+      if (!k.down) return;
+      clearTimeout(k.timer);
+      const long = Date.now() - k.down > HOLD_MS;
+      k.down = 0;
+      if (pendingRef.current && !k.held) { decide(true); return; }
+      if (long) stopListening(); // push-to-talk: letting go sends; a tap keeps listening until you pause
+    };
+    window.addEventListener('keydown', down, true);
+    window.addEventListener('keyup', up, true);
+    return () => { window.removeEventListener('keydown', down, true); window.removeEventListener('keyup', up, true); };
+  }, [status, talkKey, learning, open, startListening]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const reset = () => {
     history.current = [];
+    carry.current = [];
+    lastUndo.current = null;
+    setUndoId(null);
     setFeed([]);
     setPending(null);
-    window.speechSynthesis?.cancel();
-  };
-  const toggleSpeak = () => {
-    const v = !speakReplies;
-    setSpeakReplies(v);
-    try { localStorage.setItem(SPEAK_KEY, v ? '1' : '0'); } catch { /* per-computer */ }
-    if (!v) window.speechSynthesis?.cancel();
   };
 
   if (!status || (!status.enabled && user?.role !== 'admin')) return null;
+  const keyLabel = talkKey === ' ' ? 'Space' : talkKey;
 
   return (
     <>
-      <button type="button" className={`assist-fab${listening ? ' live' : ''}${open ? ' open' : ''}`} onClick={() => (status.enabled && !open ? listen() : setOpen(!open))}
-        title={status.enabled ? 'Assistant — press F2 and speak' : 'Assistant (not set up)'} aria-label="Assistant">
+      <div className="assist-toasts" aria-live="polite">
+        {listening && <div className="assist-toast live"><span className="assist-rec" />{interim || 'Listening…'}</div>}
+        {busy && !listening && <div className="assist-toast busy"><span className="assist-thinking inline"><span /><span /><span /></span>Working…</div>}
+        {toasts.map((t) => (
+          <div key={t.id} className={`assist-toast ${t.kind}`}>
+            {t.kind === 'done' && <Check size={14} />}
+            <span>{t.text}</span>
+            {t.undo && t.undo === undoId && <button type="button" onClick={undo}><Undo2 size={13} /> Undo</button>}
+          </div>
+        ))}
+      </div>
+      <button type="button" className={`assist-fab${listening ? ' live' : ''}${busy ? ' busy' : ''}`} onClick={() => setOpen(!open)}
+        title={status.enabled ? `Assistant — hold ${keyLabel} and speak` : 'Assistant (not set up)'} aria-label="Assistant">
         {listening ? <Mic size={22} /> : <Sparkles size={22} />}
       </button>
       {open && (
@@ -229,53 +332,64 @@ export default function Assistant() {
           <header className="assist-head">
             <Sparkles size={16} />
             <strong>Assistant</strong>
+            <span className="assist-hint">hold <kbd>{keyLabel}</kbd> to talk</span>
             <span className="assist-spacer" />
-            <button type="button" className="assist-icon" onClick={toggleSpeak} title={speakReplies ? 'Replies are read aloud (when you speak)' : 'Replies are silent'} aria-label="Read replies aloud">{speakReplies ? <Volume2 size={16} /> : <VolumeX size={16} />}</button>
+            <button type="button" className={`assist-icon${showPrefs ? ' on' : ''}`} onClick={() => setShowPrefs(!showPrefs)} title="Settings for this computer" aria-label="Settings"><Settings2 size={16} /></button>
             <button type="button" className="assist-icon" onClick={reset} title="Start over" aria-label="Start over"><RotateCcw size={16} /></button>
             <button type="button" className="assist-icon" onClick={() => setOpen(false)} aria-label="Close"><X size={16} /></button>
           </header>
+          {showPrefs && (
+            <div className="assist-prefs">
+              <label>This computer’s chair
+                <select value={chairId} onChange={(e) => { setChairId(e.target.value); setPref('chair', e.target.value); }}>
+                  <option value="">Not in an operatory</option>
+                  {chairs.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </label>
+              <label>Talk key (or foot pedal)
+                <button type="button" onClick={() => setLearning(true)}>{learning ? 'Press the key or pedal…' : keyLabel}</button>
+              </label>
+              <label className="assist-check"><input type="checkbox" checked={speak} onChange={(e) => { setSpeak(e.target.checked); setPref('speak', e.target.checked ? '1' : '0'); }} /> Read replies aloud</label>
+            </div>
+          )}
           <div className="assist-feed">
             {!status.enabled && (
               <div className="assist-empty">The assistant isn’t set up on this server yet. Add an <code>ANTHROPIC_API_KEY</code> to the server’s settings to turn it on (see the README).</div>
             )}
             {status.enabled && !feed.length && !pending && (
               <div className="assist-empty">
-                <p>Press <kbd>F2</kbd> or the mic and say what you need:</p>
+                <p>Hold <kbd>{keyLabel}</kbd>, speak, let go. Tap <kbd>{keyLabel}</kbd> to confirm, <kbd>Esc</kbd> to cancel, say “undo” to take it back.</p>
                 <ul>
                   <li>“Book Ryan Smith for a crown prep with Dr. Lee next Tuesday afternoon.”</li>
-                  <li>“Take a $120 card payment for this patient.”</li>
-                  <li>“Note: patient reports cold sensitivity on 19, no pain on percussion.”</li>
-                  <li>“Plan an MOD composite on 30 and a crown on 3.”</li>
-                  <li>“Perio on 3: buccal 3 2 4, bleeding on the mesial.”</li>
-                  <li>“Check in the 10 o’clock.” · “Open her x-rays.”</li>
+                  <li>“Take a $120 card payment.” · “Check in the 10 o’clock.”</li>
+                  <li>“Note: cold sensitivity on 19, no pain on percussion.”</li>
+                  <li>“Plan an MOD composite on 30.” · “Existing crown on 3, 19 missing.”</li>
+                  <li>“Perio on 3: 3 2 4, bleeding mesial.” · “Start perio.”</li>
+                  <li>“Open her x-rays.” · “Schedule tomorrow.”</li>
                 </ul>
-                <p className="muted">Nothing changes until you say “yes” or press Confirm.</p>
               </div>
             )}
             {feed.map((f) => (
-              f.kind === 'steps' ? <ul key={f.key} className="assist-steps">{f.steps.map((s, i) => <li key={i}>{s}</li>)}</ul>
-                : <div key={f.key} className={`assist-msg ${f.kind}${f.quiet ? ' quiet' : ''}`}>{f.kind === 'done' && <Check size={14} />}{f.kind === 'cancelled' && <Ban size={14} />}<span>{f.text}</span></div>
+              f.kind === 'steps' ? <div key={f.key} className="assist-steps">{f.steps.join(' · ')}{f.ms ? ` · ${(f.ms / 1000).toFixed(1)}s` : ''}</div>
+                : <div key={f.key} className={`assist-msg ${f.kind}${f.quiet ? ' quiet' : ''}`}>{f.kind === 'done' && <Check size={14} />}<span>{f.text}</span></div>
             ))}
             {pending && (
               <div className="assist-confirm">
-                <strong>{pending.writes.length > 1 ? `Make these ${pending.writes.length} changes?` : 'Make this change?'}</strong>
-                <ul>{pending.lines.map((l, i) => <li key={i}>{l}</li>)}</ul>
+                <ul>{pending.items.map((p) => <li key={p.id}>{p.line}</li>)}</ul>
                 <div className="assist-confirm-actions">
-                  <button type="button" className="primary" onClick={() => decide(true)} autoFocus><Check size={15} /> Confirm</button>
-                  <button type="button" onClick={() => decide(false)}>Cancel</button>
-                  <span className="muted">or say “yes” / “no”</span>
+                  <button type="button" className="primary" onClick={() => decide(true)}><Check size={15} /> Confirm <kbd>{keyLabel}</kbd></button>
+                  <button type="button" onClick={() => decide(false)}>Cancel <kbd>Esc</kbd></button>
                 </div>
               </div>
             )}
             {busy && <div className="assist-thinking"><span /><span /><span /></div>}
-            {interim && <div className="assist-msg user interim">{interim}</div>}
             <div ref={feedEnd} />
           </div>
           {status.enabled && (
             <form className="assist-input" onSubmit={(e) => { e.preventDefault(); submit(text); }}>
-              <input value={text} onChange={(e) => setText(e.target.value)} placeholder={pending ? 'Say yes, no, or something else…' : 'Type or press F2 to speak…'} aria-label="Ask the assistant" disabled={busy} />
+              <input ref={inputRef} value={text} onChange={(e) => setText(e.target.value)} placeholder={pending ? 'yes, no, or something else…' : 'Type, or hold the talk key…'} aria-label="Ask the assistant" disabled={busy} />
               {SR && (
-                <button type="button" className={`assist-mic${listening ? ' live' : ''}`} onClick={listen} title="Speak (F2)" aria-label={listening ? 'Stop listening' : 'Speak'}>
+                <button type="button" className={`assist-mic${listening ? ' live' : ''}`} onClick={() => (listening ? stopListening() : startListening())} title={`Speak (hold ${keyLabel})`} aria-label={listening ? 'Stop listening' : 'Speak'}>
                   {listening ? <MicOff size={17} /> : <Mic size={17} />}
                 </button>
               )}

@@ -2,8 +2,9 @@ import { Router } from 'express';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import Anthropic from '@anthropic-ai/sdk';
 import { HttpError, rateLimit } from '../auth.js';
-import { audit, practiceNow } from '../util.js';
+import { audit, practiceNow, insert } from '../util.js';
 import { log } from '../monitoring.js';
+import { apiAs, toolbox } from '../assistantTools.js';
 
 // The assistant: staff say (or type) what they want — "book Ryan Smith for a crown prep with Dr. Lee next
 // Tuesday", "take a $120 card payment", "note: patient reports sensitivity on 19" — and Claude works out
@@ -67,6 +68,11 @@ export const TOOLS = [
     description: 'A patient\'s planned (not yet done) treatment, with procedure ids.',
     input_schema: { type: 'object', properties: { patient_id: { type: 'integer' } }, required: ['patient_id'] },
   },
+  {
+    name: 'note_templates', kind: 'read',
+    description: 'The practice\'s clinical note templates (name, the codes they go with, and the text with [[Label: option|option]] blanks). Use one when the person names it ("crown prep note") or when it clearly fits what was done.',
+    input_schema: { type: 'object', properties: {} },
+  },
   // ---- Move around the app (run straight away) ----
   {
     name: 'open_screen', kind: 'ui',
@@ -82,7 +88,12 @@ export const TOOLS = [
       required: ['screen'],
     },
   },
-  // ---- Change the record (the user confirms first) ----
+  {
+    name: 'start_voice_perio', kind: 'ui',
+    description: 'Open the patient\'s perio chart and start full-mouth voice charting (the hygienist then reads depths tooth by tooth without you). Use for "start perio", "let\'s do perio", "chart perio".',
+    input_schema: { type: 'object', properties: { patient_id: { type: 'integer' } }, required: ['patient_id'] },
+  },
+  // ---- Change the record (the user confirms first; low-risk ones run at once with Undo) ----
   {
     name: 'book_appointment', kind: 'write',
     description: 'Book an appointment. With an appointment type the length and planned procedures come from the type.',
@@ -170,6 +181,30 @@ export const TOOLS = [
     },
   },
   {
+    name: 'chart_conditions', kind: 'write',
+    description: 'Chart existing conditions and work found on exam (not treatment): existing fillings, crowns, root canals, implants, missing teeth, caries, fractures, watches.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        patient_id: { type: 'integer' },
+        items: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              tooth: { type: 'string' },
+              condition: { type: 'string', enum: ['caries', 'missing', 'filling', 'crown', 'root_canal', 'implant', 'bridge_pontic', 'fracture', 'sealant', 'veneer', 'impacted', 'watch', 'abscess', 'mobility'] },
+              surfaces: { type: 'string' },
+              notes: { type: 'string', description: 'e.g. "amalgam", "PFM"' },
+            },
+            required: ['tooth', 'condition'],
+          },
+        },
+      },
+      required: ['patient_id', 'items'],
+    },
+  },
+  {
     name: 'record_perio', kind: 'write',
     description: 'Record periodontal readings for some teeth on today\'s perio exam (added to it if one exists). Six sites per tooth in the order DB, B, MB, DL, L, ML; use null for a site not read.',
     input_schema: {
@@ -197,29 +232,54 @@ export const TOOLS = [
   },
 ];
 
-const SYSTEM = `You are the assistant built into Dental Machine, a dental practice management system. Dentists, hygienists, assistants and front-desk staff talk to you (usually by voice, mid-task) and you do the work in the software for them with the tools.
+const SYSTEM = `You are the assistant built into Dental Machine, a dental practice management system. Dentists, hygienists, assistants and front-desk staff talk to you mid-task, usually with gloves on, to avoid typing and clicking. Speed matters more than conversation: do the work with the tools and say as little as possible.
 
 How to work:
-- Resolve people and things with the look-up tools before acting: find_patient for patient ids, practice_setup for providers, chairs and appointment types, search_procedure_codes for CDT codes. Never invent an id.
-- If a name matches more than one patient, ask which one (give each date of birth). If something needed is missing (which provider, which day), ask one short question.
-- When a patient's chart is open on screen, "the patient" / "her" / "him" means that patient.
-- Make the change with the matching tool. The person will be shown exactly what you are about to do and must confirm it, so don't ask "shall I?" first — just call the tool.
-- Scheduling: look for open times with find_open_times, then book one. If they gave an exact time, book it directly; if it's taken the booking will fail and you can offer the nearest open times.
-- Payments: amounts are in dollars. Card payments here are recorded, not charged.
-- Clinical notes: write a clean, professional note from what was dictated, in the dictation's order. Do not add findings, diagnoses or treatment that were not said.
-- Teeth use Universal numbering (1-32, primary A-T). Perio sites are DB, B, MB, DL, L, ML. "Buccal 3 2 3" means DB, B, MB; "lingual" means DL, L, ML.
-- Replies are read aloud: keep them to one or two short sentences, with times in 12-hour form ("Tuesday the 3rd at 2:30 PM"). No lists or markdown unless showing several options.
-- Only do what was asked. If a tool returns an error, say plainly what went wrong.`;
+- The operator note at each turn tells you the date, who is speaking, what is on screen, the open patient's summary (id, balance, today's visit, planned treatment) and, on this computer, which chair and who is in it. Use it instead of looking those things up again. The first note also lists the providers, chairs and appointment types with their ids.
+- Look up anything else before acting: find_patient for other patients, search_procedure_codes for codes, find_open_times for openings, note_templates for templates. Never invent an id.
+- "The patient", "her", "him", "this patient" mean the patient on screen, or else the one in this computer's chair.
+- If a name matches more than one patient, ask which (give dates of birth). If something essential is missing, ask one short question. Otherwise don't ask — act.
+- Make changes by calling the tools. The person sees exactly what you are about to do and confirms it, so never ask "shall I?". Do everything that was asked in one go: several tool calls in the same turn become one confirmation.
+- Scheduling: find open times, then book the best match (earliest that fits what they said). An exact time they gave can be booked directly.
+- Payments are in dollars; card payments here are recorded, not charged.
+- Clinical notes: write a clean professional note from the dictation, in its order, with nothing added. If they name a template or one clearly fits, fill its blanks from what was said and leave unmentioned blanks as they are.
+- Charting what's already there (existing restorations, missing teeth, decay found) is chart_conditions; treatment to do or done today is add_procedures.
+- Teeth use Universal numbering (1-32, primary A-T). Perio sites are DB, B, MB, DL, L, ML: "buccal 3 2 4" is DB, B, MB; "lingual" is DL, L, ML. For a full-mouth perio chart by voice, use start_voice_perio.
+- Replies are shown briefly, not read aloud: at most one short sentence, or just the question you need answered. After making changes, say nothing unless there's something they need to know. Times in 12-hour form. No markdown.
+- If a tool returns an error, say plainly what went wrong in a few words.`;
 
 // Tool definitions as sent to Claude (the kind is ours, not the API's).
 const API_TOOLS = TOOLS.map(({ kind: _kind, ...t }) => t);
+const KIND = Object.fromEntries(TOOLS.map((t) => [t.name, t.kind]));
+
+// Low-risk changes happen at once and can be undone; the rest wait for a yes.
+const isAuto = (u) => (u.name === 'set_appointment_status' && ['confirmed', 'checked_in', 'in_chair'].includes(u.input?.status)) || u.name === 'record_perio';
+
+async function runReads(uses, tb, steps, ui) {
+  return Promise.all(uses.map(async (u) => {
+    try {
+      if (KIND[u.name] === 'ui') {
+        ui.push({ name: u.name, ...u.input });
+        return { type: 'tool_result', tool_use_id: u.id, content: '{"ok":true}' };
+      }
+      const fn = tb.readers[u.name];
+      if (!fn) throw new Error(`Unknown tool ${u.name}`);
+      const out = await fn(u.input || {});
+      steps.push(tb.stepLabel(u.name, u.input || {}, out));
+      return { type: 'tool_result', tool_use_id: u.id, content: JSON.stringify(out) };
+    } catch (err) {
+      steps.push(`${tb.stepLabel(u.name, u.input || {}, null)}: ${err.message}`);
+      return { type: 'tool_result', tool_use_id: u.id, content: err.message, is_error: true };
+    }
+  }));
+}
 
 export function assistantConfig(env = process.env) {
   return {
     apiKey: env.ANTHROPIC_API_KEY || null,
     baseURL: env.ANTHROPIC_BASE_URL || undefined,
     model: env.ASSISTANT_MODEL || 'claude-opus-5-5',
-    effort: ['low', 'medium', 'high'].includes(env.ASSISTANT_EFFORT) ? env.ASSISTANT_EFFORT : 'medium',
+    effort: ['low', 'medium', 'high'].includes(env.ASSISTANT_EFFORT) ? env.ASSISTANT_EFFORT : 'low',
     enabled: env.ASSISTANT !== 'off' && !!env.ANTHROPIC_API_KEY,
   };
 }
@@ -227,7 +287,7 @@ export function assistantConfig(env = process.env) {
 const MAX_MESSAGES = 60;
 const MAX_CHARS = 200_000;
 
-export default function assistantRoutes({ db, config, secret }) {
+export default function assistantRoutes({ db, config, secret, app: getApp }) {
   const r = Router();
   const cfg = config.assistant || assistantConfig();
   const client = cfg.enabled ? new Anthropic({ apiKey: cfg.apiKey, baseURL: cfg.baseURL, maxRetries: 2, timeout: 60_000 }) : null;
@@ -245,10 +305,13 @@ export default function assistantRoutes({ db, config, secret }) {
     res.json({ enabled: !!client, tools: TOOLS.map((t) => ({ name: t.name, kind: t.kind })) });
   });
 
-  // One step of the conversation: the browser sends the history (user turns, Claude's turns exactly as
-  // returned, and the results of the tools it ran) and gets Claude's next turn back.
+  // One request: Claude plans, the server runs the look-ups (as the signed-in user) and keeps going until
+  // Claude is done or wants to change something. The browser gets back everything to append to its copy
+  // of the conversation, what to show, and any changes waiting for the person's yes (or, for low-risk
+  // ones, to make straight away with Undo).
   r.post('/assistant/turn', limiter, async (req, res) => {
     if (!client) throw new HttpError(503, 'The assistant isn’t set up on this server (ANTHROPIC_API_KEY)');
+    const started = Date.now();
     const messages = req.body?.messages;
     if (!Array.isArray(messages) || !messages.length || messages.length > MAX_MESSAGES) throw new HttpError(400, `messages must be a list of 1-${MAX_MESSAGES}`);
     if (JSON.stringify(messages).length > MAX_CHARS) throw new HttpError(413, 'This conversation is too long — start a new one');
@@ -259,55 +322,134 @@ export default function assistantRoutes({ db, config, secret }) {
     if (messages[0].role !== 'user') throw new HttpError(400, 'The conversation must start with the user');
     if (messages.at(-1).role !== 'user') throw new HttpError(400, 'The conversation must end with the user');
 
-    // Where the person is and what day it is ride along as an operator note, after the stable (cached) prefix.
     const ctx = req.body?.context || {};
     const now = await practiceNow(db, req.user.practice_id);
     const practice = await db.get('SELECT name, timezone FROM practices WHERE id = ?', req.user.practice_id);
-    const screen = [
-      `Now: ${now} (${practice?.timezone || 'practice time'}), ${new Date(`${now.slice(0, 10)}T12:00:00Z`).toLocaleDateString('en-US', { weekday: 'long', timeZone: 'UTC' })}.`,
-      `Signed in: ${req.user.name || req.user.email || 'staff'} (${req.user.role}).`,
-      ctx.patient_id ? `On screen: the chart of patient #${Number(ctx.patient_id)}${ctx.patient_name ? ` (${String(ctx.patient_name).slice(0, 80)})` : ''}${ctx.tab ? `, ${String(ctx.tab).slice(0, 20)} tab` : ''}.` : `On screen: ${String(ctx.screen || 'the app').slice(0, 40)}.`,
-    ].join(' ');
-
-    // Newer models (Opus 5 / 5.5, Fable) take the screen note as a mid-conversation system message kept in
-    // the history, so the instructions, tools and history stay one unchanging, cached prefix; other models
-    // get the latest note in the system prompt and don't see earlier ones.
+    const tb = toolbox(apiAs(getApp(), req), now.slice(0, 16));
     const midSystem = /^claude-(opus-5|fable-5)/.test(cfg.model);
-    const note = `Practice: ${practice?.name || ''}. ${screen}`;
+    const note = await contextNote({ req, ctx, now, practice, tb, first: !messages.some((m) => m.role === 'system') });
+
+    const append = [];
+    const steps = [];
+    const ui = [];
     const history = messages.filter((m) => midSystem || m.role !== 'system').map((m) => (m.role === 'system' ? { role: 'system', content: m.content } : m));
-    let response;
-    try {
-      response = await client.beta.messages.create({
-        model: cfg.model,
-        max_tokens: 8000,
-        // A declined request is retried on the model Anthropic recommends; a thinking block whose earlier
-        // conversation doesn't match is dropped rather than failing the request.
-        ...(midSystem ? { betas: ['server-side-fallback-2026-07-01', 'thinking-binding-controls-2026-08-01'], fallbacks: 'default' } : {}),
-        thinking: midSystem ? { type: 'adaptive', block_binding: { prefix_mismatch_behavior: 'drop_block' } } : { type: 'adaptive' },
-        output_config: { effort: cfg.effort },
-        cache_control: { type: 'ephemeral' },
-        system: midSystem ? SYSTEM : [{ type: 'text', text: SYSTEM }, { type: 'text', text: note }],
-        tools: API_TOOLS,
-        messages: midSystem ? [...history, { role: 'system', content: note }] : history,
-      });
-    } catch (err) {
-      if (err instanceof Anthropic.RateLimitError) throw new HttpError(429, 'The assistant is busy — try again in a moment');
-      if (err instanceof Anthropic.BadRequestError) throw new HttpError(400, 'The assistant couldn’t read that conversation — start a new one');
-      if (err instanceof Anthropic.AuthenticationError) throw new HttpError(503, 'The assistant’s API key was rejected');
-      if (err instanceof Anthropic.APIError) throw new HttpError(502, 'The assistant isn’t reachable right now');
-      throw err;
+    if (midSystem) {
+      const signed = { role: 'system', content: note, sig: sign(req.user.id, note) };
+      append.push(signed);
+      history.push({ role: 'system', content: note });
     }
-    await audit(db, req, 'assistant.turn', null, null, { tools: response.content.filter((b) => b.type === 'tool_use').map((b) => b.name) });
-    const dropped = (response.input_transformations || []).length;
-    if (dropped) log.warn('assistant: earlier reasoning dropped (conversation changed)', { dropped });
-    res.json({
-      // The browser appends the note (then Claude's turn) to its copy of the conversation.
-      ...(midSystem ? { note: { role: 'system', content: note, sig: sign(req.user.id, note) } } : {}),
-      content: response.content,
-      stop_reason: response.stop_reason,
-      refused: response.stop_reason === 'refusal',
+    const said = typeof messages.at(-1).content === 'string' ? messages.at(-1).content
+      : messages.at(-1).content.filter((b) => b.type === 'text').map((b) => b.text).join(' ');
+    let text = '';
+    let refused = false;
+    let pending = [];
+    let readResults = [];
+    const used = [];
+    for (let step = 0; step < 8; step++) {
+      let response;
+      try {
+        response = await client.beta.messages.create({
+          model: cfg.model,
+          max_tokens: 8000,
+          // A declined request is retried on the model Anthropic recommends; a thinking block whose
+          // earlier conversation doesn't match is dropped rather than failing the request.
+          ...(midSystem ? { betas: ['server-side-fallback-2026-07-01', 'thinking-binding-controls-2026-08-01'], fallbacks: 'default' } : {}),
+          thinking: midSystem ? { type: 'adaptive', block_binding: { prefix_mismatch_behavior: 'drop_block' } } : { type: 'adaptive' },
+          output_config: { effort: cfg.effort },
+          cache_control: { type: 'ephemeral' },
+          system: midSystem ? SYSTEM : [{ type: 'text', text: SYSTEM }, { type: 'text', text: note }],
+          tools: API_TOOLS,
+          messages: history,
+        });
+      } catch (err) {
+        if (err instanceof Anthropic.RateLimitError) throw new HttpError(429, 'The assistant is busy — try again in a moment');
+        if (err instanceof Anthropic.BadRequestError) throw new HttpError(400, 'The assistant couldn’t read that conversation — start a new one');
+        if (err instanceof Anthropic.AuthenticationError) throw new HttpError(503, 'The assistant’s API key was rejected');
+        if (err instanceof Anthropic.APIError) throw new HttpError(502, 'The assistant isn’t reachable right now');
+        throw err;
+      }
+      if ((response.input_transformations || []).length) log.warn('assistant: earlier reasoning dropped (conversation changed)', { dropped: response.input_transformations.length });
+      const turn = { role: 'assistant', content: response.content };
+      history.push(turn);
+      append.push(turn);
+      text = response.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
+      if (response.stop_reason === 'refusal') { refused = true; break; }
+      const uses = response.content.filter((b) => b.type === 'tool_use');
+      if (!uses.length) break;
+      used.push(...uses.map((u) => u.name));
+      const writes = uses.filter((u) => KIND[u.name] === 'write');
+      if (writes.length) {
+        // Look-ups asked for alongside the changes still run, so their results travel with the answer.
+        readResults = await runReads(uses.filter((u) => KIND[u.name] !== 'write'), tb, steps, ui);
+        pending = await Promise.all(writes.map(async (w) => ({ id: w.id, name: w.name, input: w.input, line: await tb.describe(w.name, w.input), auto: isAuto(w) })));
+        // All low-risk: made at once with Undo. Any change that matters: everything waits for a yes.
+        if (!pending.every((p) => p.auto)) for (const p of pending) p.auto = false;
+        break;
+      }
+      const results = await runReads(uses, tb, steps, ui);
+      const back = { role: 'user', content: results };
+      history.push(back);
+      append.push(back);
+    }
+    const logId = await insert(db, 'assistant_log', {
+      practice_id: req.user.practice_id, user_id: req.user.id, said: String(said).slice(0, 2000), tools: JSON.stringify(used), ms: Date.now() - started,
+      outcome: refused ? 'refused' : pending.length ? (pending[0].auto ? 'done' : 'asked') : 'answered',
     });
+    await audit(db, req, 'assistant.turn', null, null, { tools: used });
+    res.json({ append, text, steps, ui, pending, results: readResults, refused, log_id: logId, ms: Date.now() - started });
   });
+
+  // How each request went (confirmed, cancelled, undone), so the phrases that go wrong can be found.
+  r.post('/assistant/log/:lid', async (req, res) => {
+    const outcome = ['confirmed', 'cancelled', 'undone', 'failed', 'done'].includes(req.body?.outcome) ? req.body.outcome : null;
+    if (!outcome) throw new HttpError(400, 'outcome must be confirmed, cancelled, undone, failed or done');
+    await db.run('UPDATE assistant_log SET outcome = ? WHERE id = ? AND practice_id = ? AND user_id = ?', outcome, Number(req.params.lid), req.user.practice_id, req.user.id);
+    res.json({ ok: true });
+  });
+  r.get('/assistant/log', async (req, res) => {
+    if (req.user.role !== 'admin') throw new HttpError(403, 'Administrator access required');
+    res.json(await db.all(
+      `SELECT l.id, l.said, l.tools, l.ms, l.outcome, l.created_at, u.name AS user_name FROM assistant_log l LEFT JOIN users u ON u.id = l.user_id
+       WHERE l.practice_id = ? ORDER BY l.id DESC LIMIT 300`, req.user.practice_id,
+    ));
+  });
+
+  // What Claude should know without asking: when and where, who's speaking, the patient on screen, the
+  // patient in this computer's chair, and (once per conversation) the practice's providers and visit types.
+  async function contextNote({ req, ctx, now, practice, tb, first }) {
+    const lines = [
+      `Practice: ${practice?.name || ''}. Now: ${now} (${practice?.timezone || 'practice time'}), ${new Date(`${now.slice(0, 10)}T12:00:00Z`).toLocaleDateString('en-US', { weekday: 'long', timeZone: 'UTC' })}.`,
+      `Speaking: ${req.user.name || req.user.email || 'staff'} (${req.user.role}).`,
+      ctx.patient_id ? `On screen: patient #${Number(ctx.patient_id)}'s chart${ctx.tab ? `, ${String(ctx.tab).slice(0, 20)} tab` : ''}.` : `On screen: ${String(ctx.screen || 'the app').slice(0, 40)}.`,
+    ];
+    const day = now.slice(0, 10);
+    const minute = now.slice(0, 16);
+    const safe = async (fn) => { try { return await fn(); } catch { return null; } };
+    const pid = Number(ctx.patient_id) || null;
+    const [setup, card, planned, visits, dayAppts] = await Promise.all([
+      first || ctx.chair_id ? safe(() => tb.setup()) : null,
+      pid ? safe(() => tb.readers.patient_summary({ patient_id: pid })) : null,
+      pid ? safe(() => tb.readers.patient_treatment({ patient_id: pid })) : null,
+      pid ? safe(() => tb.readers.patient_appointments({ patient_id: pid })) : null,
+      ctx.chair_id ? safe(() => tb.readers.day_schedule({ date: day })) : null,
+    ]);
+    if (card) {
+      lines.push(`Patient on screen: ${JSON.stringify({
+        id: card.id, name: `${card.preferred_name || card.first_name} ${card.last_name}`, dob: card.dob, alerts: card.medical_alerts || undefined,
+        balance: card.balance, insurance: card.insurance?.carrier || undefined, last_visit: card.last_visit || undefined,
+      })}`);
+    }
+    if (visits?.length) lines.push(`Their upcoming visits: ${JSON.stringify(visits.slice(0, 4))}`);
+    if (planned?.length) lines.push(`Their planned treatment: ${JSON.stringify(planned.slice(0, 12))}`);
+    const chair = ctx.chair_id ? setup?.chairs.find((c) => c.id === Number(ctx.chair_id)) : null;
+    if (chair) {
+      const here = (dayAppts || []).filter((a) => a.chair === chair.name && !['cancelled', 'no_show', 'completed'].includes(a.status));
+      const current = here.find((a) => a.start_time <= minute && a.end_time > minute) || here.find((a) => a.start_time > minute);
+      lines.push(`This computer is in ${chair.name} (chair #${chair.id}).${current ? ` In that chair ${current.start_time <= minute ? 'now' : 'next'}: ${JSON.stringify(current)}` : ' Nobody else is booked there today.'}`);
+    }
+    if (setup && first) lines.push(`Practice setup: ${JSON.stringify(setup)}`);
+    return lines.join('\n');
+  }
 
   return r;
 }

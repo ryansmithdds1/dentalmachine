@@ -88,7 +88,7 @@ export default function Settings() {
     ['Clinical', [['templates', 'Note templates', can('clinical:write')], ['forms', 'Forms & consents', can('patients:read')], ['labs', 'Labs', can('clinical:read')], ['referrals', 'Referral contacts', can('patients:read')]]],
     ['Billing', [['codes', 'Fee schedule', true], ['ppo', 'Fee schedules', can('billing:read')], ['carriers', 'Insurance carriers', can('billing:read')], ['memberships', 'Membership plans', can('billing:read')]]],
     ['Patients', [['messaging', 'Messages & reviews', admin], ['custom', 'Custom patient fields', admin], ['duplicates', 'Duplicate charts', admin]]],
-    ['Connections', [['integrations', 'Integrations', admin], ['imaging', 'Imaging bridges', admin], ['developer', 'API & webhooks', admin]]],
+    ['Connections', [['integrations', 'Integrations', admin], ['imaging', 'Imaging bridges', admin], ['assistant', 'Assistant', admin], ['developer', 'API & webhooks', admin]]],
     ['Compliance', [['audit', 'Audit log', admin], ['backups', 'Backups', admin]]],
   ].map(([g, items]) => [g, items.filter((t) => t[2])]).filter(([, items]) => items.length);
   const all = groups.flatMap(([, items]) => items);
@@ -150,6 +150,7 @@ export default function Settings() {
       {tab === 'developer' && admin && <Developer />}
       {tab === 'duplicates' && <DuplicateCharts />}
       {tab === 'imaging' && <ImagingBridges />}
+      {tab === 'assistant' && <AssistantLog />}
       {tab === 'integrations' && <Integrations />}
       {tab === 'audit' && <AuditLog />}
         </div>
@@ -1277,6 +1278,53 @@ function summarizeHours(hours) {
   if (!days.length) return 'Not scheduled';
   const spans = new Set(days.map((d) => hours[d].map((r) => r.join('–')).join(', ')));
   return `${days.map((d) => DAYS[d].slice(0, 3)).join(', ')}${spans.size === 1 ? ` ${[...spans][0]}` : ''}`;
+}
+
+// What staff asked the assistant, what it did, how long it took and how it ended — to find the
+// phrases that go wrong and see whether it's quick enough.
+function AssistantLog() {
+  const { practice } = useAuth();
+  const { data: rows, error } = useApi('/assistant/log');
+  const { data: status } = useApi('/assistant');
+  const counts = (rows || []).reduce((m, r) => ({ ...m, [r.outcome]: (m[r.outcome] || 0) + 1 }), {});
+  const avg = rows?.length ? rows.reduce((s, r) => s + (r.ms || 0), 0) / rows.length / 1000 : 0;
+  return (
+    <>
+      <div className="card">
+        <h2>Assistant</h2>
+        <p className="muted" style={{ fontSize: 13 }}>
+          {status?.enabled ? 'On.' : 'Off — set ANTHROPIC_API_KEY on the server to turn it on.'} Staff hold the talk key (F2 unless changed on that computer) and speak;
+          moving around the app is instant, other requests go to Claude. Changes are confirmed (or, for check-ins, seating and perio readings, done at once with Undo).
+        </p>
+        {rows?.length > 0 && (
+          <p style={{ fontSize: 13 }}>
+            Last {rows.length} requests · average {avg.toFixed(1)} s · {Object.entries(counts).map(([k, v]) => `${v} ${k}`).join(' · ')}
+          </p>
+        )}
+        <ErrorBox error={error} />
+      </div>
+      <div className="card" style={{ padding: 0 }}>
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>When</th><th>Who</th><th>Said</th><th>Did</th><th>Time</th><th>Outcome</th></tr></thead>
+            <tbody>
+              {rows?.map((r) => (
+                <tr key={r.id}>
+                  <td style={{ whiteSpace: 'nowrap' }}>{fmtUtcDateTime(r.created_at, practice?.timezone)}</td>
+                  <td>{r.user_name || '—'}</td>
+                  <td>{r.said}</td>
+                  <td className="muted" style={{ fontSize: 12 }}>{JSON.parse(r.tools || '[]').join(', ') || '—'}</td>
+                  <td style={{ whiteSpace: 'nowrap' }}>{r.ms != null ? `${(r.ms / 1000).toFixed(1)} s` : ''}</td>
+                  <td><span className={`badge ${{ confirmed: 'ok', done: 'ok', answered: '', asked: 'warn', cancelled: 'warn', undone: 'warn', failed: 'danger', refused: 'danger' }[r.outcome] || ''}`}>{r.outcome}</span></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {rows?.length === 0 && <div className="empty">Nothing yet.</div>}
+        </div>
+      </div>
+    </>
+  );
 }
 
 // Workstations running the imaging bridge (opens DEXIS/Sidexis/etc. and imports captured images).

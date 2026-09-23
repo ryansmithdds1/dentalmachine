@@ -188,6 +188,22 @@ export default function PerioTab({ patient }) {
     setVoice({ cursor: cursor.current, heard: '' });
   };
   useEffect(() => () => recog.current?.stop(), []);
+  // "Start perio" said to the assistant: begin voice charting as soon as the exam is on screen.
+  const startVoiceRef = useRef(startVoice);
+  startVoiceRef.current = startVoice;
+  useEffect(() => {
+    const begin = () => {
+      try { sessionStorage.removeItem('dm_perio_voice'); } catch { /* same tab only */ }
+      if (recog.current || !speechSupported() || !can('clinical:write')) return;
+      setViewing(null);
+      setTimeout(() => startVoiceRef.current(), 250);
+    };
+    let asked = false;
+    try { asked = sessionStorage.getItem('dm_perio_voice') === '1'; } catch { /* storage unavailable */ }
+    if (asked && exams) begin();
+    window.addEventListener('dm:perio-voice', begin);
+    return () => window.removeEventListener('dm:perio-voice', begin);
+  }, [exams]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (voice) focus(path[voice.cursor]); }, [voice]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const { submit, busy, error } = useSubmit(async () => {

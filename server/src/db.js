@@ -601,6 +601,18 @@ CREATE TABLE IF NOT EXISTS bridge_agents (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS assistant_log (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  user_id INTEGER REFERENCES users(id),
+  said TEXT,
+  tools TEXT,
+  ms INTEGER,
+  outcome TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_assistant_log ON assistant_log(practice_id, id);
+
 CREATE TABLE IF NOT EXISTS bridge_commands (
   id INTEGER PRIMARY KEY,
   practice_id INTEGER NOT NULL REFERENCES practices(id),
