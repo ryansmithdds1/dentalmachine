@@ -24,7 +24,7 @@ const OD_PATIENTS = `PatNum,LName,FName,Preferred,Birthdate,Gender,WirelessPhone
 101,Garcia,Maria,,1979-03-14,1,(512) 555-2001,,maria@example.com,12 Oak St,Apt 4,Austin,TX,78701,0,101,ALee,Latex allergy,125.50
 102,Garcia,Tomas,Tommy,2012-07-01,0,,512-555-2002,,12 Oak St,,Austin,TX,78701,0,101,,,0
 103,Nguyen,Linh,,0001-01-01,1,5125552003,,,,,,,,2,103,,,(20.00)
-104,Deleted,Person,,1990-01-01,0,,,,,,,,,5,104,,,0
+104,Deleted,Person,,1990-01-01,0,,,,,,,,,4,104,,,0
 105,,NoLast,,1990-01-01,0,,,,,,,,,0,105,,,0`;
 
 test('parsers: dates, times, money, header detection', () => {
