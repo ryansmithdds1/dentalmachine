@@ -5,6 +5,7 @@ import { label } from './format.js';
 import Login from './pages/Login.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 import CommandPalette from './components/CommandPalette.jsx';
+import KeyboardHelp from './components/KeyboardHelp.jsx';
 import IdleLogout from './components/IdleLogout.jsx';
 import { Suspense, lazy, useEffect, useState } from 'react';
 import { api, getLocationId, setLocationId } from './api.js';
@@ -205,6 +206,7 @@ function Shell({ nav }) {
     <div className="app">
       <a href="#main" className="skip-link">Skip to content</a>
       <CommandPalette />
+      <KeyboardHelp />
       <IdleLogout />
       <aside className="sidebar">
         <div className="brand">
@@ -231,6 +233,7 @@ function Shell({ nav }) {
           <div style={{ color: '#fff' }}>{user.name}</div>
           <div>{label(user.role)}</div>
           <button className="small" onClick={logout}>Sign out</button>
+          <button className="link shortcuts-link" onClick={() => window.dispatchEvent(new Event('dm:shortcuts'))} title="Keyboard shortcuts (?)">Keyboard shortcuts</button>
         </div>
       </aside>
       <main className="main" id="main" tabIndex={-1}>
