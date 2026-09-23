@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
+import Surveys from '../components/Surveys.jsx';
 import { api } from '../api.js';
 import { useApi } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
@@ -16,7 +17,22 @@ const STARTERS = {
   no_insurance: 'Hi {first_name}, no dental insurance? {practice} has a membership plan with cleanings, exams and x-rays included and a discount on everything else. Call {phone} to join.',
 };
 
+// Campaigns and patient surveys.
 export default function Campaigns() {
+  const [params, setParams] = useSearchParams();
+  const tab = params.get('tab') === 'surveys' ? 'surveys' : 'campaigns';
+  return (
+    <>
+      <div className="tabs" style={{ marginBottom: 12 }}>
+        <button className={tab === 'campaigns' ? 'active' : ''} onClick={() => setParams({})}>Campaigns</button>
+        <button className={tab === 'surveys' ? 'active' : ''} onClick={() => setParams({ tab: 'surveys' })}>Surveys</button>
+      </div>
+      {tab === 'surveys' ? <Surveys /> : <CampaignList />}
+    </>
+  );
+}
+
+function CampaignList() {
   const { can, practice } = useAuth();
   const { data: list, reload } = useApi('/campaigns');
   const [editing, setEditing] = useState(null);

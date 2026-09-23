@@ -37,6 +37,7 @@ import backupRoutes from './routes/backup.js';
 import formRoutes from './routes/forms.js';
 import membershipRoutes from './routes/memberships.js';
 import campaignRoutes, { campaignPublicRoutes } from './routes/campaigns.js';
+import surveyRoutes, { surveyPublicRoutes } from './routes/surveys.js';
 import attachmentRoutes from './routes/attachments.js';
 import apiV1Routes from './routes/apiv1.js';
 import developerRoutes from './routes/developer.js';
@@ -110,7 +111,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   app.use('/api/public', (_req, res, next) => {
     res.set('Cache-Control', 'no-store');
     next();
-  }, publicRoutes({ db, storage, payments, messenger, config }), publicCasePresentation({ db }), portalPublicRoutes({ db, secret, messenger }), campaignPublicRoutes({ db }));
+  }, publicRoutes({ db, storage, payments, messenger, config }), publicCasePresentation({ db }), portalPublicRoutes({ db, secret, messenger }), campaignPublicRoutes({ db }), surveyPublicRoutes({ db }));
   app.use('/api/portal', portalRoutes({ db, secret, config, payments, messenger }));
   app.use('/api/v1', apiV1Routes({ db }));
 
@@ -156,6 +157,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(depositRoutes({ db }));
   api.use(closeRoutes({ db }));
   api.use(savedReportRoutes({ db, messenger }));
+  api.use(surveyRoutes({ db, messenger, config }));
   api.use(imagingRoutes({ db }));
   api.use(systemRoutes({ db, config, messenger, storage, payments, clearinghouse, erx, mailer }));
   app.use('/api', api);

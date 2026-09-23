@@ -41,6 +41,7 @@ const BookingPage = lazy(() => import('./pages/public/BookingPage.jsx'));
 const ConfirmPage = lazy(() => import('./pages/public/ConfirmPage.jsx'));
 const IntakePage = lazy(() => import('./pages/public/IntakePage.jsx'));
 const ReviewPage = lazy(() => import('./pages/public/ReviewPage.jsx'));
+const SurveyPage = lazy(() => import('./pages/public/SurveyPage.jsx'));
 const PayResult = lazy(() => import('./pages/public/PayResult.jsx'));
 
 // Patient-facing pages work without a staff login.
@@ -52,6 +53,7 @@ export default function App() {
         <Route path="/c/:token" element={<ConfirmPage />} />
         <Route path="/f/:token" element={<IntakePage />} />
         <Route path="/r/:token" element={<ReviewPage />} />
+        <Route path="/s/:token" element={<SurveyPage />} />
         <Route path="/u/:token" element={<UnsubscribePage />} />
         <Route path="/pay/:result" element={<PayResult />} />
         <Route path="/tp/:token" element={<CaseAcceptance />} />

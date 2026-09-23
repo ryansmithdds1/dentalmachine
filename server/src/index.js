@@ -13,6 +13,7 @@ import { runCampaigns } from './campaigns.js';
 import { deliverWebhooks, scanPayments } from './webhooks.js';
 import { createEligibility, runEligibilityBatches } from './eligibility.js';
 import { runScheduledReports } from './savedreports.js';
+import { runSurveys } from './surveys.js';
 
 let secret = process.env.JWT_SECRET;
 if (!secret) {
@@ -89,6 +90,14 @@ if (app.locals.payments.enabled && process.env.AUTOPAY !== 'off') {
     setInterval(run, 60 * 60 * 1000).unref();
     setTimeout(run, 90_000).unref();
   }
+}
+// After-visit patient surveys (the day after, from 10am practice time).
+{
+  const run = () => runExclusive('surveys', 30 * 60 * 1000, () => runSurveys(db, messenger, { appUrl: config.appUrl }))
+    .then((n) => n && console.log(`Surveys: ${n} sent`))
+    .catch((err) => console.error('Surveys failed:', err.message));
+  setInterval(run, 60 * 60 * 1000).unref();
+  setTimeout(run, 150_000).unref();
 }
 // Saved reports emailed on their schedule (checked hourly; each goes out once a day at most, after 7am).
 {

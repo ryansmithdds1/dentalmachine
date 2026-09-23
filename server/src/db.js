@@ -787,6 +787,31 @@ CREATE TABLE IF NOT EXISTS fee_history (
 );
 CREATE INDEX IF NOT EXISTS idx_fee_history ON fee_history(practice_id, code);
 
+-- Patient surveys (NPS and other questions), sent after visits or to a list; one response row per patient asked.
+CREATE TABLE IF NOT EXISTS surveys (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  name TEXT NOT NULL,
+  questions TEXT NOT NULL,
+  auto_after_visit INTEGER NOT NULL DEFAULT 0,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_by INTEGER,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS survey_responses (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  survey_id INTEGER NOT NULL REFERENCES surveys(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  appointment_id INTEGER,
+  token_hash TEXT NOT NULL,
+  answers TEXT,
+  nps INTEGER,
+  sent_at TEXT NOT NULL DEFAULT (datetime('now')),
+  answered_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_survey_responses ON survey_responses(survey_id, answered_at);
+
 -- Saved reports, optionally emailed on a schedule (the owner's Monday-morning numbers).
 CREATE TABLE IF NOT EXISTS saved_reports (
   id INTEGER PRIMARY KEY,

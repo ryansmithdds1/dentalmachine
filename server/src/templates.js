@@ -48,6 +48,11 @@ export const TEMPLATE_META = {
     text: "Hi {first_name}, the {amount} payment to {practice} didn't go through ({reason}). Please call us at {phone} to update your card.",
     es: 'Hola {first_name}, el pago de {amount} a {practice} no se procesó ({reason}). Llámenos al {phone} para actualizar su tarjeta.',
   },
+  survey: {
+    label: 'Patient survey', help: 'Surveys sent after visits or to a list (Campaigns → Surveys).', vars: ['first_name', 'practice', 'link', 'phone'], required: ['link'],
+    text: "Hi {first_name}, would you take a minute to tell {practice} how we're doing? {link}",
+    es: 'Hola {first_name}, ¿nos regala un minuto para decirle a {practice} cómo lo estamos haciendo? {link}',
+  },
   review: {
     label: 'Review request', help: 'After a visit. The link asks how the visit went: happy patients are sent on to your review page, others can tell you privately.', vars: ['first_name', 'practice', 'link', 'phone'], required: ['link'],
     text: 'Thanks for visiting {practice} today, {first_name}! How did we do? {link}',
@@ -118,6 +123,6 @@ const SUBJECTS_ES = {
   reminder: 'Su cita en {practice}', booking_confirmation: 'Su cita en {practice}', review: 'Gracias por visitar {practice}',
   recall: 'Ya le toca su próxima visita en {practice}', card_declined: 'Su pago no se procesó — {practice}', forms: 'Por favor complete sus formularios para {practice}',
   booking_declined: 'Su solicitud de cita en {practice}', card_setup: 'Guarde una tarjeta para sus pagos — {practice}', payment_link: 'Solicitud de pago de {practice}',
-  treatment_plan: 'Su plan de tratamiento de {practice}',
+  treatment_plan: 'Su plan de tratamiento de {practice}', survey: '¿Cómo lo hicimos? — {practice}',
 };
 export const subjectFor = (lang, key, english, practice) => (lang === 'es' && SUBJECTS_ES[key] ? SUBJECTS_ES[key].replace('{practice}', practice) : english);

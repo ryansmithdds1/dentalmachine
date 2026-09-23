@@ -276,4 +276,8 @@ export default {
   'Join {plan} for {name} at {price}?': '¿Unir a {name} al plan {plan} por {price}?',
   'Thanks — the office will call to set up your card and finish joining.': 'Gracias. La oficina le llamará para registrar su tarjeta y completar la inscripción.',
   'Welcome to the plan! Your first payment was charged to your card on file.': '¡Bienvenido al plan! Su primer pago se cargó a su tarjeta registrada.',
+  'Thank you, {name}! Your answers go straight to {practice}.': '¡Gracias, {name}! Sus respuestas van directo a {practice}.',
+  'Not likely': 'Nada probable',
+  'Very likely': 'Muy probable',
+  'Your answers go only to {practice}.': 'Sus respuestas solo las verá {practice}.',
 };
