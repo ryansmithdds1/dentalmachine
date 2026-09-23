@@ -3,6 +3,7 @@ import { insert, practiceNow } from './util.js';
 import { validateAppt } from './routes/schedule.js';
 import { findDuplicates } from './routes/patients.js';
 import { savePolicy } from './benefits.js';
+import { emitAppointment } from './webhooks.js';
 
 // Turns an online booking request into a real appointment: finds the patient (or adds them), adds
 // the insurance they entered, books the visit, and posts any deposit they paid. Used when the office
@@ -65,6 +66,9 @@ export async function finishBooking(db, b, { providerId, start, duration, patien
       "UPDATE booking_requests SET status = 'accepted', patient_id = ?, appointment_id = ?, deposit_entry_id = ?, handled_by = ?, handled_at = datetime('now') WHERE id = ?",
       pat, apptId, entryId ?? null, userId, b.id,
     );
+    return apptId;
+  }).then(async (apptId) => {
+    await emitAppointment(db, apptId, 'appointment.created');
     return apptId;
   });
 }

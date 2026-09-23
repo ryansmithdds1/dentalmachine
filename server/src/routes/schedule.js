@@ -3,6 +3,7 @@ import { requirePermission, HttpError, can } from '../auth.js';
 import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, normalizeDateTime, practiceNow, mapSeq } from '../util.js';
 import { hoursFor, providerHours, providerHoursFor, providerHoursOn, validateHours } from '../hours.js';
 import { publish, eventStream } from '../events.js';
+import { emitAppointment } from '../webhooks.js';
 import { completeProcedure } from '../services.js';
 import { recallTypes, typesForCode } from '../recalls.js';
 
@@ -287,6 +288,7 @@ export default function scheduleRoutes({ db }) {
     await db.run("UPDATE waitlist SET status = 'booked' WHERE practice_id = ? AND patient_id = ? AND status = 'waiting'", req.user.practice_id, row.patient_id);
     await audit(db, req, 'appointment.create', 'appointments', id, { start: row.start_time });
     changed(req, row.start_time, ...(series ? Array.from({ length: repeat.count }, (_, i) => shiftVisit(row.start_time, repeat, i)) : []));
+    await emitAppointment(db, id, 'appointment.created');
     res.status(201).json({ ...(await db.get(`${SELECT} WHERE a.id = ?`, id)), ...(series ? { series } : {}) });
   });
 
@@ -328,6 +330,7 @@ export default function scheduleRoutes({ db }) {
     });
     await audit(db, req, 'appointment.family', 'appointments', ids[0], { count: ids.length, mode: b.mode });
     changed(req, normalizeDateTime(b.start_time, 'start_time'));
+    for (const x of ids) await emitAppointment(db, x, 'appointment.created');
     res.status(201).json(await db.all(`${SELECT} WHERE a.id IN (${ids.map(() => '?').join(',')}) ORDER BY a.start_time, a.id`, ...ids));
   });
 
@@ -382,6 +385,7 @@ export default function scheduleRoutes({ db }) {
       }
     }
     changed(req, existing.start_time, row.start_time);
+    await emitAppointment(db, existing.id);
     res.json({ ...(await db.get(`${SELECT} WHERE a.id = ?`, existing.id)), ...(seriesUpdate ? { series_update: seriesUpdate } : {}) });
   });
 
@@ -433,6 +437,7 @@ export default function scheduleRoutes({ db }) {
     }
     await audit(db, req, 'appointment.status', 'appointments', existing.id, { from: existing.status, to: status, ...(completedProcedures ? { completed_procedures: completedProcedures } : {}) });
     changed(req, existing.start_time);
+    await emitAppointment(db, existing.id);
     res.json({ ...(await db.get(`${SELECT} WHERE a.id = ?`, existing.id)), completed_procedures: completedProcedures });
   });
 

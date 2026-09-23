@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { requirePermission, HttpError } from '../auth.js';
 import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, practiceNow } from '../util.js';
 import { schemaInfo } from '../db.js';
+import { emitPatient } from '../webhooks.js';
 import { patientBalance, primaryPolicy } from '../services.js';
 
 const FIELDS = [
@@ -232,6 +233,7 @@ export default function patientRoutes({ db }) {
     if (row.guarantor_id && (await findOr404(db, 'patients', row.guarantor_id, req.user.practice_id, 'Guarantor')).guarantor_id) throw new HttpError(400, 'Choose the head of household as guarantor');
     const id = await insert(db, 'patients', { ...row, practice_id: req.user.practice_id });
     await audit(db, req, 'patient.create', 'patients', id);
+    await emitPatient(db, id, 'patient.created');
     res.status(201).json(await db.get('SELECT * FROM patients WHERE id = ?', id));
   });
 
@@ -281,6 +283,7 @@ export default function patientRoutes({ db }) {
     }
     await update(db, 'patients', existing.id, req.user.practice_id, { ...row, updated_at: new Date().toISOString() });
     await audit(db, req, 'patient.update', 'patients', existing.id, { fields: Object.keys(row) });
+    await emitPatient(db, existing.id, 'patient.updated');
     res.json(await db.get('SELECT * FROM patients WHERE id = ?', existing.id));
   });
 

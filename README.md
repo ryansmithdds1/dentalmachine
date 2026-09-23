@@ -163,6 +163,22 @@ A restore creates a new practice with every ID remapped, so the same file works 
 
 It runs on any container host (Fly.io, Render, Railway, AWS ECS, Google Cloud Run with a mounted volume, and so on). Put it behind HTTPS and keep `/data` on persistent, encrypted storage with backups. See `.env.example` for the configuration options.
 
+## Public API and webhooks
+
+Admins create API keys (with only the access they need) and webhook endpoints in **Settings → API & webhooks**.
+
+```
+GET  /api/v1/me                      GET  /api/v1/providers | operatories | appointment-types
+GET  /api/v1/patients                ?updated_since, ?email, ?phone, ?limit, ?starting_after
+GET  /api/v1/patients/:id            POST /api/v1/patients     PATCH /api/v1/patients/:id
+GET  /api/v1/availability            ?date=YYYY-MM-DD&provider_id&duration
+GET  /api/v1/appointments            ?from&to&patient_id&status   GET /api/v1/appointments/:id
+POST /api/v1/appointments            POST /api/v1/appointments/:id/confirm | /cancel
+GET  /api/v1/payments                ?since=YYYY-MM-DD
+```
+
+Send `Authorization: Bearer dm_live_…`. Lists return `{ data, has_more }`. Webhook events (`appointment.created`, `appointment.updated`, `appointment.cancelled`, `patient.created`, `patient.updated`, `payment.created`) are POSTed as `{ id, type, created, data: { object } }` with a `DM-Signature: t=<unix>,v1=<hex HMAC-SHA256 of "t.body">` header, and retried with backoff for about a day.
+
 ## API overview
 
 All endpoints are under `/api` and need `Authorization: Bearer <token>`, except the `/auth/*` endpoints. Money values are integer **cents**. Appointment times are wall-clock times in the practice's time zone, written as `YYYY-MM-DD HH:MM`.

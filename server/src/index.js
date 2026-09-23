@@ -10,6 +10,7 @@ import { runAutomaticBackups } from './backup.js';
 import { runFormSends } from './formtemplates.js';
 import { runMembershipBilling } from './memberships.js';
 import { runCampaigns } from './campaigns.js';
+import { deliverWebhooks, scanPayments } from './webhooks.js';
 
 let secret = process.env.JWT_SECRET;
 if (!secret) {
@@ -43,6 +44,12 @@ if (ch?.batch && process.env.CLEARINGHOUSE_POLL !== 'off') {
     .catch((err) => console.error('Clearinghouse poll failed:', err.message));
   setInterval(poll, ch.pollMinutes * 60 * 1000).unref();
   setTimeout(poll, 15_000).unref();
+}
+// Webhooks: retry failed deliveries and announce new payments, every minute.
+if (process.env.WEBHOOKS !== 'off') {
+  const hooks = () => runExclusive('webhooks', 55 * 1000, async () => (await scanPayments(db)) + (await deliverWebhooks(db)))
+    .catch((err) => console.error('Webhooks failed:', err.message));
+  setInterval(hooks, 60 * 1000).unref();
 }
 // Membership fees: each period is posted (and the card on file charged) on its billing date; checked hourly.
 if (process.env.MEMBERSHIP_BILLING !== 'off') {

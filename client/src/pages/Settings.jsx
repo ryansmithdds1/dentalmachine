@@ -8,6 +8,7 @@ import { ErrorBox, Modal, useSubmit } from '../components/ui.jsx';
 import { CustomFieldsSettings, DuplicateCharts } from '../components/Switching.jsx';
 import ImportData from '../components/ImportData.jsx';
 import Backups from '../components/Backups.jsx';
+import Developer from '../components/Developer.jsx';
 import FormTemplates from '../components/FormTemplates.jsx';
 import { MembershipPlans } from '../components/Memberships.jsx';
 import MfaSetup from '../components/MfaSetup.jsx';
@@ -50,7 +51,7 @@ export default function Settings() {
     ['Clinical', [['templates', 'Note templates', can('clinical:write')], ['forms', 'Forms & consents', can('patients:read')], ['labs', 'Labs', can('clinical:read')], ['referrals', 'Referral contacts', can('patients:read')]]],
     ['Billing', [['codes', 'Fee schedule', true], ['ppo', 'PPO fee schedules', can('billing:read')], ['carriers', 'Insurance carriers', can('billing:read')], ['memberships', 'Membership plans', can('billing:read')]]],
     ['Patients', [['messaging', 'Messages & reviews', admin], ['custom', 'Custom patient fields', admin], ['duplicates', 'Duplicate charts', admin]]],
-    ['Connections', [['integrations', 'Integrations', admin], ['imaging', 'Imaging bridges', admin]]],
+    ['Connections', [['integrations', 'Integrations', admin], ['imaging', 'Imaging bridges', admin], ['developer', 'API & webhooks', admin]]],
     ['Compliance', [['audit', 'Audit log', admin], ['backups', 'Backups', admin]]],
   ].map(([g, items]) => [g, items.filter((t) => t[2])]).filter(([, items]) => items.length);
   const all = groups.flatMap(([, items]) => items);
@@ -89,6 +90,7 @@ export default function Settings() {
       {tab === 'custom' && <CustomFieldsSettings />}
       {tab === 'import' && admin && <ImportData />}
       {tab === 'backups' && admin && <Backups />}
+      {tab === 'developer' && admin && <Developer />}
       {tab === 'duplicates' && <DuplicateCharts />}
       {tab === 'imaging' && <ImagingBridges />}
       {tab === 'integrations' && <Integrations />}

@@ -34,6 +34,9 @@ import formRoutes from './routes/forms.js';
 import membershipRoutes from './routes/memberships.js';
 import campaignRoutes, { campaignPublicRoutes } from './routes/campaigns.js';
 import attachmentRoutes from './routes/attachments.js';
+import apiV1Routes from './routes/apiv1.js';
+import developerRoutes from './routes/developer.js';
+import { startWebhooks } from './webhooks.js';
 import { createAttachmentSender, attachmentConfig } from './attachments.js';
 import { createMessenger } from './messaging.js';
 import { createStorage } from './storage.js';
@@ -72,6 +75,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   payments ??= createPayments({ config, fetchImpl });
   mailer ??= overrides.mailer || createMailer({ fetchImpl });
   clearinghouse ??= createClearinghouse({ db, fetchImpl, config: { ...clearinghouseConfig(), ...(config.ediMode === 'sandbox' && !process.env.CLEARINGHOUSE ? { mode: 'sandbox' } : {}) } });
+  startWebhooks(db, fetchImpl);
   const app = express();
   app.locals.clearinghouse = clearinghouse;
   app.locals.payments = payments;
@@ -104,6 +108,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
     next();
   }, publicRoutes({ db, storage, payments, messenger, config }), publicCasePresentation({ db }), portalPublicRoutes({ db, secret, messenger }), campaignPublicRoutes({ db }));
   app.use('/api/portal', portalRoutes({ db, secret, config, payments }));
+  app.use('/api/v1', apiV1Routes({ db }));
 
   app.use('/api/bridge', (_req, res, next) => {
     res.set('Cache-Control', 'no-store');
@@ -126,6 +131,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(formRoutes({ db, messenger, config }));
   api.use(membershipRoutes({ db, payments, messenger }));
   api.use(campaignRoutes({ db, messenger, config }));
+  api.use(developerRoutes({ db, fetchImpl }));
   api.use(attachmentRoutes({ db, storage, sender: attachmentSender ?? createAttachmentSender(attachmentConfig(process.env, config.ediMode), fetchImpl) }));
   api.use(billingRoutes({ db, payments }));
   api.use(insuranceRoutes({ db }));

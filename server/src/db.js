@@ -660,6 +660,51 @@ CREATE TABLE IF NOT EXISTS portal_codes (
 CREATE INDEX IF NOT EXISTS idx_portal_codes ON portal_codes(practice_id, contact);
 
 -- Patients without an appointment who want one (or an earlier one), and when they can come.
+-- Public API keys (only a hash is kept) and outbound webhook endpoints with their deliveries.
+CREATE TABLE IF NOT EXISTS api_keys (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  name TEXT NOT NULL,
+  prefix TEXT NOT NULL,
+  key_hash TEXT NOT NULL UNIQUE,
+  scopes TEXT NOT NULL DEFAULT '[]',
+  created_by INTEGER REFERENCES users(id),
+  last_used_at TEXT,
+  revoked_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS webhook_endpoints (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  url TEXT NOT NULL,
+  events TEXT NOT NULL DEFAULT '[]',
+  secret TEXT NOT NULL,
+  description TEXT,
+  active INTEGER NOT NULL DEFAULT 1,
+  failures INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS webhook_deliveries (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  endpoint_id INTEGER NOT NULL REFERENCES webhook_endpoints(id),
+  event TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','sending','delivered','failed')),
+  attempts INTEGER NOT NULL DEFAULT 0,
+  response_code INTEGER,
+  last_error TEXT,
+  next_attempt_at TEXT,
+  delivered_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS webhook_state (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  key TEXT NOT NULL,
+  value TEXT,
+  UNIQUE (practice_id, key)
+);
 -- Practice-defined roles: a name and a set of permissions (see PERMISSION_CATALOG).
 CREATE TABLE IF NOT EXISTS custom_roles (
   id INTEGER PRIMARY KEY,
@@ -1257,6 +1302,7 @@ const INDEXES = `
 CREATE UNIQUE INDEX IF NOT EXISTS idx_practice_slug ON practices(slug);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_appt_token ON appointments(confirm_token_hash);
 CREATE INDEX IF NOT EXISTS idx_campaign_unsub ON campaign_recipients(unsubscribe_hash);
+CREATE INDEX IF NOT EXISTS idx_webhook_due ON webhook_deliveries(status, next_attempt_at);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_user_email_ci ON users(lower(email));
 `;
 

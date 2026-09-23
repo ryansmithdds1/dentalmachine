@@ -4,6 +4,7 @@ import { insert, update, hashToken, practiceNow, normalizeDateTime, audit, mapSe
 import { MEDICAL_CONDITIONS, parseMedicalHistory, contactUpdatesFromHistory } from '../forms.js';
 import { fillFields, checkAnswers, formPdf } from '../formtemplates.js';
 import { finishBooking } from '../onlinebooking.js';
+import { emitAppointment } from '../webhooks.js';
 import { sendAppointmentReminder } from '../messaging.js';
 import { openSlots } from './schedule.js';
 import { publish } from '../events.js';
@@ -176,6 +177,7 @@ export default function publicRoutes({ db, storage, payments, messenger, config 
       throw new HttpError(400, 'action must be confirm or cancel');
     }
     await logPublic(req, a.practice_id, `appointment.patient_${action}`, 'appointments', a.id);
+    await emitAppointment(db, a.id);
     res.json(apptView(await apptForToken(req.params.token)));
   });
 
