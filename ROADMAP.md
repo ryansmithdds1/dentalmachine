@@ -273,7 +273,7 @@ Works well: drag, resize and create; undo; live updates; conflict checks; open-t
 1. ✅ **P1** Settings search box. _(Done: searches section names and what's inside them (field labels, e.g. “lock date”, “payer id”, “twain”); Enter opens the first match and scrolls to the field.)_
 2. ✅ **P2** Practice setup wizard for new offices (practice info → providers → chairs → fees → insurance → messaging → go live). _(Done: a new office's admin lands on /setup — practice details for claims, providers with NPIs, chairs, keep or scale the starting fees (with a preview), common payers with their payer IDs in one click, reminders/texting number/online booking, then a go-live checklist with links to integrations and the importer; each step checks itself off, a banner stays until it's finished, and practices from before the wizard aren't asked.)_
 3. ✅ **P2** Audit log: date range, patient filter, export (item 74).
-4. **P2** Admin-only visibility of SSO and integration settings.
+4. ✅ **P2** Admin-only visibility of SSO and integration settings. _(Done: Integrations, SSO, API keys and webhooks, imaging workstations, card readers and the setup wizard are administrator-only on the server and hidden from other staff in Settings (a direct link falls back to My account); non-admin staff don't receive sign-on details, message wording or card-reader configuration with the practice settings; a test pins every guard.)_
 
 ### Platform quality
 1. ✅ **P1** Error monitoring (Sentry-compatible) and structured logs. _(Done: `SENTRY_DSN` reports server errors, failed background jobs and browser errors (no request bodies or patient data; rate-limited); JSON log lines with request ids, route, status and timing; 500s show a reference id; a crashed screen shows a recovery page.)_

@@ -166,11 +166,13 @@ export async function mapSeq(items, fn) {
 
 // A practice row safe to send to a browser: server-side secrets removed.
 export const publicPractice = (p) => (p ? { ...p, sso_client_secret: undefined } : p);
-// What non-admin staff see of the practice settings: no sign-on configuration or message templates.
+// What non-admin staff see of the practice settings: no sign-on or connection configuration, no message templates.
+const STAFF_HIDDEN = ['message_templates', 'stripe_terminal_location'];
 export const staffPractice = (p, user) => {
   if (!p || user?.role === 'admin') return publicPractice(p);
   const out = publicPractice(p);
-  for (const k of Object.keys(out)) if (k.startsWith('sso_') || k === 'message_templates') delete out[k];
+  // Sign-on and connection settings (and the wording of automated messages) are the administrator's business.
+  for (const k of Object.keys(out)) if (k.startsWith('sso_') || STAFF_HIDDEN.includes(k)) delete out[k];
   return out;
 };
 
