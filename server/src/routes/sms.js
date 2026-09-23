@@ -4,6 +4,7 @@ import { requirePermission, HttpError } from '../auth.js';
 import { sendMessage, recordOptOut, clearOptOut, isOptedOutAddress, visitsText, markBad } from '../messaging.js';
 import { insert, findOr404, audit, practiceNow, friendlyDateTime } from '../util.js';
 import { publish } from '../events.js';
+import { offerFor, claimOffer } from '../fill.js';
 import { patientLang } from '../templates.js';
 
 const STOP = ['STOP', 'STOPALL', 'UNSUBSCRIBE', 'CANCEL', 'END', 'QUIT', 'OPTOUT'];
@@ -99,7 +100,18 @@ export function smsWebhook({ db, config }) {
         }
       }
     }
-    if (STOP.includes(keyword)) {
+    // A reply to an opening we texted (the last thing we sent this number): YES books it for the first to answer.
+    const offer = !STOP.includes(keyword) && !START.includes(keyword) && !HELP.includes(keyword) ? await offerFor(db, practice.id, from) : null;
+    if (offer && /^(YES|Y|YEP|YEAH|SI|OK|SURE|I LL TAKE IT|ILL TAKE IT|TAKE IT|YES PLEASE|BOOK IT|YES BOOK IT)$/.test(keyword)) {
+      const out = await claimOffer(db, offer);
+      const lang = patientLang(await db.get('SELECT language FROM patients WHERE id = ?', offer.patient_id));
+      reply = out.won
+        ? (lang === 'es' ? `¡Listo! Su cita quedó para el ${friendlyDateTime(out.offer.start_time, 'es')} en ${practice.name}.` : `You're booked for ${friendlyDateTime(out.offer.start_time)} at ${practice.name}. See you then!`)
+        : (lang === 'es' ? `Lo sentimos, ese horario ya se tomó. Sigue en nuestra lista y le avisaremos del próximo.` : `Sorry — that time was just taken. You're still on our list and we'll text you the next one.`);
+    } else if (offer && /^(NO|N|NOPE|NO THANKS|CANT)$/.test(keyword)) {
+      await db.run("UPDATE fill_offer_recipients SET reply = 'no', replied_at = datetime('now') WHERE id = ?", offer.id);
+      reply = lang === 'es' ? 'Entendido, gracias.' : 'No problem — thanks for letting us know.';
+    } else if (STOP.includes(keyword)) {
       // "CANCEL" is a carrier opt-out keyword: the carrier stops our texts whatever we do, so we record it too.
       for (const p of candidates) await db.run('UPDATE patients SET sms_opt_in = 0 WHERE id = ?', p.id);
       // The number itself is recorded too, so nothing reaches it even if it isn't (yet) on a patient's chart.

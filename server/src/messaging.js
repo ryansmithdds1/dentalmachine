@@ -47,9 +47,27 @@ export function createMessenger({ env = process.env, fetchImpl = globalThis.fetc
     return { provider_id: res.headers.get('x-message-id') || 'sendgrid' };
   }
 
+  // An outbound phone call: Twilio fetches what to say from `url` once someone (or a voicemail) answers.
+  async function call(to, url, { statusCallback: callback } = {}) {
+    if (smsDriver === 'log') return { provider_id: `log-call-${Date.now()}` };
+    const sid = env.TWILIO_ACCOUNT_SID;
+    const res = await fetchImpl(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Calls.json`, {
+      method: 'POST',
+      headers: { Authorization: `Basic ${Buffer.from(`${sid}:${env.TWILIO_AUTH_TOKEN}`).toString('base64')}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        To: toE164(to), From: env.TWILIO_VOICE_FROM || env.TWILIO_FROM, Url: url, MachineDetection: 'DetectMessageEnd',
+        ...(callback || (base.startsWith('https://') ? { StatusCallback: `${base}/api/webhooks/twilio/call-status` } : {})),
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw Object.assign(new Error(data.message || `Twilio error ${res.status}`), { code: data.code });
+    return { provider_id: data.sid };
+  }
+
   return {
-    status: { sms: smsDriver, email: emailDriver },
+    status: { sms: smsDriver, email: emailDriver, voice: smsDriver },
     send: ({ channel, to, subject, body, ...extra }) => (channel === 'sms' ? sendSms(to, body) : sendEmail(to, subject || 'Message from your dental office', body, extra)),
+    call,
   };
 }
 
@@ -343,7 +361,7 @@ export function validateReminderSteps(steps) {
   const out = steps.map((s) => {
     const hours = Number(s?.hours);
     if (!Number.isInteger(hours) || hours < 1 || hours > 24 * 30) throw new Error('Each reminder goes out 1 hour to 30 days before the visit');
-    if (s.channel && !['auto', 'sms', 'email'].includes(s.channel)) throw new Error('channel must be auto, sms or email');
+    if (s.channel && !['auto', 'sms', 'email', 'call'].includes(s.channel)) throw new Error('channel must be auto, sms, email or call');
     return { hours, channel: s.channel || 'auto', confirmed: !!s.confirmed };
   });
   if (new Set(out.map((s) => s.hours)).size !== out.length) throw new Error('Two reminders are set for the same time');
@@ -380,6 +398,41 @@ async function sendGrouped(db, messenger, due, { kind, appUrl, channelOf }) {
 }
 const outcome = (msg) => (!msg || msg.status === 'blocked' ? 'unreachable' : msg.status === 'sent' ? 'sent' : 'failed');
 
+// Automated confirmation calls: one call per phone number and day. Whoever answers hears the visits and can
+// press 1 (or say yes) to confirm, or 2 to ask for a new time; a voicemail gets a message with the office's
+// number. Home phones are fine — this is how landline-only patients are reached.
+export async function placeConfirmCalls(db, messenger, due, appUrl) {
+  const groups = new Map();
+  for (const item of due) {
+    const patient = await db.get('SELECT * FROM patients WHERE id = ?', item.appt.patient_id);
+    const to = await recipientFor(db, patient);
+    const number = to.preferred_contact === 'email' ? null : (to.sms_bad_at ? to.phone_home || to.phone : to.phone || to.phone_home);
+    const key = number ? `${number.replace(/\D/g, '').slice(-10)}|${item.appt.start_time.slice(0, 10)}` : `none:${item.appt.id}`;
+    if (!groups.has(key)) groups.set(key, { items: [], to, number });
+    groups.get(key).items.push(item);
+  }
+  const out = [];
+  for (const g of groups.values()) {
+    if (!g.number || !messenger.call) {
+      out.push({ items: g.items, status: 'unreachable' });
+      continue;
+    }
+    const { token, hash } = newToken();
+    const practiceId = g.items[0].appt.practice_id;
+    for (const i of g.items) await insert(db, 'confirm_links', { practice_id: practiceId, token_hash: hash, appointment_id: i.appt.id, recipient_id: g.to.id, channel: 'call', address: g.number });
+    const callId = await insert(db, 'calls', { practice_id: practiceId, patient_id: g.to.id, direction: 'outbound', purpose: 'confirm', to_number: g.number, token_hash: hash });
+    try {
+      const { provider_id } = await messenger.call(g.number, `${appUrl}/api/webhooks/twilio/voice/confirm/${token}`);
+      await db.run("UPDATE calls SET provider_id = ?, status = 'ringing' WHERE id = ?", provider_id, callId);
+      out.push({ items: g.items, status: 'sent' });
+    } catch (err) {
+      await db.run("UPDATE calls SET status = 'failed', outcome = ? WHERE id = ?", String(err.message).slice(0, 200), callId);
+      out.push({ items: g.items, status: 'failed' });
+    }
+  }
+  return out;
+}
+
 // The reminder run (every few minutes), within each practice's sending hours:
 // - reminders: each visit gets the latest step it's inside the window for and hasn't had (a visit booked the
 //   day before gets only the day-before reminder); failed sends are retried up to three times;
@@ -408,7 +461,17 @@ export async function runReminders(db, messenger, { appUrl, now = new Date() } =
       }
     }
     const reminded = new Set(due.map((d) => d.appt.id));
-    for (const { items, msg } of await sendGrouped(db, messenger, due, { kind: 'reminder', appUrl, channelOf: (i) => (i.step.channel === 'auto' ? undefined : i.step.channel) })) {
+    // Call steps ring those who haven't confirmed (a family's visits that day in one call); the rest are messages.
+    const calls = due.filter((d) => d.step.channel === 'call');
+    const messages = due.filter((d) => d.step.channel !== 'call');
+    for (const { items, status } of await placeConfirmCalls(db, messenger, calls.filter((d) => d.appt.status === 'scheduled'), appUrl)) {
+      if (status === 'sent') sent++;
+      for (const { appt, step, prior } of items) {
+        if (prior) await db.run('UPDATE appointment_reminders SET status = ?, attempts = attempts + 1, sent_at = datetime(\'now\') WHERE id = ?', status, prior.id);
+        else await db.run('INSERT INTO appointment_reminders (appointment_id, step, status) VALUES (?, ?, ?)', appt.id, step.hours, status);
+      }
+    }
+    for (const { items, msg } of await sendGrouped(db, messenger, messages, { kind: 'reminder', appUrl, channelOf: (i) => (i.step.channel === 'auto' ? undefined : i.step.channel) })) {
       const status = outcome(msg);
       if (status === 'sent') sent++;
       for (const { appt, step, prior } of items) {

@@ -764,6 +764,63 @@ CREATE TABLE IF NOT EXISTS xray_findings (
 );
 CREATE INDEX IF NOT EXISTS idx_xray_findings ON xray_findings(practice_id, patient_id, status);
 
+-- Openings from cancellations, texted to ASAP and waitlist patients; the first YES books it.
+CREATE TABLE IF NOT EXISTS fill_offers (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  source_appointment_id INTEGER REFERENCES appointments(id),
+  cancelled_patient_id INTEGER,
+  provider_id INTEGER NOT NULL REFERENCES providers(id),
+  operatory_id INTEGER,
+  start_time TEXT NOT NULL,
+  end_time TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'queued',
+  offered INTEGER NOT NULL DEFAULT 0,
+  sent_at TEXT,
+  filled_patient_id INTEGER,
+  filled_appointment_id INTEGER,
+  filled_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS fill_offer_recipients (
+  id INTEGER PRIMARY KEY,
+  offer_id INTEGER NOT NULL REFERENCES fill_offers(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  source TEXT NOT NULL,
+  ref_id INTEGER,
+  phone TEXT,
+  message_id INTEGER,
+  reply TEXT,
+  replied_at TEXT,
+  won INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_fill_recipients ON fill_offer_recipients(message_id);
+
+-- Phone calls: automated confirmation calls now; the office's own calls (with transcripts) too.
+CREATE TABLE IF NOT EXISTS calls (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER REFERENCES patients(id),
+  direction TEXT NOT NULL DEFAULT 'outbound',
+  purpose TEXT NOT NULL DEFAULT 'call',
+  from_number TEXT,
+  to_number TEXT,
+  provider_id TEXT,
+  token_hash TEXT,
+  status TEXT NOT NULL DEFAULT 'queued',
+  answered_by TEXT,
+  outcome TEXT,
+  duration INTEGER,
+  recording_url TEXT,
+  transcript TEXT,
+  summary TEXT,
+  user_id INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  ended_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_calls ON calls(practice_id, created_at);
+
 CREATE TABLE IF NOT EXISTS assistant_log (
   id INTEGER PRIMARY KEY,
   practice_id INTEGER NOT NULL REFERENCES practices(id),
@@ -1920,6 +1977,9 @@ const COLUMNS = [
   ['documents', 'ai_image_type', 'TEXT'],
   ['documents', 'ai_quality', 'TEXT'],
   ['practices', 'xray_ai_auto', 'INTEGER NOT NULL DEFAULT 1'],
+  ['practices', 'auto_fill', 'INTEGER NOT NULL DEFAULT 1'],
+  ['practices', 'fill_batch', 'INTEGER NOT NULL DEFAULT 5'],
+  ['practices', 'confirm_calls', 'INTEGER NOT NULL DEFAULT 0'],
 ];
 
 // CHECK constraints widened after release: [table, constraint name on Postgres, old text, new text].

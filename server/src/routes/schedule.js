@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { openSlotLater } from '../fill.js';
 import { requirePermission, HttpError, can } from '../auth.js';
 import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, normalizeDateTime, practiceNow, mapSeq, paged } from '../util.js';
 import { hoursFor, providerHours, providerHoursFor, providerHoursOn, validateHours } from '../hours.js';
@@ -429,6 +430,7 @@ export default function scheduleRoutes({ db }) {
     if (Number(row.provider_id) !== existing.provider_id) await db.run("UPDATE procedures SET provider_id = ? WHERE appointment_id = ? AND status = 'planned'", row.provider_id, existing.id);
     // Cancelling from the edit form releases procedures and recalls, same as the status buttons.
     if (inactive.includes(row.status) && !inactive.includes(existing.status)) await releaseAppointment(db, existing.id);
+    if (row.status === 'cancelled' && existing.status !== 'cancelled') openSlotLater(db, existing.id);
     await audit(db, req, 'appointment.update', 'appointments', existing.id, {
       fields: Object.keys(changes),
       ...(row.start_time !== existing.start_time ? { from: existing.start_time, to: row.start_time } : {}),
@@ -492,6 +494,7 @@ export default function scheduleRoutes({ db }) {
       if (status === 'in_chair') await db.run('UPDATE appointments SET arrived_at = COALESCE(arrived_at, ?) WHERE id = ?', now, existing.id);
     }
     if (status === 'cancelled' || status === 'no_show') await releaseAppointment(db, existing.id);
+    if (status === 'cancelled' && existing.status !== 'cancelled') openSlotLater(db, existing.id);
     // Finishing the visit also completes the work planned for it (posting the charges), when the
     // person has clinical rights and asked for it.
     let completedProcedures = 0;

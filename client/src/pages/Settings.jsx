@@ -1142,7 +1142,7 @@ function Messaging() {
     await api.put('/practice', {
       review_url: form.review_url || null, review_requests: form.review_requests, review_threshold: Number(form.review_threshold), message_templates: form.templates,
       reminder_steps: form.reminder_steps.map((s) => ({ ...s, hours: Number(s.hours) })), recall_auto: form.recall_auto, recall_steps: form.recall_steps.map((s) => ({ ...s, days: Number(s.days) })),
-      send_from: form.send_from, send_until: form.send_until, booking_notices: form.booking_notices, no_show_texts: form.no_show_texts,
+      send_from: form.send_from, send_until: form.send_until, booking_notices: form.booking_notices, no_show_texts: form.no_show_texts, auto_fill: form.auto_fill, fill_batch: Number(form.fill_batch) || 5,
     });
     setSaved(true);
     refresh();
@@ -1152,7 +1152,7 @@ function Messaging() {
     review_url: practice.review_url || '', review_requests: !!practice.review_requests, review_threshold: practice.review_threshold || 4, templates: JSON.parse(practice.message_templates || '{}'),
     reminder_steps: practice.reminder_steps ? JSON.parse(practice.reminder_steps) : (practice.reminder_hours > 0 ? [{ hours: practice.reminder_hours, channel: 'auto', confirmed: false }] : []),
     recall_auto: !!practice.recall_auto,
-    send_from: practice.send_from || '08:00', send_until: practice.send_until || '20:00', booking_notices: practice.booking_notices !== 0, no_show_texts: practice.no_show_texts !== 0,
+    send_from: practice.send_from || '08:00', send_until: practice.send_until || '20:00', booking_notices: practice.booking_notices !== 0, no_show_texts: practice.no_show_texts !== 0, auto_fill: practice.auto_fill !== 0, fill_batch: practice.fill_batch || 5,
     recall_steps: practice.recall_steps ? JSON.parse(practice.recall_steps) : [{ days: -14, channel: 'auto' }, { days: 0, channel: 'auto' }, { days: 30, channel: 'auto' }, { days: 90, channel: 'auto' }],
   };
   const setStep = (list, i, patch) => change({ [list]: cur[list].map((s, j) => (j === i ? { ...s, ...patch } : s)) });
@@ -1176,7 +1176,7 @@ function Messaging() {
                 </td>
                 <td>
                   <select aria-label="Send by" value={s.channel || 'auto'} onChange={(e) => setStep('reminder_steps', i, { channel: e.target.value })}>
-                    <option value="auto">Text, or email if no mobile</option><option value="sms">Text</option><option value="email">Email</option>
+                    <option value="auto">Text, or email if no mobile</option><option value="sms">Text</option><option value="email">Email</option><option value="call">Phone call (if not confirmed yet)</option>
                   </select>
                 </td>
                 <td><input type="checkbox" aria-label="Also to confirmed patients" checked={!!s.confirmed} onChange={(e) => setStep('reminder_steps', i, { confirmed: e.target.checked })} /></td>
@@ -1193,6 +1193,9 @@ function Messaging() {
         <h3 style={{ marginTop: 18 }}>Also</h3>
         <label className="checkbox"><input type="checkbox" checked={cur.booking_notices} onChange={(e) => change({ booking_notices: e.target.checked })} /> Tell patients when the office books or moves a visit (a text or email with the time and the confirm link; untick “Let the patient know” when booking to skip one)</label>
         <label className="checkbox"><input type="checkbox" checked={cur.no_show_texts} onChange={(e) => change({ no_show_texts: e.target.checked })} /> Send a “we missed you” message the same day when a visit is marked as a no-show</label>
+        <label className="checkbox"><input type="checkbox" checked={cur.auto_fill} onChange={(e) => change({ auto_fill: e.target.checked })} /> Fill cancellations automatically: text the opening to
+          <input type="number" min={1} max={20} value={cur.fill_batch} onChange={(e) => change({ fill_batch: e.target.value })} style={{ width: 56, margin: '0 6px' }} />
+          ASAP and waitlist patients; the first to reply YES is booked</label>
         <div className="inline" style={{ marginTop: 10, alignItems: 'center' }}>
           <span>Automatic messages go out between</span>
           <input type="time" aria-label="Send from" value={cur.send_from} onChange={(e) => change({ send_from: e.target.value })} style={{ width: 140 }} />
@@ -1200,7 +1203,7 @@ function Messaging() {
           <input type="time" aria-label="Send until" value={cur.send_until} onChange={(e) => change({ send_until: e.target.value })} style={{ width: 140 }} />
           <span className="muted" style={{ fontSize: 12 }}>(office time; texting laws allow 8 AM–9 PM in the patient’s time zone)</span>
         </div>
-        <p className="muted" style={{ fontSize: 12 }}>A family sharing a phone gets one message for everyone&apos;s visits that day, and a child&apos;s reminders go to the parent. Patients reply C to confirm, R for a new time, HELP or STOP. Texts to a landline and emails that bounce are noticed and the other channel is used.</p>
+        <p className="muted" style={{ fontSize: 12 }}>A family sharing a phone gets one message for everyone&apos;s visits that day, and a child&apos;s reminders go to the parent. Patients reply C to confirm, R for a new time, HELP or STOP. A “Phone call” step rings those not yet confirmed (press 1 to confirm) — and reaches landlines. Texts to a landline and emails that bounce are noticed and the other channel is used.</p>
       </div>
       <div className="card">
         <h2>Recall</h2>

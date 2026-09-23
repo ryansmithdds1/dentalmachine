@@ -383,6 +383,17 @@ export default function frontDeskRoutes({ db, messenger }) {
     }));
   });
 
+  // Cancellations offered automatically in the last month, and who took them.
+  r.get('/followups/openings', requirePermission('schedule:read'), async (req, res) => {
+    const rows = await db.all(
+      `SELECT o.id, o.start_time, o.end_time, o.status, o.offered, o.sent_at, o.filled_at, pv.name AS provider_name,
+         c.first_name AS cancelled_first, c.last_name AS cancelled_last, f.first_name AS filled_first, f.last_name AS filled_last, f.id AS filled_patient_id
+       FROM fill_offers o JOIN providers pv ON pv.id = o.provider_id LEFT JOIN patients c ON c.id = o.cancelled_patient_id LEFT JOIN patients f ON f.id = o.filled_patient_id
+       WHERE o.practice_id = ? AND o.created_at > ? ORDER BY o.id DESC LIMIT 100`, req.user.practice_id, new Date(Date.now() - 30 * 86400_000).toISOString().replace('T', ' ').slice(0, 19),
+    );
+    res.json(rows);
+  });
+
   // How well confirmations work: how many visits were confirmed and how, and how often confirmed and
   // unconfirmed patients didn't show; the reminders sent and whether they arrived.
   r.get('/followups/confirmation-stats', requirePermission('schedule:read'), async (req, res) => {

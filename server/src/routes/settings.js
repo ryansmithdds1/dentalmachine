@@ -120,7 +120,7 @@ export default function settingsRoutes({ db, secret, config = {} }) {
   r.get('/message-templates/defaults', (_req, res) => res.json(DEFAULT_TEMPLATES));
   r.get('/message-templates/meta', (_req, res) => res.json(TEMPLATE_META));
   r.put('/practice', requireAdmin, async (req, res) => {
-    const row = pick(req.body, ['name', 'address', 'city', 'state', 'zip', 'phone', 'email', 'tax_id', 'npi', 'timezone', 'slug', 'online_booking', 'reminder_hours', 'require_mfa', 'office_hours', 'daily_goal', 'sms_number', 'review_url', 'review_requests', 'review_threshold', 'instant_booking', 'idle_timeout_minutes', 'message_templates', 'hygiene_goal', 'portal_enabled', 'lock_date', 'adjustment_approval_limit', 'reminder_steps', 'recall_steps', 'recall_auto', 'finance_charge_bps', 'finance_charge_min', 'late_fee', 'collection_agency', 'financing', 'auto_receipts', 'kpi_targets', 'send_from', 'send_until', 'booking_notices', 'no_show_texts', 'xray_ai_auto']);
+    const row = pick(req.body, ['name', 'address', 'city', 'state', 'zip', 'phone', 'email', 'tax_id', 'npi', 'timezone', 'slug', 'online_booking', 'reminder_hours', 'require_mfa', 'office_hours', 'daily_goal', 'sms_number', 'review_url', 'review_requests', 'review_threshold', 'instant_booking', 'idle_timeout_minutes', 'message_templates', 'hygiene_goal', 'portal_enabled', 'lock_date', 'adjustment_approval_limit', 'reminder_steps', 'recall_steps', 'recall_auto', 'finance_charge_bps', 'finance_charge_min', 'late_fee', 'collection_agency', 'financing', 'auto_receipts', 'kpi_targets', 'send_from', 'send_until', 'booking_notices', 'no_show_texts', 'xray_ai_auto', 'auto_fill', 'fill_batch']);
     if (row.financing !== undefined) row.financing = cleanFinancing(row.financing);
     if (row.kpi_targets !== undefined) row.kpi_targets = cleanKpiTargets(row.kpi_targets);
     if (row.sms_number) {
@@ -176,7 +176,11 @@ export default function settingsRoutes({ db, secret, config = {} }) {
     if (row.recall_steps !== undefined && row.recall_steps !== null) row.recall_steps = JSON.stringify(validateRecallSteps(typeof row.recall_steps === 'string' ? JSON.parse(row.recall_steps) : row.recall_steps));
     if (row.recall_auto != null) row.recall_auto = row.recall_auto ? 1 : 0;
     if (row.auto_receipts != null) row.auto_receipts = row.auto_receipts ? 1 : 0;
-    for (const k of ['booking_notices', 'no_show_texts', 'xray_ai_auto']) if (row[k] != null) row[k] = row[k] ? 1 : 0;
+    for (const k of ['booking_notices', 'no_show_texts', 'xray_ai_auto', 'auto_fill']) if (row[k] != null) row[k] = row[k] ? 1 : 0;
+    if (row.fill_batch != null) {
+      row.fill_batch = Number(row.fill_batch);
+      if (!Number.isInteger(row.fill_batch) || row.fill_batch < 1 || row.fill_batch > 20) throw new HttpError(400, 'Offer an opening to 1-20 patients at a time');
+    }
     // Hours patients may get automated texts and emails (practice time); the same start and end means any time.
     for (const k of ['send_from', 'send_until']) {
       if (row[k] === undefined) continue;

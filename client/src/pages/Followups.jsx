@@ -122,7 +122,35 @@ function Unconfirmed() {
           {rows?.length === 0 && <div className="empty">Everyone&apos;s confirmed. 🎉</div>}
         </div>
       </div>
+      <Openings />
     </>
+  );
+}
+
+// Cancellations the system texted to ASAP and waitlist patients, and who took them.
+function Openings() {
+  const { data } = useApi('/followups/openings');
+  if (!data?.length) return null;
+  const STATUS = { filled: 'Filled', open: 'Offered — waiting for a yes', queued: 'Waiting for sending hours', no_takers: 'Nobody to offer it to', expired: 'Not filled' };
+  return (
+    <div className="card" style={{ padding: 0, marginTop: 12 }}>
+      <h2 style={{ padding: '14px 16px 0' }}>Cancellations filled automatically</h2>
+      <div className="table-wrap">
+        <table>
+          <thead><tr><th>Opening</th><th>Cancelled by</th><th>Offered to</th><th>Result</th></tr></thead>
+          <tbody>
+            {data.map((o) => (
+              <tr key={o.id}>
+                <td>{fmtDateTime(o.start_time)}<div className="muted">{o.provider_name}</div></td>
+                <td>{o.cancelled_first} {o.cancelled_last}</td>
+                <td>{o.offered || '—'}</td>
+                <td>{o.status === 'filled' ? <><span className="badge ok">Filled</span> <Link to={`/patients/${o.filled_patient_id}`}>{o.filled_first} {o.filled_last}</Link></> : <span className="muted">{STATUS[o.status] || o.status}</span>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
 

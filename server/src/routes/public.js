@@ -8,6 +8,7 @@ import { finishBooking } from '../onlinebooking.js';
 import { emitAppointment } from '../webhooks.js';
 import { sendAppointmentReminder, visitsIcs, mapsUrl, recordOptOut } from '../messaging.js';
 import { openSlots, releaseAppointment } from './schedule.js';
+import { openSlotLater } from '../fill.js';
 import { publish } from '../events.js';
 import { officeHours } from '../hours.js';
 import { parseDurations } from '../patterns.js';
@@ -288,6 +289,7 @@ export default function publicRoutes({ db, storage, payments, messenger, config,
       if (action === 'cancel') {
         await db.run("UPDATE appointments SET status = 'cancelled' WHERE id = ?", v.id);
         await releaseAppointment(db, v.id);
+        openSlotLater(db, v.id);
         // The front desk hears about it, with who might fill the opening.
         const asap = (await db.get(
           "SELECT COUNT(*) AS n FROM appointments WHERE practice_id = ? AND asap = 1 AND status IN ('scheduled','confirmed') AND start_time > ? AND patient_id != ?", practiceId, v.start_time, v.patient_id,

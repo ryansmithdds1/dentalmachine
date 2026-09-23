@@ -88,6 +88,11 @@ export const TEMPLATE_META = {
     text: 'Hi {first_name}, an appointment just opened at {practice}: {when}. Reply or call {phone} to take it — first come, first served.',
     es: 'Hola {first_name}, se abrió una cita en {practice}: {when}. Responda o llame al {phone} para tomarla — el primero que responda se la lleva.',
   },
+  fill_offer: {
+    label: 'Opening offered automatically', help: 'Texted to ASAP and waitlist patients when a visit is cancelled. The first to reply YES is booked.', vars: ['first_name', 'practice', 'when', 'provider', 'phone'], required: ['when'],
+    text: 'Hi {first_name}, {practice} just had an opening: {when} with {provider}. Reply YES to take it — the first reply gets it.',
+    es: 'Hola {first_name}, se abrió un espacio en {practice}: {when} con {provider}. Responda SI para tomarlo — el primero que responda se lo lleva.',
+  },
   statement: {
     label: 'Balance statement (email)', help: 'Emailed with each statement run to accounts with an email address.', vars: ['first_name', 'practice', 'amount', 'link', 'phone'], required: ['amount'],
     text: 'Hi {first_name}, your account balance at {practice} is {amount}. You can see the details and pay online at {link}. Questions? Call {phone}.',
@@ -180,6 +185,6 @@ const SUBJECTS_ES = {
   recall: 'Ya le toca su próxima visita en {practice}', card_declined: 'Su pago no se procesó — {practice}', forms: 'Por favor complete sus formularios para {practice}',
   booking_declined: 'Su solicitud de cita en {practice}', card_setup: 'Guarde una tarjeta para sus pagos — {practice}', payment_link: 'Solicitud de pago de {practice}',
   treatment_plan: 'Su plan de tratamiento de {practice}', receipt: 'Su recibo de {practice}', waitlist_offer: 'Se abrió una cita en {practice}',
-  statement: 'Su estado de cuenta de {practice}', portal_notice: 'Nuevo mensaje de {practice}', portal_code: 'Su código del portal de {practice}', survey: '¿Cómo lo hicimos? — {practice}',
+  statement: 'Su estado de cuenta de {practice}', fill_offer: 'Se abrió una cita en {practice}', portal_notice: 'Nuevo mensaje de {practice}', portal_code: 'Su código del portal de {practice}', survey: '¿Cómo lo hicimos? — {practice}',
 };
 export const subjectFor = (lang, key, english, practice) => (lang === 'es' && SUBJECTS_ES[key] ? SUBJECTS_ES[key].replace('{practice}', practice) : english);

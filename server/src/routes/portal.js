@@ -1,4 +1,5 @@
 import express, { Router } from 'express';
+import { openSlotLater } from '../fill.js';
 import { createHash, randomInt, timingSafeEqual } from 'node:crypto';
 import { HttpError, rateLimit, signToken, verifyToken } from '../auth.js';
 import { hit } from '../cluster.js';
@@ -206,6 +207,7 @@ export function portalRoutes({ db, secret, config, payments, messenger, storage 
       title: `${p.first_name} ${p.last_name} cancelled ${a.start_time} online — offer a new time${req.body?.reason ? ` (${String(req.body.reason).slice(0, 120)})` : ''}`,
     });
     publish(req.portal.practice.id, { type: 'schedule', dates: [a.start_time.slice(0, 10)], source: 'portal' });
+    openSlotLater(db, a.id);
     await pAudit(req, 'portal.cancel', 'appointments', a.id);
     res.json({ ok: true });
   });

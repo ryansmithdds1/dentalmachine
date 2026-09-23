@@ -21,10 +21,12 @@ import setupRoutes from './routes/setup.js';
 import familyRoutes from './routes/family.js';
 import conversationRoutes, { smsWebhook } from './routes/sms.js';
 import { deliveryWebhooks } from './routes/delivery.js';
+import { voiceWebhooks } from './routes/voice.js';
 import financeRoutes, { financePublicRoutes } from './routes/finance.js';
 import scribeRoutes from './routes/scribe.js';
 import xrayAiRoutes from './routes/xrayai.js';
 import { createXrayAi, registerXrayAi } from './xrayai.js';
+import { registerFill } from './fill.js';
 import { createPlaid } from './finance/plaid.js';
 import { createQuickBooks } from './finance/quickbooks.js';
 import ediRoutes from './routes/edi.js';
@@ -122,6 +124,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   qbo ??= createQuickBooks({ config, fetchImpl });
   xrayAi ??= createXrayAi({ config, fetchImpl });
   registerXrayAi(db, { storage, xrayAi });
+  registerFill(db, messenger);
   mailer ??= overrides.mailer || createMailer({ fetchImpl });
   clearinghouse ??= createClearinghouse({ db, fetchImpl, config: { ...clearinghouseConfig(), ...(config.ediMode === 'sandbox' && !process.env.CLEARINGHOUSE ? { mode: 'sandbox' } : {}) } });
   startWebhooks(db, fetchImpl);
@@ -144,6 +147,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   app.use(stripeWebhook({ db, config, payments, messenger })); // needs the raw body, so before express.json
   app.use(smsWebhook({ db, config }));
   app.use(deliveryWebhooks({ db, config }));
+  app.use(voiceWebhooks({ db, config }));
   app.use(financePublicRoutes({ db, config, secret, plaid, qbo }));
   // Signed forms can carry photos (insurance cards, ID), so that one route takes larger bodies.
   const jsonBody = express.json({ limit: '1mb' });

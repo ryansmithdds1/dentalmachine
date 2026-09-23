@@ -3,6 +3,7 @@ import { openDb } from './db.js';
 import { createApp, loadConfig } from './app.js';
 import { createMessenger, runReminders } from './messaging.js';
 import { runFinanceSync } from './routes/finance.js';
+import { runFillOffers } from './fill.js';
 import { initCluster, runExclusive } from './cluster.js';
 import { pollClearinghouse } from './clearinghouse.js';
 import { runRecallSequences } from './recalls.js';
@@ -50,7 +51,7 @@ process.on('unhandledRejection', (err) => {
 
 // Appointment reminders every 10 minutes. With Redis, only one server runs each pass (REMINDERS=off disables).
 if (process.env.REMINDERS !== 'off') {
-  const tick = () => runExclusive('reminders', 5 * 60 * 1000, async () => (await runReminders(db, messenger, { appUrl: config.appUrl })) + (await runRecallSequences(db, messenger, { appUrl: config.appUrl })) + (await runFormSends(db, messenger, { appUrl: config.appUrl })) + (await runCampaigns(db, messenger, { appUrl: config.appUrl })))
+  const tick = () => runExclusive('reminders', 5 * 60 * 1000, async () => (await runReminders(db, messenger, { appUrl: config.appUrl })) + (await runRecallSequences(db, messenger, { appUrl: config.appUrl })) + (await runFormSends(db, messenger, { appUrl: config.appUrl })) + (await runCampaigns(db, messenger, { appUrl: config.appUrl })) + (await runFillOffers(db, messenger)))
     .then((n) => n && log.info(`Sent ${n} appointment reminder(s)`))
     .catch(jobFailed('Reminder job'));
   setInterval(tick, 10 * 60 * 1000).unref();
