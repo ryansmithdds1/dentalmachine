@@ -4,7 +4,7 @@ import { api } from '../api.js';
 import { age } from '../format.js';
 
 const PAGES = [
-  ['Today / huddle', '/'], ['Schedule', '/schedule'], ['Patients', '/patients'], ['Messages', '/messages'], ['Follow-up lists', '/followups'],
+  ['Today / huddle', '/'], ['Schedule', '/schedule'], ['Patients', '/patients'], ['Messages', '/messages'], ['Follow-up lists', '/followups'], ['Campaigns', '/campaigns'],
   ['Online requests', '/requests'], ['Billing', '/claims'], ['Statements', '/claims?tab=statements'], ['Insurance follow-up', '/claims?tab=followup'],
   ['Import ERA', '/claims?tab=era'], ['Practice KPIs', '/reports'], ['Day sheet', '/reports?tab=ops'], ['To-do & labs', '/office'], ['Settings', '/settings'],
 ];

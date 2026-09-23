@@ -17,6 +17,8 @@ const PatientDetail = lazy(() => import('./pages/PatientDetail.jsx'));
 const Claims = lazy(() => import('./pages/Claims.jsx'));
 const ClaimDetail = lazy(() => import('./pages/ClaimDetail.jsx'));
 const Followups = lazy(() => import('./pages/Followups.jsx'));
+const Campaigns = lazy(() => import('./pages/Campaigns.jsx'));
+const UnsubscribePage = lazy(() => import('./pages/public/UnsubscribePage.jsx'));
 const RouteSlip = lazy(() => import('./pages/RouteSlip.jsx'));
 const TreatmentPlanPrint = lazy(() => import('./pages/PrintDocs.jsx').then((m) => ({ default: m.TreatmentPlanPrint })));
 const PrescriptionPrint = lazy(() => import('./pages/PrintDocs.jsx').then((m) => ({ default: m.PrescriptionPrint })));
@@ -47,6 +49,7 @@ export default function App() {
         <Route path="/c/:token" element={<ConfirmPage />} />
         <Route path="/f/:token" element={<IntakePage />} />
         <Route path="/r/:token" element={<ReviewPage />} />
+        <Route path="/u/:token" element={<UnsubscribePage />} />
         <Route path="/pay/:result" element={<PayResult />} />
         <Route path="/tp/:token" element={<CaseAcceptance />} />
         <Route path="/portal/:key" element={<Portal />} />
@@ -97,6 +100,7 @@ function StaffApp() {
     ['/messages', '💬', 'Messages', can('patients:read')],
     ['/requests', '📥', 'Online requests', can('schedule:read')],
     ['/followups', '📞', 'Follow-up lists', can('schedule:read')],
+    ['/campaigns', '📣', 'Campaigns', can('patients:write')],
     ['/claims', '🧾', 'Billing', can('billing:read')],
     ['/office', '✅', 'To-do & labs', true],
     ['/reports', '📈', 'Reports', can('reports:read')],
@@ -157,6 +161,7 @@ function Shell({ nav }) {
             <Route path="/patients/:id" element={<PatientDetail />} />
             <Route path="/patients/:id/statement" element={<Statement />} />
             <Route path="/followups" element={<Followups />} />
+            <Route path="/campaigns" element={<Campaigns />} />
             <Route path="/recalls" element={<Navigate to="/followups" replace />} />
             <Route path="/requests" element={<Requests />} />
             <Route path="/messages" element={<Inbox />} />

@@ -32,6 +32,7 @@ import importRoutes from './routes/imports.js';
 import backupRoutes from './routes/backup.js';
 import formRoutes from './routes/forms.js';
 import membershipRoutes from './routes/memberships.js';
+import campaignRoutes, { campaignPublicRoutes } from './routes/campaigns.js';
 import { createMessenger } from './messaging.js';
 import { createStorage } from './storage.js';
 import { createClearinghouse, clearinghouseConfig } from './clearinghouse.js';
@@ -99,7 +100,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   app.use('/api/public', (_req, res, next) => {
     res.set('Cache-Control', 'no-store');
     next();
-  }, publicRoutes({ db, storage }), publicCasePresentation({ db }), portalPublicRoutes({ db, secret, messenger }));
+  }, publicRoutes({ db, storage }), publicCasePresentation({ db }), portalPublicRoutes({ db, secret, messenger }), campaignPublicRoutes({ db }));
   app.use('/api/portal', portalRoutes({ db, secret, config, payments }));
 
   app.use('/api/bridge', (_req, res, next) => {
@@ -122,6 +123,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(backupRoutes({ db, storage, config }));
   api.use(formRoutes({ db, messenger, config }));
   api.use(membershipRoutes({ db, payments, messenger }));
+  api.use(campaignRoutes({ db, messenger, config }));
   api.use(billingRoutes({ db, payments }));
   api.use(insuranceRoutes({ db }));
   api.use(settingsRoutes({ db, secret, config }));

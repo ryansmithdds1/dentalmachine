@@ -660,6 +660,39 @@ CREATE TABLE IF NOT EXISTS portal_codes (
 CREATE INDEX IF NOT EXISTS idx_portal_codes ON portal_codes(practice_id, contact);
 
 -- Patients without an appointment who want one (or an earlier one), and when they can come.
+-- Marketing campaigns to a segment of patients, and who each one went to.
+CREATE TABLE IF NOT EXISTS campaigns (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  name TEXT NOT NULL,
+  segment TEXT NOT NULL,
+  params TEXT,
+  channel TEXT NOT NULL DEFAULT 'auto',
+  subject TEXT,
+  body TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','scheduled','sending','sent','cancelled')),
+  send_at TEXT,
+  send_lock TEXT,
+  started_at TEXT,
+  finished_at TEXT,
+  recipients INTEGER NOT NULL DEFAULT 0,
+  sent_count INTEGER NOT NULL DEFAULT 0,
+  failed_count INTEGER NOT NULL DEFAULT 0,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS campaign_recipients (
+  id INTEGER PRIMARY KEY,
+  campaign_id INTEGER NOT NULL REFERENCES campaigns(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  channel TEXT NOT NULL,
+  to_address TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','sent','failed','skipped')),
+  message_id INTEGER REFERENCES messages(id),
+  unsubscribe_hash TEXT,
+  unsubscribed_at TEXT,
+  UNIQUE (campaign_id, channel, to_address)
+);
 -- After-visit "how did we do?" answers (review routing): happy patients go on to the public review page.
 CREATE TABLE IF NOT EXISTS review_feedback (
   id INTEGER PRIMARY KEY,
@@ -1171,6 +1204,7 @@ const COLUMNS = [
 const INDEXES = `
 CREATE UNIQUE INDEX IF NOT EXISTS idx_practice_slug ON practices(slug);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_appt_token ON appointments(confirm_token_hash);
+CREATE INDEX IF NOT EXISTS idx_campaign_unsub ON campaign_recipients(unsubscribe_hash);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_user_email_ci ON users(lower(email));
 `;
 

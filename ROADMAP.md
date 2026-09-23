@@ -160,7 +160,7 @@ The "OD / Curve" column shows which competitor has the feature: ✓ = has it, ~ 
 
 | # | Feature | Why | OD / Curve | Pri | Size |
 |---|---|---|---|---|---|
-| 62 | **Campaigns:** segmented mass text and email (reactivation, unscheduled treatment, birthdays, holiday closures) with templates, HTML email and scheduling. | Curve GRO-style marketing. | ~ / ✓ | P2 | M |
+| 62 | ✅ **Campaigns:** segmented mass text and email (reactivation, unscheduled treatment, birthdays, holiday closures) with templates, HTML email and scheduling. | Curve GRO-style marketing. | ~ / ✓ | P2 | M |
 | 63 | ✅ **Editable message templates** for every automated message, with merge fields and a preview. | Offices want their own voice. | ✓ / ✓ | P2 | S |
 | 64 | ✅ **Review routing.** Ask for satisfaction first, send happy patients to Google and route unhappy ones to the office. | Reputation. | ~ / ✓ | P2 | S |
 | 65 | **Portal additions:** reschedule, request an appointment, secure messages, forms, statements/receipts download, and membership sign-up. | Patient self-service. | ✓ / ✓ | P2 | M |
