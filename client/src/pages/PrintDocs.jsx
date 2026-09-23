@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useApi } from '../hooks.js';
 import { money, fmtDate, fmtUtcDate } from '../format.js';
 import { useAuth } from '../auth.jsx';
@@ -265,6 +265,40 @@ export function AttachmentCoverPrint() {
         </tbody>
       </table>
       <p style={{ marginTop: 16 }}>The electronic claim references each attachment by its control number (PWK). Please file these with that claim.</p>
+    </div>
+  );
+}
+
+// Collection letter for mailing (Billing → Collections → Print).
+export function CollectionLetterPrint() {
+  const { id } = useParams();
+  const [params] = useSearchParams();
+  const { data: d } = useApi(`/collections/${id}`);
+  useAutoPrint(!!d);
+  if (!d) return <div className="empty">Loading…</div>;
+  const letter = d.letters[params.get('stage')] || d.letters.letter_30;
+  const a = d.account;
+  const pr = d.practice;
+  return (
+    <div className="print-doc">
+      <div className="no-print" style={{ marginBottom: 12 }}><Link to="/claims?tab=collections">← Back</Link> <button onClick={() => window.print()}>Print</button></div>
+      <header className="doc-head">
+        <div><h1>{pr.name}</h1><div>{[pr.address, pr.city, pr.state, pr.zip].filter(Boolean).join(', ')}</div><div>{pr.phone}</div></div>
+        <div style={{ textAlign: 'right' }}><h2>{letter.title}</h2><div>{fmtDate(new Date().toISOString().slice(0, 10))}</div></div>
+      </header>
+      <p>{a.first_name} {a.last_name}<br />{a.address && <>{a.address}<br /></>}{[a.city, a.state, a.zip].filter(Boolean).join(', ')}</p>
+      <p>Dear {a.first_name} {a.last_name},</p>
+      <p>{letter.body}</p>
+      {d.aging && (
+        <table>
+          <tbody>
+            <tr><th style={{ width: 220 }}>Account balance</th><td>{money(d.aging.balance)}</td></tr>
+            {d.aging.insurance_pending > 0 && <tr><th>Expected from insurance</th><td>{money(d.aging.insurance_pending)}</td></tr>}
+            <tr><th>Past due now</th><td><strong>{money(d.aging.overdue)}</strong></td></tr>
+          </tbody>
+        </table>
+      )}
+      <p>Sincerely,<br />{pr.name}</p>
     </div>
   );
 }

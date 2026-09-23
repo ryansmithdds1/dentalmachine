@@ -787,6 +787,20 @@ CREATE TABLE IF NOT EXISTS fee_history (
 );
 CREATE INDEX IF NOT EXISTS idx_fee_history ON fee_history(practice_id, code);
 
+-- Collections: letters, finance charges, agency referrals and bad-debt write-offs on an account (the guarantor).
+CREATE TABLE IF NOT EXISTS collection_actions (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  action TEXT NOT NULL,
+  amount INTEGER,
+  note TEXT,
+  message_id INTEGER,
+  created_by INTEGER,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_collection_actions ON collection_actions(practice_id, patient_id);
+
 -- Offices of a multi-location practice. A practice with none works as one office.
 CREATE TABLE IF NOT EXISTS locations (
   id INTEGER PRIMARY KEY,
@@ -1255,6 +1269,11 @@ const COLUMNS = [
   ['patients', 'fee_schedule_id', 'INTEGER REFERENCES fee_schedules(id)'],
   ['providers', 'fee_schedule_id', 'INTEGER REFERENCES fee_schedules(id)'],
   ['locations', 'fee_schedule_id', 'INTEGER REFERENCES fee_schedules(id)'],
+  ['patients', 'collection_status', 'TEXT'],
+  ['practices', 'finance_charge_bps', 'INTEGER NOT NULL DEFAULT 0'],
+  ['practices', 'finance_charge_min', 'INTEGER NOT NULL DEFAULT 0'],
+  ['practices', 'late_fee', 'INTEGER NOT NULL DEFAULT 0'],
+  ['practices', 'collection_agency', 'TEXT'],
   ['users', 'custom_role_id', 'INTEGER REFERENCES custom_roles(id)'],
   ['users', 'permissions_add', 'TEXT'],
   ['users', 'permissions_remove', 'TEXT'],

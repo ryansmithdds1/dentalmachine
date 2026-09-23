@@ -77,7 +77,7 @@ export default function settingsRoutes({ db, secret, config = {} }) {
   r.get('/message-templates/defaults', (_req, res) => res.json(DEFAULT_TEMPLATES));
   r.get('/message-templates/meta', (_req, res) => res.json(TEMPLATE_META));
   r.put('/practice', requireAdmin, async (req, res) => {
-    const row = pick(req.body, ['name', 'address', 'city', 'state', 'zip', 'phone', 'email', 'tax_id', 'npi', 'timezone', 'slug', 'online_booking', 'reminder_hours', 'require_mfa', 'office_hours', 'daily_goal', 'sms_number', 'review_url', 'review_requests', 'review_threshold', 'instant_booking', 'idle_timeout_minutes', 'message_templates', 'hygiene_goal', 'portal_enabled', 'lock_date', 'adjustment_approval_limit', 'reminder_steps', 'recall_steps', 'recall_auto']);
+    const row = pick(req.body, ['name', 'address', 'city', 'state', 'zip', 'phone', 'email', 'tax_id', 'npi', 'timezone', 'slug', 'online_booking', 'reminder_hours', 'require_mfa', 'office_hours', 'daily_goal', 'sms_number', 'review_url', 'review_requests', 'review_threshold', 'instant_booking', 'idle_timeout_minutes', 'message_templates', 'hygiene_goal', 'portal_enabled', 'lock_date', 'adjustment_approval_limit', 'reminder_steps', 'recall_steps', 'recall_auto', 'finance_charge_bps', 'finance_charge_min', 'late_fee', 'collection_agency']);
     if (row.message_templates != null) row.message_templates = validateTemplates(row.message_templates);
     if (row.review_url && !/^https:\/\/\S+$/.test(row.review_url)) throw new HttpError(400, 'Review link must start with https://');
     if (row.review_threshold != null && ![3, 4, 5].includes(Number(row.review_threshold))) throw new HttpError(400, 'review_threshold must be 3, 4 or 5 stars');
@@ -88,6 +88,12 @@ export default function settingsRoutes({ db, secret, config = {} }) {
     if (row.hygiene_goal != null) row.hygiene_goal = toCents(row.hygiene_goal, 'hygiene_goal');
     if (row.office_hours != null) row.office_hours = JSON.stringify(validateHours(typeof row.office_hours === 'string' ? JSON.parse(row.office_hours) : row.office_hours));
     if (row.daily_goal != null) row.daily_goal = toCents(row.daily_goal, 'daily_goal');
+    for (const k of ['finance_charge_min', 'late_fee']) if (row[k] !== undefined) row[k] = Math.max(0, toCents(row[k] || 0, k));
+    if (row.finance_charge_bps !== undefined) {
+      row.finance_charge_bps = Math.round(Number(row.finance_charge_bps) || 0);
+      if (row.finance_charge_bps < 0 || row.finance_charge_bps > 300) throw new HttpError(400, 'Finance charge must be 0–3% a month');
+    }
+    if (row.collection_agency !== undefined) row.collection_agency = String(row.collection_agency || '').trim().slice(0, 200) || null;
     if (row.adjustment_approval_limit !== undefined) row.adjustment_approval_limit = row.adjustment_approval_limit === null || row.adjustment_approval_limit === '' ? null : Math.max(0, toCents(row.adjustment_approval_limit, 'adjustment_approval_limit'));
     if (row.lock_date !== undefined) {
       row.lock_date = row.lock_date || null;
