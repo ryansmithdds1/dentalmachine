@@ -4,6 +4,7 @@ import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, pr
 import { schemaInfo } from '../db.js';
 import { emitPatient } from '../webhooks.js';
 import { patientBalance, primaryPolicy } from '../services.js';
+import { isOptedOutAddress, clearOptOut } from '../messaging.js';
 
 const FIELDS = [
   'first_name', 'last_name', 'preferred_name', 'dob', 'gender', 'email', 'phone', 'address', 'city', 'state', 'zip',
@@ -240,6 +241,8 @@ export default function patientRoutes({ db }) {
     else if ('primary_hygienist_id' in row) row.primary_hygienist_id = null;
     await checkFeeSchedule(db, row, req);
     if (row.guarantor_id && (await findOr404(db, 'patients', row.guarantor_id, req.user.practice_id, 'Guarantor')).guarantor_id) throw new HttpError(400, 'Choose the head of household as guarantor');
+    // A number that already replied STOP starts with texting off.
+    if (row.phone && await isOptedOutAddress(db, req.user.practice_id, 'sms', row.phone)) row.sms_opt_in = 0;
     const id = await insert(db, 'patients', { ...row, practice_id: req.user.practice_id });
     await audit(db, req, 'patient.create', 'patients', id);
     await emitPatient(db, id, 'patient.created');
@@ -286,6 +289,11 @@ export default function patientRoutes({ db }) {
     if (row.primary_hygienist_id) await findOr404(db, 'providers', row.primary_hygienist_id, req.user.practice_id, 'Hygienist');
     else if ('primary_hygienist_id' in row) row.primary_hygienist_id = null;
     await checkFeeSchedule(db, row, req);
+    // Texts can't be switched back on for a number that replied STOP: carriers require the patient to text START.
+    if (row.sms_opt_in && !existing.sms_opt_in && await isOptedOutAddress(db, req.user.practice_id, 'sms', row.phone ?? existing.phone)) {
+      throw new HttpError(409, 'This number replied STOP to our texts. The patient needs to text START to that number to receive texts again.');
+    }
+    if (row.email_opt_in && !existing.email_opt_in && (row.email ?? existing.email)) await clearOptOut(db, req.user.practice_id, 'email', row.email ?? existing.email);
     if (row.guarantor_id) {
       const g = await findOr404(db, 'patients', row.guarantor_id, req.user.practice_id, 'Guarantor');
       if (g.id === existing.id) row.guarantor_id = null;

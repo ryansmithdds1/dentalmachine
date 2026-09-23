@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { requirePermission, HttpError } from '../auth.js';
 import { findOr404, audit, hashToken } from '../util.js';
 import { SEGMENTS, CAMPAIGN_VARS, segmentPatients, pickRecipients, campaignVars, finalBody, normalize, createCampaign, runCampaigns, cleanParams, validateBody } from '../campaigns.js';
+import { recordOptOut } from '../messaging.js';
 
 // Campaigns: build a segment, preview who gets it, then send now or schedule it.
 export default function campaignRoutes({ db, messenger, config }) {
@@ -109,6 +110,7 @@ export function campaignPublicRoutes({ db }) {
     const x = await find(req.params.token);
     await db.tx(async () => {
       await db.run(`UPDATE patients SET ${x.channel === 'sms' ? 'sms_opt_in' : 'email_opt_in'} = 0 WHERE id = ?`, x.patient_id);
+      if (x.channel === 'email') await recordOptOut(db, x.practice_id, 'email', x.to_address, 'unsubscribe');
       await db.run("UPDATE campaign_recipients SET unsubscribed_at = COALESCE(unsubscribed_at, datetime('now')) WHERE id = ?", x.id);
     });
     res.json({ practice_name: x.practice_name, channel: x.channel, done: true });

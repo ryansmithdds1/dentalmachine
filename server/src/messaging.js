@@ -63,12 +63,46 @@ export function preferredChannel(patient, requested) {
   return null;
 }
 
+// Opt-outs are keyed by the address: the last 10 digits of a phone, or the lower-cased email.
+export const optOutAddress = (channel, to) => (channel === 'sms' ? String(to || '').replace(/\D/g, '').slice(-10) : String(to || '').trim().toLowerCase());
+export async function recordOptOut(db, practiceId, channel, to, source) {
+  const address = optOutAddress(channel, to);
+  if (!address) return;
+  if (!(await db.get('SELECT id FROM message_opt_outs WHERE practice_id = ? AND channel = ? AND address = ?', practiceId, channel, address))) {
+    await insert(db, 'message_opt_outs', { practice_id: practiceId, channel, address, source });
+  }
+}
+export async function clearOptOut(db, practiceId, channel, to) {
+  await db.run('DELETE FROM message_opt_outs WHERE practice_id = ? AND channel = ? AND address = ?', practiceId, channel, optOutAddress(channel, to));
+}
+export async function isOptedOutAddress(db, practiceId, channel, to) {
+  return !!(await db.get('SELECT id FROM message_opt_outs WHERE practice_id = ? AND channel = ? AND address = ?', practiceId, channel, optOutAddress(channel, to)));
+}
+
+// Sign-in codes are only ever sent because the patient asked for one, so they're exempt.
+const OPT_OUT_EXEMPT = new Set(['portal_code']);
+// Why a message can't go: the patient turned the channel off, or the address itself opted out (STOP).
+async function blockedReason(db, { practiceId, patientId, channel, to, kind }) {
+  if (channel === 'portal' || OPT_OUT_EXEMPT.has(kind)) return null;
+  if (patientId) {
+    const p = await db.get('SELECT sms_opt_in, email_opt_in FROM patients WHERE id = ?', patientId);
+    if (p && channel === 'sms' && !p.sms_opt_in) return 'Patient has opted out of text messages';
+    if (p && channel === 'email' && !p.email_opt_in) return 'Patient has opted out of email';
+  }
+  if (await isOptedOutAddress(db, practiceId, channel, to)) return channel === 'sms' ? 'This number replied STOP — they must text START to receive texts again' : 'This address unsubscribed';
+  return null;
+}
+
 // Records a message, attempts delivery, and stores the outcome. Never throws for delivery errors.
+// Every outbound text and email passes the opt-out check here, whatever sent it.
 export async function sendMessage(db, messenger, { practiceId, patientId, appointmentId, channel, to, subject, body, kind = 'custom', userId }) {
+  const blocked = await blockedReason(db, { practiceId, patientId, channel, to, kind });
   const id = await insert(db, 'messages', {
     practice_id: practiceId, patient_id: patientId ?? null, appointment_id: appointmentId ?? null,
     channel, to_address: to, subject: subject ?? null, body, kind, created_by: userId ?? null,
+    ...(blocked ? { status: 'blocked', error: blocked } : {}),
   });
+  if (blocked) return await db.get('SELECT * FROM messages WHERE id = ?', id);
   try {
     const { provider_id } = await messenger.send({ channel, to, subject, body });
     await db.run("UPDATE messages SET status = 'sent', provider_id = ?, sent_at = datetime('now') WHERE id = ?", provider_id, id);

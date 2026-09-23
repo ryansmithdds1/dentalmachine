@@ -829,6 +829,18 @@ CREATE TABLE IF NOT EXISTS ortho_visits (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Addresses that asked not to be contacted on a channel (STOP texts, email unsubscribes), even when
+-- they don't match a patient. Every send checks this list and the patient's own preferences.
+CREATE TABLE IF NOT EXISTS message_opt_outs (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  channel TEXT NOT NULL,
+  address TEXT NOT NULL,
+  source TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (practice_id, channel, address)
+);
+
 -- Saved custom queries from the report builder (a JSON description, never SQL).
 CREATE TABLE IF NOT EXISTS custom_queries (
   id INTEGER PRIMARY KEY,
@@ -1552,6 +1564,7 @@ const COLUMNS = [
 // CHECK constraints widened after release: [table, constraint name on Postgres, old text, new text].
 const RELAXED = [
   ['messages', 'messages_channel_check', "CHECK (channel IN ('sms','email'))", "CHECK (channel IN ('sms','email','portal'))"],
+  ['messages', 'messages_status_check', "CHECK (status IN ('queued','sent','failed'))", "CHECK (status IN ('queued','sent','failed','blocked'))"],
 ];
 
 const INDEXES = `

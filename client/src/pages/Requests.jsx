@@ -170,7 +170,7 @@ export function MessageTable({ messages, showPatient }) {
               <td className="muted">{m.to_address}</td>
               <td style={{ maxWidth: 420 }}>{m.body}</td>
               <td>
-                <span className={`badge ${m.status === 'sent' ? 'ok' : m.status === 'failed' ? 'danger' : 'info'}`}>{m.status}</span>
+                <span className={`badge ${m.status === 'sent' ? 'ok' : m.status === 'failed' ? 'danger' : m.status === 'blocked' ? 'warn' : 'info'}`}>{m.status}</span>
                 {m.provider_id === 'log' && <div className="muted" style={{ fontSize: 11 }}>log only</div>}
                 {m.error && <div className="muted" style={{ fontSize: 11 }}>{m.error}</div>}
               </td>

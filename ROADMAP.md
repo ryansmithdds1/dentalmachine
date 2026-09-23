@@ -259,7 +259,7 @@ Works well: drag, resize and create; undo; live updates; conflict checks; open-t
 2. **P2** An eligibility badge on appointments ("verified 2 days ago").
 
 ### Messaging and portal
-1. **P1** Opt-out rules everywhere (see Part 1).
+1. ✅ **P1** Opt-out rules everywhere (see Part 1). _(Done: one check in the send path for every text and email — the patient's preference plus a list of addresses that texted STOP or unsubscribed (even non-patients); blocked messages are logged as “blocked” with the reason; staff can't re-enable texts for a STOP'd number (the patient texts START); new patients with a STOP'd number start opted out; only requested sign-in codes are exempt.)_
 2. **P2** Every automated message editable (item 63), with a preview on a phone mock-up.
 3. **P2** Portal: download statements and receipts; update insurance with card photos.
 

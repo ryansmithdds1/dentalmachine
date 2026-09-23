@@ -16,8 +16,11 @@ export default function CommsTab({ patient, onChange }) {
   const [err, setErr] = useState(null);
 
   const togglePref = async (field) => {
-    await api.put(`/patients/${patient.id}`, { [field]: !patient[field] });
-    onChange?.();
+    setErr(null);
+    try {
+      await api.put(`/patients/${patient.id}`, { [field]: !patient[field] });
+      onChange?.();
+    } catch (e) { setErr(e); }
   };
 
   return (

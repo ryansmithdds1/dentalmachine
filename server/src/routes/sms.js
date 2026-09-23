@@ -1,7 +1,7 @@
 import express, { Router } from 'express';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { requirePermission, HttpError } from '../auth.js';
-import { sendMessage } from '../messaging.js';
+import { sendMessage, recordOptOut, clearOptOut, isOptedOutAddress } from '../messaging.js';
 import { insert, findOr404, audit, practiceNow, friendlyDateTime } from '../util.js';
 import { publish } from '../events.js';
 import { patientLang } from '../templates.js';
@@ -67,9 +67,12 @@ export function smsWebhook({ db, config }) {
     if (STOP.includes(keyword)) {
       // "CANCEL" is a carrier opt-out keyword: the carrier stops our texts whatever we do, so we record it too.
       for (const p of candidates) await db.run('UPDATE patients SET sms_opt_in = 0 WHERE id = ?', p.id);
+      // The number itself is recorded too, so nothing reaches it even if it isn't (yet) on a patient's chart.
+      await recordOptOut(db, practice.id, 'sms', from, 'stop');
       // Twilio sends the carrier-required opt-out confirmation itself.
     } else if (START.includes(keyword)) {
       for (const p of candidates) await db.run('UPDATE patients SET sms_opt_in = 1 WHERE id = ?', p.id);
+      await clearOptOut(db, practice.id, 'sms', from);
     } else if (CONFIRM.includes(keyword) && candidates.length) {
       const now = await practiceNow(db, practice.id);
       const appt = await db.get(
@@ -163,6 +166,7 @@ export default function conversationRoutes({ db, messenger }) {
     if (!body) throw new HttpError(400, 'body is required');
     const last = (await numberMessages(req.user.practice_id, t.number)).filter((m) => m.direction === 'inbound').at(-1);
     if (!last) throw new HttpError(404, 'No texts from that number');
+    if (await isOptedOutAddress(db, req.user.practice_id, 'sms', last.from_address)) throw new HttpError(409, 'This number replied STOP — they need to text START before you can text them');
     const msg = await sendMessage(db, messenger, { practiceId: req.user.practice_id, channel: 'sms', to: last.from_address, body, kind: 'reply', userId: req.user.id });
     await audit(db, req, 'conversation.reply', 'messages', msg.id);
     publish(req.user.practice_id, { type: 'message', patient_id: null });
