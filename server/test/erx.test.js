@@ -20,21 +20,23 @@ test('e-prescribing: pharmacy, electronic send, and EPCS rules for controlled su
   await api.put(`/patients/${patient.id}/pharmacy`, { pharmacy });
   assert.equal(JSON.parse((await api.get(`/patients/${patient.id}`)).data.preferred_pharmacy).ncpdp, pharmacy.ncpdp);
 
+  // Only the prescriber can sign and send electronically.
+  const notMine = await api.post(`/patients/${patient.id}/prescriptions`, base);
+  assert.equal(notMine.status, 403);
+  assert.match(notMine.data.error, /Only Dr\. Ann Lee/);
+  await api.put(`/providers/${provider.id}`, { user_id: me.id });
   const sent = (await api.post(`/patients/${patient.id}/prescriptions`, base)).data;
   assert.equal(sent.status, 'transmitted');
   assert.match(sent.erx_reference, /^SBX-RX-/);
   assert.equal(sent.pharmacy.name, 'Lamar Family Drug');
 
-  // Controlled substance: needs DEA, the prescriber's own login, and a fresh 2FA code.
-  const hydro = { ...base, drug: 'Hydrocodone/acetaminophen', strength: '5/325', quantity: '12', schedule: 'II' };
-  let r = await api.post(`/patients/${patient.id}/prescriptions`, hydro);
+  // Controlled substance: needs DEA, the prescriber's own login, and a fresh 2FA code. The schedule
+  // comes from the drug itself — leaving it blank (or picking a laxer one) doesn't skip the checks.
+  const hydro = { ...base, drug: 'Hydrocodone/acetaminophen', strength: '5/325', quantity: '12', schedule: 'IV' };
+  let r = await api.post(`/patients/${patient.id}/prescriptions`, { ...hydro, schedule: undefined });
   assert.equal(r.status, 400);
   assert.match(r.data.error, /DEA number/);
   await api.put(`/providers/${provider.id}`, { dea_number: 'BL1234563' });
-  r = await api.post(`/patients/${patient.id}/prescriptions`, hydro);
-  assert.equal(r.status, 403);
-  assert.match(r.data.error, /prescriber themselves/);
-  await api.put(`/providers/${provider.id}`, { user_id: me.id });
   r = await api.post(`/patients/${patient.id}/prescriptions`, hydro);
   assert.equal(r.status, 403);
   assert.ok(r.data.details.mfa_setup_required);
@@ -50,6 +52,7 @@ test('e-prescribing: pharmacy, electronic send, and EPCS rules for controlled su
   assert.equal(signed.data.status, 'transmitted');
   assert.equal(signed.data.signed_two_factor, 1);
   assert.equal(signed.data.signed_by, me.id);
+  assert.equal(signed.data.schedule, 'II');
   // The same code can't be used twice.
   assert.equal((await api.post(`/patients/${patient.id}/prescriptions`, { ...hydro, otp: totp(secret, timeStep() + 1) })).status, 403);
 
@@ -71,4 +74,16 @@ test('DoseSpot single sign-on URL carries a verifiable one-time code and the pat
   assert.equal(url.searchParams.get('PrimaryPhone'), '5125550100');
   assert.ok(!url.toString().includes('KEY'), 'clinic key never appears in the URL');
   assert.throws(() => createErx({ mode: 'dosespot', dosespot: {} }), /CLINIC_ID/);
+});
+
+test('controlled-substance schedules come from the drug name', async () => {
+  const { controlledSchedule, stricterSchedule } = await import('../src/drugs.js');
+  assert.equal(controlledSchedule('Hydrocodone/acetaminophen 5/325'), 'II');
+  assert.equal(controlledSchedule('Acetaminophen with codeine #3'), 'III');
+  assert.equal(controlledSchedule('Tramadol 50 mg'), 'IV');
+  assert.equal(controlledSchedule('Triazolam 0.25 mg'), 'IV');
+  assert.equal(controlledSchedule('Amoxicillin 500 mg'), null);
+  assert.equal(stricterSchedule('IV', 'II'), 'II');
+  assert.equal(stricterSchedule(null, 'IV'), 'IV');
+  assert.equal(stricterSchedule('III', null), 'III');
 });

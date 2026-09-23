@@ -1,10 +1,10 @@
 import { Router } from 'express';
 import { randomBytes } from 'node:crypto';
-import { hashPassword, verifyPassword, signToken, authenticate, rateLimit, HttpError, PERMISSIONS } from '../auth.js';
+import { hashPassword, verifyPassword, signToken, verifyToken, authenticate, rateLimit, HttpError, PERMISSIONS } from '../auth.js';
 import { pick, requireFields, insert, audit, newToken, hashToken } from '../util.js';
 import { seedPracticeDefaults } from '../defaults.js';
 import { generateSecret, verifyTotp, otpauthUrl } from '../totp.js';
-import { PROVIDERS, issuerFor, pkcePair, discover, exchangeCode, verifyIdToken, claimEmail, openSecret } from '../sso.js';
+import { PROVIDERS, issuerFor, pkcePair, discover, exchangeCode, verifyIdToken, verifiedEmail, openSecret } from '../sso.js';
 
 export function validatePassword(pw) {
   if (typeof pw !== 'string' || pw.length < 10) {
@@ -95,9 +95,25 @@ export default function authRoutes({ db, secret, config = {}, fetchImpl = global
     res.json(p?.sso_provider ? { sso: true, provider: p.sso_provider, name: PROVIDERS[p.sso_provider].name, required: !!p.sso_only } : { sso: false });
   });
 
+  // The sign-in state is tied to this browser with a cookie, so a sign-in someone else started (login CSRF)
+  // can't be finished in your browser.
+  const COOKIE = 'dm_sso';
+  const secure = () => String(config.appUrl || '').startsWith('https://');
+  const readCookie = (req) => (String(req.headers.cookie || '').split(/;\s*/).find((c) => c.startsWith(`${COOKIE}=`)) || '').slice(COOKIE.length + 1);
+  const setCookie = (res, value, maxAge) => res.append('Set-Cookie', `${COOKIE}=${value}; Path=/api/auth/sso; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure() ? '; Secure' : ''}`);
+
+  // Signed-in staff link their own identity-provider account (required for administrators).
+  r.post('/sso/link', authenticate(db, secret), async (req, res) => {
+    if (!(await ssoPractice(req.user.practice_id))) throw new HttpError(409, 'Single sign-on is not set up');
+    const link = signToken({ sub: req.user.id, aud: 'sso-link' }, secret, 300);
+    res.json({ url: `${config.appUrl}/api/auth/sso/start?${new URLSearchParams({ email: req.user.email, link })}` });
+  });
+
   r.get('/sso/start', limiter, async (req, res) => {
     const email = String(req.query.email || '').trim().toLowerCase();
     const user = email && (await db.get('SELECT * FROM users WHERE lower(email) = ? AND active = 1', email));
+    const link = req.query.link ? verifyToken(String(req.query.link), secret) : null;
+    if (req.query.link && (!link || link.aud !== 'sso-link' || link.sub !== user?.id)) return back(res, { sso_error: 'That link has expired — start again from Settings' });
     const cfg = user && (await ssoPractice(user.practice_id));
     if (!cfg) return back(res, { sso_error: 'Single sign-on is not set up for that email' });
     const oidc = await discover(cfg.issuer, fetchImpl);
@@ -105,7 +121,9 @@ export default function authRoutes({ db, secret, config = {}, fetchImpl = global
     const nonce = randomBytes(16).toString('base64url');
     // One-time state; the PKCE verifier and nonce stay on the server.
     const { token: state, hash } = newToken();
-    await insert(db, 'sso_logins', { state_hash: hash, practice_id: cfg.practice.id, nonce, verifier, expires_at: new Date(Date.now() + 10 * 60_000).toISOString().slice(0, 19).replace('T', ' ') });
+    const browser = newToken();
+    setCookie(res, browser.token, 600);
+    await insert(db, 'sso_logins', { state_hash: hash, browser_hash: browser.hash, user_id: link ? user.id : null, practice_id: cfg.practice.id, nonce, verifier, expires_at: new Date(Date.now() + 10 * 60_000).toISOString().slice(0, 19).replace('T', ' ') });
     const url = new URL(oidc.authorization_endpoint);
     for (const [k, v] of Object.entries({
       response_type: 'code', client_id: cfg.practice.sso_client_id, redirect_uri: redirectUri(), scope: 'openid email profile', state, nonce,
@@ -119,21 +137,27 @@ export default function authRoutes({ db, secret, config = {}, fetchImpl = global
       if (req.query.error) throw new HttpError(401, String(req.query.error_description || req.query.error));
       const login = await db.get('SELECT * FROM sso_logins WHERE state_hash = ? AND used_at IS NULL', hashToken(String(req.query.state || '')));
       if (!login || login.expires_at < new Date().toISOString().slice(0, 19).replace('T', ' ')) throw new HttpError(401, 'Sign-in link expired — please try again');
-      await db.run("UPDATE sso_logins SET used_at = datetime('now') WHERE id = ?", login.id);
+      const cookie = readCookie(req);
+      if (!cookie || hashToken(cookie) !== login.browser_hash) throw new HttpError(401, 'Sign-in was started in a different browser — please try again here');
+      setCookie(res, '', 0);
+      if (!(await db.run("UPDATE sso_logins SET used_at = datetime('now') WHERE id = ? AND used_at IS NULL", login.id)).changes) throw new HttpError(401, 'Sign-in link already used — please try again');
       const state = { pid: login.practice_id, nonce: login.nonce, verifier: login.verifier };
       const cfg = await ssoPractice(state.pid);
       if (!cfg) throw new HttpError(401, 'Single sign-on is not set up');
       const oidc = await discover(cfg.issuer, fetchImpl);
       const tokens = await exchangeCode({ config: oidc, code: String(req.query.code || ''), redirectUri: redirectUri(), verifier: state.verifier, clientId: cfg.practice.sso_client_id, clientSecret: cfg.clientSecret, fetchImpl });
       const claims = await verifyIdToken(tokens.id_token, { config: oidc, clientId: cfg.practice.sso_client_id, nonce: state.nonce, fetchImpl });
-      const email = claimEmail(claims);
-      if (claims.email_verified === false) throw new HttpError(401, 'Your email address is not verified with your identity provider');
+      const email = verifiedEmail(cfg.practice.sso_provider, claims);
       const domain = cfg.practice.sso_domain?.toLowerCase();
       if (domain && !email.endsWith(`@${domain}`) && claims.hd !== domain) throw new HttpError(403, `Only @${domain} accounts can sign in`);
       const user = await db.get('SELECT * FROM users WHERE practice_id = ? AND lower(email) = ? AND active = 1', cfg.practice.id, email);
       if (!user) throw new HttpError(403, `${email} doesn't have an account at this practice — ask your administrator to add you`);
       const subject = `${claims.iss}|${claims.sub}`;
+      if (login.user_id && login.user_id !== user.id) throw new HttpError(403, `You signed in to your identity provider as ${email} — sign in there as yourself to link your account`);
       if (user.sso_subject && user.sso_subject !== subject) throw new HttpError(403, 'This account is linked to a different sign-in identity');
+      // Staff are linked on first sign-in; administrators link deliberately while signed in, so an
+      // identity-provider account can never take over an administrator by email alone.
+      if (!user.sso_subject && user.role === 'admin' && !login.user_id) throw new HttpError(403, 'Administrators link single sign-on first: sign in with your password, then Settings → Single sign-on → Link my account');
       await db.run("UPDATE users SET sso_subject = ?, last_login_at = datetime('now') WHERE id = ?", subject, user.id);
       await audit(db, { ip: req.ip, user }, 'auth.sso_login', 'users', user.id, { provider: cfg.practice.sso_provider });
       back(res, { sso: (await session(user, secret, db)).token });

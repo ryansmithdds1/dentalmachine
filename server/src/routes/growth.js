@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { requirePermission, HttpError } from '../auth.js';
-import { insert, audit, practiceNow, toCents, utcRange } from '../util.js';
+import { insert, audit, practiceNow, toCents, utcRange, publicPractice } from '../util.js';
 import { sendMessage, preferredChannel } from '../messaging.js';
 import { renderTemplate, templatesFor } from '../templates.js';
 import { mailable, statementHtml } from '../mail.js';
@@ -126,7 +126,7 @@ export default function growthRoutes({ db, messenger, config, mailer = { enabled
     const ids = new Set((req.body?.patient_ids || []).map(Number));
     const accounts = (await statementCandidates(pid, toCents(req.body?.min_balance ?? 500), Number(req.body?.since_days ?? 25))).filter((a) => !ids.size || ids.has(a.id));
     if (!accounts.length) throw new HttpError(400, 'No accounts to statement');
-    const practice = await db.get('SELECT * FROM practices WHERE id = ?', pid);
+    const practice = publicPractice(await db.get('SELECT * FROM practices WHERE id = ?', pid));
     const today = (await practiceNow(db, pid)).slice(0, 10);
     const useMail = req.body?.mail !== false && mailer.enabled && mailable(practice);
     const runId = await insert(db, 'statement_runs', {
@@ -188,7 +188,7 @@ export default function growthRoutes({ db, messenger, config, mailer = { enabled
     const pid = req.user.practice_id;
     const ids = (req.body?.recall_ids || []).map(Number);
     if (!ids.length) throw new HttpError(400, 'Choose at least one patient');
-    const practice = await db.get('SELECT * FROM practices WHERE id = ?', pid);
+    const practice = publicPractice(await db.get('SELECT * FROM practices WHERE id = ?', pid));
     const templates = templatesFor(practice);
     let sent = 0;
     let skipped = 0;

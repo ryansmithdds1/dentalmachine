@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { requirePermission, HttpError } from '../auth.js';
-import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, toCents, practiceNow, mapSeq } from '../util.js';
+import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, toCents, practiceNow, mapSeq, publicPractice } from '../util.js';
 import { estimateCoverage } from '../services.js';
 import { build837D } from '../x12.js';
 
@@ -122,7 +122,7 @@ export default function ppoRoutes({ db, config }) {
   r.post('/preauths/:aid/837', requirePermission('billing:write'), async (req, res) => {
     const pid = req.user.practice_id;
     const pa = await findOr404(db, 'preauths', req.params.aid, pid, 'Pre-authorization');
-    const practice = await db.get('SELECT * FROM practices WHERE id = ?', pid);
+    const practice = publicPractice(await db.get('SELECT * FROM practices WHERE id = ?', pid));
     const policy = await db.get('SELECT * FROM patient_insurance WHERE id = ?', pa.patient_insurance_id);
     const items = await db.all(
       `SELECT pr.fee, pr.code, pr.tooth, pr.surfaces, NULL AS completed_at, pv.name AS provider_name, pv.npi AS provider_npi

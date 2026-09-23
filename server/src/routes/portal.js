@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import { createHash, randomInt, timingSafeEqual } from 'node:crypto';
 import { HttpError, rateLimit, signToken, verifyToken } from '../auth.js';
-import { insert, audit, practiceNow, newToken, pick, mapSeq } from '../util.js';
+import { hit } from '../cluster.js';
+import { insert, audit, practiceNow, newToken, pick, mapSeq, publicPractice } from '../util.js';
 import { sendMessage } from '../messaging.js';
 import { publish } from '../events.js';
 import { planStatus } from './family.js';
@@ -38,8 +39,10 @@ export function portalPublicRoutes({ db, secret, messenger }) {
     const isEmail = contact.includes('@');
     if (!contact || !/^\d{4}-\d{2}-\d{2}$/.test(dob)) throw new HttpError(400, 'Enter your email or mobile number and your date of birth');
     const key = isEmail ? contact : digits(contact);
-    const recent = (await db.get("SELECT COUNT(*) AS n FROM portal_codes WHERE practice_id = ? AND contact = ? AND created_at > ?", practice.id, key, new Date(Date.now() - 15 * 60_000).toISOString().slice(0, 19).replace('T', ' '))).n;
-    if (recent >= 3) throw new HttpError(429, 'Too many codes requested — wait a few minutes and try again');
+    // Limited per address and device, so someone else asking for codes can't lock a patient out.
+    if ((await hit(`portal-code:${practice.id}:${key}:${req.ip}`, 15 * 60_000)) > 3) throw new HttpError(429, 'Too many codes requested — wait a few minutes and try again');
+    // And a quiet overall cap per address, so the portal can't be used to flood someone with texts.
+    const flood = (await hit(`portal-code:${practice.id}:${key}`, 60 * 60_000)) > 10;
     const candidates = (await db.all("SELECT * FROM patients WHERE practice_id = ? AND dob = ? AND status != 'archived'", practice.id, dob))
       .filter((p) => (isEmail ? String(p.email || '').toLowerCase() === key : digits(p.phone) === key && key.length === 10))
       .sort((a, b) => (a.guarantor_id ? 1 : 0) - (b.guarantor_id ? 1 : 0));
@@ -49,8 +52,9 @@ export function portalPublicRoutes({ db, secret, messenger }) {
       practice_id: practice.id, patient_id: patient?.id ?? null, contact: key, code_hash: hashCode(code).toString('hex'),
       expires_at: new Date(Date.now() + CODE_TTL_MINUTES * 60_000).toISOString().slice(0, 19).replace('T', ' '),
     });
-    if (patient) {
-      await sendMessage(db, messenger, {
+    // Sent in the background: the answer takes the same time whether or not the patient exists.
+    if (patient && !flood) {
+      sendMessage(db, messenger, {
         practiceId: practice.id, patientId: patient.id, kind: 'portal_code', channel: isEmail ? 'email' : 'sms', to: isEmail ? patient.email : patient.phone,
         subject: `Your ${practice.name} sign-in code`,
         body: `${code} is your ${practice.name} patient portal code. It expires in ${CODE_TTL_MINUTES} minutes. If you didn't ask for it, you can ignore this message.`,
@@ -63,17 +67,22 @@ export function portalPublicRoutes({ db, secret, messenger }) {
     const practice = await practiceFor(req.params.key);
     const contact = String(req.body?.contact || '').trim().toLowerCase();
     const key = contact.includes('@') ? contact : digits(contact);
-    const row = await db.get(
-      "SELECT * FROM portal_codes WHERE practice_id = ? AND contact = ? AND used_at IS NULL ORDER BY id DESC LIMIT 1", practice.id, key,
-    );
     const given = hashCode(String(req.body?.code || '').replace(/\D/g, ''));
     const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
-    const ok = row && row.patient_id && row.expires_at > now && row.attempts < 5 && timingSafeEqual(Buffer.from(row.code_hash, 'hex'), given);
-    if (!ok) {
-      if (row) await db.run('UPDATE portal_codes SET attempts = attempts + 1 WHERE id = ?', row.id);
-      throw new HttpError(403, row && row.expires_at <= now ? 'That code has expired — request a new one' : "That code isn't right — check it and try again");
+    // Any live code for this address can be used (a later request with a mistyped birth date doesn't
+    // hide the real one). Each guess uses up one of a code's five attempts before it is compared.
+    const live = await db.all(
+      'SELECT * FROM portal_codes WHERE practice_id = ? AND contact = ? AND used_at IS NULL AND expires_at > ? ORDER BY id DESC LIMIT 3', practice.id, key, now,
+    );
+    let row = null;
+    for (const c of live) {
+      if (!(await db.run('UPDATE portal_codes SET attempts = attempts + 1 WHERE id = ? AND attempts < 5', c.id)).changes) continue;
+      if (c.patient_id && timingSafeEqual(Buffer.from(c.code_hash, 'hex'), given)) row = c;
     }
-    await db.run("UPDATE portal_codes SET used_at = datetime('now') WHERE id = ?", row.id);
+    if (!row || !(await db.run("UPDATE portal_codes SET used_at = datetime('now') WHERE id = ? AND used_at IS NULL", row.id)).changes) {
+      const expired = !live.length && (await db.get('SELECT id FROM portal_codes WHERE practice_id = ? AND contact = ? AND used_at IS NULL LIMIT 1', practice.id, key));
+      throw new HttpError(403, expired ? 'That code has expired — request a new one' : "That code isn't right — check it and try again");
+    }
     const patient = await db.get('SELECT id, first_name FROM patients WHERE id = ?', row.patient_id);
     await audit(db, { ip: req.ip, user: { practice_id: practice.id, id: null } }, 'portal.login', 'patients', patient.id);
     res.json({ token: signToken({ sub: patient.id, pid: practice.id, aud: 'portal' }, secret, SESSION_HOURS * 3600), first_name: patient.first_name });
@@ -89,7 +98,7 @@ export function portalRoutes({ db, secret, config, payments }) {
     if (!payload || payload.aud !== 'portal') return next(new HttpError(401, 'Please sign in again'));
     const patient = await db.get("SELECT * FROM patients WHERE id = ? AND practice_id = ? AND status != 'archived'", payload.sub, payload.pid);
     if (!patient) return next(new HttpError(401, 'Please sign in again'));
-    const practice = await db.get('SELECT * FROM practices WHERE id = ?', payload.pid);
+    const practice = publicPractice(await db.get('SELECT * FROM practices WHERE id = ?', payload.pid));
     // A guarantor sees their whole household; anyone else sees just themselves.
     const household = patient.guarantor_id
       ? [patient]
@@ -210,6 +219,9 @@ export function portalRoutes({ db, secret, config, payments }) {
     if (!payments.enabled) throw new HttpError(409, `Online payments aren't available — please call ${practice.phone || 'the office'}`);
     const today = (await practiceNow(db, practice.id)).slice(0, 10);
     if (payments.mode === 'sandbox') {
+      // Simulated payments can't exceed what the account owes (no credit balances from the demo).
+      const owed = (await db.get('SELECT COALESCE(SUM(l.amount), 0) AS n FROM ledger_entries l JOIN patients p ON p.id = l.patient_id WHERE p.id = ? OR p.guarantor_id = ?', payer.id, payer.id)).n;
+      if (amount > owed) throw new HttpError(400, owed > 0 ? `The most you can pay is $${(owed / 100).toFixed(2)}` : 'There is nothing to pay right now');
       await insert(db, 'ledger_entries', { practice_id: practice.id, patient_id: payer.id, type: 'payment', amount: -amount, description: 'Online payment (patient portal, sandbox)', method: 'credit_card', reference: `sbx_portal_${Date.now().toString(36)}`, entry_date: today });
       await pAudit(req, 'portal.payment', 'patients', payer.id, { amount, sandbox: true });
       return res.status(201).json({ paid: true });

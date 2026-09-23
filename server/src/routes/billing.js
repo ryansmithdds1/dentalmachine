@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { requirePermission, HttpError } from '../auth.js';
-import { pick, requireFields, requireOneOf, insert, findOr404, audit, toCents, practiceNow } from '../util.js';
+import { pick, requireFields, requireOneOf, insert, findOr404, audit, toCents, practiceNow, publicPractice } from '../util.js';
 import { patientBalance } from '../services.js';
 import { planStatus } from './family.js';
 
@@ -95,7 +95,7 @@ export default function billingRoutes({ db }) {
 
 // Statement contents for a patient, or (family) for the guarantor and every member of the household.
 export async function statementData(db, practiceId, patient, { family = false, since = '0000-00-00' } = {}) {
-  const practice = await db.get('SELECT * FROM practices WHERE id = ?', practiceId);
+  const practice = publicPractice(await db.get('SELECT * FROM practices WHERE id = ?', practiceId));
   const addressee = family && patient.guarantor_id ? await db.get('SELECT * FROM patients WHERE id = ?', patient.guarantor_id) : patient;
   const ids = family
     ? (await db.all('SELECT id FROM patients WHERE practice_id = ? AND (id = ? OR guarantor_id = ?)', practiceId, addressee.id, addressee.id)).map((x) => x.id)

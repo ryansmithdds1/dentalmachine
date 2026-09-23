@@ -123,8 +123,9 @@ export function bridgeAgentRoutes({ db, storage }) {
     res.json({ ok: true });
   });
 
-  // Captured images: matched to the patient by the DICOM patient ID, an explicit patient_id, or the
-  // patient most recently opened on this workstation.
+  // Captured images go to the patient whose imaging session was opened on this workstation. An ID in the
+  // DICOM header or file name is only trusted when it agrees with that (or when nothing was opened);
+  // when they disagree the image is left unmatched for a person to file, never guessed.
   r.post('/images', express.raw({ type: () => true, limit: MAX_UPLOAD_BYTES }), async (req, res) => {
     const agent = req.agent;
     const data = req.body;
@@ -133,18 +134,27 @@ export function bridgeAgentRoutes({ db, storage }) {
     const mime = sniffMime(data, filename);
     if (!mime) throw new HttpError(415, 'Only images, PDFs and DICOM files are imported');
     const tags = isDicom(data) ? readDicomTags(data) : null;
+    const inPractice = async (id) => (/^\d+$/.test(String(id || '').trim()) ? (await db.get('SELECT id FROM patients WHERE id = ? AND practice_id = ?', Number(id), agent.practice_id))?.id ?? null : null);
+    const since = new Date(Date.now() - 45 * 60_000).toISOString().slice(0, 19).replace('T', ' ');
+    const launched = (await db.get("SELECT patient_id FROM bridge_commands WHERE agent_id = ? AND type = 'launch' AND status IN ('delivered','done') AND created_at > ? ORDER BY id DESC LIMIT 1", agent.id, since))?.patient_id
+      ?? (await inPractice(req.query.opened_patient_id));
+    const claimed = [
+      ['dicom', tags?.patientId ? String(tags.patientId).trim() : null],
+      ['filename', req.query.patient_id ? String(req.query.patient_id) : null],
+    ].filter(([, v]) => v);
     let patientId = null;
     let matchedBy = null;
-    const inPractice = async (id) => (/^\d+$/.test(String(id || '')) ? (await db.get('SELECT id FROM patients WHERE id = ? AND practice_id = ?', Number(id), agent.practice_id))?.id : null);
-    if (tags?.patientId && (patientId = await inPractice(tags.patientId))) matchedBy = 'dicom';
-    if (!patientId && req.query.patient_id && (patientId = await inPractice(req.query.patient_id))) matchedBy = 'filename';
-    if (!patientId && req.query.opened_patient_id && (patientId = await inPractice(req.query.opened_patient_id))) matchedBy = 'last_opened';
-    if (!patientId) {
-      const since = new Date(Date.now() - 45 * 60_000).toISOString().slice(0, 19).replace('T', ' ');
-      const recent = await db.get("SELECT patient_id FROM bridge_commands WHERE agent_id = ? AND type = 'launch' AND status IN ('delivered','done') AND created_at > ? ORDER BY id DESC LIMIT 1", agent.id, since);
-      if (recent) {
-        patientId = recent.patient_id;
-        matchedBy = 'last_opened';
+    if (launched) {
+      const disagree = claimed.find(([, v]) => Number(v) !== launched);
+      if (disagree) throw new HttpError(422, `This image is labelled for patient ${disagree[1]} (${disagree[0]}), but patient #${launched} was opened on ${agent.name} — file it by hand`, { unmatched: true, conflict: true });
+      patientId = launched;
+      matchedBy = claimed.length ? `last_opened+${claimed.map(([k]) => k).join('+')}` : 'last_opened';
+    } else {
+      for (const [by, v] of claimed) {
+        const id = await inPractice(v);
+        if (!id) continue;
+        if (!patientId) [patientId, matchedBy] = [id, by];
+        else if (id !== patientId) throw new HttpError(422, 'The DICOM header and the file name point to different patients — file it by hand', { unmatched: true, conflict: true });
       }
     }
     if (!patientId) throw new HttpError(422, 'Could not tell which patient this image belongs to', { unmatched: true });

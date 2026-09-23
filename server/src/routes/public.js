@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { HttpError, rateLimit } from '../auth.js';
-import { insert, update, hashToken, practiceNow, normalizeDateTime, audit, mapSeq } from '../util.js';
+import { insert, update, hashToken, practiceNow, normalizeDateTime, audit, mapSeq, publicPractice } from '../util.js';
 import { MEDICAL_CONDITIONS, parseMedicalHistory, patientUpdatesFromHistory } from '../forms.js';
 import { openSlots } from './schedule.js';
 import { publish } from '../events.js';
@@ -24,7 +24,7 @@ export default function publicRoutes({ db }) {
   const logPublic = async (req, practiceId, action, entity, entityId, details) => await audit(db, { ip: req.ip, user: { practice_id: practiceId, id: null } }, action, entity, entityId, details);
 
   const bookablePractice = async (slug) => {
-    const p = await db.get('SELECT * FROM practices WHERE slug = ? AND online_booking = 1', String(slug));
+    const p = publicPractice(await db.get('SELECT * FROM practices WHERE slug = ? AND online_booking = 1', String(slug)));
     if (!p) throw new HttpError(404, 'Online booking is not available for this practice');
     return p;
   };

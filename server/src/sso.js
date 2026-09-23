@@ -67,7 +67,19 @@ export async function verifyIdToken(idToken, { config, clientId, nonce, fetchImp
   return claims;
 }
 
-export const claimEmail = (claims) => String(claims.email || claims.preferred_username || claims.upn || '').toLowerCase();
+// The email the identity provider vouches for. An unverified address could be set by anyone, so:
+// Google and generic OIDC must say email_verified; Microsoft's email claim is only used when the tenant
+// verified its domain (xms_edov), otherwise the tenant-administered sign-in name (UPN) is used.
+export function verifiedEmail(provider, claims) {
+  if (provider === 'microsoft') {
+    if (claims.email && claims.xms_edov === true) return String(claims.email).toLowerCase();
+    const upn = claims.upn || claims.preferred_username;
+    if (upn && /@/.test(upn)) return String(upn).toLowerCase();
+    throw new HttpError(401, 'Your Microsoft account has no verified email address');
+  }
+  if (claims.email_verified !== true && claims.email_verified !== 'true') throw new HttpError(401, 'Your email address is not verified with your identity provider');
+  return String(claims.email || '').toLowerCase();
+}
 
 // The client secret is stored encrypted with a key derived from the server's signing secret.
 const keyFrom = (secret) => createHash('sha256').update(`sso:${secret}`).digest();

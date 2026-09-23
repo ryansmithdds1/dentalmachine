@@ -49,3 +49,28 @@ test('allergy screening catches drug classes, not just exact names', async () =>
   assert.equal(allergyWarning('NKDA', 'Amoxicillin'), null);
   assert.equal(allergyWarning(null, 'Amoxicillin'), null);
 });
+
+test('queries outside a transaction neither see nor join its uncommitted work', async () => {
+  const { openDb } = await import('../src/db.js');
+  const db = await openDb(':memory:');
+  try {
+    const pid = (await db.run("INSERT INTO practices (name) VALUES ('Iso')")).id;
+    let resolveInside;
+    const inside = new Promise((r) => { resolveInside = r; });
+    const tx = db.tx(async () => {
+      await db.run("UPDATE practices SET name = 'Uncommitted' WHERE id = ?", pid);
+      resolveInside();
+      await new Promise((r) => setTimeout(r, 30));
+      throw new Error('roll back');
+    }).catch(() => 'rolled back');
+    await inside;
+    // Runs after the transaction, so it sees the committed name and its own write survives the rollback.
+    const seen = (await db.get('SELECT name FROM practices WHERE id = ?', pid)).name;
+    await db.run("UPDATE practices SET phone = '555' WHERE id = ?", pid);
+    assert.equal(await tx, 'rolled back');
+    assert.equal(seen, 'Iso');
+    assert.equal((await db.get('SELECT phone FROM practices WHERE id = ?', pid)).phone, '555');
+  } finally {
+    await db.close();
+  }
+});

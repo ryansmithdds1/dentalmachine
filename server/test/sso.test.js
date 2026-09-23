@@ -3,6 +3,11 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { generateKeyPairSync, createSign, createHash } from 'node:crypto';
 import { harness } from './helpers.js';
+import { signToken } from '../src/auth.js';
+import { verifiedEmail } from '../src/sso.js';
+
+const signPortal = () => signToken({ sub: 1, pid: 1, aud: 'portal' }, 'test-secret');
+const unscoped = () => signToken({ sub: 1, pid: 1 }, 'test-secret');
 
 const h = harness();
 
@@ -49,14 +54,15 @@ before(async () => {
 after(() => idp.close());
 
 // Follows the browser redirects: app → IdP → app callback → app with #sso=… or #sso_error=…
-async function ssoLogin(email) {
-  idpState.loginAs = email;
-  let res = await fetch(`${h.origin}/api/auth/sso/start?email=${encodeURIComponent(email)}`, { redirect: 'manual' });
+async function ssoLogin(email, { as = email, link = null, browser = true } = {}) {
+  idpState.loginAs = as;
+  let res = await fetch(link ? link.replace('https://app.example.com', h.origin) : `${h.origin}/api/auth/sso/start?email=${encodeURIComponent(email)}`, { redirect: 'manual' });
+  const cookie = (res.headers.get('set-cookie') || '').split(';')[0];
   let location = res.headers.get('location');
   if (location.startsWith('https://app.example.com/#')) return new URLSearchParams(location.split('#')[1]);
   res = await fetch(location, { redirect: 'manual' });
   location = res.headers.get('location').replace('https://app.example.com', h.origin);
-  res = await fetch(location, { redirect: 'manual' });
+  res = await fetch(location, { redirect: 'manual', headers: browser ? { Cookie: cookie } : {} });
   return new URLSearchParams(res.headers.get('location').split('#')[1]);
 }
 
@@ -84,6 +90,20 @@ test('staff single sign-on with OpenID Connect (PKCE, signed ID token, SSO-only 
   idpState.emailVerified = false;
   assert.match((await ssoLogin(staff.email)).get('sso_error'), /not verified/);
   idpState.emailVerified = true;
+  // A sign-in finished in a different browser from the one that started it (login CSRF) is refused.
+  assert.match((await ssoLogin(staff.email, { browser: false })).get('sso_error'), /different browser/);
+
+  // Administrators aren't linked by email alone; they link while signed in with their password.
+  assert.match((await ssoLogin(email)).get('sso_error'), /Administrators link single sign-on first/);
+  assert.equal((await api.get('/practice/sso')).data.linked, false);
+  const { url } = (await api.post('/auth/sso/link')).data;
+  assert.match((await ssoLogin(email, { link: url, as: staff.email })).get('sso_error'), /sign in there as yourself/);
+  const linked = await ssoLogin(email, { link: (await api.post('/auth/sso/link')).data.url });
+  assert.ok(linked.get('sso'), linked.get('sso_error'));
+  assert.equal((await api.get('/practice/sso')).data.linked, true);
+  assert.ok((await ssoLogin(email)).get('sso'), 'linked admin signs in with SSO');
+  // A portal (patient) token is never accepted by staff routes.
+  assert.equal((await h.client(signPortal()).get('/patients')).status, 401);
 
   // SSO-only: staff can't use passwords any more; admins still can (so nobody is locked out).
   await api.put('/practice/sso', { provider: 'oidc', issuer: base, client_id: 'dm-client', domain: 'example.com', sso_only: true });
@@ -91,4 +111,19 @@ test('staff single sign-on with OpenID Connect (PKCE, signed ID token, SSO-only 
   assert.equal(pw.status, 403);
   assert.ok(pw.data.details.sso_required);
   assert.equal((await h.client().post('/auth/login', { email, password: 'correct-horse-battery' })).status, 200);
+});
+
+test('only verified emails are trusted from identity providers', () => {
+  assert.equal(verifiedEmail('google', { email: 'A@x.com', email_verified: true }), 'a@x.com');
+  assert.throws(() => verifiedEmail('oidc', { email: 'a@x.com' }), /not verified/);
+  assert.throws(() => verifiedEmail('google', { email: 'a@x.com', email_verified: false }), /not verified/);
+  // Microsoft: the email claim only with a verified domain; otherwise the tenant-managed UPN.
+  assert.equal(verifiedEmail('microsoft', { email: 'boss@other.com', upn: 'ann@clinic.com' }), 'ann@clinic.com');
+  assert.equal(verifiedEmail('microsoft', { email: 'ann@clinic.com', xms_edov: true }), 'ann@clinic.com');
+  assert.throws(() => verifiedEmail('microsoft', { email: 'x@y.com' }), /no verified email/);
+});
+
+test('staff routes need a staff token', async () => {
+  const res = await fetch(`${h.origin}/api/patients`, { headers: { Authorization: `Bearer ${unscoped()}` } });
+  assert.equal(res.status, 401);
 });

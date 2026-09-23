@@ -56,6 +56,11 @@ export function createPayments({ config, fetchImpl = globalThis.fetch }) {
           if (pi.status === 'succeeded') return { ok: true, reference: pi.id };
           return { ok: false, reason: pi.status === 'requires_action' ? 'The bank needs the cardholder to approve this payment' : `Payment ${pi.status}` };
         } catch (err) {
+          // No answer, or a Stripe-side error: the charge may or may not have happened. Retrying later
+          // with the same idempotency key returns the original outcome instead of charging twice.
+          if (!err.stripe || err.stripe.type === 'api_error' || err.stripe.type === 'idempotency_error') {
+            return { ok: false, ambiguous: true, reason: `Couldn't confirm the charge (${err.message})` };
+          }
           return { ok: false, reason: err.stripe?.decline_code ? `Card declined (${err.stripe.decline_code.replace(/_/g, ' ')})` : err.message };
         }
       },
@@ -85,49 +90,75 @@ export async function runAutopay(db, payments, messenger, { planId = null, force
     force ? 1 : 0, ...(planId ? [planId] : []),
   );
   const results = [];
-  for (const plan of plans) {
-    const today = (await practiceNow(db, plan.practice_id)).slice(0, 10);
-    if ((plan.autopay_last_attempt === today && !force) || plan.method_removed) continue;
-    const status = await planStatus(db, plan, today);
-    // Never charge more than the household actually owes (e.g. after insurance paid more than expected).
-    const owed = (await db.get('SELECT COALESCE(SUM(l.amount), 0) AS n FROM ledger_entries l JOIN patients p ON p.id = l.patient_id WHERE p.id = ? OR p.guarantor_id = ?', plan.patient_id, plan.patient_id)).n;
-    const amount = Math.min(status.past_due, owed);
-    if (amount <= 0) continue;
-    await db.run('UPDATE payment_plans SET autopay_last_attempt = ? WHERE id = ?', today, plan.id);
-    const practice = await db.get('SELECT name, phone FROM practices WHERE id = ?', plan.practice_id);
-    const out = await payments.charge({
-      method: plan, amount: amount, description: `${practice.name} payment plan #${plan.id}`,
-      idempotencyKey: `autopay-${plan.id}-${today}-${status.paid}`, metadata: { payment_plan_id: plan.id, patient_id: plan.patient_id },
-    });
-    const patient = await db.get('SELECT * FROM patients WHERE id = ?', plan.patient_id);
-    if (out.ok) {
-      await insert(db, 'ledger_entries', {
-        practice_id: plan.practice_id, patient_id: plan.patient_id, type: 'payment', amount: -amount,
-        description: `Autopay — payment plan (${plan.brand || 'card'} •••• ${plan.last4})`, method: 'credit_card', reference: out.reference,
-        payment_plan_id: plan.id, entry_date: today,
-      });
-      await db.run('UPDATE payment_plans SET autopay_failures = 0, autopay_message = ? WHERE id = ?', `Charged $${(amount / 100).toFixed(2)} on ${today}`, plan.id);
-      const after = await planStatus(db, await db.get('SELECT * FROM payment_plans WHERE id = ?', plan.id), today);
-      if (after.remaining <= 0) await db.run("UPDATE payment_plans SET status = 'completed' WHERE id = ?", plan.id);
-      results.push({ plan_id: plan.id, ok: true, amount: amount });
-    } else {
-      const failures = (plan.autopay_failures || 0) + 1;
-      const paused = failures >= 3 ? 1 : 0;
-      await db.run('UPDATE payment_plans SET autopay_failures = ?, autopay_paused = ?, autopay_message = ? WHERE id = ?', failures, paused, `${out.reason} (${today})`, plan.id);
-      await insert(db, 'tasks', {
-        practice_id: plan.practice_id, patient_id: plan.patient_id, priority: 'high', due_date: today,
-        title: `Autopay ${paused ? 'paused' : 'failed'}: ${patient.first_name} ${patient.last_name} — ${out.reason}`,
-      });
-      const target = preferredChannel(patient);
-      if (target && messenger) {
-        await sendMessage(db, messenger, {
-          practiceId: plan.practice_id, patientId: patient.id, kind: 'payment_request', channel: target.channel, to: target.to,
-          subject: `Payment plan payment didn't go through — ${practice.name}`,
-          body: `Hi ${patient.first_name}, the $${(amount / 100).toFixed(2)} payment for your plan at ${practice.name} didn't go through (${out.reason}). Please call us at ${practice.phone || 'the office'} to update your card.`,
-        }).catch(() => {});
-      }
-      results.push({ plan_id: plan.id, ok: false, reason: out.reason, paused: !!paused });
+  for (const listed of plans) {
+    const today = (await practiceNow(db, listed.practice_id)).slice(0, 10);
+    if ((listed.autopay_last_attempt === today && !force) || listed.method_removed) continue;
+    // Take the plan for this run, so two servers (or a scheduled run and a "charge now") can't both charge it.
+    const lock = new Date(Date.now() + 10 * 60_000).toISOString();
+    const took = await db.run(
+      "UPDATE payment_plans SET autopay_lock = ? WHERE id = ? AND status = 'active' AND (autopay_lock IS NULL OR autopay_lock < ?) AND (autopay_last_attempt IS NULL OR autopay_last_attempt <> ? OR ? = 1)",
+      lock, listed.id, new Date().toISOString(), today, force ? 1 : 0,
+    );
+    if (!took.changes) continue;
+    try {
+      const result = await autopayPlan(db, payments, messenger, { ...listed, ...(await db.get('SELECT * FROM payment_plans WHERE id = ?', listed.id)) }, today);
+      if (result) results.push(result);
+    } finally {
+      await db.run('UPDATE payment_plans SET autopay_lock = NULL WHERE id = ? AND autopay_lock = ?', listed.id, lock);
     }
   }
   return results;
+}
+
+async function autopayPlan(db, payments, messenger, plan, today) {
+  const status = await planStatus(db, plan, today);
+  // Never charge more than the household actually owes (e.g. after insurance paid more than expected).
+  const owed = (await db.get('SELECT COALESCE(SUM(l.amount), 0) AS n FROM ledger_entries l JOIN patients p ON p.id = l.patient_id WHERE p.id = ? OR p.guarantor_id = ?', plan.patient_id, plan.patient_id)).n;
+  const amount = Math.min(status.past_due, owed);
+  if (amount <= 0) return null;
+  const practice = await db.get('SELECT name, phone FROM practices WHERE id = ?', plan.practice_id);
+  // One key per installment (what's been paid so far) and attempt: a retry after a lost answer reuses it,
+  // so the processor returns the first outcome rather than charging again; a retry after a decline doesn't.
+  const out = await payments.charge({
+    method: plan, amount: amount, description: `${practice.name} payment plan #${plan.id}`,
+    idempotencyKey: `autopay-${plan.id}-${status.paid}-${amount}-${plan.autopay_failures || 0}`, metadata: { payment_plan_id: plan.id, patient_id: plan.patient_id },
+  });
+  if (out.ambiguous) {
+    // Leave the day's attempt open; the next run asks again with the same key.
+    await db.run('UPDATE payment_plans SET autopay_message = ? WHERE id = ?', `${out.reason} — will check again (${today})`, plan.id);
+    return { plan_id: plan.id, ok: false, reason: out.reason, pending: true };
+  }
+  await db.run('UPDATE payment_plans SET autopay_last_attempt = ? WHERE id = ?', today, plan.id);
+  const patient = await db.get('SELECT * FROM patients WHERE id = ?', plan.patient_id);
+  if (out.ok && (await db.get('SELECT id FROM ledger_entries WHERE payment_plan_id = ? AND reference = ?', plan.id, out.reference))) {
+    return { plan_id: plan.id, ok: true, amount, already_posted: true };
+  }
+  if (out.ok) {
+    await insert(db, 'ledger_entries', {
+      practice_id: plan.practice_id, patient_id: plan.patient_id, type: 'payment', amount: -amount,
+      description: `Autopay — payment plan (${plan.brand || 'card'} •••• ${plan.last4})`, method: 'credit_card', reference: out.reference,
+      payment_plan_id: plan.id, entry_date: today,
+    });
+    await db.run('UPDATE payment_plans SET autopay_failures = 0, autopay_message = ? WHERE id = ?', `Charged $${(amount / 100).toFixed(2)} on ${today}`, plan.id);
+    const after = await planStatus(db, await db.get('SELECT * FROM payment_plans WHERE id = ?', plan.id), today);
+    if (after.remaining <= 0) await db.run("UPDATE payment_plans SET status = 'completed' WHERE id = ?", plan.id);
+    return { plan_id: plan.id, ok: true, amount };
+  } else {
+    const failures = (plan.autopay_failures || 0) + 1;
+    const paused = failures >= 3 ? 1 : 0;
+    await db.run('UPDATE payment_plans SET autopay_failures = ?, autopay_paused = ?, autopay_message = ? WHERE id = ?', failures, paused, `${out.reason} (${today})`, plan.id);
+    await insert(db, 'tasks', {
+      practice_id: plan.practice_id, patient_id: plan.patient_id, priority: 'high', due_date: today,
+      title: `Autopay ${paused ? 'paused' : 'failed'}: ${patient.first_name} ${patient.last_name} — ${out.reason}`,
+    });
+    const target = preferredChannel(patient);
+    if (target && messenger) {
+      await sendMessage(db, messenger, {
+        practiceId: plan.practice_id, patientId: patient.id, kind: 'payment_request', channel: target.channel, to: target.to,
+        subject: `Payment plan payment didn't go through — ${practice.name}`,
+        body: `Hi ${patient.first_name}, the $${(amount / 100).toFixed(2)} payment for your plan at ${practice.name} didn't go through (${out.reason}). Please call us at ${practice.phone || 'the office'} to update your card.`,
+      }).catch(() => {});
+    }
+    return { plan_id: plan.id, ok: false, reason: out.reason, paused: !!paused };
+  }
 }

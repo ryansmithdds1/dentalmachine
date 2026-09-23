@@ -79,6 +79,18 @@ test('imaging bridge: launch the imaging program from the chart and import captu
     assert.match(dcm.notes, /Imported from Op 2/);
     assert.equal(docs.find((d) => d.filename === 'IMG_0042.jpg').mime, 'image/jpeg');
 
+    // An image labelled for a different patient than the one opened here is never guessed.
+    const other = (await api.post('/patients', { first_name: 'Otto', last_name: 'Other', dob: '1970-01-01' })).data;
+    const upload = (query, body) => fetch(`${h.origin}/api/bridge/images?${new URLSearchParams(query)}`, { method: 'POST', headers: { Authorization: `Bridge ${created.data.token}`, 'Content-Type': 'application/octet-stream' }, body });
+    const conflict = await upload({ filename: 'other.dcm' }, buildDicom({ patientId: String(other.id), studyDate: '20260920', modality: 'IO' }));
+    assert.equal(conflict.status, 422);
+    assert.equal((await conflict.json()).details.conflict, true);
+    assert.equal((await api.get(`/patients/${other.id}/documents`)).data.length, 0);
+    // Agreeing labels are fine.
+    const agree = await upload({ filename: `P${patient.id}_pa.jpg`, patient_id: String(patient.id) }, Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(80)]));
+    assert.equal(agree.status, 201);
+    assert.equal((await agree.json()).patient_id, patient.id);
+
     // Revoked keys stop working.
     await api.del(`/imaging/agents/${agents[0].id}`);
     const res = await fetch(`${h.origin}/api/bridge/commands?wait=0`, { headers: { Authorization: `Bridge ${created.data.token}` } });

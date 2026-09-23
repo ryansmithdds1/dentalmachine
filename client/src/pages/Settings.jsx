@@ -720,6 +720,15 @@ function SingleSignOn() {
     setSaved(true);
     reload();
   });
+  const [linkErr, setLinkErr] = useState(null);
+  const linkMine = async () => {
+    setLinkErr(null);
+    try {
+      window.location.assign((await api.post('/auth/sso/link')).url);
+    } catch (e) {
+      setLinkErr(e);
+    }
+  };
   if (!cur) return null;
   const set = (k) => (e) => { setSaved(false); setForm({ ...cur, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value }); };
   return (
@@ -750,11 +759,19 @@ function SingleSignOn() {
           </>
         )}
       </div>
-      <ErrorBox error={error} />
+      {data.provider && data.has_secret && (
+        <div className="notice" style={{ marginTop: 12 }}>
+          {data.linked
+            ? <>✓ Your account is linked — you can sign in with {SSO_NAMES[data.provider]}.</>
+            : <>Administrators link their own sign-in once (staff are linked automatically the first time they use it). <button className="small" onClick={linkMine}>Link my account</button></>}
+        </div>
+      )}
+      <ErrorBox error={error || linkErr} />
       <div className="form-actions">{saved && <span className="badge ok">Saved</span>}<button className="primary" disabled={busy} onClick={submit}>Save sign-in settings</button></div>
     </div>
   );
 }
+const SSO_NAMES = { google: 'Google', microsoft: 'Microsoft', oidc: 'single sign-on' };
 
 // Everything this deployment connects to, with what each does and how to turn it on.
 function Integrations() {

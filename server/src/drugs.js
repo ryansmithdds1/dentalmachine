@@ -35,3 +35,21 @@ export function allergyWarning(allergies, drug) {
   }
   return null;
 }
+
+// DEA schedules of controlled substances a dentist may prescribe. The server decides the schedule from
+// the drug name, so a controlled drug can't be sent without the EPCS checks by leaving the field blank.
+const SCHEDULES = [
+  ['II', ['hydrocodone', 'oxycodone', 'morphine', 'hydromorphone', 'oxymorphone', 'fentanyl', 'meperidine', 'tapentadol', 'methadone', 'codeine sulfate', 'vicodin', 'norco', 'percocet', 'lortab', 'dilaudid', 'amphetamine', 'methylphenidate']],
+  ['III', ['acetaminophen/codeine', 'acetaminophen with codeine', 'tylenol #3', 'tylenol #4', 'tylenol with codeine', 'codeine/acetaminophen', 'buprenorphine', 'ketamine', 'testosterone']],
+  ['IV', ['tramadol', 'diazepam', 'triazolam', 'lorazepam', 'alprazolam', 'midazolam', 'clonazepam', 'zolpidem', 'valium', 'halcion', 'ativan', 'xanax', 'carisoprodol', 'phenobarbital', 'modafinil']],
+  ['V', ['pregabalin', 'lacosamide', 'codeine cough', 'promethazine with codeine', 'lomotil', 'diphenoxylate']],
+];
+const RANK = { II: 1, III: 2, IV: 3, V: 4 };
+export function controlledSchedule(drug) {
+  const d = words(drug);
+  for (const [schedule, names] of SCHEDULES) if (names.some((n) => d.includes(n))) return schedule;
+  // Codeine alone is Schedule II; combination products are matched above.
+  return /\bcodeine\b/.test(d) ? 'II' : null;
+}
+// The stricter of what the prescriber chose and what the drug is.
+export const stricterSchedule = (a, b) => (!a ? b || null : !b ? a : RANK[a] <= RANK[b] ? a : b);

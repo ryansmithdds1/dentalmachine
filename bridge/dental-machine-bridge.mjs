@@ -96,8 +96,9 @@ async function scan() {
       const key = `${path}|${st.size}|${Math.round(st.mtimeMs)}`;
       if (state.seen[key]) continue;
       const data = readFileSync(path);
-      // "123_bitewing.jpg" / "P123-pan.dcm" style names carry the chart number.
-      const idFromName = (new RegExp(w.patientIdPattern || '^[Pp]?(\\d+)[_\\-. ]').exec(basename(name)) || [])[1];
+      // "P123_bitewing.jpg" / "P123-pan.dcm" style names carry the chart number. The "P" is required by
+      // default so capture timestamps ("20260923_1015.jpg") are never mistaken for a patient number.
+      const idFromName = (new RegExp(w.patientIdPattern || '^[Pp](\\d+)[_\\-. ]').exec(basename(name)) || [])[1];
       const params = new URLSearchParams({ filename: name, category: w.category || 'xray' });
       if (idFromName) params.set('patient_id', idFromName);
       if (lastPatient && Date.now() - lastPatient.at < 45 * 60_000) params.set('opened_patient_id', lastPatient.id);

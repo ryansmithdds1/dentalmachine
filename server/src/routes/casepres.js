@@ -4,7 +4,7 @@ import { pick, requireFields, insert, findOr404, audit, newToken, hashToken } fr
 import { estimateCoverage, primaryPolicy } from '../services.js';
 import { sendMessage, preferredChannel } from '../messaging.js';
 import { checkEpcs } from '../erx.js';
-import { allergyWarning } from '../drugs.js';
+import { allergyWarning, controlledSchedule, stricterSchedule } from '../drugs.js';
 
 // Common dental prescriptions for one-click entry.
 export const RX_FAVORITES = [
@@ -108,8 +108,10 @@ export default function casePresentationRoutes({ db, messenger, config, erx }) {
     // Surface allergies at the moment of prescribing.
     const allergy = allergyWarning(patient.allergies, `${row.drug} ${row.strength || ''}`);
     if (allergy && !req.body.override_allergy) throw new HttpError(409, allergy, { allergy_warning: true });
+    if (row.schedule && !['II', 'III', 'IV', 'V'].includes(row.schedule)) throw new HttpError(400, 'schedule must be II, III, IV or V');
+    // A known controlled substance is always treated as one, whatever the form said.
+    row.schedule = stricterSchedule(row.schedule || null, controlledSchedule(`${row.drug} ${row.strength || ''}`));
     if (row.schedule) {
-      if (!['II', 'III', 'IV', 'V'].includes(row.schedule)) throw new HttpError(400, 'schedule must be II, III, IV or V');
       if (!provider.dea_number) throw new HttpError(400, `${provider.name} needs a DEA number (Settings → Providers) to prescribe controlled substances`);
       if (row.schedule === 'II' && row.refills > 0) throw new HttpError(400, 'Schedule II prescriptions cannot have refills');
     }
@@ -120,6 +122,8 @@ export default function casePresentationRoutes({ db, messenger, config, erx }) {
       if (!erx.inApp) throw new HttpError(409, erx.ssoUrl ? `Write electronic prescriptions in ${erx.name}` : 'Electronic prescribing is not set up — print instead');
       pharmacy = patient.preferred_pharmacy ? JSON.parse(patient.preferred_pharmacy) : null;
       if (!pharmacy?.ncpdp) throw new HttpError(400, "Choose the patient's pharmacy first");
+      // Electronic prescriptions carry the prescriber's signature, so only they can send one.
+      if (provider.user_id !== req.user.id) throw new HttpError(403, `Only ${provider.name} can sign and send this prescription — save it for them to send, or print it for a wet signature`);
       signature = await checkEpcs(db, { user: req.user, provider, schedule: row.schedule, refills: row.refills, otp: req.body.otp });
     }
     const id = await insert(db, 'prescriptions', {

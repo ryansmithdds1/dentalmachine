@@ -2,6 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { harness } from './helpers.js';
 
+const waitFor = async (fn) => {
+  for (let i = 0; i < 100 && !fn(); i++) await new Promise((r) => setTimeout(r, 10));
+};
 const h = harness({ config: { payments: 'sandbox' } });
 // A 10-minute visit a few hours from now (UTC), not crossing midnight.
 const soon = () => {
@@ -34,13 +37,25 @@ test('patient portal: code sign-in, household view, confirm/cancel, pay, forms a
   assert.deepEqual((await pub.post(`/public/portal/${slug}/code`, { contact: 'JANE@example.com', dob: '1999-01-01' })).data, { sent: true, channel: 'email' });
   assert.equal(h.sent.length, before);
   await pub.post(`/public/portal/${slug}/code`, { contact: 'jane@example.com', dob: '1985-04-12' });
+  await waitFor(() => h.sent.length > before); // codes are sent in the background
   const msg = h.sent.at(-1);
+  // A later request with a mistyped birth date doesn't hide the real code.
+  await pub.post(`/public/portal/${slug}/code`, { contact: 'jane@example.com', dob: '1985-04-21' });
   assert.equal(msg.to, 'jane@example.com');
   const code = msg.body.match(/\d{6}/)[0];
   assert.equal((await pub.post(`/public/portal/${slug}/verify`, { contact: 'jane@example.com', code: code === '000000' ? '111111' : '000000' })).status, 403);
   const signin = (await pub.post(`/public/portal/${slug}/verify`, { contact: 'jane@example.com', code })).data;
   assert.ok(signin.token);
   assert.equal((await pub.post(`/public/portal/${slug}/verify`, { contact: 'jane@example.com', code })).status, 403, 'codes are single-use');
+
+  // Five wrong guesses use a code up, even when they arrive at once.
+  const n = h.sent.length;
+  await pub.post(`/public/portal/${slug}/code`, { contact: 'jane@example.com', dob: '1985-04-12' });
+  await waitFor(() => h.sent.length > n);
+  const code2 = h.sent.at(-1).body.match(/\d{6}/)[0];
+  const wrong = code2 === '000000' ? '111111' : '000000';
+  await Promise.all([1, 2, 3, 4, 5, 6].map(() => pub.post(`/public/portal/${slug}/verify`, { contact: 'jane@example.com', code: wrong })));
+  assert.equal((await pub.post(`/public/portal/${slug}/verify`, { contact: 'jane@example.com', code: code2 })).status, 403);
 
   // Portal and staff sessions can't be swapped.
   const portal = h.client(signin.token);
@@ -71,6 +86,7 @@ test('patient portal: code sign-in, household view, confirm/cancel, pay, forms a
   assert.equal((await portal.put('/portal/contact', { phone: '(512) 555-0199', sms_opt_in: false })).status, 200);
   assert.equal((await api.get(`/patients/${patient.id}`)).data.phone, '(512) 555-0199');
 
+  assert.equal((await portal.post('/portal/pay', { amount: 99_999_00 })).status, 400, 'sandbox payments are capped at the balance');
   assert.equal((await portal.post('/portal/pay', { amount: 5000 })).data.paid, true);
   assert.equal((await portal.get('/portal/me')).data.balance, 6000);
   // Another practice's patient can't be reached.

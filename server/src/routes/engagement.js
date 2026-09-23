@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { requirePermission, HttpError } from '../auth.js';
-import { pick, requireFields, requireOneOf, insert, findOr404, audit, newToken, friendlyDateTime, mapSeq } from '../util.js';
+import { pick, requireFields, requireOneOf, insert, findOr404, audit, newToken, friendlyDateTime, mapSeq, publicPractice } from '../util.js';
 import { sendMessage, sendAppointmentReminder, runReminders, preferredChannel } from '../messaging.js';
 import { validateAppt } from './schedule.js';
 import { publish } from '../events.js';
@@ -62,7 +62,7 @@ export default function engagementRoutes({ db, messenger, config }) {
     const patient = await db.get('SELECT * FROM patients WHERE id = ?', recall.patient_id);
     const target = preferredChannel(patient, req.body?.channel);
     if (!target) throw new HttpError(400, 'Patient has no reachable phone or email (or has opted out)');
-    const practice = await db.get('SELECT * FROM practices WHERE id = ?', req.user.practice_id);
+    const practice = publicPractice(await db.get('SELECT * FROM practices WHERE id = ?', req.user.practice_id));
     const bookLink = practice.online_booking && practice.slug ? `Book online: ${config.appUrl}/book/${practice.slug}` : '';
     const msg = await sendMessage(db, messenger, {
       practiceId: req.user.practice_id, patientId: patient.id, userId: req.user.id, kind: 'recall', channel: target.channel, to: target.to,

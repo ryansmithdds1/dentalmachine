@@ -756,6 +756,9 @@ const COLUMNS = [
   ['payment_plans', 'autopay_failures', 'INTEGER NOT NULL DEFAULT 0'],
   ['payment_plans', 'autopay_last_attempt', 'TEXT'],
   ['payment_plans', 'autopay_message', 'TEXT'],
+  ['payment_plans', 'autopay_lock', 'TEXT'],
+  ['sso_logins', 'browser_hash', 'TEXT'],
+  ['sso_logins', 'user_id', 'INTEGER'],
   ['statement_runs', 'mailed', 'INTEGER NOT NULL DEFAULT 0'],
   ['practices', 'portal_enabled', 'INTEGER NOT NULL DEFAULT 1'],
   ['practices', 'sso_provider', 'TEXT'],
@@ -815,15 +818,24 @@ function openSqlite(path) {
   const clean = (row) => (row ? { ...row } : row);
   const inTx = new AsyncLocalStorage();
   let queue = Promise.resolve();
+  let open = false;
+  // A query from outside the open transaction waits for it to finish: on one connection it would
+  // otherwise see the transaction's uncommitted writes, or have its own writes rolled back with it.
+  const outside = async () => {
+    while (open && !inTx.getStore()) await queue;
+  };
   return {
     dialect: 'sqlite',
     async all(sql, ...params) {
+      await outside();
       return stmt(sql).all(...args(params)).map(clean);
     },
     async get(sql, ...params) {
+      await outside();
       return clean(stmt(sql).get(...args(params)));
     },
     async run(sql, ...params) {
+      await outside();
       const r = stmt(sql).run(...args(params));
       return { changes: Number(r.changes), id: Number(r.lastInsertRowid) };
     },
@@ -832,6 +844,7 @@ function openSqlite(path) {
       if (inTx.getStore()) return fn();
       const run = async () => {
         db.exec('BEGIN');
+        open = true;
         try {
           const out = await inTx.run(true, fn);
           db.exec('COMMIT');
@@ -839,6 +852,8 @@ function openSqlite(path) {
         } catch (err) {
           db.exec('ROLLBACK');
           throw err;
+        } finally {
+          open = false;
         }
       };
       const p = queue.then(run, run);

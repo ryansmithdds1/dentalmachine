@@ -148,3 +148,6 @@ export async function mapSeq(items, fn) {
   for (let i = 0; i < items.length; i++) out.push(await fn(items[i], i));
   return out;
 }
+
+// A practice row safe to send to a browser: server-side secrets removed.
+export const publicPractice = (p) => (p ? { ...p, sso_client_secret: undefined } : p);

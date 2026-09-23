@@ -44,7 +44,10 @@ export default function settingsRoutes({ db, secret, config = {} }) {
     provider: p.sso_provider, tenant: p.sso_tenant, issuer: p.sso_issuer, client_id: p.sso_client_id, has_secret: !!p.sso_client_secret,
     domain: p.sso_domain, sso_only: !!p.sso_only, redirect_uri: `${config.appUrl}/api/auth/sso/callback`,
   });
-  r.get('/practice/sso', requireAdmin, async (req, res) => res.json(ssoView(await db.get('SELECT * FROM practices WHERE id = ?', req.user.practice_id))));
+  r.get('/practice/sso', requireAdmin, async (req, res) => res.json({
+    ...ssoView(await db.get('SELECT * FROM practices WHERE id = ?', req.user.practice_id)),
+    linked: !!(await db.get('SELECT sso_subject FROM users WHERE id = ?', req.user.id)).sso_subject,
+  }));
   r.put('/practice/sso', requireAdmin, async (req, res) => {
     const b = req.body || {};
     const provider = b.provider || null;

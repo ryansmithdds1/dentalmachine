@@ -67,6 +67,40 @@ test('autopay charges due installments to the card on file and handles declines'
   assert.equal((await api.get(`/patients/${patient.id}/payment-plans`)).data.every((p) => !p.autopay_method_id), true);
 });
 
+test('autopay charges each installment once, even when runs overlap or the answer is lost', async () => {
+  const { api, patient } = await h.practice();
+  const plan = await planDue(api, patient);
+  const card = (await api.post(`/patients/${patient.id}/payment-methods`, { number: '4242 4242 4242 4242' })).data;
+  await api.put(`/payment-plans/${plan.id}`, { autopay_method_id: card.id });
+  const calls = [];
+  let lose = 1; // the first answer is lost (timeout); the processor still charged it
+  const processor = {
+    enabled: true,
+    async charge(args) {
+      calls.push(args.idempotencyKey);
+      await new Promise((r) => setTimeout(r, 30));
+      if (lose-- > 0) return { ok: false, ambiguous: true, reason: "Couldn't confirm the charge (timeout)" };
+      return { ok: true, reference: `pi_${args.idempotencyKey}` };
+    },
+  };
+  // Three overlapping runs: only one gets to charge.
+  const first = (await Promise.all([1, 2, 3].map(() => runAutopay(h.db, processor, h.messenger, { planId: plan.id, force: true })))).flat();
+  assert.equal(calls.length, 1);
+  assert.equal(first[0].pending, true);
+  let p = (await api.get(`/patients/${patient.id}/payment-plans`)).data[0];
+  assert.equal(p.paid, 0);
+  assert.equal(p.autopay_failures, 0, 'a lost answer is not a decline');
+  // The next run asks again with the same key, so the processor returns the original charge.
+  const second = await runAutopay(h.db, processor, h.messenger);
+  assert.equal(second[0].ok, true);
+  assert.equal(calls[1], calls[0]);
+  p = (await api.get(`/patients/${patient.id}/payment-plans`)).data[0];
+  assert.equal(p.paid, 20000);
+  // Once charged today, the scheduled run leaves it alone.
+  assert.deepEqual(await runAutopay(h.db, processor, h.messenger), []);
+  assert.equal(calls.length, 2);
+});
+
 test('statement run emails, mails through the mail service, or leaves to print', async () => {
   const { api, provider, patient } = await h.practice();
   // Patient with email; a second account with only a mailing address; a third with neither.

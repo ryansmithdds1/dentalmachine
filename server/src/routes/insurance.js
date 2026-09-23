@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { requirePermission, HttpError } from '../auth.js';
-import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, toCents, practiceNow, mapSeq } from '../util.js';
+import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, toCents, practiceNow, mapSeq, publicPractice } from '../util.js';
 import { estimateCoverage, postClaimPayment } from '../services.js';
 
 const POLICY_FIELDS = [
@@ -102,7 +102,7 @@ export default function insuranceRoutes({ db }) {
        WHERE ci.claim_id = ?`, claim.id,
     );
     claim.patient = await db.get('SELECT * FROM patients WHERE id = ?', claim.patient_id);
-    claim.practice = await db.get('SELECT * FROM practices WHERE id = ?', claim.practice_id);
+    claim.practice = publicPractice(await db.get('SELECT * FROM practices WHERE id = ?', claim.practice_id));
     res.json(claim);
   });
 
