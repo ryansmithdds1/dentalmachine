@@ -78,6 +78,7 @@ export function LabCaseForm({ labCase, patient: fixedPatient, onDone }) {
         <label className="full">Notes<input value={form.notes} onChange={set('notes')} /></label>
       </div>
       <div className="form-actions"><button className="primary" disabled={busy}>{labCase ? 'Save' : 'Log lab case'}</button></div>
+      {labCase && <LabRx labCase={labCase} />}
     </form>
   );
 }
@@ -142,5 +143,63 @@ export function WaitlistForm({ patient, entry, onDone }) {
       </div>
       <div className="form-actions"><button className="primary" disabled={busy}>{entry ? 'Save' : 'Add to waitlist'}</button></div>
     </form>
+  );
+}
+
+// The digital prescription: filled in here, sent to the lab as a private link with files from the chart.
+const RX_CHOICES = {
+  material: ['Zirconia', 'Lithium disilicate (e.max)', 'PFM — high noble', 'Full cast gold', 'Composite', 'Acrylic'],
+  margin: ['Chamfer', 'Shoulder', 'Feather edge', 'Butt joint'],
+  occlusion: ['Light', 'Medium', 'Heavy', 'Out of occlusion'],
+  contacts: ['Light', 'Medium', 'Heavy'],
+  pontic: ['Modified ridge lap', 'Ovate', 'Sanitary', 'Conical'],
+  impression: ['Digital scan', 'PVS impression', 'Alginate', 'Models'],
+};
+function LabRx({ labCase }) {
+  const [open, setOpen] = useState(false);
+  const [rx, setRx] = useState(() => ({ teeth: labCase.tooth || '', shade: labCase.shade || '', restoration: labCase.description || '', ...(labCase.rx ? JSON.parse(labCase.rx) : {}) }));
+  const [docs, setDocs] = useState([]);
+  const [picked, setPicked] = useState(() => (labCase.document_ids ? JSON.parse(labCase.document_ids) : []));
+  const [result, setResult] = useState(null);
+  useEffect(() => {
+    if (open) api.get(`/patients/${labCase.patient_id}/documents`).then(setDocs).catch(() => setDocs([]));
+  }, [open, labCase.patient_id]);
+  const send = useSubmit(async () => setResult(await api.post(`/lab-cases/${labCase.id}/send`, { rx, document_ids: picked })));
+  const field = (k, label, wide) => (
+    <label className={wide ? 'full' : ''}>{label}
+      {RX_CHOICES[k] ? (
+        <input list={`rx-${k}`} value={rx[k] || ''} onChange={(e) => setRx({ ...rx, [k]: e.target.value })} />
+      ) : wide ? <textarea rows={3} value={rx[k] || ''} onChange={(e) => setRx({ ...rx, [k]: e.target.value })} /> : <input value={rx[k] || ''} onChange={(e) => setRx({ ...rx, [k]: e.target.value })} />}
+      {RX_CHOICES[k] && <datalist id={`rx-${k}`}>{RX_CHOICES[k].map((o) => <option key={o} value={o} />)}</datalist>}
+    </label>
+  );
+  return (
+    <div style={{ marginTop: 16, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+      <div className="inline" style={{ justifyContent: 'space-between' }}>
+        <h3 style={{ margin: 0 }}>Digital prescription</h3>
+        {labCase.rx_sent_at ? <span className="muted" style={{ fontSize: 12 }}>Sent {labCase.rx_sent_at.slice(0, 10)}{labCase.lab_viewed_at ? ' · opened by the lab' : ''}{labCase.lab_status ? ` · lab: ${labCase.lab_status.replace('_', ' ')}` : ''}{labCase.tracking_number ? ` · tracking ${labCase.tracking_number}` : ''}</span> : null}
+        {!open && <button type="button" className="small" onClick={() => setOpen(true)}>{labCase.rx_sent_at ? 'Edit and resend' : 'Write and send to the lab'}</button>}
+      </div>
+      {open && (
+        <>
+          <ErrorBox error={send.error} />
+          <div className="form-grid" style={{ marginTop: 8 }}>
+            {field('restoration', 'Restoration')}{field('teeth', 'Teeth')}{field('material', 'Material')}{field('shade', 'Shade')}{field('stump_shade', 'Stump shade')}
+            {field('margin', 'Margin')}{field('occlusion', 'Occlusal contact')}{field('contacts', 'Proximal contacts')}{field('pontic', 'Pontic design')}{field('impression', 'Impression')}
+            {field('scanner', 'Scanner / case ID')}{field('instructions', 'Instructions', true)}
+          </div>
+          {docs.length > 0 && (
+            <div style={{ marginTop: 8 }}>
+              <div className="muted" style={{ fontSize: 12 }}>Send these files from the chart (scans, x-rays, photos):</div>
+              <div style={{ maxHeight: 140, overflow: 'auto' }}>
+                {docs.map((d) => <label key={d.id} className="checkbox"><input type="checkbox" checked={picked.includes(d.id)} onChange={(e) => setPicked(e.target.checked ? [...picked, d.id] : picked.filter((x) => x !== d.id))} /> {d.filename} <span className="muted" style={{ fontSize: 11 }}>{d.category}{d.tooth ? ` #${d.tooth}` : ''}</span></label>)}
+              </div>
+            </div>
+          )}
+          {result && <div className="public-notice ok" style={{ marginTop: 8 }}>{result.emailed ? 'Emailed to the lab.' : 'No lab email on file — send them this link:'} <input readOnly value={result.link} onFocus={(e) => e.target.select()} style={{ width: '100%', marginTop: 4 }} /></div>}
+          <div className="form-actions"><button type="button" onClick={() => window.open(`/lab-cases/${labCase.id}/slip`, '_blank')}>Print slip</button><button type="button" className="primary" disabled={send.busy} onClick={send.submit}>Send to the lab</button></div>
+        </>
+      )}
+    </div>
   );
 }

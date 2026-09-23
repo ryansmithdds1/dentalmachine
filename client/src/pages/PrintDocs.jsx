@@ -133,7 +133,8 @@ export function LabSlipPrint() {
           {d.procedure && <tr><th>Procedure</th><td>{d.procedure.code} {d.procedure.description}</td></tr>}
           <tr><th>Tooth</th><td>{c.tooth ? `#${c.tooth}` : '—'}</td></tr>
           <tr><th>Shade</th><td>{c.shade || '—'}</td></tr>
-          <tr><th>Instructions</th><td style={{ whiteSpace: 'pre-wrap', height: 90, verticalAlign: 'top' }}>{c.notes || ''}</td></tr>
+          {Object.entries(c.rx ? JSON.parse(c.rx) : {}).filter(([k]) => !['shade', 'teeth', 'instructions', 'restoration'].includes(k)).map(([k, v]) => <tr key={k}><th>{k.replace('_', ' ').replace(/^./, (x) => x.toUpperCase())}</th><td>{v}</td></tr>)}
+          <tr><th>Instructions</th><td style={{ whiteSpace: 'pre-wrap', height: 90, verticalAlign: 'top' }}>{[c.rx ? JSON.parse(c.rx).instructions : '', c.notes].filter(Boolean).join('\n')}</td></tr>
         </tbody>
       </table>
       <div className="doc-sign">
