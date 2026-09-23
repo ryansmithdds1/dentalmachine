@@ -188,7 +188,7 @@ export default function CalendarGrid({
           {columns.map((c) => (
             <div key={c.key} className={`cal-col-head${c.isToday ? ' today' : ''}`} style={c.color ? { boxShadow: `inset 0 -3px 0 ${c.color}` } : undefined}>
               <div className="cal-col-title">{c.label}</div>
-              {c.sub && <div className="cal-col-sub">{c.sub}</div>}
+              {c.sub && <div className={`cal-col-sub${c.subClass ? ` ${c.subClass}` : ""}`}>{c.sub}</div>}
             </div>
           ))}
         </div>
@@ -214,8 +214,8 @@ export default function CalendarGrid({
                     const e = b.end_time.slice(0, 10) > col.date ? range.end : Math.min(range.end, toMin(b.end_time));
                     if (e <= s) return null;
                     return (
-                      <div key={b.id} className="cal-block" style={{ top: (s - range.start) * pxPerMin, height: (e - s) * pxPerMin }}
-                        onPointerDown={(ev) => ev.stopPropagation()} onClick={() => onOpenBlockout(b)} title={b.reason}>
+                      <div key={b.id} className={`cal-block${b.kind === 'reserved' ? ' reserved' : ''}`} style={{ top: (s - range.start) * pxPerMin, height: (e - s) * pxPerMin }}
+                        onPointerDown={(ev) => ev.stopPropagation()} onClick={() => onOpenBlockout(b)} title={b.kind === 'reserved' ? `${b.reason} — reserved for ${b.type_names || 'chosen visit types'}` : b.reason}>
                         <span>{b.reason}</span>
                       </div>
                     );

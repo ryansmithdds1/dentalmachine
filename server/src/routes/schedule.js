@@ -33,6 +33,15 @@ async function findConflicts(db, practiceId, { start_time, end_time, provider_id
 }
 
 // Blockouts that apply to this provider/operatory (or the whole office) during the slot.
+// A reserved block lets its own appointment types in.
+// Adds type_names ("Crown prep, Implant") to reserved blocks for the calendar.
+async function nameTypes(db, pid, blocks) {
+  if (!blocks.some((b) => b.kind === 'reserved')) return blocks;
+  const names = Object.fromEntries((await db.all('SELECT id, name FROM appointment_types WHERE practice_id = ?', pid)).map((t) => [t.id, t.name]));
+  return blocks.map((b) => (b.kind === 'reserved' ? { ...b, type_names: JSON.parse(b.appointment_type_ids || '[]').map((id) => names[id]).filter(Boolean).join(', ') } : b));
+}
+export const reservedFor = (block, typeId) => block.kind === 'reserved' && typeId != null && JSON.parse(block.appointment_type_ids || '[]').includes(Number(typeId));
+
 export async function findBlockouts(db, practiceId, { start_time, end_time, provider_id, operatory_id }) {
   return await db.all(
     `SELECT * FROM blockouts WHERE practice_id = ? AND start_time < ? AND end_time > ?
@@ -62,8 +71,12 @@ export async function validateAppt(db, practiceId, row, { overrideBlockout = fal
     throw new HttpError(409, `Scheduling conflict: ${[...kinds].join(', ')} already booked`, { conflicts });
   }
   if (!overrideBlockout) {
-    const blocks = await findBlockouts(db, practiceId, row);
-    if (blocks.length) throw new HttpError(409, `That time is blocked: ${blocks[0].reason}`, { blockouts: blocks, can_override: true });
+    // Reserved blocks (block scheduling) take the appointment types they're kept for.
+    const blocks = (await findBlockouts(db, practiceId, row)).filter((b) => !reservedFor(b, row.appointment_type_id));
+    if (blocks.length) {
+      const b = blocks[0];
+      throw new HttpError(409, b.kind === 'reserved' ? `That time is reserved for ${b.reason}` : `That time is blocked: ${b.reason}`, { blockouts: blocks, can_override: true });
+    }
     // Nobody is booked outside their hours — the provider's own (part-time hygienists, visiting
     // specialists) or else the office's — without a deliberate override.
     const date = row.start_time.slice(0, 10);
@@ -107,7 +120,7 @@ const fromMin = (n) => `${String(Math.floor(n / 60)).padStart(2, '0')}:${String(
 export const addMinutes = (dateTime, minutes) => `${dateTime.slice(0, 10)} ${fromMin(toMin(dateTime.slice(11, 16)) + minutes)}`;
 
 // Free start times for a provider on a day, on a grid (minutes) within office hours, avoiding appointments and blockouts.
-export async function openSlots(db, practiceId, providerId, date, { duration = 60, step = 10, after = null, open = null, close = null } = {}) {
+export async function openSlots(db, practiceId, providerId, date, { duration = 60, step = 10, after = null, open = null, close = null, typeId = null } = {}) {
   const practice = await db.get('SELECT office_hours FROM practices WHERE id = ?', practiceId);
   const provider = await db.get('SELECT id, working_hours FROM providers WHERE id = ?', providerId);
   const ranges = open && close ? [[open, close]] : await providerHoursOn(db, practice, provider, date);
@@ -117,9 +130,9 @@ export async function openSlots(db, practiceId, providerId, date, { duration = 6
        AND start_time >= ? AND start_time < ?`, practiceId, providerId, `${date} 00:00`, `${date} 24:00`,
     )),
     ...(await db.all(
-      `SELECT start_time, end_time FROM blockouts WHERE practice_id = ? AND start_time < ? AND end_time > ?
+      `SELECT start_time, end_time, kind, appointment_type_ids FROM blockouts WHERE practice_id = ? AND start_time < ? AND end_time > ?
        AND ((provider_id IS NULL AND operatory_id IS NULL) OR provider_id = ?)`, practiceId, `${date} 24:00`, `${date} 00:00`, providerId,
-    )),
+    )).filter((b) => !reservedFor(b, typeId)),
     // A pending online request holds its slot so it isn't offered to someone else meanwhile.
     ...(await db.all(
       // (one waiting on its deposit only for as long as the checkout is open).
@@ -492,7 +505,7 @@ export default function scheduleRoutes({ db }) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date || '')) throw new HttpError(400, 'date must be YYYY-MM-DD');
     await findOr404(db, 'providers', provider_id, pid, 'Provider');
     const duration = Math.max(10, Number(req.query.duration) || 60);
-    const slots = await openSlots(db, pid, Number(provider_id), date, { duration, open: req.query.open, close: req.query.close });
+    const slots = await openSlots(db, pid, Number(provider_id), date, { duration, open: req.query.open, close: req.query.close, typeId: req.query.appointment_type_id ? Number(req.query.appointment_type_id) : null });
     res.json({ date, provider_id: Number(provider_id), duration, slots });
   });
 
@@ -524,7 +537,7 @@ export default function scheduleRoutes({ db }) {
       }))])),
       provider_exceptions: exceptions.map((e) => ({ provider_id: e.provider_id, date: e.date, off: JSON.parse(e.hours).length === 0, reason: e.reason })),
       appointments,
-      blockouts: await db.all('SELECT * FROM blockouts WHERE practice_id = ? AND start_time < ? AND end_time > ? ORDER BY start_time', pid, `${to} 24:00`, `${from} 00:00`),
+      blockouts: await nameTypes(db, pid, await db.all('SELECT * FROM blockouts WHERE practice_id = ? AND start_time < ? AND end_time > ? ORDER BY start_time', pid, `${to} 24:00`, `${from} 00:00`)),
       production,
     });
   });
@@ -536,14 +549,34 @@ export default function scheduleRoutes({ db }) {
   });
 
   // ---- Blockouts (lunch, meetings, holidays, "crown seats only"…) ----
-  const BLOCK_FIELDS = ['provider_id', 'operatory_id', 'start_time', 'end_time', 'reason'];
+  const BLOCK_FIELDS = ['provider_id', 'operatory_id', 'start_time', 'end_time', 'reason', 'kind', 'appointment_type_ids'];
   const validateBlockout = async (req, row) => {
     row.start_time = normalizeDateTime(row.start_time, 'start_time');
     row.end_time = normalizeDateTime(row.end_time, 'end_time');
     if (row.end_time <= row.start_time) throw new HttpError(400, 'end_time must be after start_time');
     if (row.provider_id) await findOr404(db, 'providers', row.provider_id, req.user.practice_id, 'Provider');
     if (row.operatory_id) await findOr404(db, 'operatories', row.operatory_id, req.user.practice_id, 'Operatory');
+    if (row.kind !== undefined) requireOneOf(row.kind, ['blocked', 'reserved'], 'kind');
+    if (row.appointment_type_ids !== undefined) {
+      const ids = (Array.isArray(row.appointment_type_ids) ? row.appointment_type_ids : JSON.parse(row.appointment_type_ids || '[]')).map(Number);
+      for (const id of ids) await findOr404(db, 'appointment_types', id, req.user.practice_id, 'Appointment type');
+      row.appointment_type_ids = JSON.stringify([...new Set(ids)]);
+    }
+    if (row.kind === 'reserved' && !JSON.parse(row.appointment_type_ids || '[]').length) throw new HttpError(400, 'Choose which appointment types this time is reserved for');
   };
+  // Scheduled production per provider per day (procedures planned on, or done at, the visits), for goals.
+  r.get('/schedule/production', requirePermission('schedule:read'), async (req, res) => {
+    const DATE = /^\d{4}-\d{2}-\d{2}$/;
+    if (!DATE.test(req.query.from || '') || !DATE.test(req.query.to || '')) throw new HttpError(400, 'from and to are required (YYYY-MM-DD)');
+    const rows = await db.all(
+      `SELECT a.provider_id, substr(a.start_time, 1, 10) AS date, COALESCE(SUM(pr.fee), 0) AS scheduled
+       FROM appointments a JOIN procedures pr ON pr.appointment_id = a.id AND pr.status != 'cancelled'
+       WHERE a.practice_id = ? AND a.status NOT IN ('cancelled','no_show') AND a.start_time >= ? AND a.start_time <= ?
+       GROUP BY a.provider_id, substr(a.start_time, 1, 10)`, req.user.practice_id, `${req.query.from} 00:00`, `${req.query.to} 23:59`,
+    );
+    const goals = await db.all('SELECT id, daily_goal FROM providers WHERE practice_id = ? AND daily_goal > 0', req.user.practice_id);
+    res.json({ rows, goals: Object.fromEntries(goals.map((g) => [g.id, g.daily_goal])) });
+  });
   r.get('/blockouts', requirePermission('schedule:read'), async (req, res) => {
     const from = req.query.from || '0000-00-00';
     const to = req.query.to || '9999-12-31';
@@ -576,8 +609,8 @@ export default function scheduleRoutes({ db }) {
     await validateBlockout(req, row);
     // The whole series: the reason, provider and chair (each keeps its own day).
     if (req.body?.scope === 'series' && existing.series_key) {
-      await db.run('UPDATE blockouts SET reason = ?, provider_id = ?, operatory_id = ? WHERE practice_id = ? AND series_key = ?',
-        row.reason, row.provider_id ?? null, row.operatory_id ?? null, req.user.practice_id, existing.series_key);
+      await db.run('UPDATE blockouts SET reason = ?, provider_id = ?, operatory_id = ?, kind = ?, appointment_type_ids = ? WHERE practice_id = ? AND series_key = ?',
+        row.reason, row.provider_id ?? null, row.operatory_id ?? null, row.kind || 'blocked', row.appointment_type_ids ?? null, req.user.practice_id, existing.series_key);
       delete row.start_time;
       delete row.end_time;
     }

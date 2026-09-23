@@ -164,3 +164,31 @@ test('completing a visit completes its procedures; time off blocks booking; visi
   assert.match(csv.headers.get('content-type'), /text\/csv/);
   assert.match(await csv.text(), /provider\.exception/);
 });
+
+test('block scheduling: reserved time only takes its appointment types; production goals', async () => {
+  const { api, provider, patient } = await h.practice();
+  const crown = (await api.post('/appointment-types', { name: 'Crown prep', duration: 90 })).data;
+  const hyg = (await api.post('/appointment-types', { name: 'Cleaning', duration: 60 })).data;
+  const day = '2031-03-03'; // Monday
+  assert.equal((await api.post('/blockouts', { provider_id: provider.id, start_time: `${day} 08:00`, end_time: `${day} 11:00`, reason: 'Crown block', kind: 'reserved' })).status, 400, 'needs types');
+  assert.equal((await api.post('/blockouts', { provider_id: provider.id, start_time: `${day} 08:00`, end_time: `${day} 11:00`, kind: 'nope' })).status, 400);
+  const blk = await api.post('/blockouts', { provider_id: provider.id, start_time: `${day} 08:00`, end_time: `${day} 11:00`, reason: 'Crown block', kind: 'reserved', appointment_type_ids: [crown.id] });
+  assert.equal(blk.status, 201);
+
+  const slotsFor = async (t) => (await api.get(`/availability?date=${day}&provider_id=${provider.id}&duration=60${t ? `&appointment_type_id=${t}` : ''}`)).data.slots;
+  assert.ok(!(await slotsFor(null)).includes(`${day} 08:00`), 'plain search skips the block');
+  assert.ok(!(await slotsFor(hyg.id)).includes(`${day} 08:00`));
+  assert.ok((await slotsFor(crown.id)).includes(`${day} 08:00`), 'the reserved type can use it');
+
+  const book = (t) => api.post('/appointments', { patient_id: patient.id, provider_id: provider.id, start_time: `${day} 08:00`, end_time: `${day} 09:30`, appointment_type_id: t });
+  assert.equal((await book(hyg.id)).status, 409);
+  const ok = await book(crown.id);
+  assert.equal(ok.status, 201);
+
+  // Daily goal vs scheduled production.
+  await api.put(`/providers/${provider.id}`, { daily_goal: 300000 });
+  assert.equal((await api.post(`/patients/${patient.id}/procedures`, { code: 'D2740', tooth: '3', provider_id: provider.id, appointment_id: ok.data.id, fee: 120000 })).status, 201);
+  const prod = (await api.get(`/schedule/production?from=${day}&to=${day}`)).data;
+  assert.equal(prod.goals[provider.id], 300000);
+  assert.equal(prod.rows.find((r) => r.provider_id === provider.id && r.date === day).scheduled, 120000);
+});

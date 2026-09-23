@@ -121,7 +121,7 @@ The "OD / Curve" column shows which competitor has the feature: ✓ = has it, ~ 
 | # | Feature | Why | OD / Curve | Pri | Size |
 |---|---|---|---|---|---|
 | 32 | ✅ **Waitlist** for patients without appointments, with preferred days and times, auto-matching when a slot opens, and a "text the first 5" blast. | Fills cancellations; high ROI. | ✓ / ✓ | P1 | M |
-| 33 | **Schedule templates / block scheduling.** Reserve blocks by appointment type ("crowns 8–10"), with per-provider daily production goals. | How productive offices run. | ✓ / ✓ | P2 | M |
+| 33 | ✅ **Schedule templates / block scheduling.** _(Done: blocked vs reserved time for chosen visit types, honoured by staff booking, online booking and the API; repeating blocks; per-provider daily goal against scheduled production on the calendar.)_ Reserve blocks by appointment type ("crowns 8–10"), with per-provider daily production goals. | How productive offices run. | ✓ / ✓ | P2 | M |
 | 34 | **Pinboard / clipboard.** Drag an appointment off the schedule and drop it elsewhere or on another day. | Open Dental staff live on it. | ✓ / ~ | P2 | S |
 | 35 | ✅ **Multi-step reminders** (e.g. 2 weeks, 2 days and same day; text and email) with confirmation levels. | No-show reduction. | ✓ / ✓ | P1 | M |
 | 36 | ✅ **Recall types:** configurable (prophy, perio, BWX, FMX, pano, custom), with automated multi-touch recall sequences. | Hygiene revenue. | ✓ / ✓ | P1 | M |

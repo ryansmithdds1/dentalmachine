@@ -130,7 +130,8 @@ export default function apiV1Routes({ db }) {
       ? await db.all('SELECT id, name FROM providers WHERE id = ? AND practice_id = ? AND active = 1', Number(req.query.provider_id), pid(req))
       : await db.all('SELECT id, name FROM providers WHERE practice_id = ? AND active = 1 ORDER BY id', pid(req));
     const out = [];
-    for (const p of providers) for (const s of await openSlots(db, pid(req), p.id, req.query.date, { duration, step: 15 })) out.push({ provider_id: p.id, start_time: s });
+    const typeId = req.query.appointment_type_id ? Number(req.query.appointment_type_id) : null;
+    for (const p of providers) for (const s of await openSlots(db, pid(req), p.id, req.query.date, { duration, step: 15, typeId })) out.push({ provider_id: p.id, start_time: s });
     res.json({ data: out.sort((a, b) => a.start_time.localeCompare(b.start_time)) });
   });
 

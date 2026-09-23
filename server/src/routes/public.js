@@ -77,7 +77,7 @@ export default function publicRoutes({ db, storage, payments, messenger, config 
       .filter((pv) => req.query.provider_id || !reason.provider_type || pv.type === reason.provider_type || !all.some((x) => x.type === reason.provider_type));
     const slotsOn = async (d) => (await mapSeq(
       providers,
-      async (pv) => (await openSlots(db, p.id, pv.id, d, { duration, step: 30, after: now })).map((s) => ({ start: s, provider_id: pv.id, provider_name: pv.name }))
+      async (pv) => (await openSlots(db, p.id, pv.id, d, { duration, step: 30, after: now, typeId: reason.type_id })).map((s) => ({ start: s, provider_id: pv.id, provider_name: pv.name }))
     )).flat()
       .sort((x, y) => x.start.localeCompare(y.start));
     const slots = await slotsOn(date);
@@ -107,7 +107,7 @@ export default function publicRoutes({ db, storage, payments, messenger, config 
     if (start <= (await practiceNow(db, p.id))) throw new HttpError(400, 'Please choose a future time');
     const providerId = Number(b.provider_id);
     if (!(await publicProviders(p.id)).some((pv) => pv.id === providerId)) throw new HttpError(400, 'Choose a provider');
-    const free = await openSlots(db, p.id, providerId, start.slice(0, 10), { duration: reason.duration, step: 30 });
+    const free = await openSlots(db, p.id, providerId, start.slice(0, 10), { duration: reason.duration, step: 30, typeId: reason.type_id });
     if (!free.includes(start)) throw new HttpError(409, 'That time was just taken. Please pick another.');
     const deposit = reason.deposit > 0 ? reason.deposit : 0;
     const clip = (v, n) => (v ? String(v).trim().slice(0, n) || null : null);

@@ -289,7 +289,11 @@ export default function Schedule() {
       return providers.map((p) => ({
         ...base, key: `p${p.id}`, label: p.name, color: p.color, assign: { provider_id: p.id }, showProvider: false,
         hours: data.provider_hours?.[p.id]?.[date] ?? base.hours,
-        sub: short(appts.filter((a) => a.provider_id === p.id).reduce((s, a) => s + a.production, 0)),
+        ...(() => {
+          const prod = appts.filter((a) => a.provider_id === p.id && !['cancelled', 'no_show'].includes(a.status)).reduce((s, a) => s + a.production, 0);
+          if (!p.daily_goal) return { sub: short(prod) };
+          return { sub: `${short(prod)} of ${short(p.daily_goal)} goal`, subClass: prod >= p.daily_goal ? 'goal-met' : 'goal-short' };
+        })(),
         accepts: (a) => a.start_time.startsWith(date) && a.provider_id === p.id,
         blockouts: blockouts.filter((b) => onDate(b, date) && (officeWide(b) || b.provider_id === p.id)),
       }));

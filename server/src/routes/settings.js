@@ -223,7 +223,7 @@ export default function settingsRoutes({ db, secret, config = {} }) {
 
   resource(r, db, {
     path: 'providers', table: 'providers', required: ['name'],
-    fields: ['name', 'type', 'npi', 'license_number', 'dea_number', 'erx_user_id', 'color', 'active', 'user_id', 'working_hours'],
+    fields: ['name', 'type', 'npi', 'license_number', 'dea_number', 'erx_user_id', 'color', 'active', 'user_id', 'working_hours', 'daily_goal'],
     validate: async (row, req) => {
       if (row.working_hours != null) row.working_hours = JSON.stringify(validateWorkingHours(typeof row.working_hours === 'string' ? JSON.parse(row.working_hours) : row.working_hours));
       requireOneOf(row.type, ['dentist', 'hygienist', 'specialist'], 'type');

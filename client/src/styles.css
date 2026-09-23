@@ -627,3 +627,7 @@ a.button.primary { background: var(--primary); color: #fff; }
 .mount-slot img { width: 100%; height: 100%; object-fit: cover; }
 .mount-clear { position: absolute; top: 2px; right: 2px; padding: 0 5px; font-size: 10px; line-height: 16px; background: rgba(0,0,0,.6); color: #fff; border: none; border-radius: 3px; display: none; }
 .mount-slot:hover .mount-clear { display: block; }
+.cal-block.reserved { background: repeating-linear-gradient(135deg, rgba(14, 165, 233, 0.16) 0 6px, rgba(14, 165, 233, 0.06) 6px 12px); border-color: #7dd3fc; }
+.cal-block.reserved span { color: #0369a1; }
+.cal-col-sub.goal-met { color: #15803d; font-weight: 600; }
+.cal-col-sub.goal-short { color: #b45309; }
