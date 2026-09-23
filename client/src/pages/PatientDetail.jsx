@@ -18,6 +18,7 @@ import CommsTab from '../components/patient/CommsTab.jsx';
 import FamilyTab from '../components/patient/FamilyTab.jsx';
 import RxTab from '../components/patient/RxTab.jsx';
 import OrthoTab from '../components/patient/OrthoTab.jsx';
+import RiskTab from '../components/patient/RiskTab.jsx';
 import { LabCaseForm, TaskForm, WaitlistForm, LAB_STATUSES } from '../components/OfficeForms.jsx';
 import { api, download } from '../api.js';
 import { CustomFieldValues, MergeDialog } from '../components/Switching.jsx';
@@ -59,6 +60,7 @@ export default function PatientDetail() {
     ['chart', 'Chart', can('clinical:read')],
     ['treatment', 'Treatment plans', can('clinical:read')],
     ['perio', 'Perio', can('clinical:read')],
+    ['risk', 'Risk & education', can('clinical:read')],
     ['notes', 'Clinical notes', can('clinical:read')],
     ['rx', 'Rx', can('clinical:read')],
     ['ortho', 'Ortho', can('clinical:read')],
@@ -117,6 +119,7 @@ export default function PatientDetail() {
       {tab === 'chart' && <ChartTab patient={p} onChange={reload} />}
       {tab === 'treatment' && <TreatmentTab patient={p} onChange={reload} />}
       {tab === 'perio' && <PerioTab patient={p} />}
+      {tab === 'risk' && <RiskTab patient={p} />}
       {tab === 'notes' && <NotesTab patient={p} />}
       {tab === 'rx' && <RxTab patient={p} onChange={reload} />}
       {tab === 'ortho' && <OrthoTab patient={p} onChange={reload} />}

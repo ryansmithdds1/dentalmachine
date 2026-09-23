@@ -1703,6 +1703,28 @@ CREATE TABLE IF NOT EXISTS tasks (
   completed_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS risk_assessments (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  kind TEXT NOT NULL CHECK (kind IN ('caries','perio')),
+  answers TEXT NOT NULL,
+  level TEXT NOT NULL,
+  result TEXT NOT NULL,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS education_articles (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  slug TEXT NOT NULL,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  codes TEXT NOT NULL DEFAULT '[]',
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (practice_id, slug)
+);
 CREATE TABLE IF NOT EXISTS organizations (
   id INTEGER PRIMARY KEY,
   name TEXT NOT NULL,
