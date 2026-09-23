@@ -161,11 +161,11 @@ export async function runReminders(db, messenger, { appUrl, now = new Date() } =
       if (status !== 'failed') await db.run("UPDATE appointments SET reminder_sent_at = COALESCE(reminder_sent_at, datetime('now')) WHERE id = ?", a.id);
     }
   }
-  return sent + (await runReviewRequests(db, messenger, { now }));
+  return sent + (await runReviewRequests(db, messenger, { now, appUrl }));
 }
 
 // After a completed visit, ask happy patients for an online review (at most once every 6 months).
-export async function runReviewRequests(db, messenger, { now = new Date() } = {}) {
+export async function runReviewRequests(db, messenger, { now = new Date(), appUrl = '' } = {}) {
   let sent = 0;
   for (const practice of await db.all("SELECT * FROM practices WHERE review_requests = 1 AND review_url IS NOT NULL AND review_url != ''")) {
     const local = localNow(practice.timezone, now);
@@ -181,10 +181,14 @@ export async function runReviewRequests(db, messenger, { now = new Date() } = {}
       const patient = await db.get('SELECT * FROM patients WHERE id = ?', patientId);
       const target = preferredChannel(patient);
       if (recent || !target) continue;
+      // The link asks how the visit went first: happy patients go on to the public review page,
+      // unhappy ones can tell the office privately (review routing).
+      const { token, hash } = newToken();
+      await insert(db, 'review_feedback', { practice_id: practice.id, patient_id: patientId, appointment_id: id, token_hash: hash });
       const msg = await sendMessage(db, messenger, {
         practiceId: practice.id, patientId, appointmentId: id, kind: 'review', channel: target.channel, to: target.to,
         subject: `Thanks for visiting ${practice.name}`,
-        body: renderTemplate(templates.review, { first_name: patient.first_name, practice: practice.name, link: practice.review_url, phone: practice.phone || '' }),
+        body: renderTemplate(templates.review, { first_name: patient.first_name, practice: practice.name, link: `${appUrl}/r/${token}`, phone: practice.phone || '' }),
       });
       if (msg.status === 'sent') sent++;
     }

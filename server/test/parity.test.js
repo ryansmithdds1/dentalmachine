@@ -212,7 +212,7 @@ test('analytics KPIs, statement batch, recall campaign, review requests and temp
   // Run as of late evening that day (the job only sends for visits that have ended).
   const evening = { now: new Date(`${d}T22:00:00-04:00`) };
   assert.equal(await runReviewRequests(db, messenger, evening), 1);
-  assert.match(sent.at(-1).body, /g\.page\/r\/example\/review/);
+  assert.match(sent.at(-1).body, /\/r\/[\w-]{20,}/); // the "how did we do?" page, which routes happy patients on to the review link
   assert.equal(await runReviewRequests(db, messenger, evening), 0);
 });
 

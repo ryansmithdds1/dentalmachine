@@ -73,12 +73,13 @@ test('renewals charge the card; a decline makes it past due until paid', async (
   const bad = (await api.post(`/patients/${patient.id}/payment-methods`, { number: '4000000000000002' })).data;
   await api.put(`/memberships/${membership.id}`, { payment_method_id: bad.id });
   await h.db.run('UPDATE memberships SET next_bill_date = ? WHERE id = ?', '2019-06-01', membership.id);
-  const declined = await runMembershipBilling(h.db, h.app.locals.payments, { membershipId: membership.id });
+  const declined = await runMembershipBilling(h.db, h.app.locals.payments, { membershipId: membership.id, messenger: h.messenger });
   assert.equal(declined[0].declined, true);
   let m = (await api.get(`/patients/${patient.id}/membership`)).data.current;
   assert.equal(m.status, 'past_due');
   assert.match(m.billing_message, /declined/);
   assert.equal(m.benefits_active, true); // benefits continue while the office sorts it out
+  assert.ok((await api.get(`/tasks?patient_id=${patient.id}`)).data.some((t) => /Membership payment declined/.test(t.title)));
   assert.equal((await api.get(`/patients/${patient.id}`)).data.balance, PLAN.price);
   assert.equal((await runMembershipBilling(h.db, h.app.locals.payments, { membershipId: membership.id })).length, 0); // once a day
   // Paid at the desk: the fee stays on the ledger, the membership moves on.

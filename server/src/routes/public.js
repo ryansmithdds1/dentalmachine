@@ -141,6 +141,52 @@ export default function publicRoutes({ db, storage }) {
     res.json(apptView(await apptForToken(req.params.token)));
   });
 
+  // ---- Review routing ----
+  // "How did we do?": 4-5 stars (or the practice's threshold) are invited to post a public review;
+  // lower ratings go privately to the office, which gets a task to follow up.
+  const reviewFor = async (token) => {
+    const f = await db.get(
+      `SELECT rf.*, p.first_name, p.last_name, pr.name AS practice_name, pr.review_url, pr.review_threshold, pr.phone AS practice_phone
+       FROM review_feedback rf JOIN patients p ON p.id = rf.patient_id JOIN practices pr ON pr.id = rf.practice_id WHERE rf.token_hash = ?`, hashToken(token),
+    );
+    if (!f) throw new HttpError(404, 'This link is not valid');
+    if (new Date(`${f.sent_at.replace(' ', 'T')}Z`) < new Date(Date.now() - 30 * 86400_000)) throw new HttpError(410, 'This link has expired. Thank you anyway!');
+    return f;
+  };
+  const reviewView = (f) => ({
+    practice_name: f.practice_name, first_name: f.first_name, rating: f.rating, comment: f.comment, practice_phone: f.practice_phone,
+    happy: f.rating != null && f.rating >= (f.review_threshold || 4), review_link: !!f.review_url,
+  });
+  r.get('/review/:token', reader, async (req, res) => res.json(reviewView(await reviewFor(req.params.token))));
+  r.post('/review/:token', limiter, async (req, res) => {
+    const f = await reviewFor(req.params.token);
+    const rating = req.body?.rating != null ? Number(req.body.rating) : f.rating;
+    if (!Number.isInteger(rating) || rating < 1 || rating > 5) throw new HttpError(400, 'Choose 1 to 5 stars');
+    const comment = req.body?.comment != null ? String(req.body.comment).trim().slice(0, 2000) || null : f.comment;
+    await db.tx(async () => {
+      await db.run("UPDATE review_feedback SET rating = ?, comment = ?, responded_at = COALESCE(responded_at, datetime('now')) WHERE id = ?", rating, comment, f.id);
+      // Unhappy patients get a call back: one task per answer, updated if they add more.
+      if (rating < (f.review_threshold || 4)) {
+        const title = `Unhappy after visit (${rating}★): ${f.first_name} ${f.last_name}${comment ? ` — “${comment.slice(0, 140)}”` : ''}`;
+        if (f.task_id) await db.run('UPDATE tasks SET title = ? WHERE id = ?', title, f.task_id);
+        else {
+          const today = new Date().toISOString().slice(0, 10);
+          const taskId = await insert(db, 'tasks', { practice_id: f.practice_id, patient_id: f.patient_id, priority: 'high', due_date: today, title });
+          await db.run('UPDATE review_feedback SET task_id = ? WHERE id = ?', taskId, f.id);
+        }
+      }
+    });
+    await logPublic(req, f.practice_id, 'review.feedback', 'review_feedback', f.id, { rating });
+    res.json(reviewView(await reviewFor(req.params.token)));
+  });
+  // The public review page, via us so the office can see who went on to leave one.
+  r.get('/review/:token/go', reader, async (req, res) => {
+    const f = await reviewFor(req.params.token);
+    if (!f.review_url || f.rating == null || f.rating < (f.review_threshold || 4)) throw new HttpError(404, 'No review page');
+    await db.run('UPDATE review_feedback SET went_to_review = 1 WHERE id = ?', f.id);
+    res.redirect(302, f.review_url);
+  });
+
   // ---- Patient forms ----
   // A link opens a packet: the health history and/or practice forms sent together.
   const packetForToken = async (token) => {

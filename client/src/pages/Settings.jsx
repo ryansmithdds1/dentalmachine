@@ -802,12 +802,6 @@ function FeeScheduleEditor({ fs, codes, carriers, admin, onSaved }) {
   );
 }
 
-const TEMPLATE_INFO = {
-  reminder: ['Appointment reminder', 'Sent before each appointment. Must include {link} (the confirm page).'],
-  booking_confirmation: ['Booking confirmation', 'Sent when a patient books online or the office books them.'],
-  recall: ['Recall reminder', 'Sent from the recall list and recall campaigns.'],
-  review: ['Review request', 'Sent after a completed visit when review requests are on. Must include {link}.'],
-};
 
 // Recall types: which procedures reset each one and how often it comes due.
 function RecallTypes() {
@@ -866,29 +860,29 @@ function RecallTypes() {
 // Reminders, recall automation, message templates and the Google review request program.
 function Messaging() {
   const { data: practice } = useApi('/practice');
-  const { data: defaults } = useApi('/message-templates/defaults');
+  const { data: meta } = useApi('/message-templates/meta');
   const [form, setForm] = useState(null);
   const [saved, setSaved] = useState(false);
   const { refresh } = useAuth();
   const { submit, busy, error } = useSubmit(async () => {
     await api.put('/practice', {
-      review_url: form.review_url || null, review_requests: form.review_requests, message_templates: form.templates,
+      review_url: form.review_url || null, review_requests: form.review_requests, review_threshold: Number(form.review_threshold), message_templates: form.templates,
       reminder_steps: form.reminder_steps.map((s) => ({ ...s, hours: Number(s.hours) })), recall_auto: form.recall_auto, recall_steps: form.recall_steps.map((s) => ({ ...s, days: Number(s.days) })),
     });
     setSaved(true);
     refresh();
   });
-  if (!practice || !defaults) return null;
+  if (!practice || !meta) return null;
   const cur = form || {
-    review_url: practice.review_url || '', review_requests: !!practice.review_requests, templates: JSON.parse(practice.message_templates || '{}'),
+    review_url: practice.review_url || '', review_requests: !!practice.review_requests, review_threshold: practice.review_threshold || 4, templates: JSON.parse(practice.message_templates || '{}'),
     reminder_steps: practice.reminder_steps ? JSON.parse(practice.reminder_steps) : (practice.reminder_hours > 0 ? [{ hours: practice.reminder_hours, channel: 'auto', confirmed: false }] : []),
     recall_auto: !!practice.recall_auto,
     recall_steps: practice.recall_steps ? JSON.parse(practice.recall_steps) : [{ days: -14, channel: 'auto' }, { days: 0, channel: 'auto' }, { days: 30, channel: 'auto' }, { days: 90, channel: 'auto' }],
   };
   const setStep = (list, i, patch) => change({ [list]: cur[list].map((s, j) => (j === i ? { ...s, ...patch } : s)) });
   const change = (patch) => { setSaved(false); setForm({ ...cur, ...patch }); };
-  const sample = { first_name: 'Maria', practice: practice.name, when: 'Tue, Oct 6 at 9:00 AM', provider: 'Dr. Chen', link: 'https://…/c/abc123', phone: practice.phone || '' };
-  const render = (t) => t.replace(/\{(\w+)\}/g, (_, k) => sample[k] ?? '');
+  const sample = { first_name: 'Maria', practice: practice.name, when: 'Tue, Oct 6 at 9:00 AM', provider: 'Dr. Chen', link: 'https://…/c/abc123', phone: practice.phone || '(555) 555-0100', forms: '3 forms', amount: '$125.00', reason: 'Card declined (insufficient funds)' };
+  const render = (t, extra = {}) => t.replace(/\{(\w+)\}/g, (_, k) => extra[k] ?? sample[k] ?? '');
   return (
     <>
       <div className="card">
@@ -952,22 +946,33 @@ function Messaging() {
       </div>
       <div className="card">
         <h2>Online reviews</h2>
-        <p className="muted" style={{ fontSize: 13 }}>After a completed visit, patients get one friendly text asking for a review (at most once every 6 months). More 5-star reviews means more new patients.</p>
+        <p className="muted" style={{ fontSize: 13 }}>After a completed visit, patients get one text (at most every 6 months) asking how the visit went. Happy patients are invited to post a review on your review page; anyone less happy can tell you privately, and the office gets a task to call them back.</p>
         <div className="form-grid">
           <label className="full">Review link (Google, Yelp…)<input value={cur.review_url} placeholder="https://g.page/r/your-practice/review" onChange={(e) => change({ review_url: e.target.value })} /></label>
+          <label>
+            Invite to post a review at
+            <select value={cur.review_threshold} onChange={(e) => change({ review_threshold: Number(e.target.value) })}>
+              <option value={5}>5 stars only</option><option value={4}>4 stars and up</option><option value={3}>3 stars and up</option>
+            </select>
+          </label>
           <label className="checkbox full"><input type="checkbox" checked={cur.review_requests} onChange={(e) => change({ review_requests: e.target.checked })} /> Automatically send review requests after visits</label>
         </div>
       </div>
       <div className="card">
         <h2>Message templates</h2>
-        <p className="muted" style={{ fontSize: 13 }}>Placeholders: <code>{'{first_name}'}</code> <code>{'{practice}'}</code> <code>{'{when}'}</code> <code>{'{provider}'}</code> <code>{'{link}'}</code> <code>{'{phone}'}</code>. Leave blank to use the default.</p>
-        {Object.entries(TEMPLATE_INFO).map(([k, [title, help]]) => {
+        <p className="muted" style={{ fontSize: 13 }}>Every automatic message, in your own words. Leave one blank to use the standard wording. Texts over 160 characters are sent in parts.</p>
+        {Object.entries(meta).map(([k, m]) => {
           const value = cur.templates[k] ?? '';
+          const out = render(value || m.text, k === 'booking_declined' ? { reason: 'We are fully booked that morning.' } : {});
           return (
             <div key={k} className="template-row">
-              <label>{title}<textarea rows={2} value={value} placeholder={defaults[k]} onChange={(e) => change({ templates: { ...cur.templates, [k]: e.target.value } })} /></label>
-              <div className="muted" style={{ fontSize: 12 }}>{help}</div>
-              <div className="sms-preview">{render(value || defaults[k])}</div>
+              <label>{m.label}<textarea rows={2} value={value} placeholder={m.text} onChange={(e) => change({ templates: { ...cur.templates, [k]: e.target.value } })} /></label>
+              <div className="muted" style={{ fontSize: 12 }}>
+                {m.help} Uses {m.vars.map((v) => <code key={v} style={{ cursor: 'pointer' }} title="Add to the message" onClick={() => change({ templates: { ...cur.templates, [k]: `${value || m.text} {${v}}` } })}>{`{${v}}`}</code>).reduce((a, b) => [a, ' ', b])}
+                {m.required.length > 0 && <> · must include {m.required.map((v) => `{${v}}`).join(', ')}</>}
+              </div>
+              <div className="sms-preview">{out}<span className="muted" style={{ float: 'right', fontSize: 11 }}>{out.length} chars{out.length > 160 ? ` · ${Math.ceil(out.length / 153)} texts` : ''}</span></div>
+              {value && <button type="button" className="small" onClick={() => change({ templates: { ...cur.templates, [k]: '' } })}>Use standard wording</button>}
             </div>
           );
         })}

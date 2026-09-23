@@ -121,7 +121,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(importRoutes({ db }));
   api.use(backupRoutes({ db, storage, config }));
   api.use(formRoutes({ db, messenger, config }));
-  api.use(membershipRoutes({ db, payments }));
+  api.use(membershipRoutes({ db, payments, messenger }));
   api.use(billingRoutes({ db, payments }));
   api.use(insuranceRoutes({ db }));
   api.use(settingsRoutes({ db, secret, config }));

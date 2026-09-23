@@ -7,7 +7,7 @@ const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const age = (dob, on) => (dob ? Math.floor((new Date(on) - new Date(dob)) / (365.25 * 86400_000)) : null);
 
 // Membership plans and the patients on them.
-export default function membershipRoutes({ db, payments }) {
+export default function membershipRoutes({ db, payments, messenger }) {
   const r = Router();
   const admin = (req) => { if (req.user.role !== 'admin') throw new HttpError(403, 'Only administrators can change membership plans'); };
   const planView = (p) => ({ ...p, included: JSON.parse(p.included || '[]') });
@@ -105,7 +105,7 @@ export default function membershipRoutes({ db, payments }) {
     });
     await audit(db, req, 'membership.create', 'memberships', id, { plan: plan.name });
     // The first period is billed (and the card charged) right away.
-    const billing = start <= today ? await runMembershipBilling(db, payments, { membershipId: id }) : [];
+    const billing = start <= today ? await runMembershipBilling(db, payments, { membershipId: id, messenger }) : [];
     res.status(201).json({ ...(await detail(await db.get('SELECT * FROM memberships WHERE id = ?', id))), billing });
   });
 
@@ -126,7 +126,7 @@ export default function membershipRoutes({ db, payments }) {
   r.post('/memberships/:mid/bill', requirePermission('billing:write'), async (req, res) => {
     const m = await membershipOr404(req);
     if (m.status === 'past_due') await db.run('UPDATE memberships SET billing_message = NULL WHERE id = ?', m.id);
-    const billing = await runMembershipBilling(db, payments, { membershipId: m.id });
+    const billing = await runMembershipBilling(db, payments, { membershipId: m.id, messenger });
     await audit(db, req, 'membership.bill', 'memberships', m.id, { periods: billing.length });
     res.json({ ...(await detail(await db.get('SELECT * FROM memberships WHERE id = ?', m.id))), billing });
   });

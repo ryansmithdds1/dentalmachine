@@ -660,6 +660,20 @@ CREATE TABLE IF NOT EXISTS portal_codes (
 CREATE INDEX IF NOT EXISTS idx_portal_codes ON portal_codes(practice_id, contact);
 
 -- Patients without an appointment who want one (or an earlier one), and when they can come.
+-- After-visit "how did we do?" answers (review routing): happy patients go on to the public review page.
+CREATE TABLE IF NOT EXISTS review_feedback (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  appointment_id INTEGER REFERENCES appointments(id),
+  token_hash TEXT NOT NULL UNIQUE,
+  rating INTEGER,
+  comment TEXT,
+  went_to_review INTEGER NOT NULL DEFAULT 0,
+  task_id INTEGER,
+  sent_at TEXT NOT NULL DEFAULT (datetime('now')),
+  responded_at TEXT
+);
 -- In-house membership plans and the patients enrolled in them.
 CREATE TABLE IF NOT EXISTS membership_plans (
   id INTEGER PRIMARY KEY,
@@ -1081,6 +1095,7 @@ const COLUMNS = [
   ['practices', 'custom_fields', 'TEXT'],
   ['patients', 'custom', 'TEXT'],
   ['ledger_entries', 'membership_id', 'INTEGER REFERENCES memberships(id)'],
+  ['practices', 'review_threshold', 'INTEGER NOT NULL DEFAULT 4'],
   ['form_requests', 'template_id', 'INTEGER REFERENCES form_templates(id)'],
   ['form_requests', 'appointment_id', 'INTEGER REFERENCES appointments(id)'],
   ['form_requests', 'packet_id', 'INTEGER'],

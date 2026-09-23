@@ -5,7 +5,7 @@ import { sendMessage, sendAppointmentReminder, runReminders, preferredChannel } 
 import { runRecallSequences } from '../recalls.js';
 import { validateAppt } from './schedule.js';
 import { publish } from '../events.js';
-import { templatesFor, renderTemplate } from '../templates.js';
+import { templatesFor, renderTemplate, messageText } from '../templates.js';
 import { createPacket, runFormSends } from '../formtemplates.js';
 
 const requireAdmin = (req, _res, next) => (req.user.role === 'admin' ? next() : next(new HttpError(403, 'Administrator access required')));
@@ -83,6 +83,31 @@ export default function engagementRoutes({ db, messenger, config }) {
     res.json({ sent });
   });
 
+  // ---- Review requests and patient feedback ----
+  r.get('/reports/reviews', requirePermission('reports:read'), async (req, res) => {
+    const pid = req.user.practice_id;
+    const DATE = /^\d{4}-\d{2}-\d{2}$/;
+    const to = DATE.test(req.query.to || '') ? req.query.to : new Date().toISOString().slice(0, 10);
+    const from = DATE.test(req.query.from || '') ? req.query.from : `${to.slice(0, 7)}-01`;
+    const rows = await db.all(
+      `SELECT rf.id, rf.patient_id, rf.rating, rf.comment, rf.went_to_review, rf.sent_at, rf.responded_at, rf.task_id, p.first_name, p.last_name,
+         t.status AS task_status, pv.name AS provider_name
+       FROM review_feedback rf JOIN patients p ON p.id = rf.patient_id LEFT JOIN tasks t ON t.id = rf.task_id
+       LEFT JOIN appointments a ON a.id = rf.appointment_id LEFT JOIN providers pv ON pv.id = a.provider_id
+       WHERE rf.practice_id = ? AND substr(rf.sent_at, 1, 10) BETWEEN ? AND ? ORDER BY rf.id DESC`, pid, from, to,
+    );
+    const rated = rows.filter((x) => x.rating != null);
+    const threshold = (await db.get('SELECT review_threshold FROM practices WHERE id = ?', pid)).review_threshold || 4;
+    res.json({
+      from, to, threshold, sent: rows.length, responded: rated.length,
+      average: rated.length ? Math.round((rated.reduce((s, x) => s + x.rating, 0) / rated.length) * 10) / 10 : null,
+      happy: rated.filter((x) => x.rating >= threshold).length, unhappy: rated.filter((x) => x.rating < threshold).length,
+      went_to_review: rows.filter((x) => x.went_to_review).length,
+      by_stars: [5, 4, 3, 2, 1].map((n) => ({ stars: n, count: rated.filter((x) => x.rating === n).length })),
+      feedback: rows.filter((x) => x.rating != null && (x.rating < threshold || x.comment)),
+    });
+  });
+
   // ---- Online booking queue ----
   r.get('/booking-requests', requirePermission('schedule:read'), async (req, res) => {
     const status = req.query.status || 'pending';
@@ -157,7 +182,7 @@ export default function engagementRoutes({ db, messenger, config }) {
         message = await sendMessage(db, messenger, {
           practiceId: req.user.practice_id, userId: req.user.id, kind: 'booking_declined', channel: target.channel, to: target.to,
           subject: `Your appointment request at ${practice.name}`,
-          body: `Hi ${b.first_name}, we couldn't confirm your requested time (${friendlyDateTime(b.requested_start)}) at ${practice.name}. ${req.body?.reason ? `${req.body.reason} ` : ''}Please call us at ${practice.phone || 'the office'} to find another time.`,
+          body: await messageText(db, req.user.practice_id, 'booking_declined', { first_name: b.first_name, when: friendlyDateTime(b.requested_start), reason: req.body?.reason ? String(req.body.reason).slice(0, 300) : '' }),
         });
       }
     }

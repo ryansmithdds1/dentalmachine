@@ -45,7 +45,7 @@ if (ch?.batch && process.env.CLEARINGHOUSE_POLL !== 'off') {
 }
 // Membership fees: each period is posted (and the card on file charged) on its billing date; checked hourly.
 if (process.env.MEMBERSHIP_BILLING !== 'off') {
-  const bill = () => runExclusive('memberships', 30 * 60 * 1000, () => runMembershipBilling(db, app.locals.payments))
+  const bill = () => runExclusive('memberships', 30 * 60 * 1000, () => runMembershipBilling(db, app.locals.payments, { messenger }))
     .then((r) => r?.length && console.log(`Memberships: ${r.filter((x) => x.charged).length} charged, ${r.filter((x) => x.declined).length} declined, ${r.length} billed`))
     .catch((err) => console.error('Membership billing failed:', err.message));
   setInterval(bill, 60 * 60 * 1000).unref();

@@ -1,4 +1,5 @@
 import express, { Router } from 'express';
+import { messageText } from '../templates.js';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { requirePermission, HttpError } from '../auth.js';
 import { findOr404, insert, audit, toCents, practiceNow } from '../util.js';
@@ -36,7 +37,7 @@ export default function paymentRoutes({ db, config, messenger, payments, mailer 
       message = await sendMessage(db, messenger, {
         practiceId: req.user.practice_id, patientId: g.id, userId: req.user.id, kind: 'payment_request', channel: target.channel, to: target.to,
         subject: `Save a card for your payment plan — ${practice.name}`,
-        body: `Hi ${g.first_name}, ${practice.name} can charge your payment plan automatically. Add your card securely here: ${url}`,
+        body: await messageText(db, req.user.practice_id, 'card_setup', { first_name: g.first_name, link: url }),
       });
     }
     await audit(db, req, 'card.setup_link', 'patients', g.id);
@@ -110,7 +111,7 @@ export default function paymentRoutes({ db, config, messenger, payments, mailer 
         message = await sendMessage(db, messenger, {
           practiceId: req.user.practice_id, patientId: patient.id, userId: req.user.id, kind: 'payment_request', channel: target.channel, to: target.to,
           subject: `Payment request from ${practice.name}`,
-          body: `Hi ${patient.first_name}, you can pay your ${practice.name} balance of $${(amount / 100).toFixed(2)} securely online: ${session.url}`,
+          body: await messageText(db, req.user.practice_id, 'payment_link', { first_name: patient.first_name, amount, link: session.url }),
         });
       }
     }

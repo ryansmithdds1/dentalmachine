@@ -6,7 +6,7 @@ import { validateHours, validateWorkingHours } from '../hours.js';
 import { validateReminderSteps } from '../messaging.js';
 import { validateRecallSteps, recallTypes } from '../recalls.js';
 import { PROVIDERS, sealSecret } from '../sso.js';
-import { validateTemplates, DEFAULT_TEMPLATES } from '../templates.js';
+import { validateTemplates, DEFAULT_TEMPLATES, TEMPLATE_META } from '../templates.js';
 
 const ROLES = ['admin', 'dentist', 'hygienist', 'assistant', 'front_desk', 'billing'];
 const CATEGORIES = ['diagnostic', 'preventive', 'restorative', 'endodontics', 'periodontics', 'prosthodontics', 'oral_surgery', 'orthodontics', 'implants', 'adjunctive'];
@@ -72,10 +72,12 @@ export default function settingsRoutes({ db, secret, config = {} }) {
   });
 
   r.get('/message-templates/defaults', (_req, res) => res.json(DEFAULT_TEMPLATES));
+  r.get('/message-templates/meta', (_req, res) => res.json(TEMPLATE_META));
   r.put('/practice', requireAdmin, async (req, res) => {
-    const row = pick(req.body, ['name', 'address', 'city', 'state', 'zip', 'phone', 'email', 'tax_id', 'npi', 'timezone', 'slug', 'online_booking', 'reminder_hours', 'require_mfa', 'office_hours', 'daily_goal', 'sms_number', 'review_url', 'review_requests', 'idle_timeout_minutes', 'message_templates', 'hygiene_goal', 'portal_enabled', 'lock_date', 'adjustment_approval_limit', 'reminder_steps', 'recall_steps', 'recall_auto']);
+    const row = pick(req.body, ['name', 'address', 'city', 'state', 'zip', 'phone', 'email', 'tax_id', 'npi', 'timezone', 'slug', 'online_booking', 'reminder_hours', 'require_mfa', 'office_hours', 'daily_goal', 'sms_number', 'review_url', 'review_requests', 'review_threshold', 'idle_timeout_minutes', 'message_templates', 'hygiene_goal', 'portal_enabled', 'lock_date', 'adjustment_approval_limit', 'reminder_steps', 'recall_steps', 'recall_auto']);
     if (row.message_templates != null) row.message_templates = validateTemplates(row.message_templates);
     if (row.review_url && !/^https:\/\/\S+$/.test(row.review_url)) throw new HttpError(400, 'Review link must start with https://');
+    if (row.review_threshold != null && ![3, 4, 5].includes(Number(row.review_threshold))) throw new HttpError(400, 'review_threshold must be 3, 4 or 5 stars');
     if (row.idle_timeout_minutes != null) {
       row.idle_timeout_minutes = Number(row.idle_timeout_minutes);
       if (!Number.isInteger(row.idle_timeout_minutes) || row.idle_timeout_minutes < 5 || row.idle_timeout_minutes > 240) throw new HttpError(400, 'Automatic sign-out must be 5-240 minutes');

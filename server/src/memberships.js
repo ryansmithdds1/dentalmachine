@@ -1,5 +1,7 @@
 import { HttpError } from './auth.js';
 import { insert, practiceNow } from './util.js';
+import { preferredChannel, sendMessage } from './messaging.js';
+import { messageText } from './templates.js';
 
 // In-house membership plans for patients without insurance: a monthly or yearly fee, some services
 // included each membership year (cleanings, exams, x-rays), and a discount on everything else.
@@ -106,7 +108,7 @@ export async function memberSavings(db, patientId, items, date) {
 
 // ---- Billing ----
 // Posts the fee for one period and, with a card on file, charges it. Returns what happened.
-async function billPeriod(db, payments, m, today) {
+async function billPeriod(db, payments, m, today, messenger) {
   const periodEnd = addInterval(m.next_bill_date, m.interval);
   const label = `${m.plan_name} membership ${m.next_bill_date} to ${periodEnd}`;
   await db.tx(async () => {
@@ -137,6 +139,19 @@ async function billPeriod(db, payments, m, today) {
         result.charged = true;
       } else {
         await db.run("UPDATE memberships SET status = 'past_due', billing_failures = billing_failures + 1, billing_message = ? WHERE id = ?", `${out.reason} (${today})`, m.id);
+        // The office gets a task the first time; the patient gets a note asking them to update the card.
+        if (!m.billing_failures) {
+          const patient = await db.get('SELECT * FROM patients WHERE id = ?', m.patient_id);
+          await insert(db, 'tasks', { practice_id: m.practice_id, patient_id: m.patient_id, priority: 'high', due_date: today, title: `Membership payment declined: ${patient.first_name} ${patient.last_name} — ${out.reason}` });
+          const target = preferredChannel(patient);
+          if (target && messenger) {
+            await sendMessage(db, messenger, {
+              practiceId: m.practice_id, patientId: patient.id, kind: 'payment_request', channel: target.channel, to: target.to,
+              subject: `Membership payment didn't go through — ${practice.name}`,
+              body: await messageText(db, m.practice_id, 'card_declined', { first_name: patient.first_name, amount: m.price, reason: out.reason }),
+            }).catch(() => {});
+          }
+        }
         return { ...result, declined: true, reason: out.reason };
       }
     }
@@ -149,7 +164,7 @@ async function billPeriod(db, payments, m, today) {
 }
 
 // Bills every membership that's due (catching up at most a year of missed periods), once a day.
-export async function runMembershipBilling(db, payments, { membershipId = null } = {}) {
+export async function runMembershipBilling(db, payments, { membershipId = null, messenger = null } = {}) {
   const due = await db.all(
     `SELECT m.id, m.practice_id FROM memberships m WHERE m.status IN ('active','past_due')${membershipId ? ' AND m.id = ?' : ''}`,
     ...(membershipId ? [membershipId] : []),
@@ -169,7 +184,7 @@ export async function runMembershipBilling(db, payments, { membershipId = null }
         // A declined card is retried once a day, not every run.
         if (m.status === 'past_due' && (m.billing_message || '').endsWith(`(${today})`)) break;
         // The card is charged between two short transactions, never inside one.
-        const r = await billPeriod(db, payments, m, today);
+        const r = await billPeriod(db, payments, m, today, messenger);
         results.push(r);
         if (r.declined || r.pending) break;
       }

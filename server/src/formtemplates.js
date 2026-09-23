@@ -3,6 +3,7 @@ import { HttpError } from './auth.js';
 import { PdfDoc, dataUrlImage } from './pdf.js';
 import { insert, newToken, hashToken, practiceNow } from './util.js';
 import { preferredChannel, sendMessage } from './messaging.js';
+import { messageText } from './templates.js';
 
 // Practice-defined forms: consents, policies and intake questions, built from a list of fields.
 // A signed form is kept as answers + the exact fields it was signed against, and filed as a PDF.
@@ -258,7 +259,7 @@ export async function createPacket(db, messenger, { practiceId, patient, templat
     message = await sendMessage(db, messenger, {
       practiceId, patientId: patient.id, userId, appointmentId, kind: 'intake_form', channel: target.channel, to: target.to,
       subject: `Please complete your forms for ${practice.name}`,
-      body: `Hi ${patient.first_name}, please complete ${what} for ${practice.name} before your visit: ${url}`,
+      body: await messageText(db, practiceId, 'forms', { first_name: patient.first_name, forms: what, link: url }),
     });
   }
   return { id: ids[0], ids, url, expires_at: expires, message };

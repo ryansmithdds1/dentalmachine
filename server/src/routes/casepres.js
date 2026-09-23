@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { messageText } from '../templates.js';
 import { requirePermission, HttpError, rateLimit } from '../auth.js';
 import { pick, requireFields, insert, findOr404, audit, newToken, hashToken } from '../util.js';
 import { estimateCoverage, primaryPolicy } from '../services.js';
@@ -64,7 +65,7 @@ export default function casePresentationRoutes({ db, messenger, config, erx }) {
       message = await sendMessage(db, messenger, {
         practiceId: req.user.practice_id, patientId: patient.id, userId: req.user.id, kind: 'treatment_plan', channel: target.channel, to: target.to,
         subject: `Your treatment plan from ${practice.name}`,
-        body: `Hi ${patient.first_name}, here is the treatment plan we discussed at ${practice.name}, with your estimated costs. Review and sign here: ${url}`,
+        body: await messageText(db, req.user.practice_id, 'treatment_plan', { first_name: patient.first_name, link: url }),
       });
     }
     await audit(db, req, 'treatment_plan.present', 'treatment_plans', plan.id);
