@@ -133,7 +133,7 @@ export default function publicRoutes({ db, storage, payments, messenger, config 
       phone: clip(b.phone, 30), email: clip(b.email, 200),
       reason: reason.label, duration: visitLength, provider_id: providerId, requested_start: start,
       new_patient: b.new_patient === false ? 0 : 1, notes: clip(b.notes, 1000), ip: req.ip, language: b.language === 'es' ? 'es' : null, location_id: location?.id ?? null,
-      insurance_carrier: clip(b.insurance_carrier, 100), insurance_member_id: clip(b.insurance_member_id, 40), insurance_subscriber: clip(b.insurance_subscriber, 120),
+      referral_source: clip(b.referral_source, 100), insurance_carrier: clip(b.insurance_carrier, 100), insurance_member_id: clip(b.insurance_member_id, 40), insurance_subscriber: clip(b.insurance_subscriber, 120),
       ...(deposit ? { deposit_amount: deposit, deposit_status: 'awaiting', hold_until: new Date(Date.now() + 35 * 60_000).toISOString() } : {}),
     });
     await logPublic(req, p.id, 'booking.request', 'booking_requests', id);
@@ -295,7 +295,9 @@ export default function publicRoutes({ db, storage, payments, messenger, config 
       });
       // Contact details apply now; medical changes wait for a clinician to review them against the chart,
       // so a rushed "none" on a tablet can't erase an allergy the office recorded.
-      await update(db, 'patients', f.patient_id, f.practice_id, { ...contactUpdatesFromHistory(answers), updated_at: new Date().toISOString() });
+      // How they heard about the office fills in the chart's referral source if it's still blank.
+      const heard = answers.referral_source && !(await db.get('SELECT referral_source FROM patients WHERE id = ?', f.patient_id))?.referral_source ? { referral_source: answers.referral_source.slice(0, 100) } : {};
+      await update(db, 'patients', f.patient_id, f.practice_id, { ...contactUpdatesFromHistory(answers), ...heard, updated_at: new Date().toISOString() });
       await db.run("UPDATE form_requests SET status = 'completed', completed_at = datetime('now') WHERE id = ?", item.id);
       return id;
     });

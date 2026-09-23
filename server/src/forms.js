@@ -9,7 +9,7 @@ export const MEDICAL_CONDITIONS = [
 
 const TEXT_FIELDS = [
   'allergies', 'medications', 'other_conditions', 'physician_name', 'physician_phone', 'last_dental_visit',
-  'chief_concern', 'phone', 'email', 'address', 'city', 'state', 'zip', 'emergency_contact',
+  'chief_concern', 'phone', 'email', 'address', 'city', 'state', 'zip', 'emergency_contact', 'referral_source',
 ];
 
 // Validates and normalizes a medical-history submission from the public intake form.

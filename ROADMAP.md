@@ -201,9 +201,9 @@ Works well: drag, resize and create; undo; live updates; conflict checks; open-t
 1. ✅ **P1** Follow-ups "Book" should carry the patient and their planned procedures into the booking form.
 2. ✅ **P1** Recall tab gets a Book action, with the recall's due window pre-selected.
 3. ✅ **P1** Online-booking Accept can change the time and chair; a pending request holds the slot.
-4. **P2** Huddle performance: batch its queries (it runs about 8 per patient now).
+4. ✅ **P2** Huddle performance: batch its queries (it runs about 8 per patient now). _(Done: eleven grouped queries for the whole day, whatever the patient count; output checked identical on the demo.)_
 5. ✅ **P2** Declined/hidden follow-ups should be stored on the server, not just hidden in the browser.
-6. **P2** Referral source captured on online requests and on intake.
+6. ✅ **P2** Referral source captured on online requests and on intake. _(Done: “How did you hear about us?” on online booking (new patients) and the health-history form, in English and Spanish; it goes on the chart (intake fills it only if blank) and shows on the request.)_
 
 ### Patients and families
 1. ✅ **P1** Multiple phones (cell, home, work) with a preferred contact method and language.

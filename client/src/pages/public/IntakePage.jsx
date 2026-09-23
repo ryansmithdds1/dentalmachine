@@ -5,7 +5,7 @@ import { ErrorBox, useSubmit } from '../../components/ui.jsx';
 import SignaturePad from '../../components/SignaturePad.jsx';
 import FormFields, { formComplete } from '../../components/FormFields.jsx';
 import PublicLayout from './PublicLayout.jsx';
-import { suggestLang, useT } from './i18n.js';
+import { suggestLang, useT, HEARD_FROM } from './i18n.js';
 
 export default function IntakePage() {
   const t = useT();
@@ -105,6 +105,12 @@ function HistoryForm({ info, token, practice, step, onDone }) {
             {text('state', 'State')}
             {text('zip', 'ZIP')}
             {text('emergency_contact', 'Emergency contact (name & phone)', { full: true })}
+            <label className="full">{t('How did you hear about us? (optional)')}
+              <select value={a.referral_source || ''} onChange={(e) => setA({ ...a, referral_source: e.target.value })}>
+                <option value="">—</option>
+                {HEARD_FROM.map((h) => <option key={h} value={h}>{t(h)}</option>)}
+              </select>
+            </label>
           </div>
         </div>
 

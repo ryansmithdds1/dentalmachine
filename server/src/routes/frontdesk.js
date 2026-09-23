@@ -191,20 +191,41 @@ export default function frontDeskRoutes({ db, messenger }) {
     );
     const mmdd = date.slice(5);
     const soon = [0, 1, 2, 3, 4, 5, 6].map((n) => addDays(date, n).slice(5));
-    const rows = await mapSeq(appts, async (a) => {
-      const balance = (await db.get('SELECT COALESCE(SUM(amount),0) AS n FROM ledger_entries WHERE patient_id = ?', a.patient_id)).n;
-      const gid = a.guarantor_id || a.patient_id;
-      const familyBalance = (await db.get('SELECT COALESCE(SUM(l.amount),0) AS n FROM ledger_entries l JOIN patients p ON p.id = l.patient_id WHERE p.id = ? OR p.guarantor_id = ?', gid, gid)).n;
-      const unscheduled = await db.get(
-        `SELECT COUNT(*) AS n, COALESCE(SUM(fee),0) AS amount FROM procedures WHERE patient_id = ? AND status = 'planned' AND appointment_id IS NULL`, a.patient_id,
-      );
-      const recall = await db.get("SELECT due_date, type FROM recalls WHERE patient_id = ? AND status IN ('due','contacted') ORDER BY due_date LIMIT 1", a.patient_id);
-      const policy = await primaryPolicy(db, pid, a.patient_id);
-      const lastElig = policy ? await db.get('SELECT status, created_at FROM eligibility_checks WHERE patient_insurance_id = ? ORDER BY id DESC LIMIT 1', policy.id) : null;
-      const formsPending = (await db.get("SELECT COUNT(*) AS n FROM form_requests WHERE patient_id = ? AND status = 'pending'", a.patient_id)).n;
-      const labs = await db.all("SELECT description, status, due_date FROM lab_cases WHERE patient_id = ? AND status IN ('sent','returned_for_adjustment')", a.patient_id);
+    // Everything about today's patients in one query per kind (not several per patient).
+    const ids = [...new Set(appts.map((a) => a.patient_id))];
+    const heads = [...new Set(appts.map((a) => a.guarantor_id || a.patient_id))];
+    const IN = (list) => (list.length ? list.map(() => '?').join(',') : 'NULL');
+    const byPatient = async (sql, list = ids) => (list.length ? db.all(sql.replace('%IN%', IN(list)), ...list) : []);
+    const first = (rows, key) => rows.reduce((m, r) => (m.has(r[key]) ? m : m.set(r[key], r)), new Map());
+    const balances = new Map((await byPatient('SELECT patient_id, COALESCE(SUM(amount),0) AS n FROM ledger_entries WHERE patient_id IN (%IN%) GROUP BY patient_id')).map((r) => [r.patient_id, r.n]));
+    const families = new Map((await byPatient(
+      'SELECT COALESCE(p.guarantor_id, p.id) AS g, COALESCE(SUM(l.amount),0) AS n FROM ledger_entries l JOIN patients p ON p.id = l.patient_id WHERE COALESCE(p.guarantor_id, p.id) IN (%IN%) GROUP BY COALESCE(p.guarantor_id, p.id)', heads,
+    )).map((r) => [r.g, r.n]));
+    const unscheduledBy = new Map((await byPatient("SELECT patient_id, COUNT(*) AS n, COALESCE(SUM(fee),0) AS amount FROM procedures WHERE patient_id IN (%IN%) AND status = 'planned' AND appointment_id IS NULL GROUP BY patient_id")).map((r) => [r.patient_id, r]));
+    const recalls = first(await byPatient("SELECT patient_id, due_date, type FROM recalls WHERE patient_id IN (%IN%) AND status IN ('due','contacted') ORDER BY patient_id, due_date"), 'patient_id');
+    // Same choice as primaryPolicy: the active primary, else the secondary.
+    const policies = first(await byPatient(
+      `SELECT pi.*, c.name AS carrier_name FROM patient_insurance pi JOIN insurance_carriers c ON c.id = pi.carrier_id
+       WHERE pi.patient_id IN (%IN%) AND pi.active = 1 ORDER BY pi.patient_id, CASE pi.priority WHEN 'primary' THEN 0 ELSE 1 END, pi.id`,
+    ), 'patient_id');
+    const policyIds = [...policies.values()].map((x) => x.id);
+    const eligibility = first(await byPatient('SELECT patient_insurance_id, status, created_at FROM eligibility_checks WHERE patient_insurance_id IN (%IN%) ORDER BY patient_insurance_id, id DESC', policyIds), 'patient_insurance_id');
+    const forms = new Map((await byPatient("SELECT patient_id, COUNT(*) AS n FROM form_requests WHERE patient_id IN (%IN%) AND status = 'pending' GROUP BY patient_id")).map((r) => [r.patient_id, r.n]));
+    const labsBy = (await byPatient("SELECT patient_id, description, status, due_date FROM lab_cases WHERE patient_id IN (%IN%) AND status IN ('sent','returned_for_adjustment')"))
+      .reduce((m, r) => m.set(r.patient_id, [...(m.get(r.patient_id) || []), { description: r.description, status: r.status, due_date: r.due_date }]), new Map());
+    const seenBefore = new Set((await byPatient("SELECT DISTINCT patient_id FROM procedures WHERE patient_id IN (%IN%) AND status = 'completed'")).map((r) => r.patient_id));
+    const rows = appts.map((a) => {
+      const balance = balances.get(a.patient_id) || 0;
+      const familyBalance = families.get(a.guarantor_id || a.patient_id) || 0;
+      const unscheduled = unscheduledBy.get(a.patient_id) || { n: 0, amount: 0 };
+      const recall = recalls.get(a.patient_id);
+      const policy = policies.get(a.patient_id);
+      const e = policy ? eligibility.get(policy.id) : null;
+      const lastElig = e ? { status: e.status, created_at: e.created_at } : null;
+      const formsPending = forms.get(a.patient_id) || 0;
+      const labs = labsBy.get(a.patient_id) || [];
       const flags = [];
-      if (a.patient_since.slice(0, 10) >= addDays(date, -30) || !(await db.get("SELECT 1 FROM procedures WHERE patient_id = ? AND status = 'completed' LIMIT 1", a.patient_id))) flags.push('new_patient');
+      if (a.patient_since.slice(0, 10) >= addDays(date, -30) || !seenBefore.has(a.patient_id)) flags.push('new_patient');
       if (a.dob && soon.includes(a.dob.slice(5))) flags.push(a.dob.slice(5) === mmdd ? 'birthday_today' : 'birthday_this_week');
       if (a.status === 'scheduled') flags.push('unconfirmed');
       if (policy && (!lastElig || lastElig.created_at.slice(0, 10) < addDays(date, -30))) flags.push('verify_insurance');

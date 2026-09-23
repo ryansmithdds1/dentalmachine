@@ -1468,6 +1468,7 @@ const COLUMNS = [
   ['ledger_entries', 'ortho_case_id', 'INTEGER REFERENCES ortho_cases(id)'],
   ['bridge_agents', 'sensor', 'TEXT'],
   ['claims', 'remarks', 'TEXT'],
+  ['booking_requests', 'referral_source', 'TEXT'],
   ['appointment_types', 'pattern', 'TEXT'],
   ['appointment_types', 'provider_durations', 'TEXT'],
   ['appointments', 'pattern', 'TEXT'],

@@ -167,6 +167,7 @@ test('online booking: public request → front desk accepts → patient + appoin
   assert.equal((await pub.post('/public/practices/eng-booking/booking-requests', { first_name: 'New', last_name: 'Person', start: slot.start, provider_id: provider.id })).status, 400, 'needs contact');
   const reqd = await pub.post('/public/practices/eng-booking/booking-requests', {
     first_name: 'New', last_name: 'Person', phone: '512-555-0199', dob: '1990-02-03', reason: 'Checkup & cleaning', start: slot.start, provider_id: provider.id,
+    referral_source: 'Friend or family',
   });
   assert.equal(reqd.status, 201);
   const bot = await pub.post('/public/practices/eng-booking/booking-requests', { website: 'spam', first_name: 'x' });
@@ -181,6 +182,8 @@ test('online booking: public request → front desk accepts → patient + appoin
   const appt = (await api.get(`/appointments/${accepted.appointment_id}`)).data;
   assert.equal(appt.first_name, 'New');
   assert.equal(appt.start_time, slot.start);
+  assert.equal(queue[0].referral_source, 'Friend or family');
+  assert.equal((await api.get(`/patients/${appt.patient_id}`)).data.referral_source, 'Friend or family', 'how they heard about us goes on the new chart');
   assert.equal((await api.post(`/booking-requests/${queue[0].id}/accept`)).status, 409);
 
   // The slot is now gone from public availability.
@@ -204,7 +207,7 @@ test('intake form link updates the medical history with an e-signature', async (
   const ok = await pub.post(`/public/forms/${token}`, {
     answers: {
       conditions: ['Diabetes', 'Not a real condition'], allergies: 'Penicillin', medications: 'Metformin', premedication: true,
-      address: '1 New St', consent_hipaa: true, consent_treatment: true,
+      address: '1 New St', consent_hipaa: true, consent_treatment: true, referral_source: 'Google search',
     },
     signature_name: 'Pat Smith',
   });
@@ -214,6 +217,7 @@ test('intake form link updates the medical history with an e-signature', async (
   // Contact details apply at once; medical changes wait for a clinician, merged with what's on the chart.
   let p = (await api.get(`/patients/${patient.id}`)).data;
   assert.equal(p.address, '1 New St');
+  assert.equal(p.referral_source, 'Google search', 'fills in a blank referral source');
   assert.equal(p.allergies, 'Latex', 'staff-entered allergy untouched until review');
   assert.equal(p.history_review_pending, true);
   const review = (await api.get(`/patients/${patient.id}/history-review`)).data;

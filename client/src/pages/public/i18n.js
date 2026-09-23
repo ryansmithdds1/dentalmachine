@@ -55,3 +55,6 @@ export function fmtTimeL(lang, s) {
   return new Date(Date.UTC(2000, 0, 1, h, m)).toLocaleTimeString(locale(lang), { hour: 'numeric', minute: '2-digit', timeZone: 'UTC' });
 }
 export const fmtDateTimeL = (lang, s) => (s ? `${fmtDateL(lang, s)}, ${fmtTimeL(lang, s)}` : '');
+
+// "How did you hear about us?" — the answers the office sees in its referral reports.
+export const HEARD_FROM = ['Google search', 'Friend or family', 'Insurance directory', 'Social media', 'Drove by', 'Another dentist', 'Other'];

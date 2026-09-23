@@ -4,7 +4,7 @@ import { api } from '../../api.js';
 import { shiftDate } from '../../format.js';
 import { ErrorBox, useSubmit } from '../../components/ui.jsx';
 import PublicLayout from './PublicLayout.jsx';
-import { fmtDateL, fmtTimeL, useLang, useT } from './i18n.js';
+import { fmtDateL, fmtTimeL, useLang, useT, HEARD_FROM } from './i18n.js';
 
 export default function BookingPage() {
   const t = useT();
@@ -20,7 +20,7 @@ export default function BookingPage() {
   const [nextAvailable, setNextAvailable] = useState(null);
   const jumped = useRef(false);
   const [slot, setSlot] = useState(null);
-  const [form, setForm] = useState({ first_name: '', last_name: '', dob: '', phone: '', email: '', notes: '', new_patient: true, website: '', insurance_carrier: '', insurance_member_id: '', insurance_subscriber: '' });
+  const [form, setForm] = useState({ first_name: '', last_name: '', dob: '', phone: '', email: '', notes: '', new_patient: true, website: '', insurance_carrier: '', insurance_member_id: '', insurance_subscriber: '', referral_source: '' });
   const [done, setDone] = useState(false);
   const [params] = useSearchParams();
   const returned = params.get('deposit');
@@ -181,6 +181,14 @@ export default function BookingPage() {
             <label className="full">{t('Email')}<input type="email" value={form.email} onChange={set('email')} autoComplete="email" /></label>
             <label className="full">{t('Anything we should know? (optional)')}<textarea rows={2} value={form.notes} onChange={set('notes')} /></label>
             <label className="checkbox full"><input type="checkbox" checked={form.new_patient} onChange={(e) => setForm({ ...form, new_patient: e.target.checked })} /> {t('I’m a new patient')}</label>
+            {form.new_patient && (
+              <label className="full">{t('How did you hear about us? (optional)')}
+                <select value={form.referral_source} onChange={set('referral_source')}>
+                  <option value="">—</option>
+                  {HEARD_FROM.map((h) => <option key={h} value={h}>{t(h)}</option>)}
+                </select>
+              </label>
+            )}
             <label>{t('Dental insurance (optional)')}<input value={form.insurance_carrier} onChange={set('insurance_carrier')} placeholder={t('e.g. Delta Dental')} /></label>
             <label>{t('Member ID')}<input value={form.insurance_member_id} onChange={set('insurance_member_id')} /></label>
             {form.insurance_member_id && <label className="full">{t('Policy holder, if not you')}<input value={form.insurance_subscriber} onChange={set('insurance_subscriber')} placeholder={t('Full name')} /></label>}

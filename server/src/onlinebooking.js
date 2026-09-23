@@ -25,7 +25,7 @@ export async function finishBooking(db, b, { providerId, start, duration, patien
     if (!pat) {
       pat = await insert(db, 'patients', {
         practice_id: pid, first_name: b.first_name, last_name: b.last_name, dob: b.dob, phone: b.phone, email: b.email,
-        referral_source: 'Online booking', notes: b.notes ? `Online booking note: ${b.notes}` : null, language: b.language === 'es' ? 'Spanish' : null,
+        referral_source: b.referral_source || 'Online booking', notes: b.notes ? `Online booking note: ${b.notes}` : null, language: b.language === 'es' ? 'Spanish' : null,
       });
     }
     if (b.insurance_carrier && b.insurance_member_id) {
