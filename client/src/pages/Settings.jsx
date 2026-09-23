@@ -29,7 +29,7 @@ const RESOURCES = {
   types: {
     title: 'Appointment types', singular: 'appointment type', path: '/appointment-types', columns: ['name', 'duration', 'color', 'procedure_codes', 'online_bookable'],
     fields: [['name', 'Name', 'text'], ['duration', 'Length (minutes)', 'number'], ['color', 'Calendar color', 'color'], ['procedure_codes', 'Procedures added when booked (e.g. D0120, D1110)', 'codes'],
-      ['provider_type', 'Usually booked with', 'select', ['dentist', 'hygienist', 'specialist']], ['online_bookable', 'Patients can book online', 'checkbox'], ['sort', 'Sort order', 'number'], ['active', 'Active', 'checkbox']],
+      ['provider_type', 'Usually booked with', 'select', ['dentist', 'hygienist', 'specialist']], ['online_bookable', 'Patients can book online', 'checkbox'], ['deposit', 'Deposit to book online ($, needs Stripe)', 'money'], ['sort', 'Sort order', 'number'], ['active', 'Active', 'checkbox']],
   },
   referrals: {
     title: 'Referral contacts', singular: 'referral contact', path: '/referral-contacts', columns: ['name', 'practice_name', 'specialty', 'phone', 'referred_in', 'referred_out'], writePerm: 'patients:write',
@@ -374,6 +374,7 @@ function Practice() {
             </select>
           </label>
           <label className="checkbox full"><input type="checkbox" checked={!!current.online_booking} onChange={(e) => change('online_booking', e.target.checked)} /> Allow patients to request appointments online</label>
+          {!!current.online_booking && <label className="checkbox full" style={{ marginLeft: 22 }}><input type="checkbox" checked={!!current.instant_booking} onChange={(e) => change('instant_booking', e.target.checked)} /> Book them straight onto the schedule (instead of waiting for the office to accept). Deposits, if set on an appointment type, are taken first.</label>}
           <label className="checkbox full"><input type="checkbox" checked={current.portal_enabled !== 0} onChange={(e) => change('portal_enabled', e.target.checked)} /> Patient portal (visits, balance and online payment, forms, treatment plans)</label>
           {current.portal_enabled !== 0 && <span className="muted full" style={{ fontSize: 12, marginTop: -6 }}>Portal address: {window.location.origin}/portal/{current.slug || current.id} — it&apos;s also printed on statements.</span>}
           <label>

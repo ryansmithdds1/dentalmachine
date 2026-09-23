@@ -3,6 +3,8 @@ import { HttpError, rateLimit } from '../auth.js';
 import { insert, update, hashToken, practiceNow, normalizeDateTime, audit, mapSeq, publicPractice } from '../util.js';
 import { MEDICAL_CONDITIONS, parseMedicalHistory, contactUpdatesFromHistory } from '../forms.js';
 import { fillFields, checkAnswers, formPdf } from '../formtemplates.js';
+import { finishBooking } from '../onlinebooking.js';
+import { sendAppointmentReminder } from '../messaging.js';
 import { openSlots } from './schedule.js';
 import { publish } from '../events.js';
 import { officeHours } from '../hours.js';
@@ -18,7 +20,19 @@ const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 // Unauthenticated endpoints reached from links sent to patients and the public booking page.
 // They expose only the minimum needed and are rate limited.
-export default function publicRoutes({ db, storage }) {
+export default function publicRoutes({ db, storage, payments, messenger, config }) {
+  // Books a request right away; if the slot can't be booked after all it stays a request for the office.
+  const bookInstantly = async (b) => {
+    try {
+      const apptId = await finishBooking(db, b);
+      publish(b.practice_id, { type: 'schedule', dates: [b.requested_start.slice(0, 10)], source: 'patient' });
+      if (messenger) await sendAppointmentReminder(db, messenger, { appointmentId: apptId, appUrl: config.appUrl, kind: 'booking_confirmation' });
+      return apptId;
+    } catch (err) {
+      if (err.status && err.status < 500) return null;
+      throw err;
+    }
+  };
   const r = Router();
   const limiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 30 });
   const reader = rateLimit({ windowMs: 60 * 1000, max: 120 });
@@ -30,8 +44,9 @@ export default function publicRoutes({ db, storage }) {
     return p;
   };
   const reasonsFor = async (practiceId) => {
-    const types = await db.all('SELECT id, name, duration, provider_type FROM appointment_types WHERE practice_id = ? AND active = 1 AND online_bookable = 1 ORDER BY sort, name', practiceId);
-    return types.length ? types.map((t) => ({ label: t.name, duration: t.duration, type_id: t.id, provider_type: t.provider_type })) : FALLBACK_REASONS;
+    const types = await db.all('SELECT id, name, duration, provider_type, deposit FROM appointment_types WHERE practice_id = ? AND active = 1 AND online_bookable = 1 ORDER BY sort, name', practiceId);
+    // Deposits are only asked for when card payments are set up.
+    return types.length ? types.map((t) => ({ label: t.name, duration: t.duration, type_id: t.id, provider_type: t.provider_type, deposit: payments?.mode === 'stripe' ? t.deposit || 0 : 0 })) : FALLBACK_REASONS;
   };
   const publicProviders = async (practiceId) => await db.all('SELECT id, name, type FROM providers WHERE practice_id = ? AND active = 1 ORDER BY type, name', practiceId);
 
@@ -41,6 +56,7 @@ export default function publicRoutes({ db, storage }) {
     res.json({
       name: p.name, phone: p.phone, address: p.address, city: p.city, state: p.state, zip: p.zip,
       today: (await practiceNow(db, p.id)).slice(0, 10), providers: await publicProviders(p.id), reasons: await reasonsFor(p.id),
+      instant: !!p.instant_booking,
       open_days: Object.entries(officeHours(p)).filter(([, r]) => r.length).map(([d]) => Number(d)),
     });
   });
@@ -92,13 +108,35 @@ export default function publicRoutes({ db, storage }) {
     if (!(await publicProviders(p.id)).some((pv) => pv.id === providerId)) throw new HttpError(400, 'Choose a provider');
     const free = await openSlots(db, p.id, providerId, start.slice(0, 10), { duration: reason.duration, step: 30 });
     if (!free.includes(start)) throw new HttpError(409, 'That time was just taken. Please pick another.');
+    const deposit = reason.deposit > 0 ? reason.deposit : 0;
+    const clip = (v, n) => (v ? String(v).trim().slice(0, n) || null : null);
     const id = await insert(db, 'booking_requests', {
       practice_id: p.id, first_name: first.slice(0, 80), last_name: last.slice(0, 80), dob: b.dob || null,
-      phone: b.phone ? String(b.phone).slice(0, 30) : null, email: b.email ? String(b.email).slice(0, 200) : null,
+      phone: clip(b.phone, 30), email: clip(b.email, 200),
       reason: reason.label, duration: reason.duration, provider_id: providerId, requested_start: start,
-      new_patient: b.new_patient === false ? 0 : 1, notes: b.notes ? String(b.notes).slice(0, 1000) : null, ip: req.ip,
+      new_patient: b.new_patient === false ? 0 : 1, notes: clip(b.notes, 1000), ip: req.ip,
+      insurance_carrier: clip(b.insurance_carrier, 100), insurance_member_id: clip(b.insurance_member_id, 40), insurance_subscriber: clip(b.insurance_subscriber, 120),
+      ...(deposit ? { deposit_amount: deposit, deposit_status: 'awaiting', hold_until: new Date(Date.now() + 35 * 60_000).toISOString() } : {}),
     });
     await logPublic(req, p.id, 'booking.request', 'booking_requests', id);
+    // A deposit is paid on Stripe's page first; the booking completes when Stripe tells us it's paid.
+    if (deposit) {
+      const back = `${config.appUrl}/book/${p.slug}`;
+      const session = await payments.stripe('POST', 'checkout/sessions', {
+        mode: 'payment', 'line_items[0][quantity]': '1', 'line_items[0][price_data][currency]': 'usd',
+        'line_items[0][price_data][unit_amount]': String(deposit), 'line_items[0][price_data][product_data][name]': `${p.name} — deposit for ${reason.label}`,
+        'metadata[booking_request_id]': String(id), 'metadata[practice_id]': String(p.id), client_reference_id: `booking-${id}`,
+        ...(b.email ? { customer_email: String(b.email) } : {}),
+        expires_at: String(Math.floor(Date.now() / 1000) + 31 * 60), success_url: `${back}?deposit=paid`, cancel_url: `${back}?deposit=cancelled`,
+      });
+      await db.run('UPDATE booking_requests SET deposit_session_id = ? WHERE id = ?', session.id, id);
+      return res.status(201).json({ ok: true, id, checkout_url: session.url, deposit });
+    }
+    // Instant booking: straight onto the schedule, with a confirmation.
+    if (p.instant_booking) {
+      const booked = await bookInstantly(await db.get('SELECT * FROM booking_requests WHERE id = ?', id));
+      if (booked) return res.status(201).json({ ok: true, id, booked: true, start });
+    }
     res.status(201).json({ ok: true, id });
   });
 

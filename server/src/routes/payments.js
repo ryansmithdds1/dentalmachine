@@ -5,7 +5,8 @@ import { requirePermission, HttpError } from '../auth.js';
 import { findOr404, insert, audit, toCents, practiceNow } from '../util.js';
 import { patientBalance } from '../services.js';
 import { runAutopay } from '../payments.js';
-import { sendMessage, preferredChannel } from '../messaging.js';
+import { finishBooking } from '../onlinebooking.js';
+import { sendMessage, preferredChannel, sendAppointmentReminder } from '../messaging.js';
 
 // Online card payments via Stripe Checkout, cards on file and payment-plan autopay.
 export default function paymentRoutes({ db, config, messenger, payments, mailer }) {
@@ -136,7 +137,7 @@ export function verifyStripeSignature(rawBody, header, secret, nowSec = Math.flo
 }
 
 // Mounted before the JSON body parser: signature verification needs the exact raw bytes.
-export function stripeWebhook({ db, config, payments }) {
+export function stripeWebhook({ db, config, payments, messenger }) {
   const r = Router();
   r.post('/api/webhooks/stripe', express.raw({ type: () => true, limit: '1mb' }), async (req, res) => {
     if (!config.stripeWebhookSecret) return res.status(501).json({ error: 'Webhook secret not configured' });
@@ -155,6 +156,33 @@ export function stripeWebhook({ db, config, payments }) {
         const id = await insert(db, 'payment_methods', { practice_id: practiceId, patient_id: patientId, provider: 'stripe', ...card });
         await audit(db, { ip: req.ip, user: { practice_id: practiceId, id: null } }, 'card.saved', 'payment_methods', id);
       }
+    } else if ((event.type === 'checkout.session.completed' || event.type === 'checkout.session.async_payment_succeeded') && event.data.object.metadata?.booking_request_id) {
+      // An online booking deposit: mark it paid (once), then book it if the practice books instantly.
+      const session = event.data.object;
+      if (session.payment_status === 'paid') {
+        const flipped = await db.run(
+          "UPDATE booking_requests SET deposit_status = 'paid', deposit_reference = ?, deposit_amount = ? WHERE deposit_session_id = ? AND deposit_status = 'awaiting'",
+          session.payment_intent || session.id, session.amount_total, session.id,
+        );
+        const b = await db.get('SELECT * FROM booking_requests WHERE deposit_session_id = ?', session.id);
+        if (flipped.changes && b) {
+          await audit(db, { ip: req.ip, user: { practice_id: b.practice_id, id: null } }, 'booking.deposit_paid', 'booking_requests', b.id, { amount: session.amount_total });
+          const practice = await db.get('SELECT instant_booking FROM practices WHERE id = ?', b.practice_id);
+          if (practice.instant_booking && b.status === 'pending') {
+            try {
+              const apptId = await finishBooking(db, b);
+              if (messenger) await sendAppointmentReminder(db, messenger, { appointmentId: apptId, appUrl: config.appUrl, kind: 'booking_confirmation' });
+            } catch (err) {
+              if (!err.status || err.status >= 500) throw err;
+              // The slot went after all: the paid request waits for the office, flagged.
+              await insert(db, 'tasks', { practice_id: b.practice_id, priority: 'high', due_date: (await practiceNow(db, b.practice_id)).slice(0, 10), title: `Online booking with paid deposit needs a new time: ${b.first_name} ${b.last_name} (${err.message})` });
+            }
+          }
+        }
+      }
+    } else if (event.type === 'checkout.session.expired' && event.data.object.metadata?.booking_request_id) {
+      // Never paid: the held slot is released.
+      await db.run("UPDATE booking_requests SET deposit_status = 'expired', status = 'declined' WHERE deposit_session_id = ? AND deposit_status = 'awaiting'", event.data.object.id);
     } else if (event.type === 'checkout.session.completed' || event.type === 'checkout.session.async_payment_succeeded') {
       const session = event.data.object;
       if (session.payment_status === 'paid') {

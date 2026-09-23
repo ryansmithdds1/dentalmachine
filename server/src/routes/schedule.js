@@ -121,8 +121,10 @@ export async function openSlots(db, practiceId, providerId, date, { duration = 6
     )),
     // A pending online request holds its slot so it isn't offered to someone else meanwhile.
     ...(await db.all(
-      "SELECT requested_start, duration FROM booking_requests WHERE practice_id = ? AND provider_id = ? AND status = 'pending' AND requested_start >= ? AND requested_start < ?",
-      practiceId, providerId, `${date} 00:00`, `${date} 24:00`,
+      // (one waiting on its deposit only for as long as the checkout is open).
+      `SELECT requested_start, duration FROM booking_requests WHERE practice_id = ? AND provider_id = ? AND status = 'pending' AND requested_start >= ? AND requested_start < ?
+         AND (deposit_status IS NULL OR deposit_status = 'paid' OR hold_until > ?)`,
+      practiceId, providerId, `${date} 00:00`, `${date} 24:00`, new Date().toISOString(),
     )).map((b) => ({ start_time: b.requested_start, end_time: addMinutes(b.requested_start, b.duration || 60) })),
   ].map((a) => [a.start_time.slice(0, 10) < date ? 0 : toMin(a.start_time.slice(11)), a.end_time.slice(0, 10) > date ? 24 * 60 : toMin(a.end_time.slice(11))]);
   const slots = [];

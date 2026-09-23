@@ -130,7 +130,7 @@ The "OD / Curve" column shows which competitor has the feature: ✓ = has it, ~ 
 | 39 | ✅ **Complete appointment → complete its procedures** (and post charges) in one click. | The normal end-of-visit flow. | ✓ / ✓ | P1 | S |
 | 40 | ✅ **Provider schedule exceptions:** date-specific hours, time off, alternating weeks. | Real provider schedules. | ✓ / ✓ | P1 | S |
 | 41 | ✅ **Book the whole family** into back-to-back or side-by-side slots. | Common for kids. | ✓ / ✓ | P2 | M |
-| 42 | ✅ (slot hold done; instant booking and deposits still to do) **Instant online booking** into approved slots (optional), holding the slot while a request is pending; collect insurance and a deposit. | Curve and NexHealth-style self-scheduling. | ✓ / ✓ | P2 | M |
+| 42 | ✅ **Instant online booking** into approved slots (optional), holding the slot while a request is pending; collect insurance and a deposit. | Curve and NexHealth-style self-scheduling. | ✓ / ✓ | P2 | M |
 | 43 | ✅ **Referral tracking.** Referring doctors and referred-out, with referral letters and a report. | Specialists depend on it; GPs track sources. | ✓ / ✓ | P2 | M |
 | 44 | ✅ **Texting inbox upgrades.** Unknown numbers (attach to patient), email threads, assignment, archiving, editable quick replies, MMS photos. | Front-desk communication hub. | ✓ / ✓ | P2 | M |
 | 45 | ✅ **Custom forms builder:** consents (extraction, endo, sedation), HIPAA, financial policy, COVID/pre-op; auto-sent before visits; insurance card and ID photo upload. | Paperless office, Curve Forms. | ✓ / ✓ | P1 | L |

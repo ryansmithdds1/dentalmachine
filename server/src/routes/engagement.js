@@ -3,10 +3,10 @@ import { requirePermission, HttpError } from '../auth.js';
 import { pick, requireFields, requireOneOf, insert, findOr404, audit, friendlyDateTime, mapSeq, publicPractice } from '../util.js';
 import { sendMessage, sendAppointmentReminder, runReminders, preferredChannel } from '../messaging.js';
 import { runRecallSequences } from '../recalls.js';
-import { validateAppt } from './schedule.js';
 import { publish } from '../events.js';
 import { templatesFor, renderTemplate, messageText } from '../templates.js';
 import { createPacket, runFormSends } from '../formtemplates.js';
+import { finishBooking } from '../onlinebooking.js';
 
 const requireAdmin = (req, _res, next) => (req.user.role === 'admin' ? next() : next(new HttpError(403, 'Administrator access required')));
 
@@ -113,7 +113,7 @@ export default function engagementRoutes({ db, messenger, config }) {
     const status = req.query.status || 'pending';
     res.json(await mapSeq((await db.all(
       `SELECT b.*, pv.name AS provider_name FROM booking_requests b LEFT JOIN providers pv ON pv.id = b.provider_id
-       WHERE b.practice_id = ? AND (? = 'all' OR b.status = ?) ORDER BY b.requested_start`,
+       WHERE b.practice_id = ? AND (? = 'all' OR b.status = ?) AND (b.deposit_status IS NULL OR b.deposit_status = 'paid') ORDER BY b.requested_start`,
       req.user.practice_id, status, status,
     )), async (b) => ({
       ...b,
@@ -132,31 +132,10 @@ export default function engagementRoutes({ db, messenger, config }) {
     const pid = req.user.practice_id;
     const b = await findOr404(db, 'booking_requests', req.params.bid, pid, 'Booking request');
     if (b.status !== 'pending') throw new HttpError(409, `Request already ${b.status}`);
-    const providerId = Number(req.body?.provider_id || b.provider_id);
-    if (!providerId) throw new HttpError(400, 'Choose a provider');
     const start = req.body?.start_time || b.requested_start;
-    const duration = Number(req.body?.duration || b.duration);
-
-    const apptId = await db.tx(async () => {
-      let patientId = req.body?.patient_id ? (await findOr404(db, 'patients', req.body.patient_id, pid, 'Patient')).id : null;
-      if (!patientId) {
-        patientId = await insert(db, 'patients', {
-          practice_id: pid, first_name: b.first_name, last_name: b.last_name, dob: b.dob, phone: b.phone, email: b.email,
-          notes: b.notes ? `Online booking note: ${b.notes}` : null,
-        });
-      }
-      const [h, m] = start.slice(11, 16).split(':').map(Number);
-      const endMin = h * 60 + m + duration;
-      const row = {
-        patient_id: patientId, provider_id: providerId, operatory_id: req.body?.operatory_id ? Number(req.body.operatory_id) : null,
-        start_time: start, end_time: `${start.slice(0, 10)} ${String(Math.floor(endMin / 60)).padStart(2, '0')}:${String(endMin % 60).padStart(2, '0')}`,
-        status: 'scheduled', reason: b.reason, notes: b.notes,
-        appointment_type_id: (await db.get('SELECT id FROM appointment_types WHERE practice_id = ? AND name = ?', pid, b.reason))?.id ?? null,
-      };
-      await validateAppt(db, pid, row);
-      const id = await insert(db, 'appointments', { ...row, practice_id: pid });
-      await db.run("UPDATE booking_requests SET status = 'accepted', patient_id = ?, appointment_id = ?, handled_by = ?, handled_at = datetime('now') WHERE id = ?", patientId, id, req.user.id, b.id);
-      return id;
+    const patientId = req.body?.patient_id ? (await findOr404(db, 'patients', req.body.patient_id, pid, 'Patient')).id : null;
+    const apptId = await finishBooking(db, b, {
+      providerId: req.body?.provider_id, start, duration: req.body?.duration, patientId, operatoryId: req.body?.operatory_id, userId: req.user.id,
     });
     await audit(db, req, 'booking.accept', 'booking_requests', b.id, { appointment_id: apptId });
     publish(pid, { type: 'schedule', dates: [start.slice(0, 10)], by: req.user.id });

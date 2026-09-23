@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import { api } from '../../api.js';
 import { fmtTime, shiftDate } from '../../format.js';
 import { ErrorBox, useSubmit } from '../../components/ui.jsx';
@@ -16,8 +16,10 @@ export default function BookingPage() {
   const [nextAvailable, setNextAvailable] = useState(null);
   const jumped = useRef(false);
   const [slot, setSlot] = useState(null);
-  const [form, setForm] = useState({ first_name: '', last_name: '', dob: '', phone: '', email: '', notes: '', new_patient: true, website: '' });
+  const [form, setForm] = useState({ first_name: '', last_name: '', dob: '', phone: '', email: '', notes: '', new_patient: true, website: '', insurance_carrier: '', insurance_member_id: '', insurance_subscriber: '' });
   const [done, setDone] = useState(false);
+  const [params] = useSearchParams();
+  const returned = params.get('deposit');
 
   useEffect(() => {
     api.get(`/public/practices/${slug}`).then((p) => {
@@ -48,14 +50,37 @@ export default function BookingPage() {
   }, [practice, slug, date, reason, providerId]);
 
   const { submit, busy, error } = useSubmit(async () => {
-    await api.post(`/public/practices/${slug}/booking-requests`, { ...form, reason, start: slot.start, provider_id: slot.provider_id });
-    setDone(true);
+    const r = await api.post(`/public/practices/${slug}/booking-requests`, { ...form, reason, start: slot.start, provider_id: slot.provider_id });
+    // A deposit is paid on the secure card page, which brings the patient back here.
+    if (r.checkout_url) { window.location.assign(r.checkout_url); return; }
+    setDone(r.booked ? 'booked' : 'requested');
   });
 
   if (loadError) return <PublicLayout title="Online booking"><ErrorBox error={loadError} /></PublicLayout>;
   if (!practice) return <PublicLayout title="Online booking"><p>Loading…</p></PublicLayout>;
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
+  const deposit = practice.reasons.find((r) => r.label === reason)?.deposit || 0;
 
+  if (returned) {
+    return (
+      <PublicLayout title={returned === 'paid' ? 'Deposit received' : 'Not booked'} practice={practice}>
+        <div className={returned === 'paid' ? 'public-notice ok' : 'public-notice'}>
+          {returned === 'paid'
+            ? `Thank you! Your deposit is paid and ${practice.name} will confirm your visit by text or email in a moment.`
+            : <>The deposit wasn&apos;t paid, so the time wasn&apos;t booked. <a href={`/book/${slug}`}>Choose a time again</a> or call us{practice.phone ? ` at ${practice.phone}` : ''}.</>}
+        </div>
+      </PublicLayout>
+    );
+  }
+  if (done === 'booked') {
+    return (
+      <PublicLayout title="You're booked!" practice={practice}>
+        <div className="public-notice ok">
+          See you {new Date(`${slot.start.slice(0, 10)}T12:00:00`).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })} at {fmtTime(slot.start)}, {form.first_name}. A confirmation is on its way by {form.phone ? 'text' : 'email'}.
+        </div>
+      </PublicLayout>
+    );
+  }
   if (done) {
     return (
       <PublicLayout title="Request received" practice={practice}>
@@ -136,11 +161,15 @@ export default function BookingPage() {
             <label className="full">Email<input type="email" value={form.email} onChange={set('email')} autoComplete="email" /></label>
             <label className="full">Anything we should know? (optional)<textarea rows={2} value={form.notes} onChange={set('notes')} /></label>
             <label className="checkbox full"><input type="checkbox" checked={form.new_patient} onChange={(e) => setForm({ ...form, new_patient: e.target.checked })} /> I&apos;m a new patient</label>
+            <label>Dental insurance (optional)<input value={form.insurance_carrier} onChange={set('insurance_carrier')} placeholder="e.g. Delta Dental" /></label>
+            <label>Member ID<input value={form.insurance_member_id} onChange={set('insurance_member_id')} /></label>
+            {form.insurance_member_id && <label className="full">Policy holder, if not you<input value={form.insurance_subscriber} onChange={set('insurance_subscriber')} placeholder="Full name" /></label>}
             {/* Hidden from people; bots fill it in. */}
             <input tabIndex={-1} autoComplete="off" value={form.website} onChange={set('website')} style={{ position: 'absolute', left: -9999 }} aria-hidden="true" />
           </div>
           <p className="muted" style={{ fontSize: 12 }}>Please don&apos;t include medical details here. We&apos;ll send you secure forms before your visit.</p>
-          <button className="primary big" disabled={busy}>Request {fmtTime(slot.start)} on {new Date(`${slot.start.slice(0, 10)}T12:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</button>
+          {deposit > 0 && <p style={{ fontSize: 14 }}>A <strong>${(deposit / 100).toFixed(2)}</strong> deposit holds this time. It&apos;s paid on a secure card page next and comes off your bill.</p>}
+          <button className="primary big" disabled={busy}>{deposit > 0 ? 'Continue to deposit' : practice.instant ? 'Book' : 'Request'} {fmtTime(slot.start)} on {new Date(`${slot.start.slice(0, 10)}T12:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</button>
         </form>
       )}
     </PublicLayout>

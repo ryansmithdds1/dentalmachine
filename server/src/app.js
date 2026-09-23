@@ -79,7 +79,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   // by default one on a private network (a load balancer in the same VPC). Set TRUST_PROXY for others.
   app.set('trust proxy', process.env.TRUST_PROXY ? (/^\d+$/.test(process.env.TRUST_PROXY) ? Number(process.env.TRUST_PROXY) : process.env.TRUST_PROXY) : 'loopback, linklocal, uniquelocal');
   app.disable('x-powered-by');
-  app.use(stripeWebhook({ db, config, payments })); // needs the raw body, so before express.json
+  app.use(stripeWebhook({ db, config, payments, messenger })); // needs the raw body, so before express.json
   app.use(smsWebhook({ db, config }));
   // Signed forms can carry photos (insurance cards, ID), so that one route takes larger bodies.
   const jsonBody = express.json({ limit: '1mb' });
@@ -100,7 +100,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   app.use('/api/public', (_req, res, next) => {
     res.set('Cache-Control', 'no-store');
     next();
-  }, publicRoutes({ db, storage }), publicCasePresentation({ db }), portalPublicRoutes({ db, secret, messenger }), campaignPublicRoutes({ db }));
+  }, publicRoutes({ db, storage, payments, messenger, config }), publicCasePresentation({ db }), portalPublicRoutes({ db, secret, messenger }), campaignPublicRoutes({ db }));
   app.use('/api/portal', portalRoutes({ db, secret, config, payments }));
 
   app.use('/api/bridge', (_req, res, next) => {

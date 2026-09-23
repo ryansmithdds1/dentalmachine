@@ -74,7 +74,7 @@ export default function settingsRoutes({ db, secret, config = {} }) {
   r.get('/message-templates/defaults', (_req, res) => res.json(DEFAULT_TEMPLATES));
   r.get('/message-templates/meta', (_req, res) => res.json(TEMPLATE_META));
   r.put('/practice', requireAdmin, async (req, res) => {
-    const row = pick(req.body, ['name', 'address', 'city', 'state', 'zip', 'phone', 'email', 'tax_id', 'npi', 'timezone', 'slug', 'online_booking', 'reminder_hours', 'require_mfa', 'office_hours', 'daily_goal', 'sms_number', 'review_url', 'review_requests', 'review_threshold', 'idle_timeout_minutes', 'message_templates', 'hygiene_goal', 'portal_enabled', 'lock_date', 'adjustment_approval_limit', 'reminder_steps', 'recall_steps', 'recall_auto']);
+    const row = pick(req.body, ['name', 'address', 'city', 'state', 'zip', 'phone', 'email', 'tax_id', 'npi', 'timezone', 'slug', 'online_booking', 'reminder_hours', 'require_mfa', 'office_hours', 'daily_goal', 'sms_number', 'review_url', 'review_requests', 'review_threshold', 'instant_booking', 'idle_timeout_minutes', 'message_templates', 'hygiene_goal', 'portal_enabled', 'lock_date', 'adjustment_approval_limit', 'reminder_steps', 'recall_steps', 'recall_auto']);
     if (row.message_templates != null) row.message_templates = validateTemplates(row.message_templates);
     if (row.review_url && !/^https:\/\/\S+$/.test(row.review_url)) throw new HttpError(400, 'Review link must start with https://');
     if (row.review_threshold != null && ![3, 4, 5].includes(Number(row.review_threshold))) throw new HttpError(400, 'review_threshold must be 3, 4 or 5 stars');
@@ -207,8 +207,12 @@ export default function settingsRoutes({ db, secret, config = {} }) {
 
   resource(r, db, {
     path: 'appointment-types', table: 'appointment_types', required: ['name', 'duration'], order: 'sort, name',
-    fields: ['name', 'duration', 'color', 'procedure_codes', 'provider_type', 'online_bookable', 'active', 'sort'],
+    fields: ['name', 'duration', 'color', 'procedure_codes', 'provider_type', 'online_bookable', 'deposit', 'active', 'sort'],
     validate: (row) => {
+      if (row.deposit != null) {
+        row.deposit = Math.round(Number(row.deposit) || 0);
+        if (row.deposit < 0 || (row.deposit > 0 && row.deposit < 100) || row.deposit > 100000) throw new HttpError(400, 'Deposit must be $1–$1,000 (or 0 for none)');
+      }
       if (row.duration != null) {
         row.duration = Number(row.duration);
         if (!Number.isInteger(row.duration) || row.duration < 5 || row.duration > 480 || row.duration % 5) throw new HttpError(400, 'Duration must be 5-480 minutes in steps of 5');
