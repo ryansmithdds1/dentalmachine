@@ -1,6 +1,7 @@
 import express, { Router } from 'express';
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { requirePermission } from '../auth.js';
+import { requirePermission, HttpError } from '../auth.js';
+import { sendMessage } from '../messaging.js';
 import { insert, findOr404, audit, practiceNow, friendlyDateTime } from '../util.js';
 import { publish } from '../events.js';
 
@@ -94,22 +95,122 @@ export function smsWebhook({ db, config }) {
 }
 
 // Staff inbox of text conversations.
-export default function conversationRoutes({ db }) {
+export default function conversationRoutes({ db, messenger }) {
   const r = Router();
 
+  // A conversation is a patient's texts, or the texts from a number no patient has.
+  const threadKey = (m) => (m.patient_id ? `p${m.patient_id}` : `n${digits(m.direction === 'inbound' ? m.from_address : m.to_address)}`);
   r.get('/conversations', requirePermission('patients:read'), async (req, res) => {
-    res.json(await db.all(
+    const pid = req.user.practice_id;
+    const rows = await db.all(
       `SELECT m.*, p.first_name, p.last_name,
          (SELECT COUNT(*) FROM messages u WHERE u.practice_id = m.practice_id AND u.direction = 'inbound' AND u.read_at IS NULL
             AND ((m.patient_id IS NULL AND u.patient_id IS NULL AND u.from_address = m.from_address) OR u.patient_id = m.patient_id)) AS unread
        FROM messages m LEFT JOIN patients p ON p.id = m.patient_id
        WHERE m.id IN (
          SELECT MAX(id) FROM messages WHERE practice_id = ? AND channel = 'sms'
-           AND (direction = 'inbound' OR patient_id IN (SELECT patient_id FROM messages WHERE practice_id = ? AND direction = 'inbound'))
-         GROUP BY COALESCE(CAST(patient_id AS TEXT), 'x' || from_address)
-       ) ORDER BY m.id DESC LIMIT 200`,
-      req.user.practice_id, req.user.practice_id,
-    ));
+           AND (direction = 'inbound' OR patient_id IN (SELECT patient_id FROM messages WHERE practice_id = ? AND direction = 'inbound')
+                OR (patient_id IS NULL AND kind = 'reply'))
+         GROUP BY COALESCE(CAST(patient_id AS TEXT), 'x' || CASE WHEN direction = 'inbound' THEN from_address ELSE to_address END)
+       ) ORDER BY m.id DESC LIMIT 300`,
+      pid, pid,
+    );
+    const states = new Map((await db.all('SELECT s.*, u.name AS assigned_name FROM conversation_state s LEFT JOIN users u ON u.id = s.assigned_to WHERE s.practice_id = ?', pid)).map((s) => [s.thread, s]));
+    const view = req.query.view || 'open';
+    res.json(rows.map((m) => {
+      const thread = threadKey(m);
+      const st = states.get(thread);
+      // Archived until the patient writes again.
+      const archived = !!st?.archived_at && m.created_at <= st.archived_at;
+      return { ...m, thread, number: m.patient_id ? null : (m.direction === 'inbound' ? m.from_address : m.to_address), assigned_to: st?.assigned_to ?? null, assigned_name: st?.assigned_name ?? null, archived };
+    }).filter((t) => (view === 'archived' ? t.archived : !t.archived) && (view !== 'mine' || t.assigned_to === req.user.id) && (view !== 'unassigned' || !t.assigned_to)));
+  });
+
+  const parseThread = (thread) => {
+    const m = /^(p)(\d+)$|^(n)(\d{10})$/.exec(String(thread));
+    if (!m) throw new HttpError(400, 'Unknown conversation');
+    return m[1] ? { patientId: Number(m[2]) } : { number: m[4] };
+  };
+  const numberMessages = async (pid, number) => (await db.all(
+    "SELECT m.*, u.name AS created_by_name FROM messages m LEFT JOIN users u ON u.id = m.created_by WHERE m.practice_id = ? AND m.channel = 'sms' AND m.patient_id IS NULL ORDER BY m.id", pid,
+  )).filter((m) => digits(m.direction === 'inbound' ? m.from_address : m.to_address) === number);
+
+  // Texts from a number no patient has.
+  r.get('/conversations/:thread/messages', requirePermission('patients:read'), async (req, res) => {
+    const t = parseThread(req.params.thread);
+    if (t.patientId) {
+      const patient = await findOr404(db, 'patients', t.patientId, req.user.practice_id, 'Patient');
+      return res.json(await db.all(
+        `SELECT m.*, u.name AS created_by_name FROM messages m LEFT JOIN users u ON u.id = m.created_by
+         WHERE m.practice_id = ? AND m.patient_id = ? AND m.channel = 'sms' ORDER BY m.id`, req.user.practice_id, patient.id,
+      ));
+    }
+    const list = await numberMessages(req.user.practice_id, t.number);
+    const unread = list.filter((m) => m.direction === 'inbound' && !m.read_at).map((m) => m.id);
+    for (const id of unread) await db.run("UPDATE messages SET read_at = datetime('now') WHERE id = ?", id);
+    res.json(list);
+  });
+
+  // Reply to a number that isn't a patient yet (someone texting to ask about an appointment).
+  r.post('/conversations/:thread/reply', requirePermission('patients:write'), async (req, res) => {
+    const t = parseThread(req.params.thread);
+    if (t.patientId) throw new HttpError(400, "Reply from the patient's conversation");
+    const body = String(req.body?.body || '').trim().slice(0, 480);
+    if (!body) throw new HttpError(400, 'body is required');
+    const last = (await numberMessages(req.user.practice_id, t.number)).filter((m) => m.direction === 'inbound').at(-1);
+    if (!last) throw new HttpError(404, 'No texts from that number');
+    const msg = await sendMessage(db, messenger, { practiceId: req.user.practice_id, channel: 'sms', to: last.from_address, body, kind: 'reply', userId: req.user.id });
+    await audit(db, req, 'conversation.reply', 'messages', msg.id);
+    publish(req.user.practice_id, { type: 'message', patient_id: null });
+    res.status(201).json(msg);
+  });
+
+  // File an unknown number's texts under a patient (and remember the number on the chart if it has none).
+  r.post('/conversations/:thread/attach', requirePermission('patients:write'), async (req, res) => {
+    const t = parseThread(req.params.thread);
+    if (t.patientId) throw new HttpError(400, 'This conversation already belongs to a patient');
+    const patient = await findOr404(db, 'patients', req.body?.patient_id, req.user.practice_id, 'Patient');
+    const list = await numberMessages(req.user.practice_id, t.number);
+    for (const m of list) await db.run('UPDATE messages SET patient_id = ? WHERE id = ?', patient.id, m.id);
+    if (!patient.phone && list.length) await db.run('UPDATE patients SET phone = ? WHERE id = ?', list.find((m) => m.direction === 'inbound')?.from_address ?? null, patient.id);
+    await db.run('UPDATE conversation_state SET thread = ? WHERE practice_id = ? AND thread = ? AND NOT EXISTS (SELECT 1 FROM conversation_state x WHERE x.practice_id = ? AND x.thread = ?)',
+      `p${patient.id}`, req.user.practice_id, req.params.thread, req.user.practice_id, `p${patient.id}`);
+    await audit(db, req, 'conversation.attach', 'patients', patient.id, { messages: list.length });
+    publish(req.user.practice_id, { type: 'message', patient_id: patient.id });
+    res.json({ ok: true, moved: list.length, thread: `p${patient.id}` });
+  });
+
+  // Assign a conversation to a teammate, or archive it (it comes back when the patient writes again).
+  r.put('/conversations/:thread', requirePermission('patients:write'), async (req, res) => {
+    parseThread(req.params.thread);
+    const pid = req.user.practice_id;
+    const b = req.body || {};
+    if (b.assigned_to) await findOr404(db, 'users', b.assigned_to, pid, 'User');
+    await db.run('INSERT INTO conversation_state (practice_id, thread) VALUES (?, ?) ON CONFLICT (practice_id, thread) DO NOTHING', pid, req.params.thread);
+    if ('assigned_to' in b) await db.run('UPDATE conversation_state SET assigned_to = ? WHERE practice_id = ? AND thread = ?', b.assigned_to || null, pid, req.params.thread);
+    if ('archived' in b) await db.run(`UPDATE conversation_state SET archived_at = ${b.archived ? "datetime('now')" : 'NULL'} WHERE practice_id = ? AND thread = ?`, pid, req.params.thread);
+    if (b.archived) {
+      const t = parseThread(req.params.thread);
+      if (t.patientId) await db.run("UPDATE messages SET read_at = datetime('now') WHERE practice_id = ? AND patient_id = ? AND direction = 'inbound' AND read_at IS NULL", pid, t.patientId);
+    }
+    await audit(db, req, 'conversation.update', 'conversation_state', null, { thread: req.params.thread, ...b });
+    publish(pid, { type: 'message', patient_id: null });
+    res.json(await db.get('SELECT * FROM conversation_state WHERE practice_id = ? AND thread = ?', pid, req.params.thread));
+  });
+
+  // The office's quick replies (editable; the defaults until changed).
+  const DEFAULT_QUICK = ['Thanks! See you then.', 'Yes, that works. We have updated your appointment.', 'Please call the office so we can help: {phone}', 'We have openings later this week. Would you like one?'];
+  r.get('/quick-replies', requirePermission('patients:read'), async (req, res) => {
+    const p = await db.get('SELECT quick_replies FROM practices WHERE id = ?', req.user.practice_id);
+    res.json(p.quick_replies ? JSON.parse(p.quick_replies) : DEFAULT_QUICK);
+  });
+  r.put('/quick-replies', requirePermission('patients:write'), async (req, res) => {
+    const list = req.body?.replies;
+    if (!Array.isArray(list) || list.length > 20) throw new HttpError(400, 'replies must be a list of up to 20');
+    const clean = list.map((q) => String(q).trim().slice(0, 320)).filter(Boolean);
+    await db.run('UPDATE practices SET quick_replies = ? WHERE id = ?', JSON.stringify(clean), req.user.practice_id);
+    await audit(db, req, 'quick_replies.update', 'practices', req.user.practice_id);
+    res.json(clean);
   });
 
   r.get('/conversations/unread', requirePermission('patients:read'), async (req, res) => {

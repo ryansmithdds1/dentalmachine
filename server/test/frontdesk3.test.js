@@ -70,3 +70,51 @@ test('online requests: a pending request holds its slot; accepting can change th
   assert.equal(appt.end_time, `${day} 11:30`);
   assert.ok((await openSlots(h.db, pid, provider.id, day, { duration: 60, step: 30 })).includes(`${day} 10:00`), 'released once handled');
 });
+
+test('inbox: unknown numbers, reply, attach, assign, archive, quick replies', async () => {
+  const { api, patient } = await h.practice();
+  const pid = (await h.db.get('SELECT practice_id FROM patients WHERE id = ?', patient.id)).practice_id;
+  const inbound = (from, body, patientId = null) => h.db.run(
+    "INSERT INTO messages (practice_id, patient_id, channel, kind, direction, to_address, from_address, body, status) VALUES (?, ?, 'sms', 'reply', 'inbound', '+15125550142', ?, ?, 'sent')",
+    pid, patientId, from, body,
+  );
+  await inbound('+15125550777', 'Hi, do you take Delta Dental?');
+  let list = (await api.get('/conversations')).data;
+  const unknown = list.find((t) => t.thread === 'n5125550777');
+  assert.ok(unknown && unknown.unread === 1 && !unknown.patient_id);
+  const msgs = (await api.get('/conversations/n5125550777/messages')).data;
+  assert.equal(msgs.length, 1);
+
+  const n = h.sent.length;
+  const rep = await api.post('/conversations/n5125550777/reply', { body: 'Yes we do!' });
+  assert.equal(rep.status, 201);
+  assert.equal(h.sent.length, n + 1);
+  assert.equal(h.sent.at(-1).to, '+15125550777');
+  assert.equal((await api.get('/conversations/n5125550777/messages')).data.length, 2, 'the reply is in the thread');
+
+  // A new patient with no mobile: attaching moves the texts and saves the number.
+  const newbie = (await api.post('/patients', { first_name: 'New', last_name: 'Texter' })).data;
+  const att = await api.post('/conversations/n5125550777/attach', { patient_id: newbie.id });
+  assert.equal(att.data.moved, 2);
+  assert.equal((await api.get(`/patients/${newbie.id}`)).data.phone, '+15125550777');
+  list = (await api.get('/conversations')).data;
+  assert.ok(list.some((t) => t.thread === `p${newbie.id}`) && !list.some((t) => t.thread === 'n5125550777'));
+
+  // Assign and archive; a new text brings it back.
+  await inbound('+15125550100', 'Running late', patient.id);
+  const me = (await api.get('/auth/me')).data.user || (await api.get('/auth/me')).data;
+  await api.put(`/conversations/p${patient.id}`, { assigned_to: me.id });
+  assert.equal((await api.get('/conversations?view=mine')).data.map((t) => t.thread).join(), `p${patient.id}`);
+  await api.put(`/conversations/p${patient.id}`, { archived: true });
+  assert.ok(!(await api.get('/conversations')).data.some((t) => t.thread === `p${patient.id}`));
+  assert.ok((await api.get('/conversations?view=archived')).data.some((t) => t.thread === `p${patient.id}`));
+  await new Promise((r) => setTimeout(r, 1100));
+  await inbound('+15125550100', 'Actually on my way', patient.id);
+  assert.ok((await api.get('/conversations')).data.some((t) => t.thread === `p${patient.id}`), 'back when they write again');
+  assert.equal((await api.put('/conversations/zzz', { archived: true })).status, 400);
+
+  // Quick replies.
+  assert.ok((await api.get('/quick-replies')).data.length >= 3);
+  const q = await api.put('/quick-replies', { replies: ['See you soon!', '  ', 'Call us at {phone}'] });
+  assert.deepEqual(q.data, ['See you soon!', 'Call us at {phone}']);
+});
