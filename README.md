@@ -171,6 +171,14 @@ Documents and x-rays are sealed with `DOCUMENT_ENCRYPTION_KEY`; staff 2FA keys a
 
 Changing `JWT_SECRET` signs everyone out once.
 
+### Assistant (voice and text)
+
+Staff can say or type what they want from any screen: press **F2** (or the button in the corner) and say "book Ryan Smith for a crown prep with Dr. Lee next Tuesday afternoon", "take a $120 card payment", "note: patient reports cold sensitivity on 19", "plan an MOD composite on 30", "perio on 3: buccal 3 2 4, bleeding on the mesial", or "check in the 10 o'clock". The assistant looks things up (patients, open times, codes), then shows exactly what it will change and waits for "yes" or **Confirm**; nothing changes without it. It acts as the signed-in user through the normal API, so permissions, office restrictions, validation and the audit log apply as usual.
+
+- Turn it on with `ANTHROPIC_API_KEY` (an Anthropic API key). Optional: `ASSISTANT_MODEL` (default `claude-opus-5`), `ASSISTANT_EFFORT` (`low`, `medium` (default) or `high` — lower is faster and cheaper), `ASSISTANT=off`.
+- **HIPAA:** what staff say and what the assistant looks up goes to Anthropic, so sign Anthropic's BAA before using it with real patients. Voice input uses the browser's speech recognition, which in Chrome may send audio to Google unless it runs on the device; see [docs/HIPAA-vendors.md](docs/HIPAA-vendors.md).
+- Replies are read aloud after spoken requests (toggle in the panel).
+
 ### Imaging bridge (operatory PCs)
 
 1. In **Settings → Imaging bridges**, add the workstation and download its `bridge-config.json`. The key is shown only once.
@@ -227,6 +235,7 @@ All endpoints are under `/api` and need `Authorization: Bearer <token>`, except 
 | Scheduling extras | `POST /appointments` with `repeat: { every, unit: 'week'\|'month', count }`, `PUT /appointments/:id` and `PATCH /appointments/:id/status` with `scope: 'following'`; providers accept `working_hours` |
 | Clearinghouse | `POST /claims/submit`, `GET /clearinghouse`, `POST /clearinghouse/poll`, `POST /clearinghouse/responses`, `POST /claims/:id/status-check`, `GET /claims/:id/events` |
 | E-prescribing | `GET /erx`, `GET /pharmacies`, `PUT /patients/:id/pharmacy`, `GET /erx/launch`, `POST /patients/:id/prescriptions` with `send`, `schedule` and `otp` |
+| Assistant | `GET /assistant` (on or off, and its tools), `POST /assistant/turn` (one step of the conversation; the browser runs the tools). |
 | Imaging | `GET/POST /imaging/agents`, `DELETE /imaging/agents/:id`, `POST /patients/:id/imaging/launch`, `POST /patients/:id/imaging/capture` (optional `slot`, `retake`), `GET /imaging/commands/:id`, `PUT /imaging/commands/:id/target`, `POST /imaging/commands/:id/stop`, `POST /imaging/agents/:id/test-sensor`, `GET /imaging/commands/:id/test-image`, `PUT /documents/:id/adjust`, `GET /imaging/agent-download`. The agent itself uses `/api/bridge/hello\|commands\|captures\|images` and `/api/bridge/commands/:id/progress\|test-image` with its own key. |
 | Cards & autopay | `GET/POST /patients/:id/payment-methods`, `POST /patients/:id/card-setup`, `DELETE /payment-methods/:id`, `POST /payment-plans/:id/charge-now`; `PUT /payment-plans/:id` accepts `autopay_method_id` |
 | Portal (patient session) | `/api/public/portal/:practice/code\|verify`, then `/api/portal/me`, `/contact`, `/appointments/:id/confirm\|cancel`, `/forms/:id/open`, `/treatment-plans/:id/open`, `/pay` |

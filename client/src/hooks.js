@@ -18,6 +18,11 @@ export function useApi(path, deps = []) {
   useEffect(() => {
     load();
   }, [load]);
+  // Something changed the data behind the screen's back (the assistant): show the new state.
+  useEffect(() => {
+    window.addEventListener('dm:refresh', load);
+    return () => window.removeEventListener('dm:refresh', load);
+  }, [load]);
   return { ...state, reload: load };
 }
 

@@ -5,6 +5,7 @@ import { label } from './format.js';
 import Login from './pages/Login.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 import CommandPalette from './components/CommandPalette.jsx';
+import Assistant from './components/assistant/Assistant.jsx';
 import KeyboardHelp from './components/KeyboardHelp.jsx';
 import IdleLogout from './components/IdleLogout.jsx';
 import { Suspense, lazy, useEffect, useState } from 'react';
@@ -265,6 +266,7 @@ function Shell({ nav }) {
       <a href="#main" className="skip-link">Skip to content</a>
       <CommandPalette />
       <KeyboardHelp />
+      <Assistant />
       <IdleLogout />
       <aside className="sidebar rail">
         <div className="rail-brand" title={practice?.name}>
