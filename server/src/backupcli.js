@@ -12,14 +12,14 @@ import { exportPractice, restorePractice, writeBackupFile, readBackupFile } from
 const [cmd, arg, file] = process.argv.slice(2);
 const flags = new Set(process.argv.slice(2).filter((a) => a.startsWith('--')));
 const config = loadConfig();
-const storage = createStorage({ dir: config.uploadDir, key: config.documentKey });
+const storage = createStorage({ dir: config.uploadDir, key: config.documentKey, previousKeys: config.documentKeysPrevious });
 const db = await openDb();
 try {
   if (cmd === 'export' && Number(arg) && file) {
     await writeBackupFile(file, exportPractice(db, Number(arg), { storage, documents: flags.has('--documents') }), config.backupKey);
     console.log(`Practice ${arg} backed up to ${file}${config.backupKey ? ' (encrypted)' : ''}`);
   } else if (cmd === 'restore' && arg) {
-    const result = await restorePractice(db, JSON.parse(readBackupFile(await readFile(arg), config.backupKey)), { storage, copy: flags.has('--copy') });
+    const result = await restorePractice(db, JSON.parse(readBackupFile(await readFile(arg), [config.backupKey, ...config.backupKeysPrevious])), { storage, copy: flags.has('--copy') });
     const rows = Object.values(result.counts).reduce((a, b) => a + b, 0);
     console.log(`Restored as practice ${result.practice_id}: ${rows} rows, ${result.documents} document file(s).`);
   } else {

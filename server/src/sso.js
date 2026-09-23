@@ -98,12 +98,32 @@ export function sealSecret(value, secret, purpose = 'sso') {
   const body = Buffer.concat([c.update(String(value), 'utf8'), c.final()]);
   return `v1.${b64url(iv)}.${b64url(c.getAuthTag())}.${b64url(body)}`;
 }
+// After JWT_SECRET changes, the old value(s) go in JWT_SECRET_PREVIOUS (comma-separated) so what they sealed
+// still opens; npm run rotate-keys re-seals it under the new one.
+export const previousSecrets = (env = process.env) => String(env.JWT_SECRET_PREVIOUS || '').split(',').map((s) => s.trim()).filter(Boolean);
 export function openSecret(sealed, secret, purpose = 'sso') {
   if (!sealed) return null;
   const [, iv, tag, body] = String(sealed).split('.');
-  const d = createDecipheriv('aes-256-gcm', keyFrom(secret, purpose), Buffer.from(iv, 'base64url'));
-  d.setAuthTag(Buffer.from(tag, 'base64url'));
-  return Buffer.concat([d.update(Buffer.from(body, 'base64url')), d.final()]).toString('utf8');
+  for (const s of [secret, ...previousSecrets()]) {
+    try {
+      const d = createDecipheriv('aes-256-gcm', keyFrom(s, purpose), Buffer.from(iv, 'base64url'));
+      d.setAuthTag(Buffer.from(tag, 'base64url'));
+      return Buffer.concat([d.update(Buffer.from(body, 'base64url')), d.final()]).toString('utf8');
+    } catch { /* try the next secret */ }
+  }
+  throw new Error('A stored secret could not be opened: JWT_SECRET changed without the old value in JWT_SECRET_PREVIOUS');
+}
+// Whether a sealed value opens with the current secret (rotation skips those).
+export function sealedWithCurrent(sealed, secret, purpose) {
+  try {
+    const [, iv, tag, body] = String(sealed).split('.');
+    const d = createDecipheriv('aes-256-gcm', keyFrom(secret, purpose), Buffer.from(iv, 'base64url'));
+    d.setAuthTag(Buffer.from(tag, 'base64url'));
+    Buffer.concat([d.update(Buffer.from(body, 'base64url')), d.final()]);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // Staff authenticator-app keys. Older rows hold the base32 key as-is (base32 never contains a dot).

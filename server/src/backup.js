@@ -222,18 +222,24 @@ export async function writeBackupFile(path, source, key = null) {
 }
 
 // A backup file's JSON text: decrypted (with the key) and unzipped as needed.
+// `key` may be a list: the current key and earlier ones (BACKUP_ENCRYPTION_KEY_PREVIOUS), so backups made
+// before a key change can still be restored.
 export function readBackupFile(buf, key = null) {
   let data = buf;
   if (isEncryptedBackup(buf)) {
-    if (!key) throw new HttpError(400, 'This backup is encrypted — set BACKUP_ENCRYPTION_KEY to the key it was made with');
+    const keys = (Array.isArray(key) ? key : [key]).filter(Boolean);
+    if (!keys.length) throw new HttpError(400, 'This backup is encrypted — set BACKUP_ENCRYPTION_KEY to the key it was made with');
     const iv = buf.subarray(MAGIC.length, MAGIC.length + 12);
-    const decipher = createDecipheriv('aes-256-gcm', aesKey(key), iv);
-    decipher.setAuthTag(buf.subarray(buf.length - 16));
-    try {
-      data = Buffer.concat([decipher.update(buf.subarray(MAGIC.length + 12, buf.length - 16)), decipher.final()]);
-    } catch {
-      throw new HttpError(400, 'This backup could not be decrypted — wrong BACKUP_ENCRYPTION_KEY, or the file is damaged');
+    data = null;
+    for (const k of keys) {
+      const decipher = createDecipheriv('aes-256-gcm', aesKey(k), iv);
+      decipher.setAuthTag(buf.subarray(buf.length - 16));
+      try {
+        data = Buffer.concat([decipher.update(buf.subarray(MAGIC.length + 12, buf.length - 16)), decipher.final()]);
+        break;
+      } catch { /* try the next key */ }
     }
+    if (!data) throw new HttpError(400, 'This backup could not be decrypted — wrong BACKUP_ENCRYPTION_KEY (or _PREVIOUS), or the file is damaged');
   }
   return (data[0] === 0x1f && data[1] === 0x8b ? gunzipSync(data) : data).toString('utf8');
 }

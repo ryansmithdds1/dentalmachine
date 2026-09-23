@@ -159,6 +159,16 @@ node src/backupcli.js restore backup.json.gz --copy   # beside the original, as 
 
 A restore creates a new practice with every ID remapped, so the same file works for disaster recovery and moving servers. On Postgres, also turn on your provider's daily backups and point-in-time recovery (Supabase, Neon, RDS and Render all offer them).
 
+### Changing encryption keys
+
+Documents and x-rays are sealed with `DOCUMENT_ENCRYPTION_KEY`; staff 2FA keys and SSO client secrets with `JWT_SECRET`; backups with `BACKUP_ENCRYPTION_KEY`. To change one (on a schedule, or because it may have leaked):
+
+1. Set the new value, and put the old one in `DOCUMENT_ENCRYPTION_KEY_PREVIOUS`, `JWT_SECRET_PREVIOUS` or `BACKUP_ENCRYPTION_KEY_PREVIOUS` (comma-separated if there are several). Restart. Everything keeps working, and new files use the new key.
+2. Run `npm run rotate-keys`. It re-encrypts every file and re-seals every stored secret under the new keys (and encrypts files saved before encryption was turned on). It is safe to run again.
+3. When it reports nothing left on old keys, remove `DOCUMENT_ENCRYPTION_KEY_PREVIOUS` and `JWT_SECRET_PREVIOUS`. Keep `BACKUP_ENCRYPTION_KEY_PREVIOUS` until the old backups age out (`BACKUP_KEEP` days) or you no longer need them.
+
+Changing `JWT_SECRET` signs everyone out once.
+
 ### Imaging bridge (operatory PCs)
 
 1. In **Settings → Imaging bridges**, add the workstation and download its `bridge-config.json`. The key is shown only once.

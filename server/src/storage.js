@@ -5,9 +5,45 @@ import { randomUUID, createCipheriv, createDecipheriv, randomBytes, createHash, 
 
 // Stores uploaded files on local disk, or in S3-compatible object storage (AWS S3, Cloudflare R2,
 // Backblaze B2, MinIO…) so several servers can share them. With a key configured, files are
-// AES-256-GCM encrypted before they leave the server: [12-byte IV][16-byte auth tag][ciphertext].
-export function createStorage({ dir, key, s3 = s3FromEnv(), fetchImpl = globalThis.fetch }) {
-  const aesKey = key ? createHash('sha256').update(String(key)).digest() : null;
+// AES-256-GCM encrypted before they leave the server:
+//   "DMK2" [8-byte key id][12-byte IV][16-byte auth tag][ciphertext]
+// (files written before key ids have no header: [IV][tag][ciphertext]). The key id says which key sealed
+// the file, so after a key change the old keys (`previousKeys`, from DOCUMENT_ENCRYPTION_KEY_PREVIOUS)
+// still open old files until `npm run rotate-keys` has re-encrypted them.
+const MAGIC = Buffer.from('DMK2');
+const keyOf = (k) => {
+  const aes = createHash('sha256').update(String(k)).digest();
+  return { aes, id: createHash('sha256').update(aes).digest().subarray(0, 8) };
+};
+export function createStorage({ dir, key, previousKeys = [], s3 = s3FromEnv(), fetchImpl = globalThis.fetch }) {
+  const current = key ? keyOf(key) : null;
+  const aesKey = current?.aes ?? null;
+  const ring = [current, ...previousKeys.filter(Boolean).map(keyOf)].filter(Boolean);
+  const open = (k, iv, tag, body) => {
+    const decipher = createDecipheriv('aes-256-gcm', k.aes, iv);
+    decipher.setAuthTag(tag);
+    return Buffer.concat([decipher.update(body), decipher.final()]);
+  };
+  const decrypt = (data) => {
+    if (!ring.length) throw new Error('File is encrypted but no DOCUMENT_ENCRYPTION_KEY is configured');
+    if (data.subarray(0, 4).equals(MAGIC)) {
+      const k = ring.find((x) => x.id.equals(data.subarray(4, 12)));
+      if (!k) throw new Error('File was encrypted with a key this server no longer has (add it to DOCUMENT_ENCRYPTION_KEY_PREVIOUS)');
+      return { data: open(k, data.subarray(12, 24), data.subarray(24, 40), data.subarray(40)), current: k === current };
+    }
+    for (const k of ring) {
+      try {
+        return { data: open(k, data.subarray(0, 12), data.subarray(12, 28), data.subarray(28)), current: false };
+      } catch { /* try the next key */ }
+    }
+    throw new Error('File could not be decrypted with any configured key');
+  };
+  const encrypt = (buffer) => {
+    const iv = randomBytes(12);
+    const cipher = createCipheriv('aes-256-gcm', aesKey, iv);
+    const body = Buffer.concat([cipher.update(buffer), cipher.final()]);
+    return Buffer.concat([MAGIC, current.id, iv, cipher.getAuthTag(), body]);
+  };
   const backend = s3 ? s3Backend(s3, fetchImpl) : diskBackend(dir);
   const checkKey = (storageKey) => {
     if (!/^[0-9]+\/[0-9a-f-]{36}$/.test(storageKey)) throw new Error('Invalid storage key');
@@ -18,23 +54,28 @@ export function createStorage({ dir, key, s3 = s3FromEnv(), fetchImpl = globalTh
     driver: s3 ? 's3' : 'disk',
     async save(practiceId, buffer) {
       const storageKey = `${Number(practiceId)}/${randomUUID()}`;
-      let data = buffer;
-      if (aesKey) {
-        const iv = randomBytes(12);
-        const cipher = createCipheriv('aes-256-gcm', aesKey, iv);
-        const body = Buffer.concat([cipher.update(buffer), cipher.final()]);
-        data = Buffer.concat([iv, cipher.getAuthTag(), body]);
-      }
-      await backend.put(checkKey(storageKey), data);
+      await backend.put(checkKey(storageKey), aesKey ? encrypt(buffer) : buffer);
       return { storageKey, encrypted: !!aesKey };
     },
     async read(storageKey, encrypted) {
       const data = await backend.get(checkKey(storageKey));
       if (!data || !encrypted) return data;
-      if (!aesKey) throw new Error('File is encrypted but no DOCUMENT_ENCRYPTION_KEY is configured');
-      const decipher = createDecipheriv('aes-256-gcm', aesKey, data.subarray(0, 12));
-      decipher.setAuthTag(data.subarray(12, 28));
-      return Buffer.concat([decipher.update(data.subarray(28)), decipher.final()]);
+      return decrypt(data).data;
+    },
+    // Key rotation: rewrites one file in place under the current key (encrypting it if it wasn't).
+    // Returns 'changed', 'current' (already under the current key, left alone) or 'missing'.
+    async reencrypt(storageKey, encrypted) {
+      if (!aesKey) throw new Error('Set DOCUMENT_ENCRYPTION_KEY first');
+      const data = await backend.get(checkKey(storageKey));
+      if (!data) return 'missing';
+      let plain = data;
+      if (encrypted) {
+        const out = decrypt(data);
+        if (out.current) return 'current';
+        plain = out.data;
+      }
+      await backend.put(storageKey, encrypt(plain));
+      return 'changed';
     },
   };
 }

@@ -60,12 +60,16 @@ import { createErrorReporter, requestLogger, routeOf, log } from './monitoring.j
 import { officeAccess } from './officeaccess.js';
 
 // Runtime configuration, from the environment unless overridden (tests pass their own).
+const listOf = (v) => String(v || '').split(',').map((s) => s.trim()).filter(Boolean);
+
 export function loadConfig(env = process.env) {
   return {
     // Render and similar hosts publish the public URL themselves.
     appUrl: (env.APP_URL || env.RENDER_EXTERNAL_URL || (env.VERCEL_PROJECT_PRODUCTION_URL && `https://${env.VERCEL_PROJECT_PRODUCTION_URL}`) || `http://localhost:${env.PORT || 4000}`).replace(/\/$/, ''),
     uploadDir: env.UPLOAD_DIR || './data/uploads',
     documentKey: env.DOCUMENT_ENCRYPTION_KEY || null,
+    // Keys used before a key change (comma-separated), kept only to read what they sealed: see npm run rotate-keys.
+    documentKeysPrevious: listOf(env.DOCUMENT_ENCRYPTION_KEY_PREVIOUS),
     stripeSecretKey: env.STRIPE_SECRET_KEY || null,
     stripeWebhookSecret: env.STRIPE_WEBHOOK_SECRET || null,
     payments: env.PAYMENTS || null,
@@ -77,6 +81,7 @@ export function loadConfig(env = process.env) {
     backupDir: env.BACKUP_DIR || null,
     backupKeep: Number(env.BACKUP_KEEP) || 14,
     backupKey: env.BACKUP_ENCRYPTION_KEY || null,
+    backupKeysPrevious: listOf(env.BACKUP_ENCRYPTION_KEY_PREVIOUS),
     backupDocuments: env.BACKUP_DOCUMENTS ? env.BACKUP_DOCUMENTS === 'on' : null,
     // Error monitoring: a Sentry (or compatible) DSN; off when unset.
     sentryDsn: env.SENTRY_DSN || null,
@@ -93,7 +98,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   if (!secret) throw new Error('JWT secret is required');
   const config = { ...loadConfig(), ...overrides };
   messenger ??= createMessenger({ fetchImpl });
-  storage ??= createStorage({ dir: config.uploadDir, key: config.documentKey });
+  storage ??= createStorage({ dir: config.uploadDir, key: config.documentKey, previousKeys: config.documentKeysPrevious });
   erx ??= createErx(overrides.erx || erxConfig());
   payments ??= createPayments({ config, fetchImpl });
   mailer ??= overrides.mailer || createMailer({ fetchImpl });

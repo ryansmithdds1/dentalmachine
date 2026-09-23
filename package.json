@@ -13,6 +13,7 @@
     "start": "npm start --workspace server",
     "seed": "npm run seed --workspace server",
     "invite": "npm run invite --workspace server --",
+    "rotate-keys": "npm run rotate-keys --workspace server",
     "test": "npm test --workspace server",
     "e2e": "node --test e2e/*.test.mjs",
     "loadtest": "npm run loadtest --workspace server --",

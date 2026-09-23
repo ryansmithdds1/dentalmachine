@@ -11,6 +11,7 @@
     "start": "node --disable-warning=ExperimentalWarning src/index.js",
     "seed": "node --disable-warning=ExperimentalWarning src/seed.js",
     "invite": "node --disable-warning=ExperimentalWarning src/invitecli.js",
+    "rotate-keys": "node --disable-warning=ExperimentalWarning src/rotatekeys.js",
     "loadtest": "node --disable-warning=ExperimentalWarning scripts/loadtest.js",
     "test": "node --disable-warning=ExperimentalWarning --test \"test/**/*.test.js\""
   },
