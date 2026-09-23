@@ -3,6 +3,8 @@ import { requirePermission, HttpError } from '../auth.js';
 import { findOr404, insert, audit, requireOneOf, validTooth } from '../util.js';
 import { sniffMime } from './imaging.js';
 import { dicomToImage } from '../dicomimage.js';
+import { makeThumbnail, imageSize } from '../thumbnails.js';
+import { publish } from '../events.js';
 
 // Mount layouts (FMX etc.): how many images each holds; the client draws the slots.
 export const MOUNT_TEMPLATES = { fmx18: 18, fmx20: 20, bw4: 4, bw2: 2, pa4: 4, photos8: 8 };
@@ -155,6 +157,67 @@ export default function documentRoutes({ db, storage }) {
     const m = await findOr404(db, 'image_mounts', req.params.mid, req.user.practice_id, 'Mount');
     await db.run('DELETE FROM image_mounts WHERE id = ?', m.id);
     res.json({ ok: true });
+  });
+
+  // Grid previews: made here when the format allows, else by the first browser to show the image (below).
+  r.get('/documents/:did/thumb', requirePermission('clinical:read'), async (req, res) => {
+    const doc = await findOr404(db, 'documents', req.params.did, req.user.practice_id, 'Document');
+    if (doc.deleted_at) throw new HttpError(404, 'Document not found');
+    let thumb = doc.thumb_key ? { mime: doc.thumb_mime, data: await storage.read(doc.thumb_key, !!doc.thumb_encrypted) } : null;
+    if (!thumb?.data) {
+      if (!/^image\//.test(doc.mime) && doc.mime !== 'application/dicom') throw new HttpError(404, 'No preview for this file type');
+      const data = await storage.read(doc.storage_key, !!doc.encrypted);
+      if (!data) throw new HttpError(404, 'File missing from storage');
+      thumb = makeThumbnail(doc.mime, data);
+      if (!thumb) return res.status(202).json({ client: true }); // not made yet: the browser makes it
+      const saved = await storage.save(doc.practice_id, thumb.data);
+      await db.run('UPDATE documents SET thumb_key = ?, thumb_mime = ?, thumb_encrypted = ? WHERE id = ?', saved.storageKey, thumb.mime, saved.encrypted ? 1 : 0, doc.id);
+    }
+    res.set({ 'Content-Type': thumb.mime, 'Content-Length': thumb.data.length, 'Cache-Control': 'private, max-age=86400', 'Content-Security-Policy': "default-src 'none'; sandbox" });
+    res.send(thumb.data);
+  });
+  // A browser's preview of an image the server can't decode (it only needs making once).
+  r.put('/documents/:did/thumb', requirePermission('clinical:read'), express.raw({ type: () => true, limit: 300_000 }), async (req, res) => {
+    const doc = await findOr404(db, 'documents', req.params.did, req.user.practice_id, 'Document');
+    if (doc.deleted_at) throw new HttpError(404, 'Document not found');
+    if (doc.thumb_key) return res.json({ ok: true, existing: true });
+    const size = Buffer.isBuffer(req.body) ? imageSize(req.body) : null;
+    if (!size || size.width > 480 || size.height > 480 || !size.width || !size.height) throw new HttpError(400, 'A preview must be a PNG or JPEG no larger than 480 pixels');
+    const saved = await storage.save(doc.practice_id, req.body);
+    await db.run('UPDATE documents SET thumb_key = ?, thumb_mime = ?, thumb_encrypted = ? WHERE id = ? AND thumb_key IS NULL', saved.storageKey, size.mime, saved.encrypted ? 1 : 0, doc.id);
+    res.json({ ok: true });
+  });
+
+  // Fix what was recorded at upload: type, tooth, date taken, name, note.
+  r.put('/documents/:did', requirePermission('clinical:write'), async (req, res) => {
+    const doc = await findOr404(db, 'documents', req.params.did, req.user.practice_id, 'Document');
+    if (doc.deleted_at) throw new HttpError(404, 'Document not found');
+    const b = req.body || {};
+    const row = {};
+    if (b.category !== undefined) {
+      if (!CATEGORIES.includes(b.category)) throw new HttpError(400, `category must be one of ${CATEGORIES.join(', ')}`);
+      row.category = b.category;
+    }
+    if (b.tooth !== undefined) {
+      const t = String(b.tooth || '').trim().toUpperCase();
+      if (t && !validTooth(t)) throw new HttpError(400, 'Tooth must be 1-32 or A-T');
+      row.tooth = t || null;
+    }
+    if (b.taken_at !== undefined) {
+      if (b.taken_at && !/^\d{4}-\d{2}-\d{2}$/.test(b.taken_at)) throw new HttpError(400, 'taken_at must be YYYY-MM-DD');
+      row.taken_at = b.taken_at || null;
+    }
+    if (b.filename !== undefined) {
+      const name = String(b.filename || '').replace(/[^\w.\- ()]/g, '_').trim().slice(0, 200);
+      if (!name) throw new HttpError(400, 'Name the file');
+      row.filename = name;
+    }
+    if (b.notes !== undefined) row.notes = String(b.notes || '').slice(0, 500) || null;
+    if (!Object.keys(row).length) throw new HttpError(400, 'Nothing to change');
+    await db.run(`UPDATE documents SET ${Object.keys(row).map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, ...Object.values(row), doc.id);
+    await audit(db, req, 'document.update', 'documents', doc.id, { patient_id: doc.patient_id, ...row });
+    publish(req.user.practice_id, { type: 'documents', patient_id: doc.patient_id });
+    res.json(await db.get('SELECT id, category, tooth, taken_at, filename, notes FROM documents WHERE id = ?', doc.id));
   });
 
   // Soft delete: the file is retained for record-keeping but hidden from the chart.

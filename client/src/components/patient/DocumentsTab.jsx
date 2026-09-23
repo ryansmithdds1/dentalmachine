@@ -22,13 +22,34 @@ async function fetchBlob(id, image = false) {
   return URL.createObjectURL(await res.blob());
 }
 
+// A small preview from the server. When the server can't make one (a JPEG without an embedded thumbnail),
+// this browser makes it from the full image once and hands it back, so nobody downloads the full file again.
+async function fetchThumb(id) {
+  const res = await fetch(`/api/documents/${id}/thumb`, { headers: { Authorization: `Bearer ${getToken()}` } });
+  if (res.status === 200) return URL.createObjectURL(await res.blob());
+  if (res.status !== 202) throw new Error('No preview');
+  const full = await fetchBlob(id, true);
+  try {
+    const img = await new Promise((resolve, reject) => { const i = new Image(); i.onload = () => resolve(i); i.onerror = reject; i.src = full; });
+    const f = Math.min(1, 240 / Math.max(img.naturalWidth, img.naturalHeight));
+    const canvas = Object.assign(document.createElement('canvas'), { width: Math.max(1, Math.round(img.naturalWidth * f)), height: Math.max(1, Math.round(img.naturalHeight * f)) });
+    canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.8));
+    if (blob) fetch(`/api/documents/${id}/thumb`, { method: 'PUT', headers: { Authorization: `Bearer ${getToken()}`, 'Content-Type': 'image/jpeg' }, body: blob }).catch(() => {});
+    return blob ? URL.createObjectURL(blob) : full;
+  } finally {
+    setTimeout(() => URL.revokeObjectURL(full), 1000);
+  }
+}
+
 function Thumb({ doc, onOpen }) {
   const [src, setSrc] = useState(null);
   useEffect(() => {
     if (!viewerable(doc.mime)) return undefined;
     let url;
-    fetchBlob(doc.id, doc.mime === 'application/dicom').then((u) => setSrc((url = u))).catch(() => {});
-    return () => url && URL.revokeObjectURL(url);
+    let alive = true;
+    fetchThumb(doc.id).then((u) => { url = u; if (alive) setSrc(u); else URL.revokeObjectURL(u); }).catch(() => {});
+    return () => { alive = false; if (url) URL.revokeObjectURL(url); };
   }, [doc.id, doc.mime]);
   return (
     <button className="doc-tile" onClick={onOpen}>
@@ -55,6 +76,7 @@ export default function DocumentsTab({ patient }) {
   const [compare, setCompare] = useState(null);
   const input = useRef(null);
   const [focusMount, setFocusMount] = useState(null);
+  const [editing, setEditing] = useState(null);
 
   const upload = async (files) => {
     setUploading(true);
@@ -160,11 +182,42 @@ export default function DocumentsTab({ patient }) {
           <div className="form-actions">
             {viewing.url && <a href={viewing.url} download={viewing.doc.filename}><button>Download</button></a>}
             {viewing.viewer && <button onClick={() => fetchBlob(viewing.doc.id).then((u) => Object.assign(document.createElement('a'), { href: u, download: viewing.doc.filename }).click())}>Download original</button>}
+            {can('clinical:write') && <button onClick={() => setEditing(viewing.doc)}>Edit details</button>}
             {can('clinical:write') && <button className="danger" onClick={() => remove(viewing.doc)}>Remove</button>}
           </div>
         </Modal>
       )}
+      {editing && (
+        <DocumentDetails doc={editing} onClose={() => setEditing(null)}
+          onSaved={(d) => { setEditing(null); setViewing((v) => v && { ...v, doc: { ...v.doc, ...d } }); reload(); }} />
+      )}
     </>
+  );
+}
+
+// Fix what was recorded at upload.
+function DocumentDetails({ doc, onClose, onSaved }) {
+  const [f, setF] = useState({ filename: doc.filename, category: doc.category, tooth: doc.tooth || '', taken_at: doc.taken_at || '', notes: doc.notes || '' });
+  const [error, setError] = useState(null);
+  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+  const save = async (e) => {
+    e.preventDefault();
+    try { onSaved(await api.put(`/documents/${doc.id}`, f)); } catch (err) { setError(err); }
+  };
+  return (
+    <Modal title="Edit document details" onClose={onClose}>
+      <form onSubmit={save}>
+        <ErrorBox error={error} />
+        <div className="form-grid">
+          <label className="full">Name<input value={f.filename} onChange={set('filename')} /></label>
+          <label>Type<select value={f.category} onChange={set('category')}>{CATEGORIES.map((c) => <option key={c} value={c}>{catLabel(c)}</option>)}</select></label>
+          <label>Tooth<input value={f.tooth} onChange={set('tooth')} placeholder="e.g. 19" /></label>
+          <label>Date taken<input type="date" value={f.taken_at} onChange={set('taken_at')} /></label>
+          <label className="full">Note<input value={f.notes} onChange={set('notes')} /></label>
+        </div>
+        <div className="form-actions"><button type="button" onClick={onClose}>Cancel</button><button className="primary">Save</button></div>
+      </form>
+    </Modal>
   );
 }
 
@@ -302,7 +355,7 @@ function MountThumb({ docId, onClick, label, onClear }) {
   useEffect(() => {
     if (!docId) { setSrc(null); return undefined; }
     let url;
-    fetchBlob(docId, true).then((u) => setSrc((url = u))).catch(() => {});
+    fetchThumb(docId).then((u) => setSrc((url = u))).catch(() => {});
     return () => url && URL.revokeObjectURL(url);
   }, [docId]);
   return (

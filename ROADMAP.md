@@ -235,8 +235,8 @@ Works well: drag, resize and create; undo; live updates; conflict checks; open-t
 3. **P2** Signature shows the signer's name, credentials and time on printouts.
 
 ### Documents and imaging
-1. **P1** Edit category, tooth and date after upload.
-2. **P1** Thumbnails generated on the server (not full downloads).
+1. ✅ **P1** Edit category, tooth and date after upload. _(Done: “Edit details” in the viewer — name, type, tooth, date taken, note; audited.)_
+2. ✅ **P1** Thumbnails generated on the server (not full downloads). _(Done: PNG, BMP and DICOM are decoded and scaled on the server, JPEGs use their embedded EXIF thumbnail; anything else is made once by the first browser and stored, so the grid and mounts never download full images.)_
 3. **P2** A server-side queue of images that couldn't be matched to a patient, where staff can file them in bulk.
 4. **P2** Document search; tags; scan-to-chart from a phone (QR upload link).
 
