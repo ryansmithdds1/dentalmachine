@@ -133,6 +133,22 @@ F5. **Office settings with guardrails:** discount limits, which options show, le
     max months — set by the owner; the numbers shown to the patient are stored exactly as presented (with the
     fee schedule and estimate version) so the agreement can always be reproduced.
 
+## Recall on autopilot (asked for, high priority)
+Builds on recall types/due dates, reminders, texting/email, the AI voice calls used for confirmations, online
+booking and the ASAP list. Shares one "cadence engine" with treatment follow-up (TF).
+RC1. **A complete sequence around the due date:** e.g. 30 days before: text/email with a link to pick a time;
+     14 days before: reminder; due date: text; +14: email; +30: call (AI voice call or a task for the team, the office
+     chooses); +60: text; +90: letter/postcard; then a quarterly "we miss you" until reactivated. Editable per recall
+     type (hygiene, perio maintenance, ortho check, kids) and per patient preference; family members due together
+     get one message offering back-to-back times.
+RC2. **Self-scheduling in the message:** the link shows real open hygiene times that fit the recall type and the
+     patient's provider (respecting blocks and patterns), books directly, and confirms — no call needed.
+RC3. **Stops and adapts on its own:** stops the moment a visit is booked; skips patients with a future visit, inactive,
+     deceased, moved or opted out; switches channel after failed deliveries; respects quiet hours; pre-appointing at
+     checkout (next recall booked before they leave) counts as done.
+RC4. **Exceptions and results only:** the team sees only the calls they need to make and replies needing a person;
+     a recall dashboard shows due/overdue, booked from each step, reactivated patients and $ scheduled, per office.
+
 ## Treatment follow-up cadence and the doctor's letter (asked for, high priority)
 Builds on unscheduled treatment lists (Follow-ups), texting/email/calls, treatment plans, x-rays/photos and
 statements/mailing (Lob).
