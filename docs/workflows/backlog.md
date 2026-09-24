@@ -154,6 +154,40 @@ A4. **Then bill the patient automatically:** when the claim closes and a patient
 A5. **Reconciliation:** ERA totals vs posted vs deposited, and claims billed vs paid vs written off vs billed to
     patient — shown daily, with any gap as an exception.
 
+## Deposits and cash handling (asked for)
+Builds on the finance module (bank feed via Plaid, deposit matching, QuickBooks deposit push) and end-of-day.
+DC1. **Daily deposit submission:** at close, the team builds the day's deposit from what was taken (checks listed
+     one by one with patient and amount, cash counted by denomination), prints or photographs the deposit slip,
+     and submits it; the deposit is locked with who prepared it, who verified it, the bag/slip number and the photo.
+DC2. **Every deposit tracked to the bank:** each deposit (cash/check, card processor batches, insurance EFTs) is
+     followed from "taken" to "submitted" to "in the bank" (matched automatically from the bank feed); anything not
+     in the bank after N days, or short/over, becomes an exception in Needs attention.
+DC3. **Cash log with anti-embezzlement practice:** a cash drawer per desk opened and closed with a starting float and
+     a blind count (the counter doesn't see the expected amount), a second person verifies over/short, every cash
+     payment gets a numbered receipt, voids/refunds/discounts on cash need a manager and are flagged, the person who
+     takes payments can't also be the only one who posts adjustments and deposits (separation of duties, with a
+     warning when one person does all three), and an owner report shows cash over/short, voids, adjustments and
+     write-offs by person with trends.
+
+## Production report on one screen (asked for; like Curve's and Open Dental's production & income)
+PR1. One simple report for any date range (default: this month to date): gross production, adjustments, write-offs
+     (PPO and other), adjusted/net production, collections (patient and insurance) and collection %, by provider and
+     for the office, from the ledger. Run mid-month, it also shows the scheduled production for the rest of the
+     month and the projected month total if everything scheduled is completed, next to the goal; daily rows with
+     a running total; drill-down to the entries behind every number; print/CSV; in the report library and emails.
+
+## Opportunity finder (asked for, high priority)
+OF1. **Rules the office sets:** "opportunities" defined by codes and frequency (e.g. sealants D1351 on permanent
+     molars under 16 not already sealed, fluoride D1206/D1208 every 6 months under 19 or for high caries risk, FMX
+     D0210 every 5 years, bitewings D0274 yearly, perio maintenance vs prophy, SRP on 4 mm+ pockets, overdue
+     recall, unscheduled treatment, arestin, night guard, whitening…), with sensible starter rules.
+OF2. **Checked against each patient:** history (last done), insurance coverage and frequency limits (eligible now or
+     not, and what it would cost the patient), the chart (unsealed molars, open treatment) and perio readings.
+OF3. **On the schedule:** a small badge on the appointment card (e.g. "3 · $184") and a click/key that lists what the
+     patient is eligible for today, covered or not, with one-click "add to today's visit"; the day and each column
+     show the total opportunity; the morning huddle and huddle email list them; results tracked (offered, accepted,
+     done) so the office sees what it captured.
+
 ## Consents, start to finish (asked for, high priority)
 Builds on consent templates, e-signature, form packets, workflow 23 (in-office signing) and the paperwork items above.
 C1. **Consent library:** ready-made consents by procedure (extraction, RCT, crown/bridge, implant, perio/SRP, sedation,
