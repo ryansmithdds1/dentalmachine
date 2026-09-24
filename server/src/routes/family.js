@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { requireVisiblePatients } from '../officeaccess.js';
+import { requireVisiblePatients, canSeePatient } from '../officeaccess.js';
 import { requirePermission, HttpError } from '../auth.js';
 import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, toCents, practiceNow, mapSeq, paged, recorded } from '../util.js';
 
@@ -101,6 +101,28 @@ export async function planStatus(db, plan, today) {
   };
 }
 
+// A postal address, checked: street and city as typed (trimmed, with limits), a two-letter state, a US ZIP.
+// Fields not sent are left as they are; an empty string clears one.
+const ADDRESS = ['address', 'city', 'state', 'zip'];
+export function cleanAddress(body) {
+  const row = {};
+  for (const k of ADDRESS) {
+    if (!(k in body)) continue;
+    const v = body[k] == null ? '' : String(body[k]).trim().replace(/\s+/g, ' ');
+    row[k] = v || null;
+  }
+  if (!Object.keys(row).length) throw new HttpError(400, 'Send the new address (address, city, state, zip)');
+  if (row.address && row.address.length > 200) throw new HttpError(400, 'address can be at most 200 characters');
+  if (row.city && row.city.length > 100) throw new HttpError(400, 'city can be at most 100 characters');
+  if (row.state) {
+    row.state = row.state.replace(/\.$/, '').toUpperCase();
+    if (!/^[A-Z]{2}$/.test(row.state)) throw new HttpError(400, 'state must be the two-letter abbreviation (e.g. TX)');
+  }
+  if (row.zip && !/^\d{5}(-\d{4})?$/.test(row.zip)) throw new HttpError(400, 'zip must be 5 digits (or ZIP+4, 12345-6789)');
+  return row;
+}
+const addressOf = (p) => Object.fromEntries(ADDRESS.map((k) => [k, p[k] ?? null]));
+
 const RELATIONSHIPS = ['spouse', 'child', 'dependent', 'parent', 'other'];
 function relationshipOf(v) {
   if (!v) return null;
@@ -162,6 +184,45 @@ export default function familyRoutes({ db }) {
     }
     await audit(db, req, 'family.link', 'patients', memberId, { guarantor_id: g.id });
     res.status(201).json(await db.get('SELECT * FROM patients WHERE id = ?', memberId));
+  });
+
+  // ---- A new address (workflow 27, docs/workflows/specs/27-demographics.md) ----
+  // Families move together: by default everyone in the household who lived at the same address moves too
+  // (`household: false` changes this chart only; `members` narrows who moves). Each chart's change goes through
+  // update() (before/after kept) and is audited on its own; an undo sends the old address back the same way.
+  r.put('/patients/:id/address', requirePermission('patients:write'), async (req, res) => {
+    const patient = await patientOr404(req);
+    await requireVisiblePatients(db, req.user, [patient.id]);
+    const row = cleanAddress(req.body || {});
+    const was = addressOf(patient);
+    const key = (a) => ADDRESS.map((k) => String(a[k] ?? '').trim().toLowerCase().replace(/\s+/g, ' ')).join('|');
+    const movers = [];
+    // Only a real address is shared: an empty one would drag every chart with no address along.
+    if (req.body?.household !== false && was.address) {
+      const head = await guarantorOf(patient);
+      const family = await db.all(
+        "SELECT * FROM patients WHERE practice_id = ? AND (id = ? OR guarantor_id = ?) AND id != ? AND status != 'archived' ORDER BY id",
+        req.user.practice_id, head.id, head.id, patient.id,
+      );
+      const only = Array.isArray(req.body?.members) ? new Set(req.body.members.map(Number)) : null;
+      for (const m of family) {
+        if (key(m) !== key(was) || (only && !only.has(m.id))) continue;
+        if (await canSeePatient(db, req.user, m.id)) movers.push(m);
+      }
+    }
+    const now = new Date().toISOString();
+    const moved = [];
+    await db.tx(async () => {
+      for (const p of [patient, ...movers]) {
+        const before = addressOf(p);
+        const after = { ...before, ...row };
+        if (key(before) === key(after)) continue;
+        await update(db, 'patients', p.id, req.user.practice_id, { ...row, updated_at: now });
+        await audit(db, req, 'patient.address', 'patients', p.id, { household_of: p.id === patient.id ? null : patient.id }, { before, after, patientId: p.id });
+        if (p.id !== patient.id) moved.push({ id: p.id, first_name: p.first_name, last_name: p.last_name, before });
+      }
+    });
+    res.json({ patient: await db.get('SELECT * FROM patients WHERE id = ?', patient.id), before: was, moved });
   });
 
   // A member's relationship to the head of household.

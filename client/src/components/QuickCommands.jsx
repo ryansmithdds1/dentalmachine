@@ -7,6 +7,7 @@ import { useCommands } from '../shortcuts.js';
 import { toast } from '../toast.js';
 import { useLookup } from '../hooks.js';
 import SendForms from './FormsSend.jsx';
+import QuickUpdates from './QuickUpdates.jsx';
 import './quick.css';
 
 // Command bar commands that work on every screen (mounted once in the staff app):
@@ -140,12 +141,17 @@ export default function QuickCommands() {
   // Keeps the count (and the "new task for you" note) going on every screen.
   useTaskCount();
 
-  if (!consent) return null;
   return (
-    <SendForms
-      patient={consent.patient} procedureIds={consent.procedureIds} title={`Consent forms for ${consent.patient.first_name} ${consent.patient.last_name}`}
-      onClose={() => setConsent(null)}
-    />
+    <>
+      {/* Contact changes and "bill" for the active patient (workflows 24 and 27). */}
+      <QuickUpdates />
+      {consent && (
+        <SendForms
+          patient={consent.patient} procedureIds={consent.procedureIds} title={`Consent forms for ${consent.patient.first_name} ${consent.patient.last_name}`}
+          onClose={() => setConsent(null)}
+        />
+      )}
+    </>
   );
 }
 

@@ -11,6 +11,7 @@ import InsurancePlanForm from '../InsurancePlanForm.jsx';
 import { useShortcut, useCommands } from '../../shortcuts.js';
 import { toast } from '../../toast.js';
 import { readCard, storedCards } from '../cardRead.js';
+import { fileClaim, toastFiled } from '../billClaim.js';
 import '../insurance-intake.css';
 
 export default function InsuranceTab({ patient, onChange }) {
@@ -18,7 +19,8 @@ export default function InsuranceTab({ patient, onChange }) {
   const { data: policies, reload } = useApi(`/patients/${patient.id}/insurance`);
   const { data: claims, reload: reloadClaims } = useApi(can('billing:read') ? `/claims?patient_id=${patient.id}&limit=2000` : null);
   const [modal, setModal] = useState(null);
-  const [selected, setSelected] = useState([]);
+  // null = the smart default: everything finished and unbilled is ticked (workflow 24).
+  const [picked, setPicked] = useState(null);
   const [err, setErr] = useState(null);
   const active = policies?.filter((p) => p.active) || [];
   // Claims go to one insurer at a time: primary first, then the same procedures to the secondary.
@@ -26,6 +28,13 @@ export default function InsuranceTab({ patient, onChange }) {
   const claimPolicy = active.find((p) => p.id === billTo) || active[0];
   const { data: unclaimed, reload: reloadUnclaimed } = useApi(can('billing:read') && claimPolicy ? `/patients/${patient.id}/unclaimed-procedures?patient_insurance_id=${claimPolicy.id}` : null);
   const refresh = () => { reload(); reloadClaims(); reloadUnclaimed(); onChange?.(); };
+  const billable = (unclaimed || []).filter((p) => p.fee > 0 || picked?.includes(p.id));
+  const selected = picked ?? billable.map((p) => p.id);
+  const setSelected = (ids) => setPicked(ids);
+  // A claim to this policy that was made but hasn't gone out (it failed the checks, or was made by hand): the
+  // bill key sends it rather than making another.
+  const draft = claimPolicy && !selected.length ? (claims || []).find((c) => c.patient_insurance_id === claimPolicy.id && c.status === 'draft') : null;
+  const { data: connection } = useApi(can('billing:write') ? '/clearinghouse' : null);
 
   // Scan a card: a photo (front, and the back if picked too) is read by AI and the policy form opens filled in
   // for a person to check. Card photos a patient already sent (?card=<document ids>, from the intake list)
@@ -61,16 +70,31 @@ export default function InsuranceTab({ patient, onChange }) {
     if (ids.length) storedCards(ids).then((blobs) => readFrom(blobs, { stored: ids }), (e) => setCardErr(e));
   }, [cardParam]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const createClaim = async () => {
+  // Workflow 24: one action (B, or the button) makes the claim for what's ticked and sends it when it passes the
+  // checks; a claim that doesn't stays a draft and says what to fix.
+  const billing = useRef(false);
+  const bill = async () => {
+    if (billing.current || !claimPolicy || (!selected.length && !draft)) return;
+    billing.current = true;
     setErr(null);
     try {
-      await api.post('/claims', { patient_insurance_id: claimPolicy.id, procedure_ids: selected });
-      setSelected([]);
+      const out = await fileClaim({ policy: claimPolicy, procedureIds: selected, draft: selected.length ? null : draft, connection });
+      toastFiled(out, { policy: claimPolicy, connection });
+      if (!out.sent) setErr(out.error);
+      setPicked(null);
       refresh();
     } catch (e) {
       setErr(e);
+    } finally {
+      billing.current = false;
     }
   };
+  const canBill = can('billing:write') && !!claimPolicy && (selected.length > 0 || !!draft);
+  const billLabel = selected.length
+    ? `${connection?.batch ? 'Send' : 'Create'} ${claimPolicy?.priority || ''} claim to ${claimPolicy?.carrier_name || ''}${connection?.batch ? '' : ' (837 file)'}`
+    : draft ? `${connection?.batch ? 'Send' : 'Download'} claim #${draft.id}` : '';
+  useShortcut('b', bill, { label: 'Bill insurance: make the claim for the finished work and send it', section: 'Insurance', enabled: canBill });
+  useCommands(canBill ? [{ id: 'bill-insurance-tab', label: `Bill insurance: ${billLabel}`, hint: 'B', run: bill }] : []);
 
   return (
     <>
@@ -122,7 +146,7 @@ export default function InsuranceTab({ patient, onChange }) {
           <ErrorBox error={err} />
           {active.length > 1 && can('billing:write') && (
             <div className="seg" style={{ marginBottom: 10 }}>
-              {active.map((p) => <button key={p.id} type="button" className={claimPolicy?.id === p.id ? 'active' : ''} onClick={() => { setBillTo(p.id); setSelected([]); }}>Bill {p.priority}: {p.carrier_name}</button>)}
+              {active.map((p) => <button key={p.id} type="button" className={claimPolicy?.id === p.id ? 'active' : ''} onClick={() => { setBillTo(p.id); setPicked(null); }}>Bill {p.priority}: {p.carrier_name}</button>)}
             </div>
           )}
           {unclaimed?.length > 0 && claimPolicy && can('billing:write') && (
@@ -135,9 +159,15 @@ export default function InsuranceTab({ patient, onChange }) {
                 </label>
               ))}
               <div className="inline" style={{ marginTop: 8 }}>
-                <button className="small" onClick={() => setSelected(unclaimed.map((p) => p.id))}>Select all</button>
-                <button className="small primary" disabled={!selected.length} onClick={createClaim}>Create {claimPolicy.priority} claim to {claimPolicy.carrier_name}</button>
+                {selected.length < unclaimed.length && <button className="small" onClick={() => setSelected(unclaimed.map((p) => p.id))}>Select all</button>}
+                <button className="small primary" disabled={!selected.length} onClick={bill}>{billLabel || `Create ${claimPolicy.priority} claim to ${claimPolicy.carrier_name}`} <kbd className="elig-kbd">B</kbd></button>
               </div>
+            </div>
+          )}
+          {!unclaimed?.length && draft && can('billing:write') && (
+            <div className="inline" style={{ marginBottom: 12 }}>
+              <span className="muted">Claim #{draft.id} to {claimPolicy.carrier_name} hasn’t gone out yet.</span>
+              <button className="small primary" onClick={bill}>{billLabel} <kbd className="elig-kbd">B</kbd></button>
             </div>
           )}
           {claims?.length === 0 ? <div className="muted">No claims.</div> : (

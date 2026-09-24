@@ -24,7 +24,7 @@ import LateBanner, { useLateChime } from '../components/calendar/LateBanner.jsx'
 import { lateList, runningBehind, lateSettings } from '../components/calendar/late.js';
 import { useDayOpportunities, OpportunityTotal } from '../components/opportunities/OpportunityBadge.jsx';
 import { useDayReadiness } from '../components/readiness/ReadinessBadge.jsx';
-import { OptimizerLauncher } from '../components/optimizer/OptimizerPanel.jsx';
+import { OptimizerLauncher, FillLauncher, openFill } from '../components/optimizer/OptimizerPanel.jsx';
 import { useOptimizer } from '../components/optimizer/useOptimizer.js';
 import { useBusinessView, BusinessToggle, BusinessPanel, BusinessOverlay } from '../components/business/ScheduleBusiness.jsx';
 import BonusBar from '../components/bonus/BonusBar.jsx';
@@ -832,6 +832,8 @@ export default function Schedule() {
             </div>
           )}
           {view === 'day' && <OptimizerLauncher date={date} locationId={getLocationId()} />}
+          {/* Workflow 26: L opens the day's openings with the ASAP list and waitlist patients who fit them. */}
+          <FillLauncher date={date} locationId={getLocationId()} />
           {biz.allowed && <BusinessToggle on={biz.on} onToggle={biz.toggle} />}
           <button onClick={() => setShowAsap(!showAsap)} className={`icon-btn wide${showAsap ? ' active' : ''}`} title="Waitlist and ASAP list"><Hourglass size={16} /> Waitlist</button>
           {can('schedule:write') && <button className="icon-btn" onClick={() => setModal({ type: 'block', defaults: { date } })} title="Block time"><Ban size={16} /></button>}
@@ -909,6 +911,7 @@ export default function Schedule() {
         {showAsap && (
           <aside className="asap-panel">
             <div className="inline" style={{ justifyContent: 'space-between' }}><h3 style={{ margin: 0 }}>Waitlist & ASAP</h3><button className="small" onClick={() => setShowAsap(false)} aria-label="Close">✕</button></div>
+            {can('schedule:read') && <button className="small primary" style={{ marginTop: 8 }} onClick={openFill} title="Each opening on this day with the best fit from the ASAP list and waitlist (L)">Fill this day’s openings <kbd>L</kbd></button>}
             <WaitlistPanel date={date} providers={providers} canWrite={can('schedule:write')} onOpenPatient={(id) => nav(`/patients/${id}`)} />
             <h3 style={{ margin: '14px 0 0' }}>Booked, want earlier</h3>
             <p className="muted" style={{ fontSize: 12 }}>Patients who&apos;d take an earlier opening. Open one, choose <em>Move…</em>, then tap a gap.</p>
@@ -1037,11 +1040,21 @@ function Agenda({ from, to, appts, blockouts, providerFilter, onOpen, onFocusApp
 function WaitlistPanel({ date, providers, canWrite, onOpenPatient }) {
   const [list, setList] = useState(null);
   const [offer, setOffer] = useState({ date, time: '09:00', minutes: 60, provider_id: '' });
+  // The offer starts on the day's first opening (who, when, how long) rather than 9:00 — the same open time the
+  // plan and the fill list use. Once the person changes a field, it's theirs.
+  const touched = useRef(false);
+  const opt = useOptimizer(date, getLocationId(), { enabled: canWrite });
+  const firstGap = (opt.data?.providers || []).flatMap((p) => p.gaps.map((g) => ({ ...g, provider_id: p.provider_id }))).filter((g) => g.minutes >= 20).sort((a, b) => a.start_time.localeCompare(b.start_time))[0];
+  useEffect(() => {
+    if (touched.current || !firstGap) return;
+    setOffer((o) => ({ ...o, time: firstGap.start_time.slice(11, 16), minutes: Math.min(firstGap.minutes, 120), provider_id: String(firstGap.provider_id) }));
+  }, [firstGap?.start_time, firstGap?.provider_id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const edit = (patch) => { touched.current = true; setOffer({ ...offer, ...patch }); };
   const [result, setResult] = useState(null);
   const [err, setErr] = useState(null);
   const load = () => api.get('/waitlist').then(setList).catch(() => setList([]));
   useEffect(() => { load(); }, []);
-  useEffect(() => setOffer((o) => ({ ...o, date })), [date]);
+  useEffect(() => { touched.current = false; setOffer((o) => ({ ...o, date })); }, [date]);
   const send = async () => {
     setErr(null);
     try {
@@ -1068,10 +1081,10 @@ function WaitlistPanel({ date, providers, canWrite, onOpenPatient }) {
         <div className="waitlist-offer">
           <strong style={{ fontSize: 13 }}>Offer an opening</strong>
           <div className="inline" style={{ flexWrap: 'wrap', gap: 4 }}>
-            <input type="date" value={offer.date} onChange={(e) => setOffer({ ...offer, date: e.target.value })} style={{ width: 140 }} />
-            <input type="time" value={offer.time} step={300} onChange={(e) => setOffer({ ...offer, time: e.target.value })} style={{ width: 110 }} />
-            <input type="number" value={offer.minutes} min="10" step="10" onChange={(e) => setOffer({ ...offer, minutes: e.target.value })} style={{ width: 70 }} title="Minutes available" />
-            <select value={offer.provider_id} onChange={(e) => setOffer({ ...offer, provider_id: e.target.value })} style={{ width: 'auto' }}>
+            <input type="date" aria-label="Opening date" value={offer.date} onChange={(e) => edit({ date: e.target.value })} style={{ width: 140 }} />
+            <input type="time" aria-label="Opening time" value={offer.time} step={300} onChange={(e) => edit({ time: e.target.value })} style={{ width: 110 }} />
+            <input type="number" aria-label="Minutes available" value={offer.minutes} min="10" step="10" onChange={(e) => edit({ minutes: e.target.value })} style={{ width: 70 }} title="Minutes available" />
+            <select aria-label="Provider" value={offer.provider_id} onChange={(e) => edit({ provider_id: e.target.value })} style={{ width: 'auto' }}>
               <option value="">Any provider</option>
               {providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>

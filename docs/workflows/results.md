@@ -23,7 +23,10 @@ into one field.
 | 21 | Build a treatment plan (3 procedures) | ~22 | 8 (N, "14 D2740" Enter per procedure, Ctrl+Enter); all unplanned work → new plan 1 | — | < 1 s | 10 | |
 | 22 | Present / accept a plan | 3 staff, 6 patient | 2 staff, 3 patient | — | < 1 s | 2 / 3 | |
 | 23 | Consent forms | 3 + DOB typing | 2 from the plan (in-office signing pass, no DOB) | — | < 1 s | 1–2 | From the command bar: 4 |
+| 24 | Create and send claims | 4 from checkout; ~6 from the Insurance tab (tick, create, open, send; confirm() on resend) | 1 (B) on the Insurance tab or at checkout; 3 from any screen (Ctrl/⌘K "bill", Enter) | — | 0.1 s (tab), 0.5 s (command bar) | 1 | Made and sent in one step; everything finished is ticked; a claim failing the checks stays a draft and B sends it later (no second claim) |
 | 25 | Claim attachments | ~7 per attachment | 2 | — | < 1 s | 2 | |
+| 26 | Fill openings from the ASAP list | 6–7 by hand (offer form started at 09:00) | 2 (L, B book it now; or L, Enter to text the offer) | — | 0.2 s | 2 | ASAP first, then waitlist, then recall; Undo puts the visit back on the ASAP list; the offer form starts on the day's first opening |
+| 27 | Update demographics / contact info | 6 (30-field Edit window) | 3 (E / click, type, Enter on the chart; Ctrl/⌘K "phone …" / "address …" from anywhere) | — | 0.1–0.5 s | 3 | Saved at once with Undo; the household at the old address moves too, each chart audited with before/after |
 | 28 | Staff task | ~9 | 3 ("task … @name"); done 1 key with undo | — | < 0.5 s | 3 | Assignee sees a badge |
 | 30 | Intake review | per-chart hunting | 1–2 per item on one list (/intake: J/K, A) | — | — | 2 | Browser test still to seed an item; server tests cover it |
 | 31 | Insurance card → policy | ~12 typed fields | ≤ 4 (S, photo, read, confirm) | — | < 5 s | 4 | A person confirms; carrier added inline if missing |

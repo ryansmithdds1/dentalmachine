@@ -11,6 +11,8 @@ import NextVisitPicker from '../components/NextVisitPicker.jsx';
 import { useLastMethod, methodToPost } from '../components/patient/lastMethod.js';
 import '../components/patient/moneyflows.css';
 import { requestReview } from '../reviewRequest.js';
+import { fileClaim, toastFiled } from '../components/billClaim.js';
+import { useShortcut } from '../shortcuts.js';
 
 const METHODS = ['credit_card', 'debit_card', 'cash', 'check', 'care_credit', 'ach', 'other'];
 
@@ -20,6 +22,7 @@ export default function Checkout() {
   const nav = useNavigate();
   const { can, practice } = useAuth();
   const { data: co, reload, error: loadErr } = useApi(`/appointments/${id}/checkout`);
+  const { data: connection } = useApi(can('billing:write') ? '/clearinghouse' : null);
   const [err, setErr] = useState(null);
   const [booking, setBooking] = useState(null);
   const [picking, setPicking] = useState(false);
@@ -34,6 +37,30 @@ export default function Checkout() {
       setErr(e);
     }
   };
+  // Workflow 24: the claim for today's finished work is made and sent in one action (B, or the button).
+  const canBill = !!co?.policy && co.unclaimed.length > 0 && can('billing:write');
+  const bill = () => canBill && act(async () => {
+    const out = await fileClaim({ policy: co.policy, procedureIds: co.unclaimed, connection });
+    toastFiled(out, { policy: co.policy, connection });
+    if (!out.sent) throw out.error;
+    setNote(`Claim #${out.claim.id} ${connection?.batch ? `sent to ${co.policy.carrier_name}` : 'saved as an 837 file'}.`);
+  });
+  useShortcut('b', bill, { label: 'Bill insurance for today’s work (make and send the claim)', section: 'Check out', enabled: canBill });
+  // The payment amount has the focus when the screen opens (workflow 12). A letter means nothing in a number field,
+  // so B still bills from there; in text fields (the reference) it types as usual.
+  const billRef = useRef(bill);
+  billRef.current = bill;
+  useEffect(() => {
+    if (!canBill) return undefined;
+    const onKey = (e) => {
+      if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || e.key.toLowerCase() !== 'b') return;
+      if (!e.target.matches?.('.checkout-steps input[type=number]') || document.querySelector('.modal, .palette')) return;
+      e.preventDefault();
+      billRef.current();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [canBill]);
   if (loadErr) return <div className="error">{loadErr.message}</div>;
   if (!co) return <div className="empty">Loading…</div>;
   const a = co.appointment;
@@ -82,9 +109,9 @@ export default function Checkout() {
                 Complete {planned.length} planned procedure{planned.length > 1 ? 's' : ''}
               </button>
             )}
-            {co.unclaimed.length > 0 && can('billing:write') && (
-              <button onClick={() => act(async () => { const c = await api.post('/claims', { patient_insurance_id: co.policy.id, procedure_ids: co.unclaimed }); setNote(`Claim #${c.id} created for ${co.policy.carrier_name}.`); })}>
-                Create claim ({co.policy.carrier_name})
+            {canBill && (
+              <button onClick={bill} title="Makes the claim for today’s finished work and sends it (B)">
+                {connection?.batch ? 'Send claim' : 'Create claim'} to {co.policy.carrier_name} <kbd className="elig-kbd">B</kbd>
               </button>
             )}
           </div>

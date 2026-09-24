@@ -4,7 +4,7 @@ import { api } from '../../api.js';
 import { money, fmtTime } from '../../format.js';
 import { toast } from '../../toast.js';
 import { useAuth } from '../../auth.jsx';
-import { useShortcuts, typingIn } from '../../shortcuts.js';
+import { useShortcuts, useCommands, typingIn } from '../../shortcuts.js';
 import { useOptimizer, ACTION_LABEL, KIND_LABEL } from './useOptimizer.js';
 import './optimizer.css';
 
@@ -44,7 +44,7 @@ export function ProviderProgress({ p, money: showMoney, compact = false }) {
   );
 }
 
-function Card({ o, active, onFocus, onAct, onDecline, busy, refCb, showMoney, aiWhy }) {
+function Card({ o, active, onFocus, onAct, onDecline, busy, refCb, showMoney, aiWhy, altKey = false }) {
   const Icon = KIND_ICON[o.kind] || Target;
   return (
     <li className={`opt-card k-${o.kind}${o.in_plan ? ' in-plan' : ''}${active ? ' active' : ''}${busy ? ' busy' : ''}`} tabIndex={-1} ref={refCb} onFocus={onFocus} onClick={onFocus} aria-current={active ? 'true' : undefined} data-opt-id={o.id}>
@@ -70,7 +70,7 @@ function Card({ o, active, onFocus, onAct, onDecline, busy, refCb, showMoney, ai
       {o.fits ? (
         <div className="opt-card-actions">
           <button className="small primary" disabled={busy} onClick={(e) => { e.stopPropagation(); onAct(o); }}>{ACTION_LABEL[o.action] || 'Do it'}{active && <kbd>Enter</kbd>}</button>
-          {o.alt_actions.map((a, i) => <button key={a} className="small" disabled={busy} onClick={(e) => { e.stopPropagation(); onAct(o, i); }}>{ACTION_LABEL[a] || a}</button>)}
+          {o.alt_actions.map((a, i) => <button key={a} className="small" disabled={busy} onClick={(e) => { e.stopPropagation(); onAct(o, i); }}>{ACTION_LABEL[a] || a}{active && altKey && i === 0 && <kbd>B</kbd>}</button>)}
           <button className="small link opt-not" disabled={busy} onClick={(e) => { e.stopPropagation(); onDecline(o); }}>Not today{active && <kbd>D</kbd>}</button>
         </div>
       ) : <div className="opt-card-why opt-no">Doesn’t fit: {o.why_not}</div>}
@@ -78,7 +78,13 @@ function Card({ o, active, onFocus, onAct, onDecline, busy, refCb, showMoney, ai
   );
 }
 
-export default function OptimizerPanel({ date, locationId = null, onClose, focusId = null }) {
+// Fill mode (workflow 26, docs/workflows/specs/26-asap-fill.md): only the open times the ASAP list, the
+// waitlist and recall-due patients could fill — ASAP first (they're already booked and want sooner), then the
+// waitlist, then recall; earliest opening first — and B books it now (an ASAP visit moves up) instead of texting.
+const FILL_ORDER = { asap: 0, waitlist: 1, recall: 2 };
+const fillFirst = (a, b) => (FILL_ORDER[a.source] ?? 3) - (FILL_ORDER[b.source] ?? 3) || String(a.start_time).localeCompare(String(b.start_time)) || (a.id || 0) - (b.id || 0);
+
+export default function OptimizerPanel({ date, locationId = null, onClose, focusId = null, only = null, title = null }) {
   const { can } = useAuth() || {};
   const opt = useOptimizer(date, locationId);
   const d = opt.data;
@@ -93,12 +99,13 @@ export default function OptimizerPanel({ date, locationId = null, onClose, focus
     if (!d) return [];
     const live = (o) => pending[o.id] !== 'gone';
     const fits = d.opportunities.filter((o) => o.fits && live(o));
+    if (only) return [{ key: 'only', title: null, items: fits.filter((o) => only.includes(o.kind)).sort(fillFirst) }].filter((s) => s.items.length);
     return [
       { key: 'plan', title: d.plan.moves ? 'The plan' : null, items: fits.filter((o) => o.in_plan) },
       { key: 'more', title: 'More ideas', items: fits.filter((o) => !o.in_plan) },
       { key: 'protect', title: 'Protect what’s booked', items: d.protect.filter((o) => o.fits && live(o)) },
     ].filter((s) => s.items.length);
-  }, [d, pending]);
+  }, [d, pending, only]);
   const flat = useMemo(() => sections.flatMap((s) => s.items), [sections]);
   const current = flat[Math.min(cursor, flat.length - 1)] || null;
 
@@ -153,6 +160,8 @@ export default function OptimizerPanel({ date, locationId = null, onClose, focus
       else if (k === 'k' || k === 'ArrowUp') setCursor((c) => Math.max(0, c - 1));
       else if (k === 'Enter' && current?.fits && !e.target.closest?.('button, a')) act(current);
       else if ((k === 'd' || k === 'D') && current?.fits) decline(current);
+      // The first other action — "Book it" / "Move visit up" — for when the patient is on the phone and says yes.
+      else if ((k === 'b' || k === 'B') && current?.fits && current.alt_actions?.length) act(current, 0);
       else return;
       e.preventDefault(); // the screen underneath sees defaultPrevented and leaves the key alone
     };
@@ -160,17 +169,17 @@ export default function OptimizerPanel({ date, locationId = null, onClose, focus
     return () => window.removeEventListener('keydown', onKey, true);
   }, [flat, current, act, decline, onClose]);
 
-  const noFit = d ? d.opportunities.filter((o) => !o.fits) : [];
+  const noFit = d ? d.opportunities.filter((o) => !o.fits && (!only || only.includes(o.kind))) : [];
   const showMoney = !!d?.money;
   const rankedById = new Map((opt.ai?.ranked || []).map((r) => [r.id, r]));
   return (
-    <aside className="opt-panel" ref={panel} aria-label="Today’s plan">
+    <aside className={`opt-panel${only ? ' opt-only' : ''}`} ref={panel} aria-label={title || 'Today’s plan'}>
       <div className="opt-head">
         <div>
-          <h2><Target size={18} /> Today’s plan</h2>
-          <div className="muted opt-date">{new Date(`${date}T12:00:00`).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })} · <kbd>J</kbd><kbd>K</kbd> move · <kbd>Enter</kbd> do it · <kbd>D</kbd> not today</div>
+          <h2>{only ? <CalendarPlus size={18} /> : <Target size={18} />} {title || 'Today’s plan'}</h2>
+          <div className="muted opt-date">{new Date(`${date}T12:00:00`).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })} · <kbd>J</kbd><kbd>K</kbd> move · <kbd>Enter</kbd> {only ? 'text the offer' : 'do it'}{only ? <> · <kbd>B</kbd> book it now</> : null} · <kbd>D</kbd> not today</div>
         </div>
-        <button className="icon-btn" onClick={onClose} aria-label="Close the plan (Esc)"><X size={16} /></button>
+        <button className="icon-btn" onClick={onClose} aria-label={`Close ${only ? 'the list' : 'the plan'} (Esc)`}><X size={16} /></button>
       </div>
       <div className="opt-body">
         {opt.error && !opt.missing && <div className="error">{opt.error.message}</div>}
@@ -178,11 +187,14 @@ export default function OptimizerPanel({ date, locationId = null, onClose, focus
         {!d && !opt.error && <div className="muted opt-loading">Working out today’s plan…</div>}
         {d && (
           <>
-            <div className="opt-headline">{d.plan.headline}</div>
-            <div className="opt-provs">
-              {d.providers.filter((p) => p.goal || p.plan?.moves?.length || p.open_minutes).map((p) => <ProviderProgress key={p.provider_id} p={p} money={showMoney} />)}
-            </div>
-            {d.ai_available && (
+            {!only && <div className="opt-headline">{d.plan.headline}</div>}
+            {!only && (
+              <div className="opt-provs">
+                {d.providers.filter((p) => p.goal || p.plan?.moves?.length || p.open_minutes).map((p) => <ProviderProgress key={p.provider_id} p={p} money={showMoney} />)}
+              </div>
+            )}
+            {only && <div className="muted opt-fill-note">{openLine(d)}</div>}
+            {!only && d.ai_available && (
               <div className="opt-ai">
                 {!opt.ai && <button className="small" onClick={opt.explain}><Sparkles size={13} /> Explain with AI</button>}
                 {opt.ai?.loading && <span className="muted">Asking the AI…</span>}
@@ -195,30 +207,30 @@ export default function OptimizerPanel({ date, locationId = null, onClose, focus
                 {opt.aiError && <div className="error">{opt.aiError}</div>}
               </div>
             )}
-            {!flat.length && <div className="opt-empty"><Check size={16} /> Nothing to do right now{d.plan.moves ? '' : ' — the day is set'}.</div>}
+            {!flat.length && <div className="opt-empty"><Check size={16} /> {only ? 'Nobody on the ASAP list or waitlist fits an opening this day.' : <>Nothing to do right now{d.plan.moves ? '' : ' — the day is set'}.</>}</div>}
             {sections.map((s) => (
               <section key={s.key} className="opt-section">
                 {s.title && <h3>{s.title}{s.key === 'plan' && showMoney && d.plan.added ? <span> +{whole(d.plan.added)}</span> : null}</h3>}
                 <ul className="opt-list">
                   {s.items.map((o) => (
-                    <Card key={o.id || o.key} o={o} showMoney={showMoney} aiWhy={rankedById.get(o.id)?.why} active={current?.id === o.id} busy={pending[o.id] === 'acting'}
+                    <Card key={o.id || o.key} o={o} showMoney={showMoney} aiWhy={rankedById.get(o.id)?.why} active={current?.id === o.id} busy={pending[o.id] === 'acting'} altKey
                       onFocus={() => setCursor(flat.indexOf(o))} onAct={act} onDecline={decline}
                       refCb={(el) => (el ? refs.current.set(o.id, el) : refs.current.delete(o.id))} />
                   ))}
                 </ul>
               </section>
             ))}
-            {d.working.length > 0 && (
+            {d.working.filter((x) => !only || only.includes(x.kind)).length > 0 && (
               <section className="opt-section">
                 <h3><MessageSquare size={13} /> Waiting on a reply</h3>
-                <ul className="opt-mini">{d.working.map((w) => <li key={w.id}>{w.title}</li>)}</ul>
+                <ul className="opt-mini">{d.working.filter((x) => !only || only.includes(x.kind)).map((w) => <li key={w.id}>{w.title}</li>)}</ul>
               </section>
             )}
-            {d.done.length > 0 && (
+            {d.done.filter((x) => !only || only.includes(x.kind)).length > 0 && (
               <section className="opt-section">
                 <h3><Check size={13} /> Done today{showMoney && d.captured ? <span> +{whole(d.captured)}</span> : null}</h3>
                 <ul className="opt-mini">
-                  {d.done.map((x) => (
+                  {d.done.filter((x) => !only || only.includes(x.kind)).map((x) => (
                     <li key={x.id}>
                       <span>{x.title}</span>
                       {x.undoable && write && <button className="link small" onClick={async () => { try { await api.post(`/optimizer/${x.id}/undo`); toast('Undone'); } catch (e) { toast(e.message, { tone: 'error' }); } opt.reload(); }}><Undo2 size={12} /> Undo</button>}
@@ -268,3 +280,31 @@ export function OptimizerLauncher({ date, locationId = null, button = true }) {
     </>
   );
 }
+
+// The open time left on the day, per provider, in one line ("Dr. Lee: 2h 10m open · Kim (hygiene): 40 min").
+const minutesText = (m) => (m >= 60 ? `${Math.floor(m / 60)}h${m % 60 ? ` ${m % 60}m` : ''}` : `${m} min`);
+function openLine(d) {
+  const open = d.providers.filter((p) => p.open_minutes > 0);
+  return open.length ? `Open time: ${open.map((p) => `${p.name} ${minutesText(p.open_minutes)}`).join(' · ')}` : 'No open time left on this day.';
+}
+
+// Workflow 26: fill openings from the ASAP list and the waitlist — L on the schedule (or the command bar) opens the
+// list for the day on screen with the best fit first; Enter texts them the offer (their YES books it, fill.js),
+// B books it now. Both show at once with Undo where a booking can be undone (a text can't be unsent).
+export function FillLauncher({ date, locationId = null }) {
+  const { can } = useAuth() || {};
+  const [open, setOpen] = useState(false);
+  const opt = useOptimizer(date, locationId, { enabled: !!can?.('schedule:read') });
+  const allowed = !!can?.('schedule:read') && !opt.missing;
+  useShortcuts([{ combo: 'l', handler: () => setOpen((v) => !v), label: 'Fill openings from the ASAP list and waitlist', section: 'Schedule', enabled: allowed }]);
+  useCommands(allowed ? [{ id: 'fill-openings', label: 'Fill openings from the ASAP list / waitlist', hint: 'L on the schedule', run: () => setOpen(true) }] : []);
+  useEffect(() => {
+    const on = () => setOpen(true);
+    window.addEventListener('dm:fill', on);
+    return () => window.removeEventListener('dm:fill', on);
+  }, []);
+  if (!allowed || !open) return null;
+  return <OptimizerPanel date={date} locationId={locationId} only={FILL_KINDS} title="Fill openings" onClose={() => setOpen(false)} />;
+}
+const FILL_KINDS = ['fill'];
+export const openFill = () => window.dispatchEvent(new Event('dm:fill'));

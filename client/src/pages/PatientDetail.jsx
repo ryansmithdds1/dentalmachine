@@ -31,6 +31,7 @@ import RecallPanel from '../components/RecallPanel.jsx';
 import AttributionCard from '../components/marketing/AttributionCard.jsx';
 import MedicalHistory, { medStale, MEDICAL_CONDITIONS } from '../components/patient/MedicalHistory.jsx';
 import ConnectionChips from '../components/cards/Connection.jsx';
+import ContactCard from '../components/patient/ContactCard.jsx';
 
 export { MEDICAL_CONDITIONS };
 
@@ -188,17 +189,14 @@ function Overview({ p, reload }) {
     <div className="grid grid-2">
       <div className="card">
         <h2>Contact</h2>
-        <dl className="kv">
-          <dt>Mobile</dt><dd>{p.phone || '—'}{p.sms_bad_at && <span className="badge warn" style={{ marginLeft: 6 }} title="Reminders go by email until the number is changed">{p.sms_bad_reason || 'Can’t get texts'}</span>}</dd>
-          {p.phone_home && (<><dt>Home</dt><dd>{p.phone_home}</dd></>)}
-          {p.phone_work && (<><dt>Work</dt><dd>{p.phone_work}</dd></>)}
-          <dt>Email</dt><dd>{p.email || '—'}{p.email_bad_at && <span className="badge warn" style={{ marginLeft: 6 }} title="Reminders go by text until the address is changed">Bounced</span>}</dd>
-          {(p.preferred_contact || p.language) && (<><dt>Prefers</dt><dd>{[p.preferred_contact && { text: 'Text', call: 'Phone call', email: 'Email' }[p.preferred_contact], p.language].filter(Boolean).join(' · ')}</dd></>)}
-          <dt>Address</dt><dd>{[p.address, p.city, p.state, p.zip].filter(Boolean).join(', ') || '—'}</dd>
-          <dt>Emergency contact</dt><dd>{p.emergency_contact || '—'}</dd>
-          <dt>Referred by</dt><dd>{p.referral_source || '—'}</dd>
-          <CustomFieldValues patient={p} />
-        </dl>
+        {/* Each detail changes where it's shown: click it (or E), type, Enter — saved with Undo (workflow 27). */}
+        <ContactCard p={p} canEdit={can('patients:write')} extra={(
+          <>
+            {(p.preferred_contact || p.language) && (<><dt>Prefers</dt><dd>{[p.preferred_contact && { text: 'Text', call: 'Phone call', email: 'Email' }[p.preferred_contact], p.language].filter(Boolean).join(' · ')}</dd></>)}
+            <dt>Referred by</dt><dd>{p.referral_source || '—'}</dd>
+            <CustomFieldValues patient={p} />
+          </>
+        )} />
         {/* Alerts, allergies, medications, conditions, ASA and premed: read, reviewed and changed in one place. */}
         <MedicalHistory p={p} reload={reload} />
       </div>
