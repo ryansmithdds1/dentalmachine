@@ -348,10 +348,11 @@ export const checks = {
     return [finding('blood_pressure', '', 'Blood pressure not recorded', rules.bp_required === 'every_visit' ? 'Your office records BP at every visit; none was recorded.' : 'Local anesthetic was used and no BP was recorded.', { fix: { type: 'vitals' } })];
   },
   informed_refusal(ctx) {
-    if (!ctx.declined.length) return [];
+    const open = ctx.declined.filter((p) => !ctx.informedNotices?.has(p.id));
+    if (!open.length) return [];
     const documented = sentences(ctx.noteText).some((s) => REFUSAL.test(s)) && REFUSAL_INFORMED.test(ctx.noteText);
     if (documented || ctx.consent.refusalForms > 0) return [];
-    return ctx.declined.map((p) => finding('informed_refusal', `plan:${p.id}`, `Declined “${p.name}” without informed refusal`, 'The patient declined recommended treatment at this visit; the note doesn’t record the risks explained or that the patient understood.', { fix: { type: 'append_text', note_id: ctx.editableNoteId, text: `Informed refusal: recommended ${p.name}. Risks of not treating explained, including [[Risks: worsening decay and pain|infection or abscess|tooth loss|bone loss]]. Patient understands and declines at this time.` } }));
+    return open.map((p) => finding('informed_refusal', `plan:${p.id}`, `Declined “${p.name}” without informed refusal`, 'The patient declined recommended treatment at this visit; the note doesn’t record the risks explained or that the patient understood.', { fix: { type: 'append_text', note_id: ctx.editableNoteId, text: `Informed refusal: recommended ${p.name}. Risks of not treating explained, including [[Risks: worsening decay and pain|infection or abscess|tooth loss|bone loss]]. Patient understands and declines at this time.` } }));
   },
   postop_missing(ctx, rules) {
     const surgery = done(ctx).filter((p) => rules.postop_categories.includes(p.category));
@@ -536,6 +537,8 @@ export async function visitContext(db, pid, key, { today } = {}) {
     if (plan.option_group && await db.get("SELECT id FROM treatment_plans WHERE practice_id = ? AND option_group = ? AND status IN ('accepted','completed')", pid, plan.option_group)) continue;
     declined.push(plan);
   }
+  // A doctor's letter already sent about the plan (treatment follow-up, txletter.js) counts as the informed notice.
+  const informedNotices = new Set((await db.all("SELECT treatment_plan_id FROM txf_letters WHERE practice_id = ? AND patient_id = ? AND status = 'sent'", pid, visit.patient_id)).map((r) => r.treatment_plan_id));
   const perio = await db.get('SELECT MAX(exam_date) AS d FROM perio_exams WHERE patient_id = ? AND practice_id = ? AND deleted_at IS NULL AND exam_date <= ?', visit.patient_id, pid, visit.date);
   const windowFrom = (days) => zonedToUtc(tz, addDays(visit.date, -days));
   const since = (rows, days) => rows.filter((r) => r >= windowFrom(days));
@@ -546,7 +549,7 @@ export async function visitContext(db, pid, key, { today } = {}) {
     mainNote: notes[0] || null,
     treatingUsers: providers.map((p) => p.user_id).filter(Boolean), providerNames: providers.map((p) => p.name),
     patientAge: patient?.dob ? Math.floor(daysBetween(patient.dob, visit.date) / 365.25) : null,
-    medicalReviews: reviews, xrays, vitals, prescriptions, declined,
+    medicalReviews: reviews, xrays, vitals, prescriptions, declined, informedNotices,
     consent: { forms: forms.length + consentDocs.length, signedPlans, refusalForms: forms.filter((f) => /refus/i.test(f.name)).length, since, formDates: [...forms.map((f) => f.signed_at), ...consentDocs.map((d) => d.created_at)] },
     lastPerio: perio?.d || null,
   };

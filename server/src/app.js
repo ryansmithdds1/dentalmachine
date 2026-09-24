@@ -25,6 +25,7 @@ import insuranceRoutes from './routes/insurance.js';
 import verificationRoutes from './routes/verification.js';
 import feeScheduleRoutes from './routes/feeschedules.js';
 import marketingRoutes from './routes/marketing.js';
+import txFollowRoutes, { txFollowPublicRoutes } from './routes/txfollow.js';
 import recallFreqRoutes from './routes/recallfreq.js';
 import settingsRoutes from './routes/settings.js';
 import reportRoutes from './routes/reports.js';
@@ -263,6 +264,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   app.get('/api/health', (_req, res) => res.json({ ok: true, environment: environmentName() }));
   app.use('/api/public', statusRoutes({ db, storage, messenger }));
   app.use('/api/public', recallBookRoutes({ db, messenger, config, secret }), digestPublicRoutes({ db, secret }), journeyPublicRoutes({ db }));
+  app.use('/api/public', txFollowPublicRoutes({ db, config, secret, storage }));
   app.use('/api/public', reviewPublicRoutes({ db }), referralPublicRoutes({ db, storage, config }), eobAutopilotPublicRoutes({ db, config, secret, payments }));
   app.use('/api/auth', authRoutes({ db, secret, config, fetchImpl, messenger }));
   app.use('/api/public', (_req, res, next) => {
@@ -381,6 +383,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(optimizerRoutes({ db, config, messenger, app: () => app }));
   api.use(labCheckinRoutes({ db, storage, config, messenger, transcriber }));
   api.use(cadenceRoutes({ db, messenger, mailer, config, secret }));
+  api.use(txFollowRoutes({ db, messenger, mailer, config, storage }));
   api.use(journeyRoutes({ db, messenger, mailer, config, secret }));
   api.use(metricRoutes({ db }));
   api.use(digestRoutes({ db, messenger, config, secret }));

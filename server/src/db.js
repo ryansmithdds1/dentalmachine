@@ -4592,6 +4592,85 @@ CREATE TABLE IF NOT EXISTS exam_values (
 );
 CREATE INDEX IF NOT EXISTS idx_business_cost_profiles ON business_cost_profiles(practice_id, scope, scope_key);
 CREATE INDEX IF NOT EXISTS idx_business_provider_pay ON business_provider_pay(practice_id, provider_id);
+-- Treatment follow-up (TF1–TF4, txfollow.js / txletter.js, docs/workflows/specs/TF-treatment-followup.md). The doctor's
+-- letter about treatment that hasn't been scheduled: a draft (from the cadence's letter step, or the doctor's own click)
+-- that the doctor reviews and approves; only then is it emailed and/or mailed, filed on the chart and recorded as the
+-- informed notice. Never deleted: cancelled (no longer needed) or sent. live_key ('plan:<id>') is set while the letter
+-- is open (draft, sending, failed) so one plan has one open letter; it is cleared once the letter is sent or cancelled.
+CREATE TABLE IF NOT EXISTS txf_letters (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  treatment_plan_id INTEGER NOT NULL REFERENCES treatment_plans(id),
+  enrollment_id INTEGER REFERENCES cadence_enrollments(id),
+  run_id INTEGER UNIQUE REFERENCES cadence_runs(id),
+  provider_id INTEGER REFERENCES providers(id),
+  location_id INTEGER REFERENCES locations(id),
+  live_key TEXT UNIQUE,
+  status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','sending','sent','failed','cancelled')),
+  diagnosis TEXT,
+  why TEXT,
+  risk TEXT,
+  treatment TEXT,
+  closing TEXT,
+  cost INTEGER,
+  total_fee INTEGER,
+  insurance INTEGER,
+  document_id INTEGER REFERENCES documents(id),
+  markup TEXT,
+  send_email INTEGER NOT NULL DEFAULT 1,
+  send_mail INTEGER NOT NULL DEFAULT 0,
+  source TEXT NOT NULL DEFAULT 'automation',
+  ai_drafted INTEGER NOT NULL DEFAULT 0,
+  ai_reason TEXT,
+  link_hash TEXT,
+  link_expires_at TEXT,
+  created_by INTEGER REFERENCES users(id),
+  updated_by INTEGER REFERENCES users(id),
+  approved_by INTEGER REFERENCES users(id),
+  approved_at TEXT,
+  sent_at TEXT,
+  email_status TEXT,
+  email_message_id INTEGER REFERENCES messages(id),
+  mail_status TEXT,
+  mail_reference TEXT,
+  mail_expected TEXT,
+  print_task_id INTEGER REFERENCES tasks(id),
+  filed_document_id INTEGER REFERENCES documents(id),
+  error TEXT,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  cancelled_at TEXT,
+  cancelled_by INTEGER REFERENCES users(id),
+  cancel_reason TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- How a doctor signs the letter: credentials (DDS), a line under the name, the closing, and the signature image (an
+-- encrypted file in document storage, like documents). Configuration: edited in place, every change audited.
+CREATE TABLE IF NOT EXISTS txf_doctors (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  provider_id INTEGER NOT NULL UNIQUE REFERENCES providers(id),
+  credentials TEXT,
+  title TEXT,
+  closing TEXT,
+  signature_key TEXT,
+  signature_mime TEXT,
+  signature_encrypted INTEGER NOT NULL DEFAULT 0,
+  updated_by INTEGER REFERENCES users(id),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- The letterhead: the practice's color and logo (a stored file). Unset falls back to the online scheduling branding.
+CREATE TABLE IF NOT EXISTS txf_settings (
+  practice_id INTEGER PRIMARY KEY REFERENCES practices(id),
+  brand_color TEXT,
+  logo_key TEXT,
+  logo_mime TEXT,
+  logo_encrypted INTEGER NOT NULL DEFAULT 0,
+  updated_by INTEGER REFERENCES users(id),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_txf_letters_status ON txf_letters(practice_id, status);
 `;
 
 // Columns added after the first release. SQLite has no ADD COLUMN IF NOT EXISTS, so check first.
@@ -5146,6 +5225,9 @@ const COLUMNS = [
   ['patients', 'marketing_first_touch_id', 'INTEGER'],
   ['patients', 'marketing_last_touch_id', 'INTEGER'],
   ['patients', 'marketing_pinned', 'INTEGER NOT NULL DEFAULT 0'],
+  ['practices', 'treatment_cadence', 'INTEGER NOT NULL DEFAULT 0'],
+  ['practices', 'treatment_cadence_from', 'TEXT'],
+  ['treatment_plans', 'followup_urgency', 'TEXT'],
 ];
 
 // CHECK constraints widened after release: [table, constraint name on Postgres, old text, new text].

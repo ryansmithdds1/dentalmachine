@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { MessageSquare, PhoneCall, Plus, Trash2, RotateCcw, Play, Repeat, CalendarCheck, Users } from 'lucide-react';
 import { api } from '../api.js';
@@ -16,10 +16,18 @@ import './recall.css';
 // what each step booked, reactivated patients, $ scheduled, per office. Administrators switch it on and shape
 // each recall type's sequence on a timeline.
 
-const dayLabel = (n) => (n === 0 ? 'Due date' : n < 0 ? `${-n} days before` : `${n} days after`);
+const dayLabel = (n, type = 'recall') => (type === 'treatment' ? (n === 0 ? 'Diagnosis day' : n < 0 ? `${-n} days before` : `${n} days after diagnosis`) : n === 0 ? 'Due date' : n < 0 ? `${-n} days before` : `${n} days after`);
 const shortDay = (n) => (n === 0 ? 'Due' : n > 0 ? `+${n}` : `${n}`);
 
+// Treatment follow-up (TF, pages/TreatmentFollowup.jsx) shares this screen's address: /recall?type=treatment.
+const TreatmentFollowup = lazy(() => import('./TreatmentFollowup.jsx'));
 export default function Recall() {
+  const [params] = useSearchParams();
+  if (params.get('type') === 'treatment') return <Suspense fallback={<div className="empty">Loading…</div>}><TreatmentFollowup /></Suspense>;
+  return <RecallAutopilot />;
+}
+
+function RecallAutopilot() {
   const { user, can } = useAuth();
   const admin = user?.role === 'admin';
   const [params, setParams] = useSearchParams();
@@ -70,6 +78,7 @@ export default function Recall() {
           )}
           {admin && settings.data && <button className={on ? '' : 'primary'} disabled={busy} onClick={toggle}>{on ? 'Turn off' : 'Turn on'}</button>}
           {admin && on && <button disabled={busy} onClick={runNow} title="Run the recall pass now instead of waiting a few minutes"><Play size={15} /> Run now</button>}
+          <Link to="/recall?type=treatment" className="button">Treatment follow-up →</Link>
         </div>
       </div>
       {settings.data?.old_recall_messages && <div className="rc-note">The older automatic recall messages (Settings) are on. Turning on the autopilot replaces them, so nobody gets both.</div>}
@@ -278,10 +287,19 @@ function CallList({ canLog }) {
 
 // ---- Sequences: a timeline and the steps ----
 const SAMPLE = { first_name: 'Jane', names: 'Jane', who: 'your', visit: 'checkup and cleaning', due: 'Tue, Oct 13', link: 'https://…/rb/…', family_note: '' };
+const SAMPLES = { treatment: { ...SAMPLE, visit: 'a crown (your estimated cost: $420.00)', link: 'https://…/txf/…' } };
+const NEW_STEP = {
+  recall: 'Hi {first_name}, {who} {visit} at {practice} is overdue. Book in two taps: {link}',
+  treatment: 'Hi {first_name}, {practice} here — just checking in about the treatment we recommended. See it and pick a time: {link}',
+};
+const VAR_HELP = {
+  recall: 'Words that fill in: {first_name} {who} (“your” or “Jane and Mia’s”) {visit} {due} {link} (their booking page) {practice} {phone} {family_note}.',
+  treatment: 'Words that fill in: {first_name} {practice} {phone} {link} (their plan, cost and times, after a date-of-birth check) and, for emails and call scripts only, {visit} (the work and their estimated cost). Keep {visit} out of texts: texts carry no clinical detail. A letter step drafts the doctor’s letter for the doctor to review and approve — nothing is sent until they do.',
+};
 const fill = (tpl, vars) => String(tpl || '').replace(/\{(\w+)\}/g, (_, k) => vars[k] ?? `{${k}}`);
 
-function Sequences({ admin, settings }) {
-  const { data, error, reload } = useApi('/cadence/sequences?type=recall');
+export function Sequences({ admin, settings, type = 'recall', anchorLabel = 'Due' }) {
+  const { data, error, reload } = useApi(`/cadence/sequences?type=${type}`);
   const [pick, setPick] = useState(null);
   const [draft, setDraft] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -289,7 +307,7 @@ function Sequences({ admin, settings }) {
   const seqs = data?.sequences || [];
   const seq = seqs.find((s) => s.id === pick) || seqs[0];
   useEffect(() => { if (seq) setDraft({ name: seq.name, active: !!seq.active, family_window_days: seq.family_window_days, steps: seq.steps.map((s) => ({ ...s })) }); }, [seq?.id, data]); // eslint-disable-line react-hooks/exhaustive-deps
-  const vars = { ...SAMPLE, practice: 'your office', phone: 'our number' };
+  const vars = { ...(SAMPLES[type] || SAMPLE), practice: 'your office', phone: 'our number' };
   const dirty = useMemo(() => seq && draft && JSON.stringify({ name: seq.name, active: !!seq.active, family_window_days: seq.family_window_days, steps: seq.steps }) !== JSON.stringify(draft), [seq, draft]);
 
   if (error) return <ErrorBox error={error} />;
@@ -331,9 +349,9 @@ function Sequences({ admin, settings }) {
         ))}
       </div>
       <div className="card rc-timeline-card">
-        <Timeline steps={draft.steps} />
+        <Timeline steps={draft.steps} anchorLabel={anchorLabel} />
         <div className="muted rc-timeline-foot">
-          Stops the moment they book (or already have a visit), decline, opt out, or are marked moved, deceased or not to contact. Texts, emails and AI calls wait for sending hours{settings ? ` (${settings.send_from}–${settings.send_until})` : ''}. A step that can’t reach them tries the next channel.
+          {type === 'treatment' ? 'Stops the moment the work is booked (or they’re coming in to see a dentist), done or declined in writing, or they opt out or are marked not to contact.' : 'Stops the moment they book (or already have a visit), decline, opt out, or are marked moved, deceased or not to contact.'} Texts, emails and AI calls wait for sending hours{settings ? ` (${settings.send_from}–${settings.send_until})` : ''}. A step that can’t reach them tries the next channel.
         </div>
       </div>
       <ErrorBox error={err} />
@@ -345,9 +363,9 @@ function Sequences({ admin, settings }) {
               <div className="rc-step-head">
                 <span className={`rc-step-icon ${s.channel}`}><Icon size={16} /></span>
                 <label className="rc-field">Day
-                  <input type="number" value={s.offset_days} disabled={!admin} onChange={(e) => setStep(i, { offset_days: e.target.value })} aria-label="Days from the due date" />
+                  <input type="number" value={s.offset_days} disabled={!admin} onChange={(e) => setStep(i, { offset_days: e.target.value })} aria-label={type === 'treatment' ? 'Days from the diagnosis' : 'Days from the due date'} />
                 </label>
-                <span className="muted rc-when">{dayLabel(Number(s.offset_days))}</span>
+                <span className="muted rc-when">{dayLabel(Number(s.offset_days), type)}</span>
                 <select value={s.channel} disabled={!admin} onChange={(e) => setStep(i, { channel: e.target.value })} aria-label="Channel">
                   {Object.entries(CHANNEL_NAMES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                 </select>
@@ -368,14 +386,14 @@ function Sequences({ admin, settings }) {
                 <input className="rc-subject" value={s.subject || ''} disabled={!admin} placeholder="Subject / heading" onChange={(e) => setStep(i, { subject: e.target.value })} />
               )}
               <textarea rows={2} value={s.template} disabled={!admin} onChange={(e) => setStep(i, { template: e.target.value })} aria-label={s.channel.includes('call') ? 'Call script' : 'Message'} />
-              <div className="rc-preview"><span className="muted">{s.channel.includes('call') ? 'Script:' : 'Jane sees:'}</span> {fill(s.template, vars)}</div>
+              <div className="rc-preview"><span className="muted">{s.channel.includes('call') ? 'Script:' : type === 'treatment' && s.channel === 'letter' ? 'The doctor gets:' : 'Jane sees:'}</span> {type === 'treatment' && s.channel === 'letter' ? 'a draft letter to review, mark up and approve (Letters tab).' : fill(s.template, vars)}</div>
             </div>
           );
         })}
       </div>
       {admin && (
         <div className="rc-editor-bar">
-          <button type="button" onClick={() => setDraft((d) => ({ ...d, steps: [...d.steps, { offset_days: (Math.max(...d.steps.map((x) => Number(x.offset_days)), 0) || 0) + 30, channel: 'text', template: 'Hi {first_name}, {who} {visit} at {practice} is overdue. Book in two taps: {link}', conditions: {} }] }))}><Plus size={15} /> Add step</button>
+          <button type="button" onClick={() => setDraft((d) => ({ ...d, steps: [...d.steps, { offset_days: (Math.max(...d.steps.map((x) => Number(x.offset_days)), 0) || 0) + 30, channel: 'text', template: NEW_STEP[type] || NEW_STEP.recall, conditions: {} }] }))}><Plus size={15} /> Add step</button>
           <label className="inline muted"><Users size={15} /> Family members due within <input type="number" className="rc-small-input" value={draft.family_window_days} onChange={(e) => setDraft((d) => ({ ...d, family_window_days: Number(e.target.value) }))} /> days get one message</label>
           <label className="inline muted"><input type="checkbox" checked={draft.active} onChange={(e) => setDraft((d) => ({ ...d, active: e.target.checked }))} /> This sequence is on</label>
           <span className="rc-spacer" />
@@ -384,7 +402,7 @@ function Sequences({ admin, settings }) {
         </div>
       )}
       {!admin && <div className="muted">Only administrators can change the sequences.</div>}
-      <p className="muted rc-vars">Words that fill in: {'{first_name}'} {'{who}'} (“your” or “Jane and Mia’s”) {'{visit}'} {'{due}'} {'{link}'} (their booking page) {'{practice}'} {'{phone}'} {'{family_note}'}.</p>
+      <p className="muted rc-vars">{VAR_HELP[type] || VAR_HELP.recall}</p>
     </section>
   );
 }
