@@ -5,7 +5,7 @@ import { createGzip } from 'node:zlib';
 import { Readable } from 'node:stream';
 import { HttpError } from '../auth.js';
 import { audit } from '../util.js';
-import { exportPractice, exportToObject, restorePractice, listBackups, BACKUP_FILE } from '../backup.js';
+import { exportPractice, exportToObject, listBackups, drillBackup, BACKUP_FILE } from '../backup.js';
 
 const requireAdmin = (req, _res, next) => (req.user.role === 'admin' ? next() : next(new HttpError(403, 'Only administrators can manage backups')));
 
@@ -28,6 +28,8 @@ export default function backupRoutes({ db, storage, config }) {
       automatic: !!config.backupDir, keep_days: config.backupKeep, documents: config.backupDocuments,
       database: db.dialect, file_storage: storage.driver, encrypted_files: storage.encrypted, encrypted_backups: !!config.backupKey,
       files: await listBackups(config.backupDir, req.user.practice_id),
+      // The latest restore tests (automatic weekly on the stored files, or run by hand).
+      drills: await db.all('SELECT file, ok, rows_checked, detail, source, created_at FROM restore_drills WHERE practice_id = ? ORDER BY id DESC LIMIT 5', req.user.practice_id),
     });
   });
 
@@ -45,11 +47,9 @@ export default function backupRoutes({ db, storage, config }) {
   // Takes a fresh backup and restores it into a throwaway copy that is rolled back: every table must come back whole.
   r.post('/backup/test', async (req, res) => {
     const backup = await exportToObject(db, req.user.practice_id, {});
-    const result = await restorePractice(db, backup, { copy: true, dryRun: true });
-    const tables = Object.entries(backup.tables).map(([table, rows]) => ({ table, exported: rows.length, restored: result.counts[table] || 0 })).filter((t) => t.exported);
-    const ok = tables.every((t) => t.exported === t.restored);
+    const { ok, tables, rows, detail } = await drillBackup(db, req.user.practice_id, backup, { source: 'human' });
     await audit(db, req, 'backup.test', 'practices', req.user.practice_id, { ok });
-    res.json({ ok, tables, rows: tables.reduce((s, t) => s + t.exported, 0) });
+    res.json({ ok, tables, rows, detail });
   });
 
   return r;

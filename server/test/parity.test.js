@@ -251,9 +251,19 @@ test('quick search and full data export (without secrets)', async () => {
   assert.equal(s.patients[0].id, patient.id);
   assert.equal((await api.get('/search?q=doe, ja')).data.patients[0].id, patient.id);
   const exp = (await api.get('/export')).data;
-  assert.equal(exp.format, 'dentalmachine-export-v1');
+  assert.equal(exp.format, 'dentalmachine-export-v2');
   assert.equal(exp.tables.patients[0].first_name, 'Jane');
   const text = JSON.stringify(exp);
   assert.ok(!text.includes('password_hash') && !text.includes('scrypt$'), 'no password hashes');
   assert.ok(exp.tables.audit_log.length > 0);
+  // Every table is in it (new ones too), and any table comes as CSV.
+  assert.ok(exp.tables.issues && exp.tables.restore_drills && exp.tables.claim_items, 'derived from the schema');
+  const tables = (await api.get('/export/tables')).data;
+  assert.ok(tables.some((t) => t.table === 'patients' && t.rows >= 1));
+  const csv = await api.get('/export/patients.csv');
+  assert.equal(csv.status, 200);
+  assert.match(csv.data, /first_name/);
+  assert.match(csv.data, /Jane/);
+  assert.equal((await api.get('/export/nope.csv')).status, 404);
+  assert.ok(!(await api.get('/export/users.csv')).data.includes('password_hash'));
 });

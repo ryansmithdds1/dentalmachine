@@ -26,6 +26,8 @@ services:
         value: sandbox
       - key: ERX
         value: sandbox
+      - key: APP_ENV
+        value: demo
       - key: PAYMENTS
         value: sandbox
       - key: MAIL_DRIVER

@@ -93,6 +93,8 @@ import { officeAccess } from './officeaccess.js';
 // Runtime configuration, from the environment unless overridden (tests pass their own).
 const listOf = (v) => String(v || '').split(',').map((s) => s.trim()).filter(Boolean);
 
+export const environmentName = (env = process.env) => (['development', 'demo', 'staging', 'production'].includes(env.APP_ENV) ? env.APP_ENV : env.NODE_ENV === 'production' ? 'production' : 'development');
+
 export function loadConfig(env = process.env) {
   return {
     // Render and similar hosts publish the public URL themselves.
@@ -206,7 +208,8 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
 
   app.use(readAudit(db));
 
-  app.get('/api/health', (_req, res) => res.json({ ok: true }));
+  // Which environment this is (APP_ENV: development, demo, staging, production), so screens can say so.
+  app.get('/api/health', (_req, res) => res.json({ ok: true, environment: environmentName() }));
   app.use('/api/public', statusRoutes({ db, storage, messenger }));
   app.use('/api/auth', authRoutes({ db, secret, config, fetchImpl, messenger }));
   app.use('/api/public', (_req, res, next) => {

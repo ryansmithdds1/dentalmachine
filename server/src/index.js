@@ -12,7 +12,7 @@ import { pollClearinghouse } from './clearinghouse.js';
 import { runRecallSequences } from './recalls.js';
 import { runAutopay } from './payments.js';
 import { runPlanLateFees } from './routes/family.js';
-import { runAutomaticBackups } from './backup.js';
+import { runAutomaticBackups, runRestoreDrills } from './backup.js';
 import { runFormSends } from './formtemplates.js';
 import { runMembershipBilling } from './memberships.js';
 import { runCampaigns } from './campaigns.js';
@@ -92,6 +92,12 @@ if (config.backupDir) {
     .catch(jobFailed('Backup'));
   setInterval(backup, 60 * 60 * 1000).unref();
   setTimeout(backup, 60_000).unref();
+  // Weekly restore drill of each practice's newest stored backup (checked every six hours).
+  const drill = () => runExclusive('restore-drills', 60 * 60 * 1000, () => runRestoreDrills(db, { dir: config.backupDir, keys: [config.backupKey, ...config.backupKeysPrevious].filter(Boolean) }))
+    .then((r) => r?.length && log.info(`Restore drills: ${r.filter((x) => x.ok).length} passed, ${r.filter((x) => !x.ok).length} failed`))
+    .catch(jobFailed('Restore drill'));
+  setInterval(drill, 6 * 60 * 60 * 1000).unref();
+  setTimeout(drill, 15 * 60_000).unref();
 }
 // Payment-plan autopay: due installments are charged once a day (checked hourly).
 if (app.locals.payments.enabled && process.env.AUTOPAY !== 'off') {

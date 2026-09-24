@@ -1019,6 +1019,7 @@ table.elig-freq th, table.elig-freq td { padding: 3px 8px; }
 .portal-ins-update { border-left: 4px solid #f59e0b; }
 
 /* Setup wizard */
+.env-banner { background: #ede9fe; color: #5b21b6; border: 1px solid #c4b5fd; border-radius: 8px; padding: 6px 12px; margin-bottom: 12px; font-size: 13px; font-weight: 550; }
 .setup-banner { background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; border-radius: 8px; padding: 8px 12px; margin-bottom: 14px; font-size: 14px; }
 .setup-banner a { font-weight: 600; margin-left: 6px; }
 .setup-layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 20px; align-items: start; }
@@ -1133,6 +1134,7 @@ kbd { display: inline-block; min-width: 20px; padding: 1px 6px; border: 1px soli
 :root[data-theme='dark'] .cal-block { background: repeating-linear-gradient(135deg, rgba(148, 163, 184, 0.09) 0 5px, rgba(148, 163, 184, 0.03) 5px 10px); border-color: var(--border); }
 :root[data-theme='dark'] .cal-block span { color: var(--muted); }
 :root[data-theme='dark'] .office-chip, :root[data-theme='dark'] .office-popup { background: rgba(251, 191, 36, 0.14); color: #fde68a; border-color: rgba(251, 191, 36, 0.3); }
+:root[data-theme='dark'] .env-banner { background: rgba(139, 92, 246, 0.14); color: #ddd6fe; border-color: rgba(139, 92, 246, 0.35); }
 :root[data-theme='dark'] .setup-banner, :root[data-theme='dark'] .placing-banner { background: rgba(251, 191, 36, 0.12); color: #fde68a; border-color: rgba(251, 191, 36, 0.3); }
 :root[data-theme='dark'] .toast { background: #1f2a3d; }
 :root[data-theme='dark'] .error { border-color: rgba(251, 146, 60, 0.3); }

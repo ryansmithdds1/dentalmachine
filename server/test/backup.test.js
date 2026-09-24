@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { harness } from './helpers.js';
 import { seedDemo, DEMO_EMAIL } from '../src/demo.js';
-import { exportToObject, restorePractice, runAutomaticBackups, backupTables, isEncryptedBackup, readBackupFile } from '../src/backup.js';
+import { exportToObject, restorePractice, runAutomaticBackups, backupTables, isEncryptedBackup, readBackupFile, runRestoreDrills } from '../src/backup.js';
 import { productionProblems } from '../src/preflight.js';
 
 const h = harness();
@@ -157,4 +157,32 @@ test('production refuses to start without its security settings', () => {
   assert.match(productionProblems({ ...ok, APP_URL: 'http://dental.example.com' }).join(), /https/);
   assert.deepEqual(productionProblems({ ...ok, APP_URL: 'http://localhost:4000' }), [], 'local testing is fine');
   assert.match(productionProblems({ ...ok, BACKUP_DIR: '/backups' }).join(), /BACKUP_ENCRYPTION_KEY/);
+  // A server that says it's production can't run pretend payers or card processing; staging and demo can.
+  assert.match(productionProblems({ ...ok, APP_ENV: 'production', PAYMENTS: 'sandbox', EDI_MODE: 'sandbox' }).join(), /sandbox.*PAYMENTS/);
+  assert.deepEqual(productionProblems({ ...ok, APP_ENV: 'demo', PAYMENTS: 'sandbox' }), []);
+});
+
+test('restore drills: the newest stored backup is read back and restored weekly; a bad file raises an item', async () => {
+  const { practiceId } = await h.practice();
+  const dir = mkdtempSync(join(tmpdir(), 'dm-drills-'));
+  try {
+    const now = new Date();
+    await runAutomaticBackups(h.db, { dir, keep: 14, now, key: 'drill-key' });
+    const done = await runRestoreDrills(h.db, { dir, keys: ['drill-key'], now });
+    const mine = done.find((d) => d.practice_id === practiceId);
+    assert.equal(mine.ok, true, mine.detail);
+    assert.ok(mine.rows > 0);
+    assert.equal((await runRestoreDrills(h.db, { dir, keys: ['drill-key'], now })).length, 0, 'once a week');
+
+    // A damaged file fails loudly.
+    const name = readdirSync(dir).find((f) => f.startsWith(`practice-${practiceId}-`));
+    writeFileSync(join(dir, name), Buffer.from('DMBK1 not really a backup'));
+    await h.db.run('DELETE FROM restore_drills WHERE practice_id = ?', practiceId);
+    const [bad] = (await runRestoreDrills(h.db, { dir, keys: ['drill-key'], now })).filter((d) => d.practice_id === practiceId);
+    assert.equal(bad.ok, false);
+    const issue = await h.db.get("SELECT * FROM issues WHERE practice_id = ? AND dedupe_key = 'restore-drill' AND status = 'open'", practiceId);
+    assert.ok(issue, 'a failed drill is a Needs-attention item');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

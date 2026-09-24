@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { requirePermission, HttpError } from '../auth.js';
-import { insert, audit, practiceNow, toCents, utcRange, publicPractice } from '../util.js';
+import { insert, audit, practiceNow, toCents, utcRange, publicPractice, toCsv } from '../util.js';
+import { backupTables } from '../backup.js';
 import { sendMessage, preferredChannel } from '../messaging.js';
 import { renderTemplate, templatesFor, patientLang, fixedText, subjectFor, messageText } from '../templates.js';
 import { mailable, statementHtml } from '../mail.js';
@@ -269,30 +270,33 @@ export default function growthRoutes({ db, messenger, config, mailer = { enabled
     res.json({ sent, skipped });
   });
 
-  // ---- Full practice data export (data portability / backup) ----
-  const EXPORT_TABLES = [
-    'practices', 'providers', 'operatories', 'appointment_types', 'procedure_codes', 'fee_schedules', 'insurance_carriers', 'patients', 'patient_insurance',
-    'appointments', 'blockouts', 'procedures', 'treatment_plans', 'tooth_conditions', 'perio_exams', 'clinical_notes', 'prescriptions', 'ledger_entries',
-    'claims', 'preauths', 'payment_plans', 'recalls', 'patient_forms', 'documents', 'lab_cases', 'tasks', 'messages', 'followups', 'audit_log',
-    'appointment_series', 'claim_events', 'edi_batches', 'eligibility_checks', 'era_imports', 'payment_methods', 'payment_requests',
-    'statement_runs', 'statement_deliveries', 'form_requests', 'booking_requests',
-  ];
+  // ---- Full practice data export (data portability) ----
+  // Every table that holds this practice's data (the same list backups use, so a new table is included
+  // automatically), without sign-in secrets or internal storage keys: one JSON file, or any table as CSV.
+  const SECRET = /(_hash$|^mfa_secret$|secret|_token$|^token$|^storage_key$|^thumb_key$|^recording_key$|^api_key)/;
+  const scrubRow = (row) => Object.fromEntries(Object.entries(row).filter(([k]) => !SECRET.test(k)));
+  const exportRows = (t, pid) => db.all(`SELECT * FROM ${t.table} WHERE ${t.where}${t.cols.some((c) => c.name === 'id') ? ' ORDER BY id' : ''}`, pid).then((rows) => rows.map(scrubRow));
   r.get('/export', requireAdmin, async (req, res) => {
     const pid = req.user.practice_id;
-    const out = { exported_at: new Date().toISOString(), format: 'dentalmachine-export-v1', tables: {} };
-    for (const t of EXPORT_TABLES) {
-      const col = t === 'practices' ? 'id' : 'practice_id';
-      out.tables[t] = (await db.all(`SELECT * FROM ${t} WHERE ${col} = ?`, pid)).map((row) => {
-        const { password_hash: _p, mfa_secret: _m, confirm_token_hash: _c, sign_token_hash: _s, token_hash: _t, sso_client_secret: _k, ...rest } = row;
-        return rest;
-      });
-    }
-    out.tables.claim_items = await db.all('SELECT ci.* FROM claim_items ci JOIN claims c ON c.id = ci.claim_id WHERE c.practice_id = ?', pid);
-    out.tables.fee_schedule_items = await db.all('SELECT i.* FROM fee_schedule_items i JOIN fee_schedules f ON f.id = i.fee_schedule_id WHERE f.practice_id = ?', pid);
-    out.tables.users = await db.all('SELECT id, email, name, role, active, created_at FROM users WHERE practice_id = ?', pid);
+    const out = { exported_at: new Date().toISOString(), format: 'dentalmachine-export-v2', tables: {} };
+    for (const t of backupTables()) out.tables[t.table] = await exportRows(t, pid);
     await audit(db, req, 'practice.export', 'practices', pid);
     res.set({ 'Content-Type': 'application/json', 'Content-Disposition': `attachment; filename="dentalmachine-export-${(await practiceNow(db, pid)).slice(0, 10)}.json"` });
     res.send(JSON.stringify(out));
+  });
+  r.get('/export/tables', requireAdmin, async (req, res) => {
+    const list = [];
+    for (const t of backupTables()) list.push({ table: t.table, rows: Number((await db.get(`SELECT COUNT(*) AS n FROM ${t.table} WHERE ${t.where}`, req.user.practice_id)).n) });
+    res.json(list.filter((t) => t.rows > 0));
+  });
+  r.get('/export/:table.csv', requireAdmin, async (req, res) => {
+    const t = backupTables().find((x) => x.table === req.params.table);
+    if (!t) throw new HttpError(404, 'No such dataset');
+    const rows = await exportRows(t, req.user.practice_id);
+    const cols = t.cols.map((c) => c.name).filter((k) => !SECRET.test(k));
+    await audit(db, req, 'practice.export_table', 'practices', req.user.practice_id, { table: t.table, rows: rows.length });
+    res.set({ 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="${t.table}.csv"`, 'Cache-Control': 'no-store' });
+    res.send(toCsv(rows, cols.map((k) => [k, (row) => row[k]])));
   });
 
   return r;

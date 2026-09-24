@@ -1817,6 +1817,18 @@ CREATE TABLE IF NOT EXISTS issues (
   resolution TEXT
 );
 -- Every call to an outside service (see issues.js): no bodies, no query strings.
+-- Proof that backups restore: each drill reads a stored backup file, restores it into a rolled-back copy and
+-- compares every table's row count.
+CREATE TABLE IF NOT EXISTS restore_drills (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  file TEXT,
+  ok INTEGER NOT NULL,
+  rows_checked INTEGER NOT NULL DEFAULT 0,
+  detail TEXT,
+  source TEXT NOT NULL DEFAULT 'automation',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 -- Data migrations that have run (see migrations.js).
 CREATE TABLE IF NOT EXISTS schema_migrations (
   id INTEGER PRIMARY KEY,

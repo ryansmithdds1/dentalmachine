@@ -124,6 +124,14 @@ function OfflineSchedule({ onRetry }) {
   );
 }
 
+// Staging and demo servers say so on every screen, so nobody mistakes test data for the real practice.
+function EnvironmentBanner() {
+  const [env, setEnv] = useState(null);
+  useEffect(() => { fetch('/api/health').then((r) => r.json()).then((d) => setEnv(d.environment)).catch(() => {}); }, []);
+  if (env !== 'staging' && env !== 'demo') return null;
+  return <div className="env-banner no-print">{env === 'staging' ? 'Staging server — test data only. Nothing here reaches real patients, payers or card processors.' : 'Demo server — sample data, sandbox integrations.'}</div>;
+}
+
 function UnreadBadge() {
   const [n, setN] = useState(0);
   const load = () => api.get('/conversations/unread').then((r) => setN(r.unread)).catch(() => {});
@@ -322,6 +330,7 @@ function Shell({ nav }) {
         </div>
       </aside>
       <main className={`main${fullBleed ? ' full-bleed' : ''}`} id="main" tabIndex={-1}>
+        <EnvironmentBanner />
         {user.role === 'admin' && practice?.setup_status === 'pending' && location.pathname !== '/setup' && (
           <div className="setup-banner no-print">Finish setting up {practice.name} — providers, fees, insurance and reminders. <NavLink to="/setup">Continue setup →</NavLink></div>
         )}

@@ -7,6 +7,7 @@ import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
 import { schemaInfo } from './db.js';
 import { HttpError } from './auth.js';
+import { raiseIssue, resolveIssue } from './issues.js';
 import { TABLE as IMPORT_TABLES } from './importer.js';
 
 // Practice backups: every row the practice owns, in one JSON file, optionally with its documents.
@@ -297,4 +298,51 @@ export async function listBackups(dir, practiceId) {
   }
   const mine = files.filter((f) => BACKUP_FILE.test(f) && Number(BACKUP_FILE.exec(f)[1]) === Number(practiceId)).sort().reverse();
   return Promise.all(mine.map(async (f) => ({ name: f, date: /(\d{4}-\d{2}-\d{2})/.exec(f)[1], size: (await stat(join(dir, f))).size })));
+}
+
+// ---- Restore drills ----
+// A backup nobody has restored is a hope, not a backup. Weekly, each practice's newest stored backup file is
+// read back (decrypted with the current or a previous key), restored into a copy that is rolled back, and
+// every table's row count compared with the file. The result is kept, and a failure goes to Needs attention.
+export async function drillBackup(db, practiceId, backup, { file = null, source = 'automation' } = {}) {
+  let tables = [];
+  let ok = false;
+  let detail = null;
+  try {
+    const result = await restorePractice(db, backup, { copy: true, dryRun: true });
+    tables = Object.entries(backup.tables).map(([table, rows]) => ({ table, exported: rows.length, restored: result.counts[table] || 0 })).filter((t) => t.exported);
+    const short = tables.filter((t) => t.exported !== t.restored);
+    ok = !short.length;
+    if (!ok) detail = `Came back short: ${short.map((t) => `${t.table} ${t.restored}/${t.exported}`).join(', ')}`.slice(0, 1000);
+  } catch (err) {
+    detail = `Couldn't restore: ${err.message}`.slice(0, 1000);
+  }
+  const rows = tables.reduce((s, t) => s + t.exported, 0);
+  await db.run('INSERT INTO restore_drills (practice_id, file, ok, rows_checked, detail, source) VALUES (?, ?, ?, ?, ?, ?)', practiceId, file, ok ? 1 : 0, rows, detail, source);
+  const key = 'restore-drill';
+  if (ok) await resolveIssue(db, practiceId, key, 'Resolved: the next restore test worked');
+  else await raiseIssue(db, { practiceId, kind: 'records', key, role: 'admin', severity: 'high', title: `A backup${file ? ` (${file})` : ''} failed its restore test`, detail });
+  return { ok, rows, tables, detail };
+}
+
+export async function runRestoreDrills(db, { dir, keys = [], everyDays = 7, now = new Date() }) {
+  if (!dir) return [];
+  const since = new Date(now.getTime() - everyDays * 86400000).toISOString().slice(0, 19).replace('T', ' ');
+  const out = [];
+  for (const { id } of await db.all('SELECT id FROM practices ORDER BY id')) {
+    if (await db.get('SELECT id FROM restore_drills WHERE practice_id = ? AND created_at >= ?', id, since)) continue;
+    const [newest] = await listBackups(dir, id);
+    if (!newest) continue;
+    let backup;
+    try {
+      backup = JSON.parse(readBackupFile(await readFile(join(dir, newest.name)), keys));
+    } catch (err) {
+      await db.run('INSERT INTO restore_drills (practice_id, file, ok, detail) VALUES (?, ?, 0, ?)', id, newest.name, `Couldn't read the file: ${err.message}`.slice(0, 1000));
+      await raiseIssue(db, { practiceId: id, kind: 'records', key: 'restore-drill', role: 'admin', severity: 'high', title: `Backup file ${newest.name} couldn't be read back`, detail: err.message });
+      out.push({ practice_id: id, ok: false });
+      continue;
+    }
+    out.push({ practice_id: id, file: newest.name, ...(await drillBackup(db, id, backup, { file: newest.name })) });
+  }
+  return out;
 }

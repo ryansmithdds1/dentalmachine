@@ -1,17 +1,17 @@
 import { useState } from 'react';
 import { api, download } from '../api.js';
 import { useApi } from '../hooks.js';
-import { fmtDate } from '../format.js';
+import { fmtDate, fmtUtcDateTime } from '../format.js';
 import { ErrorBox, useSubmit } from './ui.jsx';
 
 const size = (n) => (n > 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1e3))} KB`);
 
 // Settings → Backups: download a backup, prove one restores, and see the automatic ones.
 export default function Backups() {
-  const { data: status } = useApi('/backup/status');
+  const { data: status, reload } = useApi('/backup/status');
   const [test, setTest] = useState(null);
   const dl = useSubmit((docs) => download(`/backup${docs ? '?documents=true' : ''}`, 'dental-machine-backup.json.gz'));
-  const check = useSubmit(async () => setTest(await api.post('/backup/test')));
+  const check = useSubmit(async () => { setTest(await api.post('/backup/test')); reload(); });
   if (!status) return <div className="card">Loading…</div>;
   return (
     <>
@@ -27,6 +27,8 @@ export default function Backups() {
           <button disabled={dl.busy} onClick={() => dl.submit(true)}>Download with documents & x-rays</button>
         </div>
       </div>
+
+      <ExportData />
 
       <div className="card">
         <h2 style={{ marginTop: 0 }}>Test a restore</h2>
@@ -45,6 +47,18 @@ export default function Backups() {
                 <tbody>{test.tables.map((t) => <tr key={t.table}><td>{t.table.replace(/_/g, ' ')}</td><td>{t.exported}</td><td style={{ color: t.exported === t.restored ? undefined : 'var(--danger)' }}>{t.restored}</td></tr>)}</tbody>
               </table>
             </details>
+          </div>
+        )}
+        {status?.drills?.length > 0 && (
+          <div style={{ marginTop: 16 }}>
+            <div className="muted" style={{ fontSize: 13, marginBottom: 6 }}>Recent restore tests (the newest stored backup is tested automatically every week):</div>
+            <table>
+              <thead><tr><th>When</th><th>What</th><th>Records</th><th>Result</th></tr></thead>
+              <tbody>{status.drills.map((d, i) => (
+                <tr key={i}><td>{fmtUtcDateTime(d.created_at)}</td><td>{d.file || 'Fresh backup (by hand)'}</td><td>{d.rows_checked.toLocaleString()}</td>
+                  <td>{d.ok ? <span className="badge ok">restored whole</span> : <span className="badge danger" title={d.detail || ''}>failed</span>}{!d.ok && d.detail ? <div className="muted" style={{ fontSize: 12 }}>{d.detail}</div> : null}</td></tr>
+              ))}</tbody>
+            </table>
           </div>
         )}
       </div>
@@ -79,5 +93,36 @@ export default function Backups() {
         </div>
       </div>
     </>
+  );
+}
+
+// Your data in standard formats: everything as one JSON file, or any table as a spreadsheet (CSV).
+function ExportData() {
+  const { data: tables } = useApi('/export/tables');
+  const [open, setOpen] = useState(false);
+  const get = useSubmit((path) => download(path));
+  return (
+    <div className="card">
+      <h2 style={{ marginTop: 0 }}>Export your data</h2>
+      <div className="muted" style={{ fontSize: 13, marginBottom: 12 }}>
+        Everything this practice has entered, in open formats you can take anywhere: one JSON file with every table, or any table as a CSV spreadsheet. Sign-in secrets are left out. Each export is recorded in the audit log.
+      </div>
+      <ErrorBox error={get.error} />
+      <div className="inline" style={{ gap: 8, flexWrap: 'wrap' }}>
+        <button disabled={get.busy} onClick={() => get.submit('/export')}>Everything (JSON)</button>
+        <button disabled={!tables} onClick={() => setOpen(!open)}>{open ? 'Hide tables' : `One table as CSV${tables ? ` (${tables.length} with data)` : ''}`}</button>
+      </div>
+      {open && tables && (
+        <div className="table-wrap" style={{ marginTop: 12 }}>
+          <table>
+            <thead><tr><th>Table</th><th className="num">Rows</th><th /></tr></thead>
+            <tbody>{tables.map((t) => (
+              <tr key={t.table}><td>{t.table.replace(/_/g, ' ')}</td><td className="num">{t.rows.toLocaleString()}</td>
+                <td><button className="small" disabled={get.busy} onClick={() => get.submit(`/export/${t.table}.csv`)}>CSV</button></td></tr>
+            ))}</tbody>
+          </table>
+        </div>
+      )}
+    </div>
   );
 }
