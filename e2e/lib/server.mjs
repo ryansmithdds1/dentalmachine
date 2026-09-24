@@ -11,7 +11,8 @@ export const root = join(dirname(fileURLToPath(import.meta.url)), '../..');
 
 export async function startApp() {
   if (process.env.E2E_URL) return { base: process.env.E2E_URL, stop: async () => {} };
-  if (!existsSync(join(root, 'client/dist/index.html'))) throw new Error('Build the client first: npm run build');
+  const dist = process.env.CLIENT_DIST || join(root, 'client/dist');
+  if (!existsSync(join(dist, 'index.html'))) throw new Error('Build the client first: npm run build');
   const dir = mkdtempSync(join(tmpdir(), 'dm-e2e-'));
   const port = 5100 + Math.floor(Math.random() * 800);
   const env = {

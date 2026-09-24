@@ -331,7 +331,8 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   app.use('/api', (_req, _res, next) => next(new HttpError(404, 'Not found')));
 
   // Serve the built SPA in production.
-  const dist = join(dirname(fileURLToPath(import.meta.url)), '../../client/dist');
+  // CLIENT_DIST lets tests serve a build made elsewhere (parallel test runs each build their own).
+  const dist = process.env.CLIENT_DIST || join(dirname(fileURLToPath(import.meta.url)), '../../client/dist');
   if (existsSync(dist)) {
     app.use(express.static(dist));
     app.get('/{*path}', (_req, res) => res.sendFile(join(dist, 'index.html')));
