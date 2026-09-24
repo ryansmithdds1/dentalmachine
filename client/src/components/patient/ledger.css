@@ -1,0 +1,91 @@
+/* Ledger colour coding (LedgerViews.jsx). One colour per kind of line, with a light and a dark value each;
+   every coloured thing also carries its name (chip text), so colour is never the only signal. */
+:root {
+  --lk-charge: #2563eb;
+  --lk-patient-pay: #15803d;
+  --lk-ins-pay: #7c3aed;
+  --lk-write-off: #0f766e;
+  --lk-discount: #b45309;
+  --lk-fee: #be185d;
+  --lk-refund: #b91c1c;
+  --lk-void: #94a3b8;
+  --lk-expected: #0369a1;
+}
+:root[data-theme='dark'] {
+  --lk-charge: #60a5fa;
+  --lk-patient-pay: #4ade80;
+  --lk-ins-pay: #a78bfa;
+  --lk-write-off: #2dd4bf;
+  --lk-discount: #fbbf24;
+  --lk-fee: #f472b6;
+  --lk-refund: #f87171;
+  --lk-void: #64748b;
+  --lk-expected: #38bdf8;
+}
+
+.k-charge { --k: var(--lk-charge); }
+.k-patient-pay { --k: var(--lk-patient-pay); }
+.k-ins-pay { --k: var(--lk-ins-pay); }
+.k-write-off { --k: var(--lk-write-off); }
+.k-discount { --k: var(--lk-discount); }
+.k-fee { --k: var(--lk-fee); }
+.k-refund { --k: var(--lk-refund); }
+.k-expected { --k: var(--lk-expected); }
+.k-void { --k: var(--lk-void); }
+
+.kind-chip {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.6;
+  /* The text leans toward the page's text colour so it stays readable on the tint in both themes. */
+  color: color-mix(in srgb, var(--k, var(--muted)) 78%, var(--text));
+  background: color-mix(in srgb, var(--k, var(--muted)) var(--tint), var(--panel));
+  border: 1px solid color-mix(in srgb, var(--k, var(--muted)) var(--tint-border), var(--panel));
+}
+.kind-chip.k-expected { border-style: dashed; }
+.kind-chip.k-void { text-decoration: line-through; }
+a.kind-chip { text-decoration: none; }
+a.kind-chip:hover, a.kind-chip:focus-visible { background: color-mix(in srgb, var(--k) calc(var(--tint) * 2), var(--panel)); }
+
+.ledger-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 0 16px 10px; font-size: 12px; }
+
+/* The bar down the left edge of each line. */
+tr.lrow > td:first-child { box-shadow: inset 4px 0 0 var(--k, transparent); padding-left: 14px; white-space: nowrap; }
+tr.lrow { cursor: pointer; }
+tr.lrow:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+tr.lrow.voided td { color: var(--muted); }
+/* Clicked: the line and everything on the same visit or claim light up; the rest steps back. */
+.ledger-focus tr.lrow:not(.related) { opacity: 0.45; }
+tr.lrow.related > td { background: color-mix(in srgb, var(--primary) 8%, var(--panel)); }
+tr.lrow.selected > td { background: color-mix(in srgb, var(--primary) 16%, var(--panel)); }
+.focus-bar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  margin: 0 16px 10px; padding: 6px 10px; border-radius: var(--radius-sm);
+  background: var(--primary-soft); color: var(--primary-ink); font-size: 13px;
+}
+.focus-bar .actions { margin-left: auto; display: flex; gap: 6px; }
+
+/* By visit: one table, a header row per visit. */
+.visit-table tr.visit-head > th {
+  text-align: left; font-weight: 400; text-transform: none; letter-spacing: 0;
+  background: var(--subtle); border-top: 2px solid var(--border-strong); padding: 10px 16px 8px;
+}
+.visit-head-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: var(--text); font-size: 14px; }
+.visit-left { margin-left: auto; font-weight: 700; }
+.visit-left.due { color: var(--danger); }
+.visit-left.credit { color: var(--ok); }
+.visit-note { margin-top: 4px; font-size: 12px; color: var(--muted); }
+.visit-group.unapplied tr.visit-head > th { background: var(--warn-soft); }
+.visit-group.related tr.visit-head > th { box-shadow: inset 4px 0 0 var(--primary); }
+.apply-row > td { background: var(--primary-soft); }
+.apply-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+
+@media print {
+  .ledger-legend, .focus-bar { display: none; }
+  .ledger-focus tr.lrow:not(.related) { opacity: 1; }
+}

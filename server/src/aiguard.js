@@ -9,6 +9,7 @@ import { HttpError } from './auth.js';
 export const HIGH_RISK = [
   ['POST', /^\/patients\/\d+\/(payments|refunds|adjustments|terminal-payments|transfer|prescriptions|merge|insurance|payment-plans)$/, 'money, prescriptions, merges and insurance'],
   ['POST', /^\/ledger\/\d+\/void$/, 'voiding a charge or payment'],
+  ['POST', /^\/ledger\/\d+\/(link|unlink)$/, 'applying a payment or adjustment to a visit'],
   ['POST', /^\/payment-plans\/\d+\/charge-now$/, 'charging a card'],
   ['POST', /^\/claims(\/submit|\/837|\/\d+\/(submit|void|payment|deny|correct|reopen|appeal))?$/, 'claims'],
   ['PUT', /^\/claims\/\d+$/, 'claims'],

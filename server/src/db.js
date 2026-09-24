@@ -6028,6 +6028,9 @@ const COLUMNS = [
   ['billing_dunning', 'resumes', 'INTEGER NOT NULL DEFAULT 0'],
   // Claims ready to approve: prepare claims from finished work for a person to approve (never sent on its own).
   ['practices', 'claim_prep', 'INTEGER NOT NULL DEFAULT 1'],
+  // Ledger by visit: a patient payment or adjustment staff applied to a visit points at one of that visit's
+  // charges (ledgervisits.js). Only this link ever changes on the entry (POST /ledger/:id/link|unlink, audited).
+  ['ledger_entries', 'applied_to_id', 'INTEGER REFERENCES ledger_entries(id)'],
 ];
 
 // CHECK constraints widened after release: [table, constraint name on Postgres, old text, new text].

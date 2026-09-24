@@ -1,10 +1,11 @@
 import { Router } from 'express';
 import { requirePermission, HttpError } from '../auth.js';
 import { isManager } from '../deposits.js';
-import { pick, requireFields, requireOneOf, insert, findOr404, audit, toCents, practiceNow, publicPractice } from '../util.js';
+import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, toCents, practiceNow, publicPractice } from '../util.js';
 import { patientBalance, pendingInsurance, checkPostingDate, voidLedgerEntry } from '../services.js';
 import { planStatus } from './family.js';
 import { allocate } from '../allocation.js';
+import { groupByVisit, entryKind, linkProblem } from '../ledgervisits.js';
 import { accountAging } from '../aging.js';
 import { portalKey } from './portal.js';
 import { payCodeFor, formatCode, guarantorIdOf } from '../billpay.js';
@@ -25,8 +26,10 @@ export default function billingRoutes({ db, payments = { enabled: false }, confi
     const patient = await patientOr404(req);
     const entries = await db.all(
       `SELECT l.*, u.name AS created_by_name, pv.name AS provider_name, pr.code AS proc_code, pr.tooth AS proc_tooth, pr.surfaces AS proc_surfaces,
-         COALESCE(l.claim_id, (SELECT MAX(ci.claim_id) FROM claim_items ci WHERE ci.procedure_id = l.procedure_id)) AS claim_link
+         COALESCE(l.claim_id, (SELECT MAX(ci.claim_id) FROM claim_items ci WHERE ci.procedure_id = l.procedure_id)) AS claim_link,
+         pr.appointment_id AS visit_appointment_id, a.start_time AS visit_start, a.reason AS visit_reason, apv.name AS visit_provider
        FROM ledger_entries l LEFT JOIN users u ON u.id = l.created_by LEFT JOIN providers pv ON pv.id = l.provider_id LEFT JOIN procedures pr ON pr.id = l.procedure_id
+         LEFT JOIN appointments a ON a.id = pr.appointment_id LEFT JOIN providers apv ON apv.id = a.provider_id
        WHERE l.patient_id = ? AND l.practice_id = ? ORDER BY l.entry_date, l.id`,
       patient.id, req.user.practice_id,
     );
@@ -35,14 +38,26 @@ export default function billingRoutes({ db, payments = { enabled: false }, confi
     const pending = await pendingInsurance(db, req.user.practice_id, patient.id);
     const lock = (await db.get('SELECT lock_date FROM practices WHERE id = ?', req.user.practice_id)).lock_date;
     // What each credit paid for, and credit not yet applied to any charge.
-    const lines = await db.all('SELECT ci.claim_id, ci.procedure_id, ci.paid_amount, ci.adjusted_amount FROM claim_items ci JOIN claims c ON c.id = ci.claim_id WHERE c.patient_id = ?', patient.id);
+    const lines = await db.all('SELECT ci.claim_id, ci.procedure_id, ci.paid_amount, ci.adjusted_amount FROM claim_items ci JOIN claims c ON c.id = ci.claim_id WHERE c.patient_id = ? AND c.practice_id = ?', patient.id, req.user.practice_id);
     const { allocations, unapplied } = allocate(entries, lines);
     const paidBy = new Map();
     for (const a of allocations) paidBy.set(a.charge_id, (paidBy.get(a.charge_id) || 0) + a.amount);
     for (const e of entries) if (e.amount > 0 && e.type === 'charge') e.paid_off = paidBy.get(e.id) || 0;
+    // The same entries by visit (ledgervisits.js): each line's kind (colour coding), its visit, and whether it
+    // can be applied to a visit from here.
+    const claims = await db.all(
+      `SELECT c.id, c.status, c.estimated_amount, c.paid_amount, c.write_off_estimate, pi.priority, ic.name AS carrier_name
+       FROM claims c LEFT JOIN patient_insurance pi ON pi.id = c.patient_insurance_id LEFT JOIN insurance_carriers ic ON ic.id = pi.carrier_id
+       WHERE c.patient_id = ? AND c.practice_id = ? ORDER BY c.id`, patient.id, req.user.practice_id,
+    );
+    const { visits, unapplied: notApplied } = groupByVisit(entries, claims, lines);
+    for (const e of entries) {
+      e.kind = entryKind(e);
+      e.linkable = !linkProblem(e, lock);
+    }
     res.json({
       entries, balance: running, pending_insurance: pending.insurance, pending_write_off: pending.write_off, patient_portion: running - pending.total, lock_date: lock,
-      unapplied_credit: unapplied.reduce((s, u) => s + u.amount, 0),
+      unapplied_credit: unapplied.reduce((s, u) => s + u.amount, 0), visits, not_applied: notApplied,
     });
   });
 
@@ -226,6 +241,41 @@ export default function billingRoutes({ db, payments = { enabled: false }, confi
     res.status(201).json({ balance: await patientBalance(db, req.user.practice_id, from.id), to_balance: await patientBalance(db, req.user.practice_id, to.id) });
   });
 
+  // Applies a patient payment or adjustment to a visit (so the ledger by visit, "Why this balance" and
+  // collections by provider count it there), or takes it off again. Only the link changes — never the amount,
+  // date or type — and each change is audited with before → after and the reason. Asking twice is harmless:
+  // the same link again changes nothing and records nothing.
+  const linkable = async (req) => {
+    const entry = await findOr404(db, 'ledger_entries', req.params.eid, req.user.practice_id, 'Ledger entry');
+    const lock = (await db.get('SELECT lock_date FROM practices WHERE id = ?', req.user.practice_id)).lock_date;
+    const problem = linkProblem(entry, lock);
+    if (problem) throw new HttpError(409, problem);
+    return entry;
+  };
+  const setLink = async (req, entry, to, action) => {
+    const reason = String(req.body?.reason || '').trim().slice(0, 300) || null;
+    await update(db, 'ledger_entries', entry.id, req.user.practice_id, { applied_to_id: to });
+    await audit(db, req, action, 'ledger_entries', entry.id, { amount: entry.amount, type: entry.type, applied_to_id: to, patient_id: entry.patient_id },
+      { reason, patientId: entry.patient_id, before: { applied_to_id: entry.applied_to_id ?? null }, after: { applied_to_id: to } });
+  };
+  r.post('/ledger/:eid/link', requirePermission('billing:write'), async (req, res) => {
+    const entry = await linkable(req);
+    const toId = Number(req.body?.applied_to_id);
+    if (!Number.isInteger(toId) || toId <= 0) throw new HttpError(400, 'Choose the visit to apply this to');
+    const target = await findOr404(db, 'ledger_entries', toId, req.user.practice_id, 'Visit');
+    if (target.patient_id !== entry.patient_id) throw new HttpError(400, "That visit is on another patient's account");
+    if (target.type !== 'charge' || target.voided_at || target.reverses_id) throw new HttpError(400, 'Choose a visit with a charge on it');
+    const unchanged = entry.applied_to_id === target.id;
+    if (!unchanged) await setLink(req, entry, target.id, 'ledger.link');
+    res.json({ unchanged, entry: await db.get('SELECT * FROM ledger_entries WHERE id = ?', entry.id) });
+  });
+  r.post('/ledger/:eid/unlink', requirePermission('billing:write'), async (req, res) => {
+    const entry = await linkable(req);
+    const unchanged = entry.applied_to_id == null;
+    if (!unchanged) await setLink(req, entry, null, 'ledger.unlink');
+    res.json({ unchanged, entry: await db.get('SELECT * FROM ledger_entries WHERE id = ?', entry.id) });
+  });
+
   r.post('/ledger/:eid/void', requirePermission('billing:write'), async (req, res) => {
     const entry = await findOr404(db, 'ledger_entries', req.params.eid, req.user.practice_id, 'Ledger entry');
     // Voiding a charge takes it off the patient's bill, the same as writing it off: same approval limit.
@@ -252,7 +302,10 @@ export default function billingRoutes({ db, payments = { enabled: false }, confi
 
 // "Why do I owe this?" for one patient (staff ledger and the patient portal): see the route above.
 export async function explainBalance(db, pid, patientId) {
-  const entries = await db.all('SELECT * FROM ledger_entries WHERE patient_id = ? AND practice_id = ? ORDER BY entry_date, id', patientId, pid);
+  const entries = await db.all(
+    `SELECT l.*, pr.appointment_id AS visit_appointment_id FROM ledger_entries l LEFT JOIN procedures pr ON pr.id = l.procedure_id
+     WHERE l.patient_id = ? AND l.practice_id = ? ORDER BY l.entry_date, l.id`, patientId, pid,
+  );
   const balance = entries.reduce((s, e) => s + e.amount, 0);
   const claimLines = await db.all(
     `SELECT ci.claim_id, ci.procedure_id, ci.paid_amount, ci.adjusted_amount, ci.estimated_amount, ci.write_off, c.status

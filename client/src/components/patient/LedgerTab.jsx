@@ -15,6 +15,7 @@ import BalanceWhy from './BalanceWhy.jsx';
 import { useLastMethod, methodToPost } from './lastMethod.js';
 import { undoable } from '../../toast.js';
 import './moneyflows.css';
+import { LedgerLegend, LedgerRow, VisitView } from './LedgerViews.jsx';
 
 const KINDS = { Charges: ['charge'], 'Patient payments': ['payment'], 'Insurance payments': ['insurance_payment'], Adjustments: ['adjustment'], Refunds: ['refund'] };
 const METHODS = ['credit_card', 'debit_card', 'cash', 'check', 'ach', 'care_credit', 'other'];
@@ -33,6 +34,18 @@ export default function LedgerTab({ patient, onChange }) {
   const [showWhy, rememberWhy] = useRemembered('ledger.why', true);
   const [version, setVersion] = useState(0);
   useShortcut('w', () => rememberWhy(!showWhy), { label: 'Show or hide why this balance', section: 'Ledger' });
+  // By date (every line in order, running balance) or by visit (what each visit charged, its claim, what came
+  // in for it and what's left). Kept for this person like the other ledger choices; V switches.
+  const [view, rememberView] = useRemembered('ledger.view', 'date');
+  useShortcut('v', () => rememberView(view === 'visit' ? 'date' : 'visit'), { label: 'Ledger by date or by visit', section: 'Ledger' });
+  // The line clicked: it and everything on the same visit or claim light up. Esc clears it.
+  const [focus, setFocus] = useState(null);
+  useEffect(() => {
+    if (!focus) return undefined;
+    const off = (ev) => { if (ev.key === 'Escape') setFocus(null); };
+    window.addEventListener('keydown', off);
+    return () => window.removeEventListener('keydown', off);
+  }, [focus]);
   // ?pay=1 (from quick search "Take payment…") opens the payment form; ?adjust=1 the adjustment (workflow 40) and
   // ?finance=1 the financing application (workflow 39) — the command bar's actions for the active patient.
   const [params, setParams] = useSearchParams();
@@ -52,6 +65,9 @@ export default function LedgerTab({ patient, onChange }) {
   const providers = [...new Map(data.entries.filter((e) => e.provider_id).map((e) => [e.provider_id, e.provider_name])).entries()];
   const shown = data.entries.filter((e) => (!kind || KINDS[kind].includes(e.type)) && (!prov || String(e.provider_id) === prov) && !(hideVoided && (e.voided_at || e.reverses_id)));
   const filtered = shown.length !== data.entries.length;
+  const byVisit = view === 'visit' && Array.isArray(data.visits);
+  const focusVisit = focus && (focus.visit_key === 'unapplied' ? data.not_applied : data.visits?.find((v) => v.key === focus.visit_key));
+  const rowProps = { onReceipt: (e) => setModal({ receipt: e }), onVoid: (e) => setModal({ void: e }) };
 
   return (
     <>
@@ -102,50 +118,56 @@ export default function LedgerTab({ patient, onChange }) {
           </div>
         </div>
         <div className="inline ledger-filters" style={{ gap: 8, padding: '0 16px 10px', flexWrap: 'wrap' }}>
-          <select aria-label="Show entries" value={kind} onChange={(e) => setKind(e.target.value)} style={{ width: 'auto' }}>
-            <option value="">All entries</option>
-            {Object.keys(KINDS).map((k) => <option key={k} value={k}>{k}</option>)}
-          </select>
-          {providers.length > 0 && (
-            <select aria-label="Provider" value={prov} onChange={(e) => setProv(e.target.value)} style={{ width: 'auto' }}>
-              <option value="">All providers</option>
-              {providers.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
-            </select>
+          <div className="seg" role="group" aria-label="Ledger view">
+            <button type="button" className={byVisit ? '' : 'active'} aria-pressed={!byVisit} onClick={() => rememberView('date')} title="V">By date</button>
+            <button type="button" className={byVisit ? 'active' : ''} aria-pressed={byVisit} onClick={() => rememberView('visit')} title="V">By visit</button>
+          </div>
+          {!byVisit && (
+            <>
+              <select aria-label="Show entries" value={kind} onChange={(e) => setKind(e.target.value)} style={{ width: 'auto' }}>
+                <option value="">All entries</option>
+                {Object.keys(KINDS).map((k) => <option key={k} value={k}>{k}</option>)}
+              </select>
+              {providers.length > 0 && (
+                <select aria-label="Provider" value={prov} onChange={(e) => setProv(e.target.value)} style={{ width: 'auto' }}>
+                  <option value="">All providers</option>
+                  {providers.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+                </select>
+              )}
+              <label className="inline" style={{ gap: 4, flexDirection: "row", alignItems: "center", margin: 0 }}><input type="checkbox" style={{ width: "auto" }} checked={hideVoided} onChange={(e) => setHideVoided(e.target.checked)} /> Hide voided</label>
+              {filtered && <span className="muted">{shown.length} of {data.entries.length} entries · charges {money(shown.filter((e) => e.amount > 0).reduce((s, e) => s + e.amount, 0))} · credits {money(-shown.filter((e) => e.amount < 0).reduce((s, e) => s + e.amount, 0))}</span>}
+            </>
           )}
-          <label className="inline" style={{ gap: 4, flexDirection: "row", alignItems: "center", margin: 0 }}><input type="checkbox" style={{ width: "auto" }} checked={hideVoided} onChange={(e) => setHideVoided(e.target.checked)} /> Hide voided</label>
-          {filtered && <span className="muted">{shown.length} of {data.entries.length} entries · charges {money(shown.filter((e) => e.amount > 0).reduce((s, e) => s + e.amount, 0))} · credits {money(-shown.filter((e) => e.amount < 0).reduce((s, e) => s + e.amount, 0))}</span>}
         </div>
-        <div className="table-wrap">
-          <table>
-            <thead><tr><th>Date</th><th>Type</th><th>Description</th><th>By</th><th className="num">Charges</th><th className="num">Credits</th><th className="num">Balance</th>{can('billing:write') && <th />}</tr></thead>
-            <tbody>
-              {shown.map((e) => (
-                <tr key={e.id} className={e.voided_at ? 'voided' : undefined}>
-                  <td>{fmtDate(e.entry_date)}</td>
-                  <td>{label(e.type)}</td>
-                  <td>
-                    {e.proc_code && <span className="badge" style={{ marginRight: 6 }}>{e.proc_code}{e.proc_tooth ? ` #${e.proc_tooth}` : ''}{e.proc_surfaces ? ` ${e.proc_surfaces}` : ''}</span>}
-                    {e.description}{e.reference ? <span className="muted"> · ref {e.reference}</span> : ''}
-                    {e.claim_link && <> · <Link to={`/claims/${e.claim_link}`}>claim #{e.claim_link}</Link></>}
-                    {e.provider_name && <span className="muted"> · {e.provider_name}</span>}
-                    {e.voided_at && <div className="muted" style={{ fontSize: 12 }}>Voided — {e.void_reason}</div>}
-                  </td>
-                  <td className="muted">{e.created_by_name}</td>
-                  <td className="num">{e.amount > 0 ? money(e.amount) : ''}</td>
-                  <td className="num">{e.amount < 0 ? money(-e.amount) : ''}</td>
-                  <td className="num">{money(e.running_balance)}</td>
-                  {can('billing:write') && (
-                    <td className="num" style={{ whiteSpace: 'nowrap' }}>
-                      {e.type === 'payment' && e.amount < 0 && <button className="small" style={{ marginRight: 4 }} onClick={() => setModal({ receipt: e })}>Receipt</button>}
-                      {!e.voided_at && !e.reverses_id && !e.claim_id && <button className="small" title={e.type === 'charge' ? 'Void this charge and put the procedure back to planned' : 'Void this entry'} onClick={() => setModal({ void: e })}>Void</button>}
-                    </td>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {!data.entries.length && <div className="empty">No transactions.</div>}
-          {data.entries.length > 0 && !shown.length && <div className="empty">No entries match.</div>}
+        {data.entries.length > 0 && <LedgerLegend />}
+        {focus && (
+          <div className="focus-bar" role="status">
+            <span>
+              {focusVisit && focus.visit_key !== 'unapplied'
+                ? <>Showing the <strong>{fmtDate(focusVisit.date)}{focusVisit.reason ? ` · ${focusVisit.reason}` : ''}</strong> visit: {focusVisit.entry_ids.length} line{focusVisit.entry_ids.length === 1 ? '' : 's'}, {focusVisit.balance > 0 ? `${money(focusVisit.balance)} left` : focusVisit.balance < 0 ? `${money(-focusVisit.balance)} overpaid` : 'paid in full'}</>
+                : <>Showing payments and adjustments <strong>not applied to a visit</strong></>}
+            </span>
+            <span className="actions">
+              {!byVisit && <button className="small" onClick={() => rememberView('visit')}>See it by visit</button>}
+              <button className="small" onClick={() => setFocus(null)} title="Esc">Clear</button>
+            </span>
+          </div>
+        )}
+        <div className={focus ? 'ledger-focus' : undefined}>
+          {byVisit
+            ? <VisitView data={data} canWrite={can('billing:write')} focus={focus} onFocus={setFocus} rowProps={rowProps} onChanged={() => { setFocus(null); reload(); setVersion((v) => v + 1); onChange?.(); }} />
+            : (
+              <div className="table-wrap">
+                <table>
+                  <thead><tr><th>Date</th><th>Type</th><th>Description</th><th>By</th><th className="num">Charges</th><th className="num">Credits</th><th className="num">Balance</th>{can('billing:write') && <th />}</tr></thead>
+                  <tbody>
+                    {shown.map((e) => <LedgerRow key={e.id} e={e} showBalance canWrite={can('billing:write')} focus={focus} onFocus={setFocus} {...rowProps} />)}
+                  </tbody>
+                </table>
+                {!data.entries.length && <div className="empty">No transactions.</div>}
+                {data.entries.length > 0 && !shown.length && <div className="empty">No entries match.</div>}
+              </div>
+            )}
         </div>
       </div>
       <PaymentPlans patient={patient} onChange={reload} />

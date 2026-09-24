@@ -1,9 +1,16 @@
 // Payment allocation: which charges (and so which providers) each payment, insurance payment and credit
 // adjustment paid for. Worked out from the ledger when needed rather than stored, so it can't drift:
 //  - insurance payments and write-offs go to the procedures on their claim, by what the payer paid per line;
+//  - a payment or adjustment staff applied to a visit (applied_to_id → one of that visit's charges) pays that
+//    visit's charges first;
 //  - everything else pays the oldest open charges first;
 //  - voided entries and their reversals cancel out and are left out;
 //  - whatever a credit can't be applied to is unapplied credit on the account.
+
+// Which visit a charge belongs to: its procedure's appointment, else the day it was posted. Rows carry the
+// appointment as visit_appointment_id (joined from procedures); the same key groups the ledger by visit
+// (ledgervisits.js) and "Why this balance" (billing.js), so all three agree.
+export const chargeVisitKey = (e) => (e.visit_appointment_id ? `a${e.visit_appointment_id}` : `d${e.entry_date}`);
 
 // entries: one patient's ledger rows; claimLines: [{ claim_id, procedure_id, paid_amount, adjusted_amount }].
 export function allocate(entries, claimLines = []) {
@@ -33,6 +40,14 @@ export function allocate(entries, claimLines = []) {
         left -= apply(credit, byProcedure.get(l.procedure_id), Math.min(want, left));
       }
       for (const l of lines) if (left > 0) left -= apply(credit, byProcedure.get(l.procedure_id), left);
+    } else if (credit.applied_to_id) {
+      // Applied to a visit by staff: that visit's charges first, oldest first; anything over goes on as usual.
+      const anchor = charges.find((c) => c.id === credit.applied_to_id);
+      const visit = anchor ? chargeVisitKey(anchor) : null;
+      for (const c of charges) {
+        if (left <= 0 || !visit) break;
+        if (chargeVisitKey(c) === visit) left -= apply(credit, c, left);
+      }
     }
     for (const c of charges) {
       if (left <= 0) break;
@@ -65,7 +80,10 @@ export async function allocationsForRange(db, practiceId, from, to) {
   for (let i = 0; i < patientIds.length; i += 500) {
     const ids = patientIds.slice(i, i + 500);
     const inList = ids.map(() => '?').join(',');
-    const entries = await db.all(`SELECT * FROM ledger_entries WHERE practice_id = ? AND patient_id IN (${inList})`, practiceId, ...ids);
+    const entries = await db.all(
+      `SELECT l.*, pr.appointment_id AS visit_appointment_id FROM ledger_entries l LEFT JOIN procedures pr ON pr.id = l.procedure_id
+       WHERE l.practice_id = ? AND l.patient_id IN (${inList})`, practiceId, ...ids,
+    );
     const lines = await db.all(
       `SELECT ci.claim_id, ci.procedure_id, ci.paid_amount, ci.adjusted_amount FROM claim_items ci JOIN claims c ON c.id = ci.claim_id WHERE c.practice_id = ? AND c.patient_id IN (${inList})`,
       practiceId, ...ids,
