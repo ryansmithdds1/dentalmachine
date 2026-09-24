@@ -43,6 +43,26 @@ S4. **More ideas:** short-call/ASAP list matched to a gap (length, provider, typ
     patient from any list onto the schedule; family appointments booked back to back in one step; recurring
     blocks (lunch, meetings) from templates; schedule notes/huddle notes per day.
 
+## Metrics and automated emails (asked for)
+Builds on scheduled saved reports (already emailed on a schedule) and the KPI screens.
+K1. **Automated metric emails:** a morning huddle email (today's schedule, production scheduled vs goal, open gaps,
+    unconfirmed, insurance to verify, balances due), an end-of-day email (production, collections, new patients,
+    case acceptance, broken appointments), and weekly and monthly digests with trends (vs last week/month, same period
+    last year, goal). Good-looking HTML that reads well on a phone, per-person subscriptions by role (owner, office
+    manager, hygienist, billing), send time per practice time zone, one-click unsubscribe, a preview/test-send, and
+    every send and failure visible (Connection activity / Needs attention).
+K2. **Areas for improvement:** each digest highlights the 2–3 metrics furthest from goal or trending worst (e.g.
+    hygiene reappointment down 8%, collections lagging production, unscheduled treatment up) with the concrete list
+    behind them (the patients to call, the claims to chase) and a link to act; an optional plain-language summary
+    written by AI, clearly labelled as AI and never including more patient detail than the email needs.
+K3. **More robust metrics:** one definition per KPI (docs/metrics.md: exactly what's counted, from the ledger and
+    visits), the same numbers on every screen, email and report (one shared calculation), goals per provider and
+    per office, benchmarks where known, drill-down from every number to the rows behind it, and tests pinning each
+    definition.
+K4. **Email foundation:** reusable email templates and layout, a sending log with delivery/bounce status (SendGrid
+    events already tracked), BAA-covered provider notes, and staff-facing emails (task assigned, lab case overdue,
+    claim denied) using the same system.
+
 ## Then: remaining workflow batches
 9. Batch 4 (32–44): new patient setup, ERA/EOB posting, prescriptions, lab cases, huddle actions, recall lists,
    pre-auths, financing, adjustments, referrals, end-of-day, review requests (fix the count bug), clock in/out.
