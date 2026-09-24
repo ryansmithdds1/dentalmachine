@@ -94,6 +94,8 @@ const BillPay = lazy(() => import('./pages/public/BillPay.jsx'));
 const Marketing = lazy(() => import('./pages/Marketing.jsx'));
 const XrayReviewPage = lazy(() => import('./pages/XrayReview.jsx'));
 const MyBonus = lazy(() => import('./components/bonus/MyBonus.jsx'));
+const BillingAutopilot = lazy(() => import('./pages/BillingAutopilot.jsx'));
+const BillingLink = lazy(() => import('./pages/public/BillingLink.jsx'));
 const Phones = lazy(() => import('./pages/Phones.jsx'));
 const Verification = lazy(() => import('./pages/Verification.jsx'));
 const Metrics = lazy(() => import('./pages/Metrics.jsx'));
@@ -134,6 +136,7 @@ export default function App() {
         <Route path="/portal/:key" element={<Portal />} />
         <Route path="/timeclock/kiosk" element={<TimeClockKiosk />} />
         <Route path="/rb/:token" element={<RecallBook />} />
+        <Route path="/billing-link/:token" element={<BillingLink />} />
         <Route path="/p/:token" element={<PaperworkPage />} />
         <Route path="/kiosk" element={<FormsKiosk />} />
         <Route path="/e/:token" element={<EduPage />} />
@@ -487,6 +490,7 @@ function Shell({ nav }) {
             <Route path="/reviews" element={<ReviewsDashboard />} />
             <Route path="/referrals" element={<Referrals />} />
             <Route path="/insurance-autopilot" element={<EobAutopilot />} />
+            <Route path="/billing-autopilot" element={<BillingAutopilot />} />
             <Route path="/timeclock" element={<TimeClockPage />} />
             <Route path="/bonus" element={<MyBonus />} />
             <Route path="/deposits" element={<Deposits />} />

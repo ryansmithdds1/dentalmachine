@@ -2,8 +2,7 @@ import { autoReceipt } from './receipts.js';
 import { raiseIssue, resolveIssue, failed } from './issues.js';
 import { HttpError } from './auth.js';
 import { insert, practiceNow } from './util.js';
-import { preferredChannel, sendMessage } from './messaging.js';
-import { messageText, patientLang, subjectFor } from './templates.js';
+import { trackedCharge, mayCharge, chargeDeclined, chargeSucceeded } from './billingauto.js';
 
 // In-house membership plans for patients without insurance: a monthly or yearly fee, some services
 // included each membership year (cleanings, exams, x-rays), and a discount on everything else.
@@ -125,37 +124,29 @@ async function billPeriod(db, payments, m, today, messenger) {
     const method = await db.get('SELECT * FROM payment_methods WHERE id = ? AND removed_at IS NULL', m.payment_method_id);
     if (method) {
       const practice = await db.get('SELECT name FROM practices WHERE id = ?', m.practice_id);
-      const out = await payments.charge({
+      // Tracked, with the surcharge the patient agreed to if any (billingauto.js).
+      const out = await trackedCharge(db, payments, {
         method, amount: m.price, description: `${practice.name} — ${label}`,
         idempotencyKey: `membership-${m.id}-${m.next_bill_date}-${m.billing_failures || 0}`, metadata: { membership_id: m.id, patient_id: m.patient_id },
-      });
+      }, { practiceId: m.practice_id, patientId: m.patient_id, sourceType: 'membership', sourceId: m.id });
       if (out.ambiguous) return { ...result, pending: true, reason: out.reason };
       if (out.ok) {
         const entryId = await db.tx(async () => {
           if (await db.get("SELECT id FROM ledger_entries WHERE membership_id = ? AND type = 'payment' AND reference = ?", m.id, out.reference)) return null;
           return insert(db, 'ledger_entries', {
-            practice_id: m.practice_id, patient_id: m.patient_id, type: 'payment', amount: -m.price, method: 'credit_card', reference: out.reference,
+            practice_id: m.practice_id, patient_id: m.patient_id, type: 'payment', amount: -out.total, method: 'credit_card', reference: out.reference,
             description: `Membership autopay (${method.brand || 'card'} •••• ${method.last4})`, entry_date: today, membership_id: m.id,
           });
         });
         if (entryId) await autoReceipt(db, messenger, entryId);
+        await chargeSucceeded(db, { practiceId: m.practice_id, sourceType: 'membership', sourceId: m.id, today });
         result.charged = true;
       } else {
         await db.run("UPDATE memberships SET status = 'past_due', billing_failures = billing_failures + 1, billing_message = ? WHERE id = ?", `${out.reason} (${today})`, m.id);
-        // The office gets a task the first time; the patient gets a note asking them to update the card.
-        if (!m.billing_failures) {
-          const patient = await db.get('SELECT * FROM patients WHERE id = ?', m.patient_id);
-          await insert(db, 'tasks', { practice_id: m.practice_id, patient_id: m.patient_id, priority: 'high', due_date: today, title: `Membership payment declined: ${patient.first_name} ${patient.last_name} — ${out.reason}` });
-          const target = preferredChannel(patient);
-          if (target && messenger) {
-            await sendMessage(db, messenger, {
-              practiceId: m.practice_id, patientId: patient.id, kind: 'payment_request', channel: target.channel, to: target.to,
-              subject: subjectFor(patientLang(patient), 'card_declined', `Membership payment didn't go through — ${practice.name}`, practice.name),
-              body: await messageText(db, m.practice_id, 'card_declined', { first_name: patient.first_name, amount: m.price, reason: out.reason }, patientLang(patient)),
-            }).catch(failed(db, { practiceId: m.practice_id, kind: 'payment', key: `decline-notice:m${m.id}`, role: 'billing', patientId: patient.id, title: 'The patient couldn’t be told their membership card was declined' }));
-          }
-        }
-        return { ...result, declined: true, reason: out.reason };
+        // Nothing more posted. Dunning (billingauto.js): Needs attention, the patient's update-card link, retries on
+        // the practice's schedule (not every day), then paused with next steps for the team.
+        const d = await chargeDeclined(db, messenger, { practiceId: m.practice_id, patientId: m.patient_id, sourceType: 'membership', sourceId: m.id, methodId: method.id, amount: m.price, reason: out.reason, today });
+        return { ...result, declined: true, reason: out.reason, paused: d.paused, next_retry_on: d.next_retry_on };
       }
     }
   }
@@ -186,6 +177,8 @@ export async function runMembershipBilling(db, payments, { membershipId = null, 
         if (m.next_bill_date > today || !['active', 'past_due'].includes(m.status)) break;
         // A declined card is retried once a day, not every run.
         if (m.status === 'past_due' && (m.billing_message || '').endsWith(`(${today})`)) break;
+        // …and then only on its retry day (day 3 / 7 / 14), or straight away with a new card.
+        if (m.autopay && !(await mayCharge(db, 'membership', m.id, m.payment_method_id, today))) break;
         // The card is charged between two short transactions, never inside one.
         const r = await billPeriod(db, payments, m, today, messenger);
         results.push(r);

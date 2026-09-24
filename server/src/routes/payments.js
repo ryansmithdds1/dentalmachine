@@ -10,6 +10,7 @@ import { refreshTerminalPayment } from './terminal.js';
 import { finishBooking } from '../onlinebooking.js';
 import { postOnlinePayment, afterOnlinePayment, paymentFailed } from '../billpay.js';
 import { sendMessage, preferredChannel, sendAppointmentReminder } from '../messaging.js';
+import { handleBillingEvent, cardFromLink, returnedPaymentFee, TEST_CARDS } from '../billingauto.js';
 
 // Online card payments via Stripe Checkout, cards on file and payment-plan autopay.
 export default function paymentRoutes({ db, config, messenger, payments, mailer }) {
@@ -52,10 +53,10 @@ export default function paymentRoutes({ db, config, messenger, payments, mailer 
   r.post('/patients/:id/payment-methods', requirePermission('billing:write'), async (req, res) => {
     if (payments.mode !== 'sandbox') throw new HttpError(409, 'Cards are saved on the secure card page');
     const number = String(req.body?.number || '').replace(/\D/g, '');
-    if (!['4242424242424242', '4000000000000002', '5555555555554444'].includes(number)) throw new HttpError(400, 'Sandbox accepts test cards only: 4242 4242 4242 4242 (approves), 4000 0000 0000 0002 (declines), 5555 5555 5555 4444');
+    if (!TEST_CARDS[number]) throw new HttpError(400, 'Sandbox accepts test cards only: 4242 4242 4242 4242 (approves), 4000 0000 0000 0002 (declines), 5555 5555 5555 4444, 4000 0566 5566 5556 (debit)');
     const g = await guarantorOf(await findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient'));
     const id = await insert(db, 'payment_methods', {
-      practice_id: req.user.practice_id, patient_id: g.id, provider: 'sandbox', brand: number.startsWith('5') ? 'mastercard' : 'visa', last4: number.slice(-4),
+      practice_id: req.user.practice_id, patient_id: g.id, provider: 'sandbox', brand: TEST_CARDS[number].brand, last4: number.slice(-4), funding: TEST_CARDS[number].funding,
       exp_month: 12, exp_year: new Date().getUTCFullYear() + 3, created_by: req.user.id,
     });
     await audit(db, req, 'card.saved', 'payment_methods', id);
@@ -159,9 +160,17 @@ export function stripeWebhook({ db, config, payments, messenger }) {
       const practiceId = Number(session.metadata.practice_id);
       const card = await payments.cardFromSetupSession(session);
       const exists = await db.get('SELECT id FROM payment_methods WHERE payment_method_id = ? AND removed_at IS NULL', card.payment_method_id);
+      let methodId = exists?.id ?? null;
       if (!exists && (await db.get('SELECT id FROM patients WHERE id = ? AND practice_id = ?', patientId, practiceId))) {
-        const id = await insert(db, 'payment_methods', { practice_id: practiceId, patient_id: patientId, provider: 'stripe', ...card });
-        await audit(db, { ip: req.ip, user: { practice_id: practiceId, id: null } }, 'card.saved', 'payment_methods', id);
+        methodId = await insert(db, 'payment_methods', { practice_id: practiceId, patient_id: patientId, provider: 'stripe', ...card });
+        await audit(db, { ip: req.ip, user: { practice_id: practiceId, id: null } }, 'card.saved', 'payment_methods', methodId);
+      }
+      // Saved from a patient's billing link (update the card after a decline, or agree to a set-up): billingauto.js
+      // puts it on their automatic payments and retries what was declined.
+      const linkId = Number(session.metadata?.billing_link);
+      if (linkId && methodId) {
+        const link = await db.get('SELECT * FROM billing_links WHERE id = ? AND practice_id = ? AND patient_id = ?', linkId, practiceId, patientId);
+        if (link) await cardFromLink(db, payments, messenger, link, methodId);
       }
     } else if ((event.type === 'checkout.session.completed' || event.type === 'checkout.session.async_payment_succeeded') && event.data.object.metadata?.booking_request_id) {
       // An online booking deposit: mark it paid (once), then book it if the practice books instantly.
@@ -207,6 +216,8 @@ export function stripeWebhook({ db, config, payments, messenger }) {
         await db.run("UPDATE payment_requests SET status = 'cancelled' WHERE id = ?", pr.id);
         const payer = await db.get('SELECT * FROM patients WHERE id = ?', pr.patient_id);
         await paymentFailed(db, { practiceId: pr.practice_id, payer, amount: pr.amount, reason: 'The bank payment didn’t clear', source: session.metadata?.source });
+        // The office's returned-payment fee, when it has one set to apply automatically (once per payment).
+        await returnedPaymentFee(db, { practiceId: pr.practice_id, patientId: payer.id, amount: pr.amount, key: session.id });
       }
     } else if (event.type === 'payment_intent.succeeded' && event.data.object.metadata?.terminal_payment_id) {
       // A card-reader payment: post it even if nobody's screen is still checking.
@@ -214,6 +225,9 @@ export function stripeWebhook({ db, config, payments, messenger }) {
       if (row) await refreshTerminalPayment(db, payments, messenger, row);
     } else if (event.type === 'checkout.session.expired') {
       await db.run("UPDATE payment_requests SET status = 'expired' WHERE session_id = ? AND status = 'pending'", event.data.object.id);
+    } else if (['charge.dispute.created', 'charge.dispute.updated', 'charge.dispute.closed', 'charge.refunded'].includes(event.type)) {
+      // Disputes (chargebacks) and refunds made at the processor: posted once each as reversals (billingauto.js).
+      await handleBillingEvent(db, { messenger }, event);
     }
     res.json({ received: true });
   });

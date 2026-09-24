@@ -71,7 +71,7 @@ test('starting treatment posts the down payment; months come due from the start 
   assert.equal((await api.put(`/ortho/${c.id}`, { status: 'bogus' })).status, 400);
 });
 
-test('a declined card still bills the month, raises a task once, and the last month evens out the balance', async () => {
+test('a declined card still bills the month, raises a Needs attention item once, and the last month evens out the balance', async () => {
   const { api, patient } = await h.practice();
   const pm = (await api.post(`/patients/${patient.id}/payment-methods`, { number: '4000000000000002' })).data;
   const start = addInterval(today(), 'month', -3);
@@ -80,7 +80,9 @@ test('a declined card still bills the month, raises a task once, and the last mo
   assert.equal(c.billed, 100000, '33333 + 33333 + 33334');
   const pays = await h.db.get("SELECT COUNT(*) AS n FROM ledger_entries WHERE ortho_case_id = ? AND type = 'payment'", c.id);
   assert.equal(pays.n, 0);
-  const tasks = await h.db.all("SELECT title FROM tasks WHERE patient_id = ? AND title LIKE 'Ortho payment declined%'", patient.id);
-  assert.equal(tasks.length, 1);
+  // Billing autopilot (billingauto.js): one item for billing; later months wait for the retry instead of piling on.
+  const items = await h.db.all('SELECT * FROM issues WHERE dedupe_key = ?', `dunning:ortho_case:${c.id}`);
+  assert.equal(items.length, 1);
+  assert.equal(items[0].occurrences, 1);
   assert.ok(c.billing_failures >= 1);
 });

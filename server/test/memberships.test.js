@@ -79,13 +79,15 @@ test('renewals charge the card; a decline makes it past due until paid', async (
   assert.equal(m.status, 'past_due');
   assert.match(m.billing_message, /declined/);
   assert.equal(m.benefits_active, true); // benefits continue while the office sorts it out
-  assert.ok((await api.get(`/tasks?patient_id=${patient.id}`)).data.some((t) => /Membership payment declined/.test(t.title)));
+  // Billing autopilot (billingauto.js): a Needs attention item for billing, retried on the practice's schedule.
+  assert.equal((await h.db.get('SELECT status FROM issues WHERE dedupe_key = ?', `dunning:membership:${membership.id}`)).status, 'open');
   assert.equal((await api.get(`/patients/${patient.id}`)).data.balance, PLAN.price);
   assert.equal((await runMembershipBilling(h.db, h.app.locals.payments, { membershipId: membership.id })).length, 0); // once a day
   // Paid at the desk: the fee stays on the ledger, the membership moves on.
   m = (await api.post(`/memberships/${membership.id}/settle`)).data;
   assert.equal(m.status, 'active');
   assert.equal(m.next_bill_date, '2019-07-01');
+  assert.equal((await h.db.get('SELECT status FROM issues WHERE dedupe_key = ?', `dunning:membership:${membership.id}`)).status, 'resolved');
 
   const report = (await api.get('/reports/memberships')).data;
   assert.equal(report.active, 1);

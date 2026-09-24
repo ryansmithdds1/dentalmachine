@@ -38,14 +38,15 @@ test('autopay charges due installments to the card on file and handles declines'
   // Nothing more is due, so the daily run does nothing.
   assert.deepEqual(await runAutopay(h.db, h.app.locals.payments, h.messenger, { planId: plan.id, force: true }), []);
 
-  // A declining card: task for the office, note to the patient, paused after three declines.
+  // A declining card: Needs attention, an update-card link to the patient, paused (with a task) after the first try
+  // and the three retries of the practice's schedule (billingauto.js).
   const plan2 = await planDue(api, patient);
   const bad = (await api.post(`/patients/${patient.id}/payment-methods`, { number: '4000000000000002' })).data;
   await api.put(`/payment-plans/${plan2.id}`, { autopay_method_id: bad.id });
   const sentBefore = h.sent.length;
-  for (let i = 0; i < 3; i++) await runAutopay(h.db, h.app.locals.payments, h.messenger, { planId: plan2.id, force: true });
+  for (let i = 0; i < 4; i++) await runAutopay(h.db, h.app.locals.payments, h.messenger, { planId: plan2.id, force: true });
   const p2 = (await api.get(`/patients/${patient.id}/payment-plans`)).data.find((p) => p.id === plan2.id);
-  assert.equal(p2.autopay_failures, 3);
+  assert.equal(p2.autopay_failures, 4);
   assert.equal(p2.autopay_paused, 1);
   assert.match(p2.autopay_message, /declined/);
   assert.ok(h.sent.length > sentBefore, 'patient was told');

@@ -140,6 +140,7 @@ function Due({ practice, bill, slug, lang, cancelled, onPaid, onStartOver }) {
   const acct = {
     payment: {
       enabled: practice?.payments_enabled, mode: practice?.mode, ach: practice?.ach, wallets: practice?.wallets, max: due, suggested: due, can_save_card: false, email_on_file: true,
+      pass_through: practice?.pass_through || null,
     },
     cards: [],
   };

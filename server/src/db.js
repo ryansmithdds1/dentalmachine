@@ -4946,10 +4946,221 @@ CREATE TABLE IF NOT EXISTS bonus_payout_lines (
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE (approval_id, user_id)
 );
-CREATE UNIQUE INDEX IF NOT EXISTS idx_bonus_approval_once ON bonus_approvals(plan_id, period_start) WHERE status = 'approved';
-CREATE INDEX IF NOT EXISTS idx_bonus_approvals_payroll ON bonus_approvals(practice_id, payroll_period_start, status);
-CREATE INDEX IF NOT EXISTS idx_bonus_lines_user ON bonus_payout_lines(practice_id, user_id);
-CREATE INDEX IF NOT EXISTS idx_bonus_versions_plan ON bonus_plan_versions(plan_id, effective_from);
+-- Billing autopilot (backlog BL1-BL5, billingauto.js; spec docs/workflows/specs/BL-billing.md).
+-- The practice's billing switches: the processor, passing card costs on (a surcharge on credit cards or a flat
+-- convenience fee, in basis points / cents), the retry schedule for declined charges and the expiring-card notice.
+CREATE TABLE IF NOT EXISTS billing_settings (
+  practice_id INTEGER PRIMARY KEY REFERENCES practices(id),
+  processor TEXT NOT NULL DEFAULT 'stripe',
+  pass_through TEXT NOT NULL DEFAULT 'off' CHECK (pass_through IN ('off','surcharge','convenience_fee')),
+  surcharge_bps INTEGER NOT NULL DEFAULT 0,
+  processing_cost_bps INTEGER NOT NULL DEFAULT 0,
+  convenience_fee INTEGER NOT NULL DEFAULT 0,
+  processor_notified INTEGER NOT NULL DEFAULT 0,
+  retry_days TEXT NOT NULL DEFAULT '[3,7,14]',
+  expiring_days INTEGER NOT NULL DEFAULT 30,
+  updated_by INTEGER REFERENCES users(id),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- Office fees the practice defines: a fixed amount or a % (basis points) of what's collectible, when it applies,
+-- caps and whether staff may waive it. Configuration: never deleted (active = 0), every change audited.
+CREATE TABLE IF NOT EXISTS billing_fees (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  name TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('fixed','percent')),
+  amount INTEGER NOT NULL DEFAULT 0,
+  pct_bps INTEGER NOT NULL DEFAULT 0,
+  occasion TEXT NOT NULL CHECK (occasion IN ('plan_setup','late_payment','returned_payment','missed_appointment','statement','manual')),
+  applies TEXT NOT NULL DEFAULT 'offered' CHECK (applies IN ('automatic','offered')),
+  min_amount INTEGER,
+  max_amount INTEGER,
+  max_per_year INTEGER,
+  grace_days INTEGER NOT NULL DEFAULT 0,
+  waivable INTEGER NOT NULL DEFAULT 1,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- Each fee put on an account: once per fee per occasion (source_key: the plan installment, the missed visit, the
+-- statement, the returned payment), its own ledger line; a waiver is a reversing entry with a reason.
+CREATE TABLE IF NOT EXISTS billing_fee_charges (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  fee_id INTEGER NOT NULL REFERENCES billing_fees(id),
+  source_key TEXT NOT NULL,
+  basis INTEGER,
+  amount INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'posted' CHECK (status IN ('posted','waived')),
+  ledger_entry_id INTEGER REFERENCES ledger_entries(id),
+  reversal_entry_id INTEGER REFERENCES ledger_entries(id),
+  waived_by INTEGER REFERENCES users(id),
+  waive_reason TEXT,
+  waived_at TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (fee_id, source_key)
+);
+-- The patient's signed OK for automatic charges: the exact words shown (and their hash), who agreed, how, when.
+-- Pending ones (sent by text link) carry the set-up to create once the patient agrees. Never edited once signed.
+CREATE TABLE IF NOT EXISTS billing_authorizations (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  kind TEXT NOT NULL CHECK (kind IN ('payment_plan','recurring','membership','ortho_case')),
+  source_id INTEGER,
+  payment_method_id INTEGER REFERENCES payment_methods(id),
+  setup TEXT NOT NULL,
+  terms TEXT NOT NULL,
+  terms_hash TEXT NOT NULL,
+  surcharge_bps INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','signed','revoked','expired')),
+  signer_name TEXT,
+  signature_image TEXT,
+  signed_via TEXT,
+  signed_at TEXT,
+  ip TEXT,
+  user_agent TEXT,
+  revoked_at TEXT,
+  revoked_by INTEGER REFERENCES users(id),
+  revoke_reason TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (patient_id, terms_hash)
+);
+-- A recurring card charge of a set amount (never more than the account owes), on a day of the month.
+CREATE TABLE IF NOT EXISTS recurring_charges (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  location_id INTEGER REFERENCES locations(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  amount INTEGER NOT NULL,
+  day_of_month INTEGER NOT NULL,
+  next_charge_date TEXT NOT NULL,
+  end_date TEXT,
+  max_charges INTEGER,
+  charges_made INTEGER NOT NULL DEFAULT 0,
+  description TEXT NOT NULL,
+  payment_method_id INTEGER REFERENCES payment_methods(id),
+  authorization_id INTEGER REFERENCES billing_authorizations(id),
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','paused','completed','cancelled')),
+  last_message TEXT,
+  charge_lock TEXT,
+  cancelled_at TEXT,
+  cancel_reason TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- Every automatic card charge attempt (plans, memberships, ortho, recurring, set-up down payments): what was tried,
+-- the surcharge decided on the first try (a retry with the same key charges the same total), and the answer.
+CREATE TABLE IF NOT EXISTS billing_attempts (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  source_type TEXT NOT NULL,
+  source_id INTEGER,
+  payment_method_id INTEGER REFERENCES payment_methods(id),
+  amount INTEGER NOT NULL,
+  surcharge INTEGER NOT NULL DEFAULT 0,
+  idempotency_key TEXT NOT NULL UNIQUE,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','succeeded','declined','unclear')),
+  reason TEXT,
+  reference TEXT,
+  tries INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- Dunning: a declined automatic charge being retried on the schedule, then paused for the team. One open row per
+-- plan / membership / ortho case / recurring charge (live_key), closed when a charge goes through or a person stops it.
+CREATE TABLE IF NOT EXISTS billing_dunning (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  source_type TEXT NOT NULL,
+  source_id INTEGER NOT NULL,
+  payment_method_id INTEGER REFERENCES payment_methods(id),
+  amount INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'retrying' CHECK (status IN ('retrying','paused','recovered','stopped')),
+  failures INTEGER NOT NULL DEFAULT 1,
+  first_failed_on TEXT NOT NULL,
+  last_failed_on TEXT NOT NULL,
+  next_retry_on TEXT,
+  last_reason TEXT,
+  patient_notified_at TEXT,
+  team_notified_at TEXT,
+  paused_at TEXT,
+  closed_at TEXT,
+  close_note TEXT,
+  closed_by INTEGER REFERENCES users(id),
+  live_key TEXT UNIQUE,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- Secure links sent to a patient: update the card (after a decline, or before it expires) or agree to a set-up.
+-- Only a hash of the token is kept. A derived convenience: expired links can be purged.
+CREATE TABLE IF NOT EXISTS billing_links (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  kind TEXT NOT NULL CHECK (kind IN ('update_card','authorize')),
+  token_hash TEXT NOT NULL UNIQUE,
+  old_method_id INTEGER REFERENCES payment_methods(id),
+  new_method_id INTEGER REFERENCES payment_methods(id),
+  authorization_id INTEGER REFERENCES billing_authorizations(id),
+  dunning_id INTEGER REFERENCES billing_dunning(id),
+  message_id INTEGER REFERENCES messages(id),
+  expires_at TEXT NOT NULL,
+  opened_at TEXT,
+  used_at TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- "Your card expires soon" requests: once per card per expiry date (notice_key).
+CREATE TABLE IF NOT EXISTS billing_notices (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  payment_method_id INTEGER REFERENCES payment_methods(id),
+  kind TEXT NOT NULL,
+  notice_key TEXT NOT NULL UNIQUE,
+  link_id INTEGER REFERENCES billing_links(id),
+  message_id INTEGER REFERENCES messages(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- Card disputes (chargebacks) and refunds made at the processor, each posted once (processor_id) as a reversal.
+CREATE TABLE IF NOT EXISTS billing_disputes (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER REFERENCES patients(id),
+  kind TEXT NOT NULL CHECK (kind IN ('dispute','refund')),
+  processor_id TEXT NOT NULL UNIQUE,
+  payment_reference TEXT,
+  payment_entry_id INTEGER REFERENCES ledger_entries(id),
+  reversal_entry_id INTEGER REFERENCES ledger_entries(id),
+  restored_entry_id INTEGER REFERENCES ledger_entries(id),
+  amount INTEGER NOT NULL,
+  reason TEXT,
+  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','won','lost','posted','unmatched')),
+  respond_by TEXT,
+  closed_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- The daily check of the processor against the ledger (charges and payouts) for one practice day.
+CREATE TABLE IF NOT EXISTS billing_recon_days (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  day TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'running',
+  processor_total INTEGER NOT NULL DEFAULT 0,
+  ledger_total INTEGER NOT NULL DEFAULT 0,
+  matched INTEGER NOT NULL DEFAULT 0,
+  exceptions INTEGER NOT NULL DEFAULT 0,
+  payouts INTEGER NOT NULL DEFAULT 0,
+  detail TEXT,
+  checked_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (practice_id, day)
+);
 -- Benchmarks across practices (BM1-BM5; benchmarks.js). Off by default: the owner joins, and can leave at any time.
 -- The participant id and keys are random (the service never learns the practice's name); the signing key is sealed
 -- with the app secret. last_results is the latest answer from the service (derived; the monthly email reads it).
@@ -5020,6 +5231,14 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_bm_sends_nightly ON bm_sends(practice_id, 
 
 // Columns added after the first release. SQLite has no ADD COLUMN IF NOT EXISTS, so check first.
 const COLUMNS = [
+  // Billing autopilot (billingauto.js): a card's funding (credit / debit / prepaid — surcharges never on debit) and
+  // the pass-through fee disclosed and added to an online payment.
+  ['payment_methods', 'funding', 'TEXT'],
+  ['payment_requests', 'fee_amount', 'INTEGER NOT NULL DEFAULT 0'],
+  ['payment_requests', 'fee_kind', 'TEXT'],
+  // Team bonus module (bonus.js): approved bonuses carried by a payroll file (a separate pay type, in cents).
+  ['payroll_exports', 'bonus_cents', 'INTEGER NOT NULL DEFAULT 0'],
+  ['payroll_exports', 'bonus_detail', 'TEXT'],
   // Treatment follow-up (txfollow.js): the practice's switch, the oldest diagnosis date it picks up, a plan's urgency.
   ['practices', 'treatment_cadence', 'INTEGER NOT NULL DEFAULT 0'],
   ['practices', 'treatment_cadence_from', 'TEXT'],
@@ -5591,9 +5810,6 @@ const COLUMNS = [
   ['tooth_conditions', 'xray_finding_id', 'INTEGER REFERENCES xray_findings(id)'],
   ['documents', 'ai_engine', 'TEXT'],
   ['documents', 'ai_vendor_ref', 'TEXT'],
-  // Team bonus module (bonus.js): approved bonuses carried by a payroll file (a separate pay type, in cents).
-  ['payroll_exports', 'bonus_cents', 'INTEGER NOT NULL DEFAULT 0'],
-  ['payroll_exports', 'bonus_detail', 'TEXT'],
 ];
 
 // CHECK constraints widened after release: [table, constraint name on Postgres, old text, new text].
@@ -5650,6 +5866,17 @@ const GUARDS_PG = [
 ];
 
 const INDEXES = `
+CREATE INDEX IF NOT EXISTS idx_billing_fees_practice ON billing_fees(practice_id, occasion, active);
+CREATE INDEX IF NOT EXISTS idx_billing_fee_charges_patient ON billing_fee_charges(practice_id, patient_id);
+CREATE INDEX IF NOT EXISTS idx_billing_auth_patient ON billing_authorizations(practice_id, patient_id, status);
+CREATE INDEX IF NOT EXISTS idx_billing_auth_source ON billing_authorizations(kind, source_id, status);
+CREATE INDEX IF NOT EXISTS idx_recurring_charges_due ON recurring_charges(status, next_charge_date);
+CREATE INDEX IF NOT EXISTS idx_billing_attempts_patient ON billing_attempts(practice_id, patient_id);
+CREATE INDEX IF NOT EXISTS idx_billing_attempts_source ON billing_attempts(source_type, source_id);
+CREATE INDEX IF NOT EXISTS idx_billing_dunning_practice ON billing_dunning(practice_id, status);
+CREATE INDEX IF NOT EXISTS idx_billing_dunning_source ON billing_dunning(source_type, source_id);
+CREATE INDEX IF NOT EXISTS idx_billing_links_patient ON billing_links(practice_id, patient_id);
+CREATE INDEX IF NOT EXISTS idx_billing_disputes_practice ON billing_disputes(practice_id, status);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_practice_slug ON practices(slug);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_appt_token ON appointments(confirm_token_hash);
 CREATE INDEX IF NOT EXISTS idx_campaign_unsub ON campaign_recipients(unsubscribe_hash);
@@ -5710,6 +5937,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_schedule_notes_key ON schedule_notes(pract
 CREATE INDEX IF NOT EXISTS idx_office_moves_patient ON office_moves(patient_id, happened_on);
 CREATE INDEX IF NOT EXISTS idx_office_moves_day ON office_moves(practice_id, happened_on);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_appt_labels_active ON appointment_labels(appointment_id, label_key) WHERE removed_at IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_bonus_approval_once ON bonus_approvals(plan_id, period_start) WHERE status = 'approved';
+CREATE INDEX IF NOT EXISTS idx_bonus_approvals_payroll ON bonus_approvals(practice_id, payroll_period_start, status);
+CREATE INDEX IF NOT EXISTS idx_bonus_lines_user ON bonus_payout_lines(practice_id, user_id);
+CREATE INDEX IF NOT EXISTS idx_bonus_versions_plan ON bonus_plan_versions(plan_id, effective_from);
 `;
 
 // ---------------------------------------------------------------------------

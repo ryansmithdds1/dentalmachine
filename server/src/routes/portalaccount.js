@@ -12,6 +12,7 @@ import {
   accountSummary, takePayment, settleReturn, achEnabled, planRules, planChoices, addDays, paymentFailed, kindError, checkAmount,
   postOnlinePayment, afterOnlinePayment, oneAtATime,
 } from '../billpay.js';
+import { passThroughInfo } from '../billingauto.js';
 
 // Patient portal 2.0 (PT1, PT2): the household account at a glance and paying it. Mounted under /api/portal next to
 // routes/portal.js (same sign-in: portalSession). Everything here is the patient acting (source 'patient'), audited.
@@ -114,6 +115,8 @@ export default function portalAccountRoutes({ db, secret, config = {}, payments 
         enabled: !!payments.enabled, mode: payments.mode, ach: achEnabled(payments), wallets: payments.mode === 'stripe', can_save_card: guarantor && !!payments.enabled,
         suggested: summary.your_portion, max: payer ? (await accountSummary(db, practice.id, (await db.all("SELECT id FROM patients WHERE practice_id = ? AND (id = ? OR guarantor_id = ?) AND status != 'archived'", practice.id, payer.id, payer.id)).map((x) => x.id))).max_payment : 0,
         email_on_file: !!payer?.email,
+        // Card costs passed on, in words, shown before paying (billingauto.js).
+        pass_through: await passThroughInfo(db, practice.id),
       },
       cards: cards.map(cardView),
       plans: plans.map((p) => ({
@@ -154,6 +157,7 @@ export default function portalAccountRoutes({ db, secret, config = {}, payments 
       practice, payer, amount: Math.round(Number(b.amount)), how, method: b.method === 'ach' ? 'ach' : 'card', cardId: b.card_id,
       saveCard: !!b.save_card && isGuarantor(req), receipt: b.receipt !== false, source: 'portal', lang: patientLang(patient),
       sandbox: { card_number: b.card_number, account_number: b.account_number }, requestKey: req.get('Idempotency-Key') ? `p${patient.id}-${req.get('Idempotency-Key')}` : null,
+      feeAck: b.fee_ack ?? null, // the surcharge / convenience fee the page showed (billingauto.js)
       ...returnUrls(req),
     });
     await pAudit(req, out.paid ? 'portal.payment' : 'portal.payment_start', 'payment_requests', out.payment_request_id, { amount: Math.round(Number(b.amount)), how, method: b.method || 'card', patient_id: payer.id });

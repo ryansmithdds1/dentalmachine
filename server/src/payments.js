@@ -4,8 +4,7 @@ import { randomBytes } from 'node:crypto';
 import { HttpError } from './auth.js';
 import { insert, practiceNow } from './util.js';
 import { planStatus } from './routes/family.js';
-import { sendMessage, preferredChannel } from './messaging.js';
-import { messageText, patientLang, subjectFor } from './templates.js';
+import { trackedCharge, mayCharge, chargeDeclined, chargeSucceeded, TEST_CARDS } from './billingauto.js';
 
 // Card processing. Stripe when STRIPE_SECRET_KEY is set; PAYMENTS=sandbox simulates it for demos
 // (test cards: 4242… approves, 4000 0000 0000 0002 declines, like Stripe's test mode).
@@ -36,11 +35,13 @@ export function createPayments({ config, fetchImpl = globalThis.fetch }) {
         return c.id;
       },
       // Hosted page where the patient (or front desk, on the patient's behalf) saves a card.
-      async cardSetupUrl(db, patient, { successUrl, cancelUrl }) {
+      // metadata: extra keys for the webhook (e.g. billing_link: a patient's update-card link, billingauto.js).
+      async cardSetupUrl(db, patient, { successUrl, cancelUrl, metadata = {} }) {
         const customer = await this.ensureCustomer(db, patient);
         const s = await stripe('POST', 'checkout/sessions', {
           mode: 'setup', customer, 'payment_method_types[0]': 'card', currency: 'usd',
           'metadata[purpose]': 'card_on_file', 'metadata[patient_id]': String(patient.id), 'metadata[practice_id]': String(patient.practice_id),
+          ...Object.fromEntries(Object.entries(metadata).map(([k, v]) => [`metadata[${k}]`, String(v)])),
           success_url: successUrl, cancel_url: cancelUrl,
         });
         return s.url;
@@ -49,13 +50,15 @@ export function createPayments({ config, fetchImpl = globalThis.fetch }) {
       async cardFromSetupSession(session) {
         const si = await stripe('GET', `setup_intents/${session.setup_intent}`, { 'expand[]': 'payment_method' });
         const pm = si.payment_method;
-        return { customer_id: session.customer, payment_method_id: pm.id, brand: pm.card?.brand, last4: pm.card?.last4, exp_month: pm.card?.exp_month, exp_year: pm.card?.exp_year };
+        // funding (credit / debit / prepaid): a surcharge is never added to a debit or prepaid card (billingauto.js).
+        return { customer_id: session.customer, payment_method_id: pm.id, brand: pm.card?.brand, last4: pm.card?.last4, exp_month: pm.card?.exp_month, exp_year: pm.card?.exp_year, funding: pm.card?.funding || null };
       },
       // Refunds part or all of an earlier card payment (by its PaymentIntent) back to the card.
       async refund({ reference, amount, idempotencyKey }) {
         const pi = String(reference || '');
         if (!pi.startsWith('pi_')) throw new HttpError(400, "That payment wasn't made by card through Stripe — refund it by cash or check");
-        const re = await stripe('POST', 'refunds', { payment_intent: pi, amount: String(amount) }, { idempotencyKey });
+        // Marked as ours, so the charge.refunded webhook doesn't post it a second time (billingauto.js posts only outside refunds).
+        const re = await stripe('POST', 'refunds', { payment_intent: pi, amount: String(amount), 'metadata[source]': 'dentalmachine' }, { idempotencyKey });
         return { reference: re.id, status: re.status };
       },
       // Card readers (Stripe Terminal, server-driven): the reader shows the amount and the patient taps or inserts.
@@ -111,6 +114,33 @@ export function createPayments({ config, fetchImpl = globalThis.fetch }) {
         }
         return out;
       },
+      // Payouts that arrived between two instants, each with what it paid out (charges, refunds, disputes, fees),
+      // for the daily payout check (billingauto.js reconcileDay).
+      async listPayouts({ fromTs, toTs }) {
+        const out = [];
+        let after = null;
+        for (let i = 0; i < 20; i++) {
+          const res = await stripe('GET', 'payouts', { 'arrival_date[gte]': String(fromTs), 'arrival_date[lt]': String(toTs), limit: '100', ...(after ? { starting_after: after } : {}) });
+          for (const po of res.data || []) {
+            if (po.status === 'failed' || po.status === 'canceled') continue;
+            const items = [];
+            let next = null;
+            for (let j = 0; j < 50; j++) {
+              const bt = await stripe('GET', 'balance_transactions', { payout: po.id, limit: '100', 'expand[]': 'data.source', ...(next ? { starting_after: next } : {}) });
+              for (const t of bt.data || []) {
+                const src = t.source && typeof t.source === 'object' ? t.source : {};
+                items.push({ id: t.id, type: t.type, amount: t.amount, fee: t.fee, net: t.net, payment_intent: src.payment_intent || null, practice_id: src.metadata?.practice_id ?? null });
+              }
+              if (!bt.has_more || !bt.data?.length) break;
+              next = bt.data[bt.data.length - 1].id;
+            }
+            out.push({ id: po.id, amount: po.amount, arrival_date: po.arrival_date, items });
+          }
+          if (!res.has_more || !res.data?.length) break;
+          after = res.data[res.data.length - 1].id;
+        }
+        return out;
+      },
       // Online payments from the patient portal and "Pay my bill" (billpay.js): Stripe's hosted page, one payment
       // type per page — 'card' (Apple Pay / Google Pay / Link show there too, on devices that have them) or 'ach'
       // (a US bank account, which clears in a few days). saveCard keeps the card on the customer for next time.
@@ -132,7 +162,7 @@ export function createPayments({ config, fetchImpl = globalThis.fetch }) {
         const pi = await stripe('GET', `payment_intents/${encodeURIComponent(paymentIntentId)}`, { 'expand[]': 'payment_method' });
         const pm = pi.payment_method;
         if (!pm || typeof pm !== 'object') return null;
-        return { id: pm.id, type: pm.type, customer: pi.customer || pm.customer || null, brand: pm.card?.brand || pm.us_bank_account?.bank_name || null, last4: pm.card?.last4 || pm.us_bank_account?.last4 || null, exp_month: pm.card?.exp_month ?? null, exp_year: pm.card?.exp_year ?? null };
+        return { id: pm.id, type: pm.type, customer: pi.customer || pm.customer || null, brand: pm.card?.brand || pm.us_bank_account?.bank_name || null, last4: pm.card?.last4 || pm.us_bank_account?.last4 || null, exp_month: pm.card?.exp_month ?? null, exp_year: pm.card?.exp_year ?? null, funding: pm.card?.funding || null };
       },
       detach: (paymentMethodId) => stripe('POST', `payment_methods/${encodeURIComponent(paymentMethodId)}/detach`, {}),
       async charge({ method, amount, description, idempotencyKey, metadata: extra = {} }) {
@@ -184,10 +214,10 @@ export function createPayments({ config, fetchImpl = globalThis.fetch }) {
           if (n === '000111111116') return { ok: false, reason: 'Bank account refused (insufficient funds)' };
           return { ok: true, reference: sbx('sbx_pi_'), brand: 'bank', last4: n.slice(-4) };
         }
-        if (!['4242424242424242', '4000000000000002', '5555555555554444'].includes(n)) throw new HttpError(400, 'Sandbox accepts test cards only: 4242 4242 4242 4242 (approves), 4000 0000 0000 0002 (declines), 5555 5555 5555 4444');
+        if (!TEST_CARDS[n]) throw new HttpError(400, 'Sandbox accepts test cards only: 4242 4242 4242 4242 (approves), 4000 0000 0000 0002 (declines), 5555 5555 5555 4444, 4000 0566 5566 5556 (debit)');
         if (n.endsWith('0002')) return { ok: false, reason: 'Card declined (generic decline)' };
         if (amount < 50) return { ok: false, reason: 'Amount too small' };
-        return { ok: true, reference: sbx('sbx_pi_'), brand: n.startsWith('5') ? 'mastercard' : 'visa', last4: n.slice(-4) };
+        return { ok: true, reference: sbx('sbx_pi_'), brand: TEST_CARDS[n].brand, last4: n.slice(-4), funding: TEST_CARDS[n].funding };
       },
       async detach() {},
       async charge({ method, amount }) {
@@ -205,7 +235,7 @@ export function createPayments({ config, fetchImpl = globalThis.fetch }) {
 export async function runAutopay(db, payments, messenger, { planId = null, force = false } = {}) {
   if (!payments.enabled) return [];
   const plans = await db.all(
-    `SELECT pp.*, pm.customer_id, pm.payment_method_id, pm.brand, pm.last4, pm.removed_at AS method_removed
+    `SELECT pp.*, pm.customer_id, pm.payment_method_id, pm.brand, pm.last4, pm.funding, pm.removed_at AS method_removed
      FROM payment_plans pp JOIN payment_methods pm ON pm.id = pp.autopay_method_id
      WHERE pp.status = 'active' AND pp.autopay_method_id IS NOT NULL AND (pp.autopay_paused = 0 OR ?)${planId ? ' AND pp.id = ?' : ''}`,
     force ? 1 : 0, ...(planId ? [planId] : []),
@@ -214,6 +244,8 @@ export async function runAutopay(db, payments, messenger, { planId = null, force
   for (const listed of plans) {
     const today = (await practiceNow(db, listed.practice_id)).slice(0, 10);
     if ((listed.autopay_last_attempt === today && !force) || listed.method_removed) continue;
+    // A declined installment waits for its retry day (day 3 / 7 / 14 — billingauto.js), unless the card was changed.
+    if (!force && !(await mayCharge(db, 'payment_plan', listed.id, listed.autopay_method_id, today))) continue;
     // Take the plan for this run, so two servers (or a scheduled run and a "charge now") can't both charge it.
     const lock = new Date(Date.now() + 10 * 60_000).toISOString();
     const took = await db.run(
@@ -237,14 +269,19 @@ async function autopayPlan(db, payments, messenger, plan, today) {
   const owed = (await db.get('SELECT COALESCE(SUM(l.amount), 0) AS n FROM ledger_entries l JOIN patients p ON p.id = l.patient_id WHERE p.id = ? OR p.guarantor_id = ?', plan.patient_id, plan.patient_id)).n;
   // What's due on the plan, never more than is left on the plan or than the household owes.
   const amount = Math.min(status.past_due, status.remaining, owed);
-  if (amount <= 0) return null;
+  if (amount <= 0) {
+    // Paid another way since a decline: the retries (and their work item) are over.
+    await chargeSucceeded(db, { practiceId: plan.practice_id, sourceType: 'payment_plan', sourceId: plan.id, today, note: 'nothing is due on the plan any more' });
+    return null;
+  }
   const practice = await db.get('SELECT name, phone FROM practices WHERE id = ?', plan.practice_id);
   // One key per installment (what's been paid so far) and attempt: a retry after a lost answer reuses it,
   // so the processor returns the first outcome rather than charging again; a retry after a decline doesn't.
-  const out = await payments.charge({
-    method: plan, amount: amount, description: `${practice.name} payment plan #${plan.id}`,
+  // Tracked (visible on the account) and with the surcharge the patient agreed to, if any (billingauto.js).
+  const out = await trackedCharge(db, payments, {
+    method: { ...plan, id: plan.autopay_method_id }, amount: amount, description: `${practice.name} payment plan #${plan.id}`,
     idempotencyKey: `autopay-${plan.id}-${status.paid}-${amount}-${plan.autopay_failures || 0}`, metadata: { payment_plan_id: plan.id, patient_id: plan.patient_id },
-  });
+  }, { practiceId: plan.practice_id, patientId: plan.patient_id, sourceType: 'payment_plan', sourceId: plan.id });
   if (out.ambiguous) {
     // Leave the day's attempt open; the next run asks again with the same key.
     await db.run('UPDATE payment_plans SET autopay_message = ? WHERE id = ?', `${out.reason} — will check again (${today})`, plan.id);
@@ -252,36 +289,31 @@ async function autopayPlan(db, payments, messenger, plan, today) {
   }
   await db.run('UPDATE payment_plans SET autopay_last_attempt = ? WHERE id = ?', today, plan.id);
   const patient = await db.get('SELECT * FROM patients WHERE id = ?', plan.patient_id);
-  if (out.ok && (await db.get('SELECT id FROM ledger_entries WHERE payment_plan_id = ? AND reference = ?', plan.id, out.reference))) {
+  if (out.ok && (await db.get("SELECT id FROM ledger_entries WHERE payment_plan_id = ? AND reference = ? AND type = 'payment'", plan.id, out.reference))) {
     return { plan_id: plan.id, ok: true, amount, already_posted: true };
   }
   if (out.ok) {
+    // The whole charge (a surcharge is its own ledger line, also on the plan, so the plan counts only the installment).
     const entryId = await insert(db, 'ledger_entries', {
-      practice_id: plan.practice_id, patient_id: plan.patient_id, type: 'payment', amount: -amount,
+      practice_id: plan.practice_id, patient_id: plan.patient_id, type: 'payment', amount: -out.total,
       description: `Autopay — payment plan (${plan.brand || 'card'} •••• ${plan.last4})`, method: 'credit_card', reference: out.reference,
       payment_plan_id: plan.id, entry_date: today,
     });
-    await db.run('UPDATE payment_plans SET autopay_failures = 0, autopay_message = ? WHERE id = ?', `Charged $${(amount / 100).toFixed(2)} on ${today}`, plan.id);
+    await db.run('UPDATE payment_plans SET autopay_failures = 0, autopay_message = ? WHERE id = ?', `Charged $${(out.total / 100).toFixed(2)} on ${today}`, plan.id);
+    await chargeSucceeded(db, { practiceId: plan.practice_id, sourceType: 'payment_plan', sourceId: plan.id, today });
     const after = await planStatus(db, await db.get('SELECT * FROM payment_plans WHERE id = ?', plan.id), today);
     if (after.remaining <= 0) await db.run("UPDATE payment_plans SET status = 'completed' WHERE id = ?", plan.id);
     await autoReceipt(db, messenger, entryId);
     return { plan_id: plan.id, ok: true, amount };
   } else {
+    // Nothing posted. Dunning (billingauto.js): Needs attention, the patient's update-card link, retries on the
+    // practice's schedule, then paused with next steps for the team.
     const failures = (plan.autopay_failures || 0) + 1;
-    const paused = failures >= 3 ? 1 : 0;
-    await db.run('UPDATE payment_plans SET autopay_failures = ?, autopay_paused = ?, autopay_message = ? WHERE id = ?', failures, paused, `${out.reason} (${today})`, plan.id);
-    await insert(db, 'tasks', {
-      practice_id: plan.practice_id, patient_id: plan.patient_id, priority: 'high', due_date: today,
-      title: `Autopay ${paused ? 'paused' : 'failed'}: ${patient.first_name} ${patient.last_name} — ${out.reason}`,
+    const d = await chargeDeclined(db, messenger, {
+      practiceId: plan.practice_id, patientId: patient.id, sourceType: 'payment_plan', sourceId: plan.id, methodId: plan.autopay_method_id, amount, reason: out.reason, today,
     });
-    const target = preferredChannel(patient);
-    if (target && messenger) {
-      await sendMessage(db, messenger, {
-        practiceId: plan.practice_id, patientId: patient.id, kind: 'payment_request', channel: target.channel, to: target.to,
-        subject: subjectFor(patientLang(patient), 'card_declined', `Payment plan payment didn't go through — ${practice.name}`, practice.name),
-        body: await messageText(db, plan.practice_id, 'card_declined', { first_name: patient.first_name, amount, reason: out.reason }, patientLang(patient)),
-      }).catch(failed(db, { practiceId: plan.practice_id, kind: 'payment', key: `decline-notice:${plan.id}`, role: 'billing', patientId: patient.id, title: 'The patient couldn’t be told their payment-plan card was declined' }));
-    }
+    const paused = d.paused ? 1 : 0;
+    await db.run('UPDATE payment_plans SET autopay_failures = ?, autopay_paused = ?, autopay_message = ? WHERE id = ?', failures, paused, `${out.reason} (${today})${paused ? '' : ` — next try ${d.next_retry_on}`}`, plan.id);
     return { plan_id: plan.id, ok: false, reason: out.reason, paused: !!paused };
   }
 }

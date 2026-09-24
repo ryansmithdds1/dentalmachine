@@ -2,6 +2,7 @@ import { insert, practiceNow } from './util.js';
 import { primaryPolicy } from './services.js';
 import { withPlan } from './benefits.js';
 import { addInterval } from './memberships.js';
+import { trackedCharge, mayCharge, chargeDeclined, chargeSucceeded } from './billingauto.js';
 
 // Orthodontic contracts: insurance pays up to the plan's lifetime ortho maximum (at its ortho percentage, if
 // the patient is under the age limit); the patient's part is a down payment plus equal monthly charges,
@@ -32,7 +33,7 @@ export async function orthoEstimate(db, practiceId, patient, { total_fee, down_p
 }
 
 // Posts each month's charge that has come due, and charges the card when autopay is on.
-export async function runOrthoBilling(db, payments, { caseId = null } = {}) {
+export async function runOrthoBilling(db, payments, { caseId = null, messenger = null } = {}) {
   const results = [];
   const due = await db.all(`SELECT id, practice_id FROM ortho_cases WHERE status IN ('active','retention') AND billed_months < months${caseId ? ' AND id = ?' : ''}`, ...(caseId ? [caseId] : []));
   for (const { id, practice_id: pid } of due) {
@@ -56,25 +57,26 @@ export async function runOrthoBilling(db, payments, { caseId = null } = {}) {
           });
         });
         let charged = false;
-        if (c.autopay && c.payment_method_id && payments?.enabled && amount > 0) {
+        // While a declined month waits for its retry day (billingauto.js retries it), a new month isn't charged on top.
+        if (c.autopay && c.payment_method_id && payments?.enabled && amount > 0 && (await mayCharge(db, 'ortho_case', c.id, c.payment_method_id, today))) {
           const method = await db.get('SELECT * FROM payment_methods WHERE id = ? AND removed_at IS NULL', c.payment_method_id);
           if (method) {
             const practice = await db.get('SELECT name FROM practices WHERE id = ?', c.practice_id);
-            const out = await payments.charge({ method, amount, description: `${practice.name} — orthodontic payment ${month} of ${c.months}`, idempotencyKey: `ortho-${c.id}-${month}-${c.billing_failures}`, metadata: { ortho_case_id: c.id, patient_id: c.patient_id } });
+            const out = await trackedCharge(db, payments, { method, amount, description: `${practice.name} — orthodontic payment ${month} of ${c.months}`, idempotencyKey: `ortho-${c.id}-${month}-${c.billing_failures}`, metadata: { ortho_case_id: c.id, patient_id: c.patient_id } },
+              { practiceId: c.practice_id, patientId: c.patient_id, sourceType: 'ortho_case', sourceId: c.id });
             if (out.ambiguous) { results.push({ case_id: c.id, month, pending: true }); break; }
             if (!out.ok) {
               await db.run('UPDATE ortho_cases SET billing_failures = billing_failures + 1, billing_message = ? WHERE id = ?', `${out.reason} (${today})`, c.id);
-              if (!c.billing_failures) {
-                const p = await db.get('SELECT first_name, last_name FROM patients WHERE id = ?', c.patient_id);
-                await insert(db, 'tasks', { practice_id: c.practice_id, patient_id: c.patient_id, priority: 'high', due_date: today, title: `Ortho payment declined: ${p.first_name} ${p.last_name} — ${out.reason}` });
-              }
+              // Dunning (billingauto.js): Needs attention, the patient's update-card link, retries, then paused.
+              await chargeDeclined(db, messenger, { practiceId: c.practice_id, patientId: c.patient_id, sourceType: 'ortho_case', sourceId: c.id, methodId: method.id, amount, reason: out.reason, today });
               results.push({ case_id: c.id, month, declined: true, reason: out.reason });
               // The month is still billed to the account; the card is tried again tomorrow.
             } else {
               await insert(db, 'ledger_entries', {
-                practice_id: c.practice_id, patient_id: c.patient_id, type: 'payment', amount: -amount, method: 'credit_card', reference: out.reference,
+                practice_id: c.practice_id, patient_id: c.patient_id, type: 'payment', amount: -out.total, method: 'credit_card', reference: out.reference,
                 description: `Ortho autopay (${method.brand || 'card'} •••• ${method.last4})`, entry_date: today, ortho_case_id: c.id,
               });
+              await chargeSucceeded(db, { practiceId: c.practice_id, sourceType: 'ortho_case', sourceId: c.id, today });
               charged = true;
             }
           }

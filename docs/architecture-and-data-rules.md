@@ -48,6 +48,13 @@ Rules that apply to all of them are in `/CLAUDE.md`.
 - Links: `procedure_id`, `claim_id`, `insurance_check_id`, `payment_plan_id`, `deposit_id`, `membership_id`,
   `ortho_case_id`, `location_id`, `provider_id`, `created_by`.
 - Around it: `payment_plans`, `deposits` (bank deposit slips), `payment_methods` (cards on file), `financing_applications`.
+- Automatic billing (`billingauto.js`, BL1–BL5): every automatic card charge goes through `trackedCharge`
+  (`billing_attempts`) and posts once by the processor's id; a declined one is `billing_dunning` (retries, pause,
+  Needs attention) — never a posting. The patient's OK is `billing_authorizations` (exact words + hash, never
+  edited); `recurring_charges` is the only "any amount each month" schedule (plans stay `payment_plans`).
+  Surcharges, convenience fees and office fees (`billing_fees` → `billing_fee_charges`) are their own ledger lines
+  (`adjustment`), never inside a procedure fee; waivers are reversing entries. Disputes and processor refunds are
+  `billing_disputes`, posted as reversing entries / refunds.
 
 ## Insurance and claims
 - `insurance_carriers` (payer) → `insurance_plans` (employer group: shared benefits, frequencies, fee schedule)

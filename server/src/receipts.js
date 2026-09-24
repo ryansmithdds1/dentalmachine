@@ -14,10 +14,12 @@ export async function receiptData(db, entryId, practiceId) {
   // The account balance straight after this payment (later activity isn't the receipt's business).
   const after = (await db.get('SELECT COALESCE(SUM(amount), 0) AS n FROM ledger_entries WHERE patient_id = ? AND practice_id = ? AND id <= ?', entry.patient_id, practiceId, entry.id)).n;
   const staff = entry.created_by ? await db.get('SELECT name FROM users WHERE id = ?', entry.created_by) : null;
-  return { entry, patient, practice, balance_after: after, received_by: staff?.name || null, voided: !!entry.voided_at };
+  // A card surcharge or convenience fee charged with this payment (its own ledger line, same processor id).
+  const fees = entry.reference ? await db.all("SELECT adjustment_type, amount FROM ledger_entries WHERE practice_id = ? AND reference = ? AND type = 'adjustment' AND adjustment_type IN ('Card surcharge', 'Convenience fee') AND voided_at IS NULL", practiceId, entry.reference) : [];
+  return { entry, patient, practice, balance_after: after, received_by: staff?.name || null, voided: !!entry.voided_at, fees };
 }
 
-export function receiptPdf({ entry, patient, practice, balance_after, received_by, voided }) {
+export function receiptPdf({ entry, patient, practice, balance_after, received_by, voided, fees = [] }) {
   const doc = new PdfDoc({ footer: `${practice.name} · receipt #${entry.id}` });
   doc.text(practice.name, { size: 15, bold: true, gap: 1 });
   doc.text([practice.address, practice.city, practice.state, practice.zip].filter(Boolean).join(', '), { size: 9.5, gap: 1 });
@@ -32,6 +34,7 @@ export function receiptPdf({ entry, patient, practice, balance_after, received_b
     ['Date', entry.entry_date],
     ['Received from', `${patient.first_name} ${patient.last_name}`],
     ['Amount', money(-entry.amount)],
+    ...fees.map((f) => [`Includes ${f.adjustment_type.toLowerCase()}`, money(f.amount)]),
     ['Method', methodName(entry.method)],
     ...(entry.reference && !/^(pi_|sbx_|ch_)/.test(entry.reference) ? [['Reference', entry.reference]] : []),
     ['For', entry.description],
@@ -48,14 +51,15 @@ export function receiptPdf({ entry, patient, practice, balance_after, received_b
 export async function sendReceipt(db, messenger, { entryId, practiceId, channel, userId = null }) {
   const data = await receiptData(db, entryId, practiceId);
   if (!data) return null;
-  const { entry, patient, practice, balance_after } = data;
+  const { entry, patient, practice, balance_after, fees } = data;
   let target = preferredChannel(patient, channel);
   if (!target && patient.guarantor_id) target = preferredChannel(await db.get('SELECT * FROM patients WHERE id = ?', patient.guarantor_id), channel);
   if (!target) return null;
   const lang = patientLang(patient);
-  const body = await messageText(db, practiceId, 'receipt', {
+  const text = await messageText(db, practiceId, 'receipt', {
     first_name: patient.first_name, amount: -entry.amount, date: entry.entry_date, method: methodName(entry.method), balance: money(Math.max(0, balance_after)), receipt: `#${entry.id}`,
   }, lang);
+  const body = fees?.length ? `${text}\n${fees.map((f) => (lang === 'es' ? `Incluye ${f.adjustment_type === 'Card surcharge' ? 'recargo por tarjeta' : 'cargo por conveniencia'}: ${money(f.amount)}` : `Includes ${f.adjustment_type.toLowerCase()}: ${money(f.amount)}`)).join('\n')}` : text;
   return sendMessage(db, messenger, {
     practiceId, patientId: patient.id, userId, kind: 'receipt', channel: target.channel, to: target.to,
     subject: subjectFor(lang, 'receipt', `Your receipt from ${practice.name}`, practice.name), body,

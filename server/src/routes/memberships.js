@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { requirePermission, HttpError } from '../auth.js';
 import { findOr404, audit, practiceNow, insert } from '../util.js';
 import { INTERVALS, cleanIncluded, membershipYear, addInterval, runMembershipBilling, membershipOn } from '../memberships.js';
+import { chargeSucceeded } from '../billingauto.js';
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const age = (dob, on) => (dob ? Math.floor((new Date(on) - new Date(dob)) / (365.25 * 86400_000)) : null);
@@ -138,6 +139,8 @@ export default function membershipRoutes({ db, payments, messenger }) {
     const plan = await db.get('SELECT interval FROM membership_plans WHERE id = ?', m.plan_id);
     const next = addInterval(m.next_bill_date, plan.interval);
     await db.run("UPDATE memberships SET status = 'active', next_bill_date = ?, paid_through = ?, billing_failures = 0, billing_message = ? WHERE id = ?", next, next, `Paid at the office (${req.user.name || 'staff'})`, m.id);
+    // Its declined-card retries are over (billingauto.js), and the Needs attention item resolves.
+    await chargeSucceeded(db, { practiceId: m.practice_id, sourceType: 'membership', sourceId: m.id, today: (await practiceNow(db, m.practice_id)).slice(0, 10), note: 'paid at the office' });
     await audit(db, req, 'membership.settle', 'memberships', m.id);
     res.json(await detail(await db.get('SELECT * FROM memberships WHERE id = ?', m.id)));
   });

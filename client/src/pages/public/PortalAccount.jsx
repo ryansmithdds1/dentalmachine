@@ -140,6 +140,9 @@ export function PayForm({ acct, token, onPaid, onCancel, path = '/portal/billing
   const [error, setError] = useState(null);
   // One key per payment attempt: a double tap or a retry after a dropped connection can't pay twice.
   const [key, setKey] = useState(newKey);
+  // A card surcharge or convenience fee the office passes on (billing autopilot): shown with its exact amount
+  // before paying; the payment then goes with the fee the patient saw (fee_ack).
+  const [fee, setFee] = useState(null);
   const amount = amountMode === 'due' ? suggested : Math.round(Number(String(other).replace(/[$,\s]/g, '')) * 100);
   const valid = Number.isFinite(amount) && amount >= 50 && amount <= p.max;
   const submit = async (e) => {
@@ -152,8 +155,19 @@ export function PayForm({ acct, token, onPaid, onCancel, path = '/portal/billing
       const body = {
         amount, how: saved ? 'saved' : 'new', card_id: saved ? Number(how.slice(6)) : undefined, method: how === 'ach' ? 'ach' : 'card', save_card: !saved && how === 'card' && save, receipt, lang,
         ...(p.mode === 'sandbox' && how === 'card' ? { card_number: testCard } : {}), ...(p.mode === 'sandbox' && how === 'ach' ? { account_number: testBank } : {}),
+        ...(fee ? { fee_ack: fee.amount } : {}),
       };
-      const r = await call('POST', path, body, token, { key });
+      let r;
+      try {
+        r = await call('POST', path, body, token, { key });
+      } catch (err) {
+        if (err.status === 409 && err.details?.fee_required) {
+          setFee(err.details.fee_required);
+          setKey(newKey());
+          return;
+        }
+        throw err;
+      }
       if (r.url) { window.location.href = r.url; return; }
       onPaid(t('Thank you — your payment of {amount} is on your account.', { amount: money(r.amount) }), r);
     } catch (err) {
@@ -163,26 +177,27 @@ export function PayForm({ acct, token, onPaid, onCancel, path = '/portal/billing
       setBusy(false);
     }
   };
+  const change = (fn) => (...a) => { setFee(null); fn(...a); };
   return (
     <form className="bp-pay" onSubmit={submit} aria-label={t('Make a payment')}>
       <fieldset>
         <legend>{t('How much?')}</legend>
-        <label className="bp-choice"><input type="radio" name="amt" checked={amountMode === 'due'} onChange={() => setAmountMode('due')} /> {p.suggested > 0 ? t('Amount due: {amount}', { amount: money(suggested) }) : money(suggested)}</label>
+        <label className="bp-choice"><input type="radio" name="amt" checked={amountMode === 'due'} onChange={change(() => setAmountMode('due'))} /> {p.suggested > 0 ? t('Amount due: {amount}', { amount: money(suggested) }) : money(suggested)}</label>
         <label className="bp-choice">
-          <input type="radio" name="amt" checked={amountMode === 'other'} onChange={() => setAmountMode('other')} /> {t('Another amount')}
-          {amountMode === 'other' && <input className="bp-other" inputMode="decimal" autoFocus aria-label={t('Amount in dollars')} placeholder="$0.00" value={other} onChange={(e) => setOther(e.target.value)} />}
+          <input type="radio" name="amt" checked={amountMode === 'other'} onChange={change(() => setAmountMode('other'))} /> {t('Another amount')}
+          {amountMode === 'other' && <input className="bp-other" inputMode="decimal" autoFocus aria-label={t('Amount in dollars')} placeholder="$0.00" value={other} onChange={change((e) => setOther(e.target.value))} />}
         </label>
       </fieldset>
       <fieldset>
         <legend>{t('Pay with')}</legend>
         {cards.map((c) => (
-          <label key={c.id} className="bp-choice"><input type="radio" name="how" checked={how === `saved:${c.id}`} onChange={() => setHow(`saved:${c.id}`)} /> <CreditCard size={16} aria-hidden /> {t('Saved card {card}', { card: cardName(t, c) })}</label>
+          <label key={c.id} className="bp-choice"><input type="radio" name="how" checked={how === `saved:${c.id}`} onChange={change(() => setHow(`saved:${c.id}`))} /> <CreditCard size={16} aria-hidden /> {t('Saved card {card}', { card: cardName(t, c) })}</label>
         ))}
-        <label className="bp-choice"><input type="radio" name="how" checked={how === 'card'} onChange={() => setHow('card')} /> <CreditCard size={16} aria-hidden /> {p.wallets ? t('Card, Apple Pay or Google Pay') : t('Card')}</label>
-        {p.ach && <label className="bp-choice"><input type="radio" name="how" checked={how === 'ach'} onChange={() => setHow('ach')} /> <Landmark size={16} aria-hidden /> {t('Bank account (ACH)')}</label>}
+        <label className="bp-choice"><input type="radio" name="how" checked={how === 'card'} onChange={change(() => setHow('card'))} /> <CreditCard size={16} aria-hidden /> {p.wallets ? t('Card, Apple Pay or Google Pay') : t('Card')}</label>
+        {p.ach && <label className="bp-choice"><input type="radio" name="how" checked={how === 'ach'} onChange={change(() => setHow('ach'))} /> <Landmark size={16} aria-hidden /> {t('Bank account (ACH)')}</label>}
       </fieldset>
       {p.mode === 'sandbox' && how === 'card' && (
-        <label className="bp-test">{t('Test card (sandbox — no real card is charged)')}<input inputMode="numeric" value={testCard} onChange={(e) => setTestCard(e.target.value)} /><span className="muted bp-small">{t('4242… approves; 4000 0000 0000 0002 is declined.')}</span></label>
+        <label className="bp-test">{t('Test card (sandbox — no real card is charged)')}<input inputMode="numeric" value={testCard} onChange={change((e) => setTestCard(e.target.value))} /><span className="muted bp-small">{t('4242… approves; 4000 0000 0000 0002 is declined.')}</span></label>
       )}
       {p.mode === 'sandbox' && how === 'ach' && (
         <label className="bp-test">{t('Test bank account (sandbox)')}<input inputMode="numeric" value={testBank} onChange={(e) => setTestBank(e.target.value)} /><span className="muted bp-small">{t('000123456789 clears; 000111111116 is refused.')}</span></label>
@@ -190,9 +205,11 @@ export function PayForm({ acct, token, onPaid, onCancel, path = '/portal/billing
       {p.mode === 'stripe' && !how.startsWith('saved:') && <p className="muted bp-small">{t('You’ll enter your details on our card processor’s secure page (Stripe) and come right back.')}</p>}
       {!lookup && acct.payment.can_save_card && how === 'card' && <label className="bp-check"><input type="checkbox" checked={save} onChange={(e) => setSave(e.target.checked)} /> {t('Save this card for next time')}</label>}
       {p.email_on_file !== false && <label className="bp-check"><input type="checkbox" checked={receipt} onChange={(e) => setReceipt(e.target.checked)} /> {t('Email me a receipt')}</label>}
+      {p.pass_through && !fee && <p className="muted bp-small">{p.pass_through.text}</p>}
+      {fee && <p className="bp-fee" role="status"><strong>{fee.label}: {money(fee.amount)}.</strong> {fee.disclosure} {t('Total: {amount}', { amount: money(fee.total) })}</p>}
       <ErrorBox error={error} />
       <div className="bp-actions">
-        <button className="primary big" disabled={busy}>{busy ? t('Paying…') : t('Pay {amount}', { amount: valid ? money(amount) : '' })}</button>
+        <button className="primary big" disabled={busy}>{busy ? t('Paying…') : t('Pay {amount}', { amount: fee ? money(fee.total) : valid ? money(amount) : '' })}</button>
         {onCancel && <button type="button" className="link" onClick={onCancel}>{t('Not now')}</button>}
       </div>
     </form>

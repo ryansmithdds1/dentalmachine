@@ -6,6 +6,7 @@ import { useAuth } from '../../auth.jsx';
 import { money, fmtDate, label, toCents } from '../../format.js';
 import { ErrorBox, Modal, useSubmit } from '../ui.jsx';
 import PaymentPlans from './PaymentPlans.jsx';
+import BillingActivity from '../billing/BillingActivity.jsx';
 import Financing from './Financing.jsx';
 import { ReaderPay, useReaders } from '../CardReader.jsx';
 import { useRemembered } from '../../prefs.js';
@@ -135,6 +136,8 @@ export default function LedgerTab({ patient, onChange }) {
         </div>
       </div>
       <PaymentPlans patient={patient} onChange={reload} />
+      {/* Billing autopilot (BL1–BL5): Set up payments, automatic-payment history, office fees and waivers. */}
+      <BillingActivity patientId={patient.guarantor_id || patient.id} />
       <Financing patient={patient} canWrite={can('billing:write')} onChange={reload} />
       {payRequests?.length > 0 && (
         <div className="card">

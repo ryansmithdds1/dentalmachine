@@ -25,6 +25,7 @@ import { runMarketingJobs } from './marketing.js';
 import { runFeeSchedules } from './feeimport.js';
 import { runSecondLook } from './xrayai.js';
 import { createBenchmarkClient, runBenchmarkSends } from './benchmarks.js';
+import { runBillingAutopilot } from './billingauto.js';
 import { runScheduledReports } from './savedreports.js';
 import { runSurveys } from './surveys.js';
 import { runOrthoBilling } from './ortho.js';
@@ -282,6 +283,15 @@ if (process.env.BENCHMARK_SENDS !== 'off') {
   setInterval(run, 60 * 60 * 1000).unref();
   setTimeout(run, 100_000).unref();
 }
+// Billing autopilot (BL1-BL5): recurring charges, retries of declined ortho months, expiring-card notices,
+// automatic office fees, closing retries for plans that ended, and yesterday's processor check. Hourly.
+if (process.env.BILLING_AUTOPILOT !== 'off') {
+  const run = () => runExclusive('billing-autopilot', 30 * 60 * 1000, () => runBillingAutopilot(db, app.locals.payments, messenger, { appUrl: config.appUrl }))
+    .then((r) => r && (r.recurring || r.fees || r.expiring) && log.info(`Billing autopilot: ${r.recurring} recurring, ${r.ortho_retries} ortho retries, ${r.expiring} card notices, ${r.fees} fees`))
+    .catch(jobFailed('Billing autopilot'));
+  setInterval(run, 60 * 60 * 1000).unref();
+  setTimeout(run, 140_000).unref();
+}
 // Payment-plan late fees: an installment still unpaid after the plan's grace days gets its fee once.
 if (process.env.PLAN_LATE_FEES !== 'off') {
   const run = () => runExclusive('plan-late-fees', 30 * 60 * 1000, () => runPlanLateFees(db))
@@ -292,7 +302,7 @@ if (process.env.PLAN_LATE_FEES !== 'off') {
 }
 // Ortho contracts: each month's charge (and card payment, with autopay) once a day.
 if (process.env.ORTHO_BILLING !== 'off') {
-  const run = () => runExclusive('ortho-billing', 30 * 60 * 1000, () => runOrthoBilling(db, app.locals.payments))
+  const run = () => runExclusive('ortho-billing', 30 * 60 * 1000, () => runOrthoBilling(db, app.locals.payments, { messenger }))
     .then((r) => r?.length && log.info(`Ortho billing: ${r.length} months billed`))
     .catch(jobFailed('Ortho billing'));
   setInterval(run, 60 * 60 * 1000).unref();

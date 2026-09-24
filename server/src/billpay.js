@@ -4,6 +4,7 @@ import { insert, audit, practiceNow } from './util.js';
 import { pendingInsurance } from './services.js';
 import { raiseIssue, resolveIssue, failed } from './issues.js';
 import { autoReceipt, sendReceipt } from './receipts.js';
+import { passThroughFor, TEST_CARDS } from './billingauto.js';
 
 // Patient portal 2.0 and "Pay my bill" (PT1–PT4, docs/workflows/specs/PT-portal.md): the household account in
 // plain numbers, paying it (card, bank/ACH, Apple Pay / Google Pay through Stripe's hosted page, a saved card),
@@ -141,6 +142,14 @@ export async function postOnlinePayment(db, session) {
     const pr = await db.get('SELECT * FROM payment_requests WHERE session_id = ?', session.id);
     const md = session.metadata || {};
     const ach = md.pay_method === 'ach';
+    // A surcharge or convenience fee the patient saw and agreed to: its own ledger line, the payment is the whole charge.
+    if (pr.fee_amount > 0) {
+      await insert(db, 'ledger_entries', {
+        practice_id: pr.practice_id, patient_id: pr.patient_id, type: 'adjustment', adjustment_type: pr.fee_kind === 'surcharge' ? 'Card surcharge' : 'Convenience fee', amount: pr.fee_amount,
+        description: pr.fee_kind === 'surcharge' ? 'Card surcharge on a credit card payment' : 'Convenience fee for paying online', reference: session.payment_intent || session.id,
+        entry_date: (await practiceNow(db, pr.practice_id)).slice(0, 10),
+      });
+    }
     const where = md.source === 'billpay' ? ' — Pay my bill' : md.source === 'portal' ? ' — patient portal' : '';
     const entryId = await insert(db, 'ledger_entries', {
       practice_id: pr.practice_id, patient_id: pr.patient_id, type: 'payment', amount: -session.amount_total,
@@ -208,41 +217,51 @@ export async function checkAmount(db, practiceId, payer, amount) {
 // Returns { paid: true, entry_id, amount } or { url } (Stripe's page) — or throws a kind 402/503.
 export async function takePayment(db, payments, messenger, {
   practice, payer, amount, how = 'new', method = 'card', saveCard = false, cardId = null, sandbox = {}, receipt = false,
-  source, lang = 'en', successUrl, cancelUrl, requestKey = null,
+  source, lang = 'en', successUrl, cancelUrl, requestKey = null, feeAck = null,
 }) {
   if (!payments?.enabled) throw new HttpError(409, `Online payments aren’t available — please call ${practice.phone || 'the office'}`);
   if (!['card', 'ach'].includes(method)) throw new HttpError(400, 'method must be card or ach');
   if (method === 'ach' && !achEnabled(payments)) throw new HttpError(400, 'Bank payments aren’t available online — please pay by card');
   await checkAmount(db, practice.id, payer, amount);
   await oneAtATime(db, payer.id);
+  // Passing card costs on (billingauto.js): a surcharge (credit cards only, where the state allows) or a flat
+  // convenience fee. It's shown before paying, and the page sends back the fee it showed: a different fee isn't taken.
+  const saved = how === 'saved' ? await db.get('SELECT * FROM payment_methods WHERE id = ? AND practice_id = ? AND patient_id = ? AND removed_at IS NULL', Number(cardId), practice.id, payer.id) : null;
+  const funding = saved ? saved.funding : payments.mode === 'sandbox' && method === 'card' ? TEST_CARDS[String(sandbox.card_number || '').replace(/\D/g, '')]?.funding ?? null : null;
+  const fee = await passThroughFor(db, practice.id, { amount, channel: 'online', funding, method: how === 'saved' ? 'card' : method });
+  if (fee.amount > 0 && Number(feeAck) !== fee.amount) {
+    throw new HttpError(409, fee.disclosure, { fee_required: { kind: fee.kind, amount: fee.amount, label: fee.label, disclosure: fee.disclosure, total: amount + fee.amount } });
+  }
+  const feeRow = fee.amount > 0 ? { fee_amount: fee.amount, fee_kind: fee.kind } : {};
+  const total = amount + fee.amount;
   const md = { source, practice_id: String(practice.id), patient_id: String(payer.id), pay_method: how === 'saved' ? 'card' : method, ...(receipt ? { receipt: '1' } : {}), ...(saveCard ? { save_card: '1' } : {}) };
   const rand = `${Date.now().toString(36)}${randomInt(1e9).toString(36)}`;
 
   // A card on file: charged now, off-session.
   if (how === 'saved') {
-    const card = await db.get('SELECT * FROM payment_methods WHERE id = ? AND practice_id = ? AND patient_id = ? AND removed_at IS NULL', Number(cardId), practice.id, payer.id);
+    const card = saved;
     if (!card) throw new HttpError(404, 'That card isn’t on file any more');
     const sessionId = `off_cs_${rand}`;
-    const prId = await insert(db, 'payment_requests', { practice_id: practice.id, patient_id: payer.id, amount, provider: payments.mode, session_id: sessionId });
+    const prId = await insert(db, 'payment_requests', { practice_id: practice.id, patient_id: payer.id, amount: total, provider: payments.mode, session_id: sessionId, ...feeRow });
     const out = await payments.charge({
-      method: card, amount, description: `${practice.name} account payment`, idempotencyKey: `online-pay-${requestKey || prId}`,
+      method: card, amount: total, description: `${practice.name} account payment${fee.amount ? ` (incl. ${fee.label.toLowerCase()})` : ''}`, idempotencyKey: `online-pay-${requestKey || prId}`,
       metadata: { payment_request_id: prId, source, patient_id: payer.id },
     });
-    return settleNow(db, payments, messenger, { practice, payer, amount, prId, sessionId, out, md: { ...md, save_card: undefined, card_label: `${card.brand || 'card'} •••• ${card.last4}` }, source, lang });
+    return settleNow(db, payments, messenger, { practice, payer, amount: total, prId, sessionId, out, md: { ...md, save_card: undefined, card_label: `${card.brand || 'card'} •••• ${card.last4}` }, source, lang });
   }
 
   // Sandbox: the published test numbers only (4242… approves, …0002 declines; bank 000123456789 approves,
   // 000111111116 is refused), charged straight away.
   if (payments.mode === 'sandbox') {
     const sessionId = `sbx_cs_${rand}`;
-    const test = payments.sandboxPay({ method, number: method === 'ach' ? sandbox.account_number : sandbox.card_number, amount });
-    const prId = await insert(db, 'payment_requests', { practice_id: practice.id, patient_id: payer.id, amount, provider: 'sandbox', session_id: sessionId });
+    const test = payments.sandboxPay({ method, number: method === 'ach' ? sandbox.account_number : sandbox.card_number, amount: total });
+    const prId = await insert(db, 'payment_requests', { practice_id: practice.id, patient_id: payer.id, amount: total, provider: 'sandbox', session_id: sessionId, ...feeRow });
     const res = await settleNow(db, payments, messenger, {
-      practice, payer, amount, prId, sessionId, out: test, md: { ...md, save_card: undefined, card_label: test.last4 ? `${test.brand} •••• ${test.last4}` : undefined }, source, lang,
+      practice, payer, amount: total, prId, sessionId, out: test, md: { ...md, save_card: undefined, card_label: test.last4 ? `${test.brand} •••• ${test.last4}` : undefined }, source, lang,
     });
     if (saveCard && method === 'card') {
       const id = await insert(db, 'payment_methods', {
-        practice_id: practice.id, patient_id: payer.id, provider: 'sandbox', brand: test.brand, last4: test.last4, exp_month: 12, exp_year: new Date().getUTCFullYear() + 3,
+        practice_id: practice.id, patient_id: payer.id, provider: 'sandbox', brand: test.brand, last4: test.last4, exp_month: 12, exp_year: new Date().getUTCFullYear() + 3, funding: funding ?? null,
       });
       await audit(db, { user: { practice_id: practice.id, id: null } }, 'card.saved', 'payment_methods', id, { source }, { patientId: payer.id });
       res.card_saved = true;
@@ -252,12 +271,12 @@ export async function takePayment(db, payments, messenger, {
 
   // Stripe: its hosted page (card with Apple Pay / Google Pay / Link, or a US bank account). The payment posts
   // from the webhook (or when the patient comes back, whichever is first).
-  const prId = await insert(db, 'payment_requests', { practice_id: practice.id, patient_id: payer.id, amount, provider: 'stripe' });
+  const prId = await insert(db, 'payment_requests', { practice_id: practice.id, patient_id: payer.id, amount: total, provider: 'stripe', ...feeRow });
   let session;
   try {
     session = await payments.checkout({
       customerId: saveCard || payer.stripe_customer_id ? await payments.ensureCustomer(db, payer) : null,
-      amount, description: `${practice.name} - account payment`, method, saveCard: saveCard && method === 'card',
+      amount: total, description: `${practice.name} - account payment${fee.amount ? ` (incl. ${fee.label.toLowerCase()})` : ''}`, method, saveCard: saveCard && method === 'card',
       metadata: { ...md, payment_request_id: String(prId) }, successUrl, cancelUrl, idempotencyKey: `online-checkout-${requestKey || prId}`,
     });
   } catch (err) {

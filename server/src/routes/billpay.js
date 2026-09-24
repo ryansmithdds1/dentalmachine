@@ -12,6 +12,7 @@ import { portalKey } from './portal.js';
 import {
   accountByCode, accountSummary, householdIds, takePayment, settleReturn, achEnabled, guarantorIdOf, payCodeFor, rotatePayCode, formatCode,
 } from '../billpay.js';
+import { passThroughInfo } from '../billingauto.js';
 
 // "Pay my bill" from the practice's website (PT3). Three routers:
 //   billpayPublicRoutes — under /api/public: find the bill without an account (the statement code, or last name +
@@ -75,6 +76,7 @@ export default function billpayPublicRoutes({ db, secret, payments = { enabled: 
       name: p.name, phone: p.phone, city: p.city, state: p.state, portal_key: portalKey(p),
       payments_enabled: !!payments.enabled, mode: payments.mode, ach: achEnabled(payments), wallets: payments.mode === 'stripe',
       captcha_site_key: config.turnstileSecret ? config.turnstileSiteKey || null : null,
+      pass_through: await passThroughInfo(db, p.id), // card costs passed on, shown before paying (billingauto.js)
     });
   });
 
@@ -136,7 +138,7 @@ export default function billpayPublicRoutes({ db, secret, payments = { enabled: 
     const out = await takePayment(db, payments, messenger, {
       practice, payer: account, amount, how: 'new', method: b.method === 'ach' ? 'ach' : 'card', saveCard: false, receipt: b.receipt !== false,
       source: 'billpay', lang: b.lang === 'es' ? 'es' : patientLang(account), sandbox: { card_number: b.card_number, account_number: b.account_number },
-      requestKey: req.get('Idempotency-Key') ? `b${account.id}-${req.get('Idempotency-Key')}` : null,
+      requestKey: req.get('Idempotency-Key') ? `b${account.id}-${req.get('Idempotency-Key')}` : null, feeAck: b.fee_ack ?? null,
       successUrl: `${base}?paid=1&session_id={CHECKOUT_SESSION_ID}`, cancelUrl: `${base}?pay=cancelled`,
     });
     await bAudit(req, out.paid ? 'billpay.payment' : 'billpay.payment_start', 'payment_requests', out.payment_request_id, { amount, method: b.method || 'card', patient_id: account.id });

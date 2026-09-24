@@ -27,6 +27,7 @@ import feeScheduleRoutes from './routes/feeschedules.js';
 import marketingRoutes from './routes/marketing.js';
 import bonusRoutes from './routes/bonus.js';
 import benchmarkRoutes from './routes/benchmarks.js';
+import billingAutoRoutes, { billingPublicRoutes } from './routes/billingauto.js';
 import cardRoutes from './routes/cards.js';
 import doctorNoteRoutes from './routes/doctornotes.js';
 import officeMoveRoutes from './routes/officemoves.js';
@@ -276,6 +277,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
     res.set('Cache-Control', 'no-store');
     next();
   }, publicRoutes({ db, storage, payments, messenger, config, secret, fetchImpl }), publicCasePresentation({ db, storage, secret }), portalPublicRoutes({ db, secret, messenger }), campaignPublicRoutes({ db }), surveyPublicRoutes({ db }), labPublicRoutes({ db, storage }), learnPublicRoutes({ db }), checkinPublicRoutes({ db }), paperworkPublicRoutes({ db, storage, secret }));
+  app.use('/api/public', billingPublicRoutes({ db, payments, messenger, config }));
   app.use('/api/public', billpayPublicRoutes({ db, secret, payments, messenger, config, fetchImpl }));
   app.use('/api/public', onlineSchedPublicRoutes({ db, messenger, payments, storage, config, fetchImpl }));
   app.use('/api/portal', portalAccountRoutes({ db, secret, config, payments, messenger }));
@@ -403,6 +405,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(volumeRoutes({ db, storage }));
   api.use(intranetRoutes({ db, storage }));
   api.use(paymentRoutes({ db, config, messenger, payments, mailer }));
+  api.use(billingAutoRoutes({ db, payments, messenger, config }));
   api.use(terminalRoutes({ db, payments, messenger }));
   api.use(setupRoutes({ db, config }));
   api.use(familyRoutes({ db }));
