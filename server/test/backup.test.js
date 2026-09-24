@@ -145,6 +145,9 @@ test('a backup downloaded from the browser leaves two-factor secrets behind', as
   assert.equal(res.status, 200);
   const text = gunzipSync(Buffer.from(await res.arrayBuffer())).toString();
   assert.equal(text.includes('JBSWY3DPEHPK3PXP'), false);
+  // Nor password hashes, which could be cracked offline if the file were lost.
+  assert.equal(text.includes('scrypt$'), false);
+  assert.match(text, /"password_hash":"reset-required"/);
   await h.db.run('UPDATE users SET mfa_secret = NULL, mfa_enabled = 0 WHERE id = ?', me.id);
 });
 

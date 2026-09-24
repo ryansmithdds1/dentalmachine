@@ -111,6 +111,8 @@ export function loadConfig(env = process.env) {
     googleBusiness: env.GOOGLE_BUSINESS || null, googleClientId: env.GOOGLE_CLIENT_ID || null, googleClientSecret: env.GOOGLE_CLIENT_SECRET || null,
     // Call recordings to text: TRANSCRIBE=deepgram (with DEEPGRAM_API_KEY) or sandbox.
     transcribe: env.TRANSCRIBE || null, deepgramKey: env.DEEPGRAM_API_KEY || null,
+    // Bot check on public booking (Cloudflare Turnstile): both keys, or neither.
+    turnstileSiteKey: env.TURNSTILE_SITE_KEY || null, turnstileSecret: env.TURNSTILE_SECRET_KEY || null,
     sendgridWebhookKey: env.SENDGRID_WEBHOOK_KEY || null,
     // The business's bank (Plaid) and books (QuickBooks Online); PLAID=sandbox / QBO=sandbox simulate them.
     plaidClientId: env.PLAID_CLIENT_ID || null, plaidSecret: env.PLAID_SECRET || null, plaidEnv: env.PLAID_ENV || 'sandbox', plaid: env.PLAID || null,
@@ -138,7 +140,7 @@ export function loadConfig(env = process.env) {
 
 // Keep in step with the headers in vercel.json (where the app's static files are served by the CDN).
 // Plaid Link (connecting the practice's bank) runs from Plaid's own script and frame.
-export const CSP = "default-src 'self'; script-src 'self' https://cdn.plaid.com/link/v2/stable/link-initialize.js; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://production.plaid.com https://sandbox.plaid.com; frame-src 'self' blob: https://cdn.plaid.com; media-src 'self' blob:; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'";
+export const CSP = "default-src 'self'; script-src 'self' https://cdn.plaid.com/link/v2/stable/link-initialize.js https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://production.plaid.com https://sandbox.plaid.com; frame-src 'self' blob: https://cdn.plaid.com https://challenges.cloudflare.com; media-src 'self' blob:; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'";
 
 export function createApp({ db, secret, config: overrides = {}, fetchImpl = globalThis.fetch, messenger, storage, clearinghouse, erx, payments, mailer, attachmentSender, plaid, qbo, xrayAi, transcriber, gbp }) {
   if (!secret) throw new Error('JWT secret is required');
@@ -190,8 +192,11 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   const jsonBody = express.json({ limit: '1mb' });
   const formBody = express.json({ limit: '15mb' });
   // (after the body is read, below) repeats of a request with the same Idempotency-Key aren't done twice
+  // Large bodies from the public form page are rate-limited before they're read (no sign-in there).
+  const bigPublicBody = rateLimit({ windowMs: 60_000, max: 12, name: 'public-big-body' });
+  app.use((req, res, next) => (/^\/api\/public\/forms\/[^/]+\/\d+$/.test(req.path) ? bigPublicBody(req, res, next) : next()));
   app.use((req, res, next) => (/^\/api\/public\/forms\/[^/]+\/\d+$|^\/api\/insurance-plans\/\d+\/read-benefits$|^\/api\/eobs\/read$/.test(req.path) ? formBody : jsonBody)(req, res, next));
-  app.use('/api', idempotency(db));
+  app.use('/api', idempotency(db, secret));
   app.use((req, res, next) => {
     // Patient data isn't left in the browser's or a proxy's disk cache.
     if (req.path.startsWith('/api/')) res.set('Cache-Control', 'no-store');
@@ -218,7 +223,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   app.use('/api/public', (_req, res, next) => {
     res.set('Cache-Control', 'no-store');
     next();
-  }, publicRoutes({ db, storage, payments, messenger, config, secret }), publicCasePresentation({ db, storage, secret }), portalPublicRoutes({ db, secret, messenger }), campaignPublicRoutes({ db }), surveyPublicRoutes({ db }), labPublicRoutes({ db, storage }), learnPublicRoutes({ db }), checkinPublicRoutes({ db }));
+  }, publicRoutes({ db, storage, payments, messenger, config, secret, fetchImpl }), publicCasePresentation({ db, storage, secret }), portalPublicRoutes({ db, secret, messenger }), campaignPublicRoutes({ db }), surveyPublicRoutes({ db }), labPublicRoutes({ db, storage }), learnPublicRoutes({ db }), checkinPublicRoutes({ db }));
   app.use('/api/portal', portalRoutes({ db, secret, config, payments, messenger, storage }));
   app.use('/api/v1', apiV1Routes({ db }));
   app.use('/api/mcp', (_req, res, next) => { res.set('Cache-Control', 'no-store'); next(); }, mcpRoutes({ db }));
@@ -256,6 +261,8 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
     next();
   });
   api.use(aiGuard());
+  // Repeated requests (double clicks, retries): after sign-in is checked, keyed to this user's session.
+  api.use(idempotency(db, secret, { scopeOf: (req) => `u${req.user.id}:${req.session_id ?? ''}` }));
   api.use(officeAccess(db));
   api.use((_req, res, next) => {
     res.set('Cache-Control', 'no-store'); // PHI must not be cached by intermediaries
@@ -292,7 +299,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(attachmentRoutes({ db, storage, sender: attachmentSender ?? createAttachmentSender(attachmentConfig(process.env, config.ediMode), fetchImpl) }));
   api.use(billingRoutes({ db, payments, config, messenger }));
   api.use(insuranceRoutes({ db }));
-  api.use(settingsRoutes({ db, secret, config }));
+  api.use(settingsRoutes({ db, secret, config, messenger }));
   api.use(reportRoutes({ db }));
   api.use(engagementRoutes({ db, messenger, config }));
   api.use(documentRoutes({ db, storage, config }));

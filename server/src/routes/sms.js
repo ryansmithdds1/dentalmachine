@@ -254,7 +254,7 @@ export default function conversationRoutes({ db, messenger }) {
     const patient = await findOr404(db, 'patients', req.body?.patient_id, req.user.practice_id, 'Patient');
     const list = await numberMessages(req.user.practice_id, t.number);
     for (const m of list) await db.run('UPDATE messages SET patient_id = ? WHERE id = ?', patient.id, m.id);
-    if (!patient.phone && list.length) await db.run('UPDATE patients SET phone = ? WHERE id = ?', list.find((m) => m.direction === 'inbound')?.from_address ?? null, patient.id);
+    if (!patient.phone && list.length) await recorded(db, 'patients', patient.id, () => db.run('UPDATE patients SET phone = ? WHERE id = ?', list.find((m) => m.direction === 'inbound')?.from_address ?? null, patient.id));
     await db.run('UPDATE conversation_state SET thread = ? WHERE practice_id = ? AND thread = ? AND NOT EXISTS (SELECT 1 FROM conversation_state x WHERE x.practice_id = ? AND x.thread = ?)',
       `p${patient.id}`, req.user.practice_id, req.params.thread, req.user.practice_id, `p${patient.id}`);
     await audit(db, req, 'conversation.attach', 'patients', patient.id, { messages: list.length });

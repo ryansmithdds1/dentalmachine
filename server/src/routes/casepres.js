@@ -349,12 +349,14 @@ export function publicCasePresentation({ db, storage, secret }) {
 
   // Anyone holding the link can read the plan, so each look is on the record.
   const linkAudit = (req, plan, action) => audit(db, { ip: req.ip, user: { practice_id: plan.practice_id, id: null } }, action, 'treatment_plans', plan.id, { patient_id: plan.patient_id });
-  r.get('/tp/:token', async (req, res) => {
+  // Building the PDF is slow, and every look is a guess at the link: keep both to a sensible pace.
+  const viewLimit = rateLimit({ windowMs: 60_000, max: 30, name: 'tp-link-view' });
+  r.get('/tp/:token', viewLimit, async (req, res) => {
     const plan = await byToken(req.params.token, req);
     await linkAudit(req, plan, 'treatment_plan.link_view');
     res.json(await publicView(plan));
   });
-  r.get('/tp/:token/pdf', async (req, res) => {
+  r.get('/tp/:token/pdf', viewLimit, async (req, res) => {
     const plan = await byToken(req.params.token, req);
     await linkAudit(req, plan, 'treatment_plan.link_pdf');
     res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': `attachment; filename="${pdfFilename(plan)}.pdf"` }).send(await planPdf(db, plan));

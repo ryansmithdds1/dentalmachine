@@ -58,8 +58,23 @@ export default function BookingPage() {
     }).catch(() => setSlots([]));
   }, [practice, slug, date, reason, providerId, locationId]);
 
+  // The office's bot check (Cloudflare Turnstile), when it has one.
+  const captchaBox = useRef(null);
+  const [captcha, setCaptcha] = useState('');
+  useEffect(() => {
+    const key = practice?.captcha_site_key;
+    if (!key || !slot || !captchaBox.current) return;
+    const draw = () => window.turnstile?.render(captchaBox.current, { sitekey: key, callback: setCaptcha, 'expired-callback': () => setCaptcha('') });
+    if (window.turnstile) { draw(); return; }
+    const s = document.createElement('script');
+    s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+    s.async = true;
+    s.onload = draw;
+    document.head.appendChild(s);
+  }, [practice, slot]);
+
   const { submit, busy, error } = useSubmit(async () => {
-    const r = await api.post(`/public/practices/${slug}/booking-requests`, { ...form, reason, start: slot.start, provider_id: slot.provider_id, language: lang, ...(params.get('src') ? { source: params.get('src') } : {}), ...(locationId ? { location_id: Number(locationId) } : {}) });
+    const r = await api.post(`/public/practices/${slug}/booking-requests`, { ...form, captcha, reason, start: slot.start, provider_id: slot.provider_id, language: lang, ...(params.get('src') ? { source: params.get('src') } : {}), ...(locationId ? { location_id: Number(locationId) } : {}) });
     // A deposit is paid on the secure card page, which brings the patient back here.
     if (r.checkout_url) { window.location.assign(r.checkout_url); return; }
     setDone(r.booked ? 'booked' : 'requested');
@@ -196,8 +211,9 @@ export default function BookingPage() {
             <input tabIndex={-1} autoComplete="off" value={form.website} onChange={set('website')} style={{ position: 'absolute', left: -9999 }} aria-hidden="true" />
           </div>
           <p className="muted" style={{ fontSize: 12 }}>{t('Please don’t include medical details here. We’ll send you secure forms before your visit.')}</p>
+          {practice.captcha_site_key && <div ref={captchaBox} style={{ margin: '8px 0' }} />}
           {deposit > 0 && <p style={{ fontSize: 14 }}>{t('A {amount} deposit holds this time. It’s paid on a secure card page next and comes off your bill.', { amount: `$${(deposit / 100).toFixed(2)}` })}</p>}
-          <button className="primary big" disabled={busy}>{t(deposit > 0 ? 'Continue to deposit: {time} on {date}' : practice.instant ? 'Book {time} on {date}' : 'Request {time} on {date}', { time: fmtTimeL(lang, slot.start), date: fmtDateL(lang, slot.start, { month: 'short', day: 'numeric' }) })}</button>
+          <button className="primary big" disabled={busy || (!!practice.captcha_site_key && !captcha)}>{t(deposit > 0 ? 'Continue to deposit: {time} on {date}' : practice.instant ? 'Book {time} on {date}' : 'Request {time} on {date}', { time: fmtTimeL(lang, slot.start), date: fmtDateL(lang, slot.start, { month: 'short', day: 'numeric' }) })}</button>
         </form>
       )}
     </PublicLayout>

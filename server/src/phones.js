@@ -50,6 +50,12 @@ export function isOpenNow(practice, now) {
 // ---- Missed-call text-back ----
 export async function textBack(db, messenger, call, practice, appUrl) {
   if (!practice.missed_call_text || call.texted_back_at || digits(call.from_number).length < 10) return null;
+  // Caller ID can be faked: text only US/Canada numbers, and one text-back per number a day, so spoofed
+  // calls can't turn the office's line into a way to text strangers.
+  const raw = String(call.from_number || '').replace(/\D/g, '');
+  if (!(raw.length === 10 || (raw.length === 11 && raw.startsWith('1')))) return null;
+  const since = new Date(Date.now() - 86400_000).toISOString().slice(0, 19).replace('T', ' ');
+  if (await db.get('SELECT id FROM calls WHERE practice_id = ? AND from_number = ? AND texted_back_at >= ? AND id <> ?', practice.id, call.from_number, since, call.id)) return null;
   const booking = practice.slug && practice.online_booking ? ` or book online: ${appUrl}/book/${practice.slug}` : '';
   const body = `Sorry we missed your call to ${practice.name}! Reply here and we'll help${booking}. Reply STOP to opt out.`;
   const msg = await sendMessage(db, messenger, { practiceId: practice.id, patientId: call.patient_id, channel: 'sms', to: pretty(call.from_number), body, kind: 'missed_call' });
@@ -159,7 +165,7 @@ const RECEPTIONIST = `You are the phone receptionist for {practice}, a dental of
 Your words are read aloud: short, warm, plain sentences (one or two at a time), no lists, no markdown, spell out times like "two thirty P M".
 You can: find open appointment times and book them, move or cancel the caller's existing visit, and take a message for the team.
 {caller}
-Rules: confirm the patient's full name (and date of birth for anyone new) before booking. Never give medical advice or prices; for pain, swelling, bleeding or an injury, take an urgent message and tell them the team will call back right away — for anything life-threatening, tell them to call 911.
+Rules: caller ID can be faked, so before you say anything about a patient's visits, or book, move or cancel one for an existing patient, ask for the patient's first name and date of birth and call verify_caller; only continue when it says verified. Get the full name and date of birth of anyone new before booking. Never give medical advice or prices; for pain, swelling, bleeding or an injury, take an urgent message and tell them the team will call back right away — for anything life-threatening, tell them to call 911.
 When the caller is done, say goodbye and call end_call.`;
 
 const RECEPTION_TOOLS = [
@@ -168,20 +174,39 @@ const RECEPTION_TOOLS = [
     name: 'book_visit', description: 'Books a visit at a time open_times returned. For an existing patient it goes straight on the schedule; a new patient’s request is held for the team to confirm.',
     input_schema: { type: 'object', properties: { start: { type: 'string', description: 'YYYY-MM-DD HH:MM exactly as open_times gave it' }, provider_id: { type: 'integer' }, minutes: { type: 'integer' }, reason: { type: 'string' }, first_name: { type: 'string' }, last_name: { type: 'string' }, dob: { type: 'string', description: 'YYYY-MM-DD, for a new patient' }, existing_patient: { type: 'boolean' } }, required: ['start', 'provider_id', 'reason', 'first_name', 'last_name', 'existing_patient'] },
   },
-  { name: 'upcoming_visits', description: 'The caller’s upcoming visits (a patient matched by their phone number).', input_schema: { type: 'object', properties: {} } },
+  { name: 'verify_caller', description: 'Checks the patient’s first name and date of birth against the records for the number calling. Required before discussing or changing an existing patient’s visits.', input_schema: { type: 'object', properties: { first_name: { type: 'string' }, dob: { type: 'string', description: 'YYYY-MM-DD' } }, required: ['first_name', 'dob'] } },
+  { name: 'upcoming_visits', description: 'The verified caller’s upcoming visits (and their family’s).', input_schema: { type: 'object', properties: {} } },
   { name: 'change_visit', description: 'Moves one of the caller’s upcoming visits to a new open time, or cancels it.', input_schema: { type: 'object', properties: { appointment_id: { type: 'integer' }, action: { type: 'string', enum: ['move', 'cancel'] }, new_start: { type: 'string' } }, required: ['appointment_id', 'action'] } },
   { name: 'take_message', description: 'Leaves a message for the team.', input_schema: { type: 'object', properties: { name: { type: 'string' }, message: { type: 'string' }, callback_number: { type: 'string' }, urgent: { type: 'boolean' } }, required: ['message'] } },
   { name: 'end_call', description: 'Hangs up after you have said goodbye.', input_schema: { type: 'object', properties: {} } },
 ];
 const addMin = (dt, n) => new Date(Date.parse(`${dt.replace(' ', 'T')}:00Z`) + n * 60000).toISOString().slice(0, 16).replace('T', ' ');
 
-async function receptionTool(db, call, practice, name, input) {
+export async function receptionTool(db, call, practice, name, input) {
   return withActor({ source: 'ai', actor: 'AI receptionist', userId: null, practiceId: practice.id }, () => receptionAct(db, call, practice, name, input));
 }
 async function receptionAct(db, call, practice, name, input) {
   const pid = practice.id;
   const now = await practiceNow(db, pid);
-  const mine = async () => (call.patient_id ? db.all("SELECT id, patient_id, start_time, end_time, reason, provider_id FROM appointments WHERE practice_id = ? AND start_time > ? AND status IN ('scheduled','confirmed') AND (patient_id = ? OR patient_id IN (SELECT id FROM patients WHERE guarantor_id = ?)) ORDER BY start_time LIMIT 6", pid, now, call.patient_id, call.patient_id) : []);
+  // Everything about an existing patient waits for verify_caller: the number alone proves nothing.
+  const verified = call.ai_verified_patient_id ? await db.get('SELECT id, guarantor_id FROM patients WHERE id = ?', call.ai_verified_patient_id) : null;
+  const head = verified ? verified.guarantor_id || verified.id : null;
+  if (name === 'verify_caller') {
+    if (!call.patient_id) return { verified: false, note: 'This number isn’t on file; treat them as a new patient.' };
+    if (call.ai_verify_attempts >= 3) return { verified: false, note: 'Too many tries. Take a message for the team instead.' };
+    await db.run('UPDATE calls SET ai_verify_attempts = ai_verify_attempts + 1 WHERE id = ?', call.id);
+    call.ai_verify_attempts += 1;
+    const owner = await db.get('SELECT id, guarantor_id FROM patients WHERE id = ?', call.patient_id);
+    const family = await db.all('SELECT id, first_name, preferred_name, dob FROM patients WHERE practice_id = ? AND (id = ? OR guarantor_id = ?)', pid, owner.guarantor_id || owner.id, owner.guarantor_id || owner.id);
+    const first = String(input.first_name || '').trim().toLowerCase();
+    const match = family.find((f) => f.dob && f.dob === String(input.dob || '').trim() && [f.first_name, f.preferred_name].filter(Boolean).some((n) => n.toLowerCase() === first));
+    if (!match) return { verified: false, note: 'That doesn’t match our records. You can offer to take a message.' };
+    await db.run('UPDATE calls SET ai_verified_patient_id = ? WHERE id = ?', match.id, call.id);
+    call.ai_verified_patient_id = match.id;
+    return { verified: true, patient_id: match.id };
+  }
+  if (['upcoming_visits', 'change_visit'].includes(name) && !verified) return { error: 'Verify the caller first (verify_caller with first name and date of birth).' };
+  const mine = async () => (head ? db.all("SELECT id, patient_id, start_time, end_time, reason, provider_id FROM appointments WHERE practice_id = ? AND start_time > ? AND status IN ('scheduled','confirmed') AND (patient_id = ? OR patient_id IN (SELECT id FROM patients WHERE guarantor_id = ?)) ORDER BY start_time LIMIT 6", pid, now, head, head) : []);
   if (name === 'open_times') {
     const date = /^\d{4}-\d{2}-\d{2}$/.test(input.date || '') ? input.date : now.slice(0, 10);
     const providers = await db.all('SELECT id, name, type FROM providers WHERE practice_id = ? AND active = 1 ORDER BY id', pid);
@@ -197,7 +222,8 @@ async function receptionAct(db, call, practice, name, input) {
     const start = String(input.start || '');
     const minutes = Math.min(180, Math.max(15, Number(input.minutes) || 60));
     if (!(await openSlots(db, pid, Number(input.provider_id), start.slice(0, 10), { duration: minutes, after: now })).includes(start)) return { error: 'That time is no longer open. Check open_times again.' };
-    const known = input.existing_patient && call.patient_id ? await db.get('SELECT id, first_name, last_name FROM patients WHERE id = ?', call.patient_id) : null;
+    // Straight onto the schedule only for a verified caller's family; anyone else becomes a request the team confirms.
+    const known = input.existing_patient && head ? await db.get('SELECT id, first_name, last_name FROM patients WHERE id = ?', head) : null;
     // An existing patient (matched by the number they're calling from) goes straight onto the schedule.
     const family = known ? await db.all('SELECT id, first_name, last_name FROM patients WHERE practice_id = ? AND (id = ? OR guarantor_id = ?)', pid, known.id, known.id) : [];
     const who = family.find((f) => f.first_name.toLowerCase() === String(input.first_name || '').trim().toLowerCase());
@@ -256,10 +282,13 @@ export async function receptionistTurn(db, config, callId, heard) {
   const ai = aiClient(config);
   if (!ai) return { say: `Sorry, I can't help right now. Please call back during office hours${practice.phone ? ` at ${practice.phone}` : ''}.`, hangup: true };
   const now = await practiceNow(db, practice.id);
-  const card = await callerCard(db, practice.id, call.patient_id);
+  // Names only once the caller has proved who they are.
+  const card = call.ai_verified_patient_id ? await callerCard(db, practice.id, call.ai_verified_patient_id) : null;
   const system = RECEPTIONIST.replace('{practice}', practice.name).replace('{now}', now).replace('{weekday}', new Date(`${now.slice(0, 10)}T12:00:00Z`).toLocaleDateString('en-US', { weekday: 'long', timeZone: 'UTC' }))
     .replace('{open}', isOpenNow(practice, now) ? 'open now' : 'closed right now')
-    .replace('{caller}', card ? `The number calling belongs to patient ${card.first_name} ${card.last_name}${card.household.length ? ` (family: ${card.household.map((h) => h.first_name).join(', ')})` : ''}. Confirm who you're speaking with.` : 'The caller’s number isn’t on file: they may be new.');
+    .replace('{caller}', card ? `Verified caller: ${card.first_name} ${card.last_name}${card.household.length ? ` (family: ${card.household.map((h) => h.first_name).join(', ')})` : ''}.`
+      : call.patient_id ? 'The number calling is on file for an existing patient, but not yet verified: ask for their first name and date of birth and call verify_caller before anything about their visits.'
+        : 'The caller’s number isn’t on file: they may be new.');
   const messages = [];
   for (const t of turns) {
     const role = t.role === 'caller' ? 'user' : 'assistant';

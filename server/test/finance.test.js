@@ -108,11 +108,15 @@ test('bank connection: link, pull the lines, file them by category, and match th
 test('QuickBooks: connect, the chart of accounts sorted into dental categories, the profit and loss, deposits sent as totals', async () => {
   const { api } = await practiceWithMoney();
   await api.post('/finance/plaid/exchange', { public_token: 'public-sandbox-2', institution: 'Chase' });
-  const url = (await api.get('/finance/quickbooks/connect')).data.url.replace('https://app.example.com', h.origin);
-  // Intuit sends the browser back with a code; a forged state is refused.
-  const bad = await fetch(url.replace(/state=[^&]+/, 'state=forged'), { redirect: 'manual' });
+  const start = await api.get('/finance/quickbooks/connect');
+  const url = start.data.url.replace('https://app.example.com', h.origin);
+  const cookie = start.headers.get('set-cookie').split(';')[0];
+  // Intuit sends the browser back with a code; a forged state, or the right one in another browser, is refused.
+  const bad = await fetch(url.replace(/state=[^&]+/, 'state=forged'), { redirect: 'manual', headers: { Cookie: cookie } });
   assert.match(bad.headers.get('location'), /qbo=error/);
-  const back = await fetch(url, { redirect: 'manual' });
+  assert.match((await fetch(url, { redirect: 'manual' })).headers.get('location'), /qbo=error/, 'no cookie: a link someone else started');
+  const back = await fetch(url, { redirect: 'manual', headers: { Cookie: cookie } });
+  assert.match((await fetch(url, { redirect: 'manual', headers: { Cookie: cookie } })).headers.get('location'), /qbo=error/, 'single use');
   assert.equal(back.status, 302);
   assert.match(back.headers.get('location'), /^\/finance\?tab=connections&qbo=connected/);
 

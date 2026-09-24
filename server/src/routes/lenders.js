@@ -17,12 +17,17 @@ const dollarsToCents = (v) => {
 async function markFunded(db, app, amount, userId) {
   const lender = LENDERS[app.lender];
   const date = (await practiceNow(db, app.practice_id)).slice(0, 10);
+  return db.tx(async () => {
+  // Claim the "funded" step first: a lender retry arriving at the same moment finds it taken and posts nothing.
+  const took = await db.run("UPDATE financing_applications SET status = 'funded', updated_at = datetime('now') WHERE id = ? AND status <> 'funded'", app.id);
+  if (!took.changes) return null;
   const entry = await insert(db, 'ledger_entries', {
     practice_id: app.practice_id, patient_id: app.patient_id, type: 'payment', amount: -amount, method: lender.method,
     description: `Financing — ${lender.name}${app.external_id ? ` (${app.external_id})` : ''}`, reference: app.external_id || `FIN-${app.id}`, entry_date: date, created_by: userId ?? null,
   });
-  await db.run("UPDATE financing_applications SET status = 'funded', funded_amount = ?, funded_at = datetime('now'), ledger_entry_id = ?, updated_at = datetime('now') WHERE id = ?", amount, entry, app.id);
+  await db.run("UPDATE financing_applications SET funded_amount = ?, funded_at = datetime('now'), ledger_entry_id = ? WHERE id = ?", amount, entry, app.id);
   return entry;
+  });
 }
 
 export default function lenderRoutes({ db, messenger }) {
@@ -85,7 +90,7 @@ export default function lenderRoutes({ db, messenger }) {
       await markFunded(db, app, amount, req.user.id);
     } else {
       await db.run("UPDATE financing_applications SET status = ?, approved_amount = COALESCE(?, approved_amount), plan = COALESCE(?, plan), external_id = COALESCE(?, external_id), updated_at = datetime('now') WHERE id = ?",
-        status, req.body.approved_amount != null ? dollarsToCents(req.body.approved_amount) : null, req.body.plan ? String(req.body.plan).slice(0, 120) : null, req.body.external_id ? String(req.body.external_id).slice(0, 80) : null, app.id);
+        status, req.body.approved_amount != null ? dollarsToCents(req.body.approved_amount) : null, req.body.plan ? String(req.body.plan).slice(0, 120) : null, req.body.external_id && !/^FIN-\d+$/i.test(String(req.body.external_id)) ? String(req.body.external_id).slice(0, 80) : null, app.id);
     }
     await audit(db, req, 'financing.update', 'financing_applications', app.id, { status });
     res.json(await db.get('SELECT * FROM financing_applications WHERE id = ?', app.id));
@@ -101,12 +106,24 @@ export function lenderWebhooks({ db }) {
     if (!LENDERS[lender]) return res.status(404).end();
     setActor({ source: 'integration', actor: LENDERS[lender].name });
     const raw = Buffer.isBuffer(req.body) ? req.body : Buffer.from('');
-    if (!verifyLenderSignature(lender, raw, req.headers['x-signature'] || req.headers['x-webhook-signature'])) return res.status(401).json({ error: 'Bad signature' });
+    // Lenders that send X-Timestamp sign "<timestamp>.<body>": an old message replayed later is refused.
+    const ts = req.headers['x-timestamp'];
+    const signed = ts ? Buffer.concat([Buffer.from(`${ts}.`), raw]) : raw;
+    if (!verifyLenderSignature(lender, signed, req.headers['x-signature'] || req.headers['x-webhook-signature'])) return res.status(401).json({ error: 'Bad signature' });
+    if (ts && !(Math.abs(Date.now() / 1000 - Number(ts)) <= 300)) return res.status(401).json({ error: 'Stale message' });
     let b;
     try { b = JSON.parse(raw.toString('utf8')); } catch { return res.status(400).json({ error: 'JSON body expected' }); }
     const ref = String(b.reference || b.application_id || '');
-    const id = Number(ref.replace(/^FIN-/, ''));
-    const app = await db.get('SELECT * FROM financing_applications WHERE lender = ? AND (id = ? OR external_id = ?)', lender, Number.isFinite(id) ? id : -1, String(b.external_id || ref));
+    // Our own reference (FIN-<id>) names exactly one application. The lender's id is used only when it matches
+    // exactly one application — never guessed between practices.
+    const own = /^FIN-(\d+)$/.exec(ref) || (/^\d+$/.test(ref) ? [null, ref] : null);
+    let app = own ? await db.get('SELECT * FROM financing_applications WHERE lender = ? AND id = ?', lender, Number(own[1])) : null;
+    if (!app) {
+      const ext = String(b.external_id || ref || '');
+      const matches = ext ? await db.all('SELECT * FROM financing_applications WHERE lender = ? AND external_id = ?', lender, ext) : [];
+      if (matches.length > 1) return res.status(409).json({ error: 'That reference matches more than one application; send reference FIN-<id>' });
+      app = matches[0] || null;
+    }
     if (!app) return res.status(404).json({ error: 'Unknown application' });
     const status = String(b.status || '').toLowerCase();
     if (!STATUSES.includes(status)) return res.status(400).json({ error: 'Unknown status' });

@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import { api } from '../api.js';
+import { useAuth } from '../auth.jsx';
 import { ErrorBox, useSubmit } from './ui.jsx';
 
 // Enrols the signed-in user in authenticator-app 2FA: scan QR, then confirm with a code.
 export default function MfaSetup({ onDone }) {
+  const { adoptSession } = useAuth();
   const [setup, setSetup] = useState(null);
   const [qr, setQr] = useState(null);
   const [code, setCode] = useState('');
@@ -14,7 +16,9 @@ export default function MfaSetup({ onDone }) {
     setQr(await QRCode.toDataURL(s.otpauth_url, { margin: 1, width: 200 }));
   });
   const confirm = useSubmit(async () => {
-    await api.post('/auth/mfa/enable', { code });
+    // Turning on 2FA ends every other session; this device carries on with the fresh one.
+    const res = await api.post('/auth/mfa/enable', { code });
+    if (res?.token) await adoptSession(res.token);
     onDone?.();
   });
   const started = useRef(false);

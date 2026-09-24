@@ -216,7 +216,7 @@ export const mapsUrl = (pr) => (address(pr) ? `https://www.google.com/maps/searc
 export function visitsIcs(visits, practice, link) {
   const tz = practice.timezone || 'America/New_York';
   const utc = (dt) => zonedToUtc(tz, dt.slice(0, 10), dt.slice(11, 16)).replace(/[-: ]/g, '').replace(/^(\d{8})(\d{6})$/, '$1T$2Z');
-  const text = (s) => String(s ?? '').replace(/\\/g, '\\\\').replace(/[,;]/g, (c) => `\\${c}`).replace(/\r?\n/g, '\\n');
+  const text = (s) => String(s ?? '').replace(/\\/g, '\\\\').replace(/[,;]/g, (c) => `\\${c}`).replace(/\r\n|\r|\n/g, '\\n');
   const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
   const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Dental Machine//Appointments//EN', 'METHOD:PUBLISH', 'CALSCALE:GREGORIAN'];
   for (const v of visits) {

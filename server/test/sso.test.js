@@ -135,9 +135,11 @@ test('single sign-on still asks for the authenticator code when two-factor is on
   await api.put('/practice/sso', { provider: 'oidc', issuer: base, client_id: 'dm-client', client_secret: 'shh', domain: 'example.com' });
   const email = `mfa-${Date.now()}@example.com`;
   await api.post('/users', { email, name: 'Hyg', role: 'hygienist', password: 'correct-horse-battery' });
-  const staff = h.client((await h.client().post('/auth/login', { email, password: 'correct-horse-battery' })).data.token);
+  let staff = h.client((await h.client().post('/auth/login', { email, password: 'correct-horse-battery' })).data.token);
   const { secret } = (await staff.post('/auth/mfa/setup')).data;
-  assert.equal((await staff.post('/auth/mfa/enable', { code: totp(secret, timeStep() - 1) })).status, 200);
+  const enabled = await staff.post('/auth/mfa/enable', { code: totp(secret, timeStep() - 1) });
+  assert.equal(enabled.status, 200);
+  staff = h.client(enabled.data.token);
 
   const back = await ssoLogin(email);
   assert.equal(back.get('sso'), null, 'no session from the identity provider alone');

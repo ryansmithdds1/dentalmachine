@@ -38,6 +38,13 @@ export function toCents(value, name = 'amount') {
   return Math.round(n);
 }
 
+// An email address: at most 254 characters, checked with a pattern that can't backtrack (a long crafted
+// string once took seconds of CPU with the old one — anyone could freeze the server with it).
+export function validEmail(value) {
+  const s = String(value ?? '').trim();
+  return s.length > 0 && s.length <= 254 && /^[^@\s]+@[^@\s.]+(\.[^@\s.]+)+$/.test(s);
+}
+
 // Real calendar dates and times, not just the right shape ("2026-02-31" and "25:99" are refused).
 export function isRealDate(value) {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value ?? ''));

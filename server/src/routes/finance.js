@@ -1,6 +1,7 @@
 import express, { Router } from 'express';
+import { startConnect, finishConnect } from '../oauthstate.js';
 import { raiseIssue, resolveIssue, failed } from '../issues.js';
-import { requirePermission, HttpError, signToken, verifyToken } from '../auth.js';
+import { requirePermission, HttpError, signToken, verifyToken, rateLimit } from '../auth.js';
 import { insert, findOr404, audit } from '../util.js';
 import { CATEGORIES } from '../finance/categories.js';
 import {
@@ -201,7 +202,7 @@ export default function financeRoutes({ db, config, secret, plaid, qbo }) {
   // ---- QuickBooks ----
   r.get('/finance/quickbooks/connect', requireAdmin, async (req, res) => {
     if (!qbo.enabled) throw new HttpError(503, 'QuickBooks is not set up on this server (QBO_CLIENT_ID / QBO_CLIENT_SECRET)');
-    const state = signToken({ sub: req.user.id, pid: req.user.practice_id, aud: 'qbo-connect' }, secret, 15 * 60);
+    const state = await startConnect(db, req, res, { purpose: 'qbo-connect', appUrl: config.appUrl });
     res.json({ url: qbo.authUrl(state, redirectUri()) });
   });
 
@@ -275,8 +276,8 @@ export function financePublicRoutes({ db, config, secret, plaid, qbo }) {
   r.get('/api/finance/quickbooks/callback', async (req, res) => {
     const back = (q) => res.redirect(`/finance?tab=connections&${new URLSearchParams(q)}`);
     try {
-      const state = verifyToken(String(req.query.state || ''), secret);
-      if (!state || state.aud !== 'qbo-connect') return back({ qbo: 'error', message: 'The sign-in link expired — try again' });
+      const state = await finishConnect(db, req, 'qbo-connect');
+      if (!state) return back({ qbo: 'error', message: 'That sign-in link expired or was started in another browser — try again from here' });
       if (req.query.error) return back({ qbo: 'error', message: String(req.query.error_description || req.query.error).slice(0, 120) });
       const t = await qbo.exchange(String(req.query.code || ''), `${config.appUrl}/api/finance/quickbooks/callback`);
       const realmId = String(req.query.realmId || '');
@@ -296,7 +297,7 @@ export function financePublicRoutes({ db, config, secret, plaid, qbo }) {
     }
   });
 
-  r.post('/api/webhooks/plaid', express.raw({ type: '*/*', limit: '256kb' }), async (req, res) => {
+  r.post('/api/webhooks/plaid', rateLimit({ windowMs: 60_000, max: 120, name: 'plaid-webhook' }), express.raw({ type: '*/*', limit: '256kb' }), async (req, res) => {
     if (!plaid.enabled || !(await plaid.verifyWebhook(req.headers['plaid-verification'], req.body).catch(() => false))) return res.status(401).end();
     const body = JSON.parse(req.body.toString('utf8'));
     const conn = await db.get("SELECT * FROM bank_connections WHERE item_id = ? AND status != 'removed'", String(body.item_id || ''));

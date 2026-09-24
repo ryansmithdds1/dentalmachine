@@ -20,6 +20,9 @@ export function isPrivateAddress(ip) {
 
 // Returns the parsed URL, or throws a 400 saying why it can't be used. `allowLocal` (development only)
 // lets a test identity provider on localhost through.
+// Local addresses are only for a developer's own machine: never on a deployed copy, whatever NODE_ENV says.
+export const localUrlsAllowed = (env = process.env) => env.NODE_ENV !== 'production' && !['production', 'staging', 'demo'].includes(env.APP_ENV) && !env.VERCEL;
+
 export async function assertPublicUrl(raw, { what = 'The address', allowLocal = false, resolve = (host) => lookup(host, { all: true }) } = {}) {
   let url;
   try {

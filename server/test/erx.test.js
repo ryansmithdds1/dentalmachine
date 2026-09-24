@@ -8,7 +8,9 @@ import { doseSpotSsoUrl, createErx } from '../src/erx.js';
 const h = harness({ config: { erx: { mode: 'sandbox' } } });
 
 test('e-prescribing: pharmacy, electronic send, and EPCS rules for controlled substances', async () => {
-  const { api, provider, patient } = await h.practice();
+  const office = await h.practice();
+  const { provider, patient } = office;
+  let { api } = office;
   const me = (await api.get('/auth/me')).data.user;
   assert.equal((await api.get('/erx')).data.in_app, true);
 
@@ -37,12 +39,20 @@ test('e-prescribing: pharmacy, electronic send, and EPCS rules for controlled su
   assert.equal(r.status, 400);
   assert.match(r.data.error, /DEA number/);
   await api.put(`/providers/${provider.id}`, { dea_number: 'BL1234563' });
+  // Changing who signs (or the DEA number) pauses controlled prescriptions for a day and tells the admins.
+  r = await api.post(`/patients/${patient.id}/prescriptions`, hydro);
+  assert.equal(r.status, 403);
+  assert.match(r.data.error, /changed recently/);
+  assert.ok(await h.db.get("SELECT id FROM audit_log WHERE action = 'provider.prescriber_link_change' AND entity_id = ?", provider.id));
+  await h.db.run('UPDATE providers SET epcs_changed_at = ? WHERE id = ?', new Date(Date.now() - 25 * 3600_000).toISOString(), provider.id);
   r = await api.post(`/patients/${patient.id}/prescriptions`, hydro);
   assert.equal(r.status, 403);
   assert.ok(r.data.details.mfa_setup_required);
 
   const { secret } = (await api.post('/auth/mfa/setup')).data;
-  assert.equal((await api.post('/auth/mfa/enable', { code: totp(secret) })).status, 200);
+  const enabled = await api.post('/auth/mfa/enable', { code: totp(secret) });
+  assert.equal(enabled.status, 200);
+  api = h.client(enabled.data.token);
   r = await api.post(`/patients/${patient.id}/prescriptions`, hydro);
   assert.ok(r.data.details.otp_required);
   assert.equal((await api.post(`/patients/${patient.id}/prescriptions`, { ...hydro, otp: '000000' })).status, 403);

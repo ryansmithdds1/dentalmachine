@@ -132,6 +132,35 @@ function EnvironmentBanner() {
   return <div className="env-banner no-print">{env === 'staging' ? 'Staging server — test data only. Nothing here reaches real patients, payers or card processors.' : 'Demo server — sample data, sandbox integrations.'}</div>;
 }
 
+// First sign-in after an administrator set (or reset) the password.
+function OwnPassword() {
+  const { adoptSession } = useAuth();
+  const [f, setF] = useState({ current_password: '', new_password: '' });
+  const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const save = async (e) => {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await api.post('/auth/change-password', f);
+      await adoptSession(res.token);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <form onSubmit={save} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {error && <div className="error">{error}</div>}
+      <label>Temporary password<input type="password" required autoComplete="current-password" value={f.current_password} onChange={(e) => setF({ ...f, current_password: e.target.value })} /></label>
+      <label>New password (at least 10 characters)<input type="password" required minLength={10} autoComplete="new-password" value={f.new_password} onChange={(e) => setF({ ...f, new_password: e.target.value })} /></label>
+      <button className="primary" disabled={busy}>Save and continue</button>
+    </form>
+  );
+}
+
 function UnreadBadge() {
   const [n, setN] = useState(0);
   const load = () => api.get('/conversations/unread').then((r) => setN(r.unread)).catch(() => {});
@@ -161,6 +190,19 @@ function StaffApp() {
           <h1>Secure your account</h1>
           <p className="muted">{practice?.name} requires two-factor authentication. Set it up to continue.</p>
           <MfaSetup onDone={refresh} />
+          <button className="link" style={{ marginTop: 12 }} onClick={logout}>Sign out</button>
+        </div>
+      </div>
+    );
+  }
+
+  if (user.password_change_required) {
+    return (
+      <div className="auth-page">
+        <div className="card auth-card" style={{ maxWidth: 480 }}>
+          <h1>Choose your own password</h1>
+          <p className="muted">An administrator set a temporary password for you. Pick one only you know to continue.</p>
+          <OwnPassword />
           <button className="link" style={{ marginTop: 12 }} onClick={logout}>Sign out</button>
         </div>
       </div>

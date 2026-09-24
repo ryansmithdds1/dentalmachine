@@ -1,6 +1,6 @@
 import express, { Router } from 'express';
 import { requirePermission, HttpError } from '../auth.js';
-import { pick, requireFields, insert, update, findOr404, audit, practiceNow, localNow } from '../util.js';
+import { pick, requireFields, insert, update, findOr404, audit, practiceNow, localNow, validEmail } from '../util.js';
 import { quickFill, aiFill } from '../notedictation.js';
 import { aiClient } from '../ai.js';
 import { log } from '../monitoring.js';
@@ -251,7 +251,7 @@ export default function chartingRoutes({ db, config = {}, transcriber = null }) 
       row.turnaround_days = Number(row.turnaround_days);
       if (!Number.isInteger(row.turnaround_days) || row.turnaround_days < 0 || row.turnaround_days > 120) throw new HttpError(400, 'turnaround_days must be 0-120');
     } else if ('turnaround_days' in row) row.turnaround_days = null;
-    if (row.email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(row.email)) throw new HttpError(400, 'Invalid email');
+    if (row.email && !validEmail(row.email)) throw new HttpError(400, 'Invalid email');
     if (row.active != null) row.active = row.active ? 1 : 0;
     return row;
   };

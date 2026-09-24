@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { startConnect, finishConnect } from '../oauthstate.js';
 import { raiseIssue, resolveIssue, failed } from '../issues.js';
 import { requirePermission, HttpError, signToken, verifyToken } from '../auth.js';
 import { findOr404, audit, insert, practiceNow } from '../util.js';
@@ -70,9 +71,9 @@ export default function reputationRoutes({ db, config, secret, gbp }) {
     });
   });
 
-  r.get('/reputation/google/connect', requireAdmin, (req, res) => {
+  r.get('/reputation/google/connect', requireAdmin, async (req, res) => {
     if (!gbp) throw new HttpError(501, 'Google Business Profile isn’t set up on this server (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET)');
-    res.json({ url: gbp.authUrl(signToken({ sub: req.user.id, pid: req.user.practice_id, aud: 'gbp-connect' }, secret, 15 * 60), redirectUri()) });
+    res.json({ url: gbp.authUrl(await startConnect(db, req, res, { purpose: 'gbp-connect', appUrl: config.appUrl }), redirectUri()) });
   });
   r.post('/reputation/sync', requirePermission('patients:read'), async (req, res) => {
     const since = new Date().toISOString().slice(0, 19).replace('T', ' ');
@@ -124,8 +125,8 @@ export function reputationPublicRoutes({ db, secret, gbp, config }) {
   r.get('/api/reputation/google/callback', async (req, res) => {
     const back = (q) => res.redirect(`/reputation?${new URLSearchParams(q)}`);
     try {
-      const state = verifyToken(String(req.query.state || ''), secret);
-      if (!state || state.aud !== 'gbp-connect' || !gbp) return back({ google: 'error', message: 'The sign-in link expired — try again' });
+      const state = gbp ? await finishConnect(db, req, 'gbp-connect') : null;
+      if (!state) return back({ google: 'error', message: 'That sign-in link expired or was started in another browser — try again from here' });
       if (req.query.error) return back({ google: 'error', message: String(req.query.error) });
       const t = await gbp.exchange(String(req.query.code || ''), `${config.appUrl}/api/reputation/google/callback`);
       const locations = await gbp.locations(t.accessToken);

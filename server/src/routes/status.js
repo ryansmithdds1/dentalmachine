@@ -35,7 +35,6 @@ export default function statusRoutes({ db, storage, messenger }) {
     const degraded = !down && (checks.some((c) => !c.ok) || jobs.some((j) => !j.ok));
     res.set('Cache-Control', 'no-store').status(down ? 503 : 200).json({
       status: down ? 'down' : degraded ? 'degraded' : 'operational', checked_at: new Date().toISOString(), uptime_minutes: Math.round((Date.now() - started) / 60000),
-      version: process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) || process.env.RENDER_GIT_COMMIT?.slice(0, 7) || null,
       checks, jobs, background_jobs: process.env.VERCEL ? 'This deployment runs on serverless hosting, where background jobs only run when triggered.' : null,
     });
   });

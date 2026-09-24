@@ -26,6 +26,12 @@ export function appointmentScope(user, alias = 'a') {
   return { sql: ` AND (${alias}.location_id IS NULL OR ${alias}.location_id IN (${list(user.location_ids)}))`, args: [...user.location_ids] };
 }
 
+// Every patient id sent in a request body (statements, campaigns, surveys…) must be one the person can see.
+export async function requireVisiblePatients(db, user, ids) {
+  if (!restricted(user)) return;
+  for (const id of ids) if (!(await canSeePatient(db, user, id))) throw new HttpError(404, 'Patient not found');
+}
+
 export async function canSeePatient(db, user, patientId) {
   if (!restricted(user) || !patientId) return true;
   const s = patientScope(user);
@@ -40,12 +46,15 @@ const TABLES = {
   mounts: 'image_mounts', 'lab-cases': 'lab_cases', insurance: 'patient_insurance', 'booking-requests': 'booking_requests', waitlist: 'waitlist',
   tasks: 'tasks', prescriptions: 'prescriptions', 'payment-methods': 'payment_methods', 'patient-forms': 'patient_forms',
   'insurance-updates': 'insurance_updates', conditions: 'tooth_conditions', eligibility: 'eligibility_checks', 'terminal-payments': 'terminal_payments',
+  calls: 'calls', 'ai-findings': 'xray_findings', deposits: 'deposits',
 };
 
 // Reports that can be held to the person's offices (see reports.js); every other report covers the whole
 // practice, so it isn't open to someone limited to some offices.
 const OFFICE_REPORTS = new Set(['/reports/production', '/reports/adjustments', '/reports/daysheet', '/reports/my-production']);
-const PRACTICE_WIDE = /^\/(reports|query|saved-reports|audit-log|backup|exports?)(\/|$)/;
+// Practice-wide tools (the report builder and "Ask your data" answer across every office) are closed to
+// someone limited to some offices, whatever the method.
+const PRACTICE_WIDE = /^\/(reports|query|query-builder|saved-reports|audit-log|backup|exports?|ask)(\/|$)/;
 
 // Lists (claims, messages, recalls, tasks, follow-up lists…) drop rows about patients the person can't see:
 // any array in the response whose rows carry a patient_id, at the top level or one level down.
@@ -78,7 +87,7 @@ export function officeAccess(db) {
           return res;
         };
       }
-      if (req.method === 'GET' && PRACTICE_WIDE.test(req.path) && !OFFICE_REPORTS.has(req.path)) {
+      if (PRACTICE_WIDE.test(req.path) && !OFFICE_REPORTS.has(req.path)) {
         throw new HttpError(403, 'This report covers every office. Ask an administrator.');
       }
       const [, segment, rawId] = req.path.split('/');
@@ -96,7 +105,7 @@ export function officeAccess(db) {
       if (!table || !/^\d+$/.test(rawId.replace(/\.pdf$/, ''))) return next();
       const row = await db.get(`SELECT * FROM ${table} WHERE id = ? AND practice_id = ?`, Number(rawId.replace(/\.pdf$/, '')), user.practice_id);
       if (!row) return next(); // the route answers 404 itself
-      if (row.location_id != null && ['appointments', 'ledger_entries', 'booking_requests'].includes(table) && !user.location_ids.includes(row.location_id)) throw hidden();
+      if (row.location_id != null && ['appointments', 'ledger_entries', 'booking_requests', 'calls', 'deposits'].includes(table) && !user.location_ids.includes(row.location_id)) throw hidden();
       if (row.patient_id && !(await canSeePatient(db, user, row.patient_id))) throw hidden();
       next();
     } catch (err) {

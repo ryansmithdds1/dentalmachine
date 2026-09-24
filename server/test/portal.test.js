@@ -97,4 +97,7 @@ test('patient portal: code sign-in, household view, confirm/cancel, pay, forms a
   // Another practice's patient can't be reached.
   const other = await h.practice();
   assert.equal((await portal.post(`/portal/appointments/${(await other.api.post('/appointments', { patient_id: other.patient.id, provider_id: other.provider.id, start_time: `${day(6)} 09:00`, end_time: `${day(6)} 10:00` })).data.id}/confirm`)).status, 404);
+  // Signing out ends the session on the server, not just in the browser.
+  assert.equal((await portal.post('/portal/logout')).status, 200);
+  assert.equal((await portal.get('/portal/me')).status, 401);
 });

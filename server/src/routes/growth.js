@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { restricted, canSeePatient, requireVisiblePatients } from '../officeaccess.js';
 import { requirePermission, HttpError } from '../auth.js';
 import { insert, audit, practiceNow, toCents, utcRange, publicPractice, toCsv } from '../util.js';
 import { backupTables } from '../backup.js';
@@ -171,13 +172,19 @@ export default function growthRoutes({ db, messenger, config, mailer = { enabled
   };
 
   r.get('/statements/candidates', requirePermission('billing:read'), async (req, res) => {
-    res.json(await statementCandidates(req.user.practice_id, toCents(req.query.min_balance ?? 500), Number(req.query.since_days ?? 25)));
+    res.json((await statementCandidates(req.user.practice_id, toCents(req.query.min_balance ?? 500), Number(req.query.since_days ?? 25))).map((a) => ({ ...a, patient_id: a.id })));
   });
 
   r.post('/statements/run', requirePermission('billing:write'), async (req, res) => {
     const pid = req.user.practice_id;
     const ids = new Set((req.body?.patient_ids || []).map(Number));
-    const accounts = (await statementCandidates(pid, toCents(req.body?.min_balance ?? 500), Number(req.body?.since_days ?? 25))).filter((a) => !ids.size || ids.has(a.id));
+    let accounts = (await statementCandidates(pid, toCents(req.body?.min_balance ?? 500), Number(req.body?.since_days ?? 25))).filter((a) => !ids.size || ids.has(a.id));
+    // Someone limited to some offices statements only their offices' accounts.
+    if (restricted(req.user)) {
+      const mine = [];
+      for (const a of accounts) if (await canSeePatient(db, req.user, a.id)) mine.push(a);
+      accounts = mine;
+    }
     if (!accounts.length) throw new HttpError(400, 'No accounts to statement');
     const practice = publicPractice(await db.get('SELECT * FROM practices WHERE id = ?', pid));
     const today = (await practiceNow(db, pid)).slice(0, 10);
@@ -241,6 +248,10 @@ export default function growthRoutes({ db, messenger, config, mailer = { enabled
     const pid = req.user.practice_id;
     const ids = (req.body?.recall_ids || []).map(Number);
     if (!ids.length) throw new HttpError(400, 'Choose at least one patient');
+    if (restricted(req.user)) {
+      const owners = await db.all(`SELECT patient_id FROM recalls WHERE practice_id = ? AND id IN (${ids.map(() => '?').join(',')})`, pid, ...ids);
+      await requireVisiblePatients(db, req.user, owners.map((o) => o.patient_id));
+    }
     const practice = publicPractice(await db.get('SELECT * FROM practices WHERE id = ?', pid));
     let sent = 0;
     let skipped = 0;

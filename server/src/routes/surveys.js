@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { requireVisiblePatients } from '../officeaccess.js';
 import { requirePermission, HttpError, rateLimit } from '../auth.js';
 import { insert, findOr404, audit, hashToken } from '../util.js';
 import { cleanQuestions, cleanAnswers, npsScore, sendSurvey, DEFAULT_QUESTIONS, QUESTION_TYPES } from '../surveys.js';
@@ -49,6 +50,7 @@ export default function surveyRoutes({ db, messenger, config }) {
     const s = await findOr404(db, 'surveys', req.params.sid, req.user.practice_id, 'Survey');
     const pid = req.user.practice_id;
     let ids = (req.body?.patient_ids || []).map(Number);
+    await requireVisiblePatients(db, req.user, ids);
     if (!ids.length && req.body?.seen_within_days) {
       const since = new Date(Date.now() - Math.min(365, Number(req.body.seen_within_days)) * 86400_000).toISOString().slice(0, 10);
       ids = (await db.all(
@@ -115,7 +117,9 @@ export function surveyPublicRoutes({ db }) {
     const x = await byToken(req.params.token);
     if (x.answered_at) throw new HttpError(409, 'You already answered — thank you!');
     const { answers, nps } = cleanAnswers(JSON.parse(x.questions), req.body?.answers);
-    await db.run("UPDATE survey_responses SET answers = ?, nps = ?, answered_at = datetime('now') WHERE id = ?", JSON.stringify(answers), nps, x.id);
+    // Only the first answer counts, even if two arrive at once.
+    const saved = await db.run("UPDATE survey_responses SET answers = ?, nps = ?, answered_at = datetime('now') WHERE id = ? AND answered_at IS NULL", JSON.stringify(answers), nps, x.id);
+    if (!saved.changes) throw new HttpError(409, 'You already answered — thank you!');
     res.json({ ok: true });
   });
   return r;

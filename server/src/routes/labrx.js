@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { raiseIssue } from '../issues.js';
 import { setActor } from '../actor.js';
 import { requirePermission, HttpError, rateLimit } from '../auth.js';
-import { findOr404, audit, newToken, hashToken, insert, practiceNow } from '../util.js';
+import { findOr404, audit, newToken, hashToken, insert, practiceNow, validEmail } from '../util.js';
 import { publish } from '../events.js';
 
 // Digital lab prescriptions: the case's full Rx (restoration, material, shades, margins, contacts,
@@ -32,7 +32,7 @@ export default function labRxRoutes({ db, messenger, config }) {
     }
     const lab = c.lab_id ? await db.get('SELECT * FROM labs WHERE id = ?', c.lab_id) : null;
     const email = String(req.body?.email || lab?.email || '').trim();
-    if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new HttpError(400, 'That email address isn’t valid');
+    if (email && !validEmail(email)) throw new HttpError(400, 'That email address isn’t valid');
     const { token, hash } = newToken();
     const expires = new Date(Date.now() + LINK_DAYS * 86400_000).toISOString();
     await db.run(
@@ -76,6 +76,8 @@ export function labPublicRoutes({ db, storage }) {
     const p = await db.get('SELECT first_name, last_name, dob, gender FROM patients WHERE id = ?', c.patient_id);
     const age = p.dob ? Math.floor((Date.now() - Date.parse(p.dob)) / (365.25 * 86400_000)) : null;
     await db.run("UPDATE lab_cases SET lab_viewed_at = COALESCE(lab_viewed_at, datetime('now')) WHERE id = ?", c.id);
+    // The link shows a patient's name to whoever holds it, so each look is on the record.
+    await audit(db, { ip: req.ip, user: { practice_id: c.practice_id, id: null } }, 'lab_link.view', 'lab_cases', c.id, null, { source: 'integration', actor: `Lab: ${c.lab_name}`, patientId: c.patient_id });
     res.json({
       case: { id: c.id, description: c.description, tooth: c.tooth, shade: c.shade, sent_date: c.sent_date, due_date: c.due_date, status: c.status, lab_status: c.lab_status, tracking_number: c.tracking_number, notes: c.notes },
       rx: JSON.parse(c.rx || '{}'), fields: RX_FIELDS, updates: LAB_UPDATES,

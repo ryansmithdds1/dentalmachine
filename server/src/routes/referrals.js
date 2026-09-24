@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { requirePermission, HttpError } from '../auth.js';
-import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, practiceNow, recorded } from '../util.js';
+import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, practiceNow, recorded, validEmail } from '../util.js';
 
 const STATUSES = ['open', 'scheduled', 'seen', 'report_received', 'closed'];
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -13,7 +13,7 @@ export default function referralRoutes({ db }) {
   // ---- Referral contacts (dentists, specialists, other sources) ----
   const CONTACT_FIELDS = ['name', 'practice_name', 'specialty', 'phone', 'fax', 'email', 'address', 'npi', 'notes', 'active'];
   const cleanContact = (row) => {
-    if (row.email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(row.email)) throw new HttpError(400, 'Invalid email');
+    if (row.email && !validEmail(row.email)) throw new HttpError(400, 'Invalid email');
     if (row.npi && !/^\d{10}$/.test(row.npi)) throw new HttpError(400, 'NPI must be 10 digits');
     if (row.active != null) row.active = row.active ? 1 : 0;
     return row;

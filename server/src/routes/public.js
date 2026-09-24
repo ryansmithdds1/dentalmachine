@@ -1,6 +1,6 @@
 import express, { Router } from 'express';
 import { HttpError, rateLimit, signToken, verifyToken } from '../auth.js';
-import { insert, update, hashToken, practiceNow, normalizeDateTime, audit, mapSeq, publicPractice, friendlyDateTime, recorded, isRealDate } from '../util.js';
+import { insert, update, hashToken, practiceNow, normalizeDateTime, audit, mapSeq, publicPractice, friendlyDateTime, recorded, isRealDate, validEmail } from '../util.js';
 import { MEDICAL_CONDITIONS, parseMedicalHistory, contactUpdatesFromHistory } from '../forms.js';
 import { fillFields, checkAnswers, formPdf } from '../formtemplates.js';
 import { patientLang } from '../templates.js';
@@ -15,6 +15,8 @@ import { parseDurations } from '../patterns.js';
 import { sniffMime } from './imaging.js';
 import { MAX_UPLOAD_BYTES } from './documents.js';
 
+// The few server-made HTML pages (email unsubscribe) have no scripts: say so, so nothing injected could run.
+const PAGE_CSP = "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'";
 const escHtml = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
 // Used only for practices that haven't marked any appointment types as bookable online.
@@ -31,7 +33,7 @@ const DATE = /^\d{4}-\d{2}-\d{2}$/;
 // A short pass to one form packet (see /forms/:token/verify); the portal hands one out with its links.
 export const formPass = (requestId, secret) => signToken({ sub: requestId, aud: 'form-view' }, secret, 2 * 3600);
 
-export default function publicRoutes({ db, storage, payments, messenger, config, secret }) {
+export default function publicRoutes({ db, storage, payments, messenger, config, secret, fetchImpl = globalThis.fetch }) {
   // Books a request right away; if the slot can't be booked after all it stays a request for the office.
   const bookInstantly = async (b) => {
     try {
@@ -111,6 +113,7 @@ export default function publicRoutes({ db, storage, payments, messenger, config,
       name: p.name, phone: p.phone, address: p.address, city: p.city, state: p.state, zip: p.zip,
       today: (await practiceNow(db, p.id)).slice(0, 10), providers: await publicProviders(p.id), reasons: await reasonsFor(p.id),
       instant: !!p.instant_booking,
+      captcha_site_key: config.turnstileSecret ? config.turnstileSiteKey : null,
       locations: (await publicLocations(p.id)).map(({ office_hours: hours, ...l }) => ({
         ...l, open_days: Object.entries(officeHours(hours ? { office_hours: hours } : p)).filter(([, r]) => r.length).map(([d]) => Number(d)),
       })),
@@ -118,7 +121,9 @@ export default function publicRoutes({ db, storage, payments, messenger, config,
     });
   });
 
-  r.get('/practices/:slug/availability', reader, async (req, res) => {
+  // Working out open times is the most expensive public call, so it gets its own tighter limit.
+  const slotReader = rateLimit({ windowMs: 60 * 1000, max: 40, name: 'public-availability' });
+  r.get('/practices/:slug/availability', reader, slotReader, async (req, res) => {
     const p = await bookablePractice(req.params.slug);
     const { date } = req.query;
     if (!DATE.test(date || '')) throw new HttpError(400, 'date must be YYYY-MM-DD');
@@ -130,6 +135,7 @@ export default function publicRoutes({ db, storage, payments, messenger, config,
     // Office hours decide which days/times are offered; a hygiene visit is only offered with hygienists, etc.
     const all = await publicProviders(p.id);
     const providers = all
+      .slice(0, 40)
       .filter((pv) => !req.query.provider_id || pv.id === Number(req.query.provider_id))
       .filter((pv) => req.query.provider_id || !reason.provider_type || pv.type === reason.provider_type || !all.some((x) => x.type === reason.provider_type));
     const slotsOn = async (d) => (await mapSeq(
@@ -141,7 +147,7 @@ export default function publicRoutes({ db, storage, payments, messenger, config,
     // Point patients at the next day with openings instead of making them click through full days.
     let nextAvailable = null;
     if (!slots.length || req.query.next === '1') {
-      for (let i = 1; i <= 45 && !nextAvailable; i++) {
+      for (let i = 1; i <= 30 && !nextAvailable; i++) {
         const d = new Date(Date.parse(`${date}T12:00:00Z`) + i * 86400_000).toISOString().slice(0, 10);
         if ((await slotsOn(d)).length) nextAvailable = d;
       }
@@ -157,6 +163,28 @@ export default function publicRoutes({ db, storage, payments, messenger, config,
     const last = String(b.last_name || '').trim();
     if (!first || !last) throw new HttpError(400, 'First and last name are required');
     if (!b.phone && !b.email) throw new HttpError(400, 'A phone number or email is required so we can confirm');
+    // Texts only go to US/Canada numbers (confirmations to arbitrary international numbers are a known fraud).
+    const phoneDigits = String(b.phone || '').replace(/\D/g, '');
+    if (b.phone && !(phoneDigits.length === 10 || (phoneDigits.length === 11 && phoneDigits.startsWith('1')))) throw new HttpError(400, 'Please enter a US or Canadian phone number, or use email');
+    // A bot check when the office has one set up (Cloudflare Turnstile).
+    if (config.turnstileSecret) {
+      const check = await fetchImpl('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+        method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ secret: config.turnstileSecret, response: String(b.captcha || ''), remoteip: req.ip || '' }),
+      }).then((r) => r.json()).catch(() => ({ success: false }));
+      if (!check.success) throw new HttpError(400, 'Please complete the check that you’re not a robot');
+    }
+    // Floods: one person can have two requests waiting; a practice takes at most 40 new ones an hour.
+    const hourAgo = new Date(Date.now() - 3600_000).toISOString().slice(0, 19).replace('T', ' ');
+    const phoneLike = phoneDigits ? `%${phoneDigits.slice(-10)}` : null;
+    const waiting = await db.get(
+      `SELECT COUNT(*) AS n FROM booking_requests WHERE practice_id = ? AND status = 'pending' AND (${phoneLike ? "replace(replace(replace(replace(phone, '-', ''), ' ', ''), '(', ''), ')', '') LIKE ?" : '1 = 0'}${b.email ? ' OR lower(email) = ?' : ''})`,
+      p.id, ...(phoneLike ? [phoneLike] : []), ...(b.email ? [String(b.email).trim().toLowerCase()] : []),
+    );
+    if (Number(waiting.n) >= 2) throw new HttpError(429, 'You already have requests waiting — the office will be in touch soon, or call us.');
+    if (Number((await db.get('SELECT COUNT(*) AS n FROM booking_requests WHERE practice_id = ? AND created_at >= ?', p.id, hourAgo)).n) >= 40) {
+      throw new HttpError(429, 'Online booking is busy right now — please call the office.');
+    }
     if (b.dob && !DATE.test(b.dob)) throw new HttpError(400, 'Date of birth must be YYYY-MM-DD');
     const reasons = await reasonsFor(p.id);
     const reason = reasons.find((x) => x.label === b.reason) || reasons[0];
@@ -171,7 +199,7 @@ export default function publicRoutes({ db, storage, payments, messenger, config,
     const deposit = reason.deposit > 0 ? reason.deposit : 0;
     const clip = (v, n) => (v ? String(v).trim().slice(0, n) || null : null);
     // The details become the new patient's chart: a real email and date of birth, or none.
-    if (b.email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(b.email).trim())) throw new HttpError(400, 'Please check your email address');
+    if (b.email && !validEmail(String(b.email).trim())) throw new HttpError(400, 'Please check your email address');
     if (b.dob && (!isRealDate(b.dob) || b.dob > new Date().toISOString().slice(0, 10))) throw new HttpError(400, 'Please check your date of birth');
     const id = await insert(db, 'booking_requests', {
       practice_id: p.id, first_name: first.slice(0, 80), last_name: last.slice(0, 80), dob: b.dob || null,
@@ -334,12 +362,12 @@ export default function publicRoutes({ db, storage, payments, messenger, config,
   const page = (title, body) => `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escHtml(title)}</title></head><body style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:480px;margin:40px auto;padding:0 16px;color:#1f2933">${body}</body></html>`;
   r.get('/confirm/:token/stop-emails', reader, async (req, res) => {
     const { visits } = await visitsFor(req.params.token, { expired: false });
-    res.type('html').send(page('Appointment emails', `<h2>${escHtml(visits[0].practice_name)}</h2><p>Stop getting appointment emails? You'll still get texts if you have them on.</p><form method="post"><button style="padding:10px 18px;font-size:16px">Stop appointment emails</button></form>`));
+    res.type('html').set('Content-Security-Policy', PAGE_CSP).send(page('Appointment emails', `<h2>${escHtml(visits[0].practice_name)}</h2><p>Stop getting appointment emails? You'll still get texts if you have them on.</p><form method="post"><button style="padding:10px 18px;font-size:16px">Stop appointment emails</button></form>`));
   });
   r.post('/confirm/:token/stop-emails', limiter, express.urlencoded({ extended: false, limit: '4kb' }), async (req, res) => {
     const name = await stopEmails(req.params.token);
     await logPublic(req, (await visitsFor(req.params.token, { expired: false })).visits[0].practice_id, 'patient.email_optout', 'patients', null);
-    res.type('html').send(page('Unsubscribed', `<h2>${escHtml(name)}</h2><p>Done — you won't get appointment emails from us anymore. To turn them back on, just let the office know.</p>`));
+    res.type('html').set('Content-Security-Policy', PAGE_CSP).send(page('Unsubscribed', `<h2>${escHtml(name)}</h2><p>Done — you won't get appointment emails from us anymore. To turn them back on, just let the office know.</p>`));
   });
 
   // ---- Review routing ----
@@ -416,6 +444,12 @@ export default function publicRoutes({ db, storage, payments, messenger, config,
     return { f, items };
   };
 
+  // Marks a form as submitted, once: a double tap or a second tab submitting at the same moment gets "already
+  // submitted" instead of filing the form twice.
+  const claimRequest = async (id) => {
+    const done = await db.run("UPDATE form_requests SET status = 'completed', completed_at = datetime('now') WHERE id = ? AND status <> 'completed'", id);
+    if (!done.changes) throw new HttpError(410, 'This form has already been submitted. Thank you!');
+  };
   r.post('/forms/:token/verify', limiter, async (req, res) => {
     const { f } = await packetForToken(req.params.token);
     if (f.dob && String(req.body?.dob || '').trim() !== f.dob) {
@@ -455,6 +489,7 @@ export default function publicRoutes({ db, storage, payments, messenger, config,
     if (!item) throw new HttpError(410, 'Your health history has already been submitted. Thank you!');
     const { answers, signatureName, signatureImage } = parseMedicalHistory(req.body);
     const formId = await db.tx(async () => {
+      await claimRequest(item.id);
       const id = await insert(db, 'patient_forms', {
         practice_id: f.practice_id, patient_id: f.patient_id, request_id: item.id, kind: 'medical_history', data: JSON.stringify(answers),
         signature_name: signatureName, signature_image: signatureImage, ip: req.ip, user_agent: String(req.headers['user-agent'] || '').slice(0, 300),
@@ -465,7 +500,6 @@ export default function publicRoutes({ db, storage, payments, messenger, config,
       // How they heard about the office fills in the chart's referral source if it's still blank.
       const heard = answers.referral_source && !(await db.get('SELECT referral_source FROM patients WHERE id = ?', f.patient_id))?.referral_source ? { referral_source: answers.referral_source.slice(0, 100) } : {};
       await update(db, 'patients', f.patient_id, f.practice_id, { ...contactUpdatesFromHistory(answers), ...heard, updated_at: new Date().toISOString() });
-      await db.run("UPDATE form_requests SET status = 'completed', completed_at = datetime('now') WHERE id = ?", item.id);
       return id;
     });
     await logPublic(req, f.practice_id, 'form.submit', 'patient_forms', formId, { patient_id: f.patient_id });
@@ -488,6 +522,7 @@ export default function publicRoutes({ db, storage, payments, messenger, config,
     const files = await Promise.all(photos.map(async (p) => ({ ...p, ...(await storage.save(f.practice_id, p.bytes)) })));
     const day = signedAt.slice(0, 10);
     const formId = await db.tx(async () => {
+      await claimRequest(item.id);
       const docId = await insert(db, 'documents', {
         practice_id: f.practice_id, patient_id: f.patient_id, category: item.template_kind === 'consent' ? 'consent' : 'document',
         filename: `${item.name} ${day}.pdf`.replace(/[^\w.\- ()]/g, '_'), mime: 'application/pdf', size: pdf.length,
@@ -506,7 +541,6 @@ export default function publicRoutes({ db, storage, payments, messenger, config,
         signature_name: signatureName || `${f.first_name} ${f.last_name}`, signature_image: signature, document_id: docId,
         ip: req.ip, user_agent: String(req.headers['user-agent'] || '').slice(0, 300),
       });
-      await db.run("UPDATE form_requests SET status = 'completed', completed_at = datetime('now') WHERE id = ?", item.id);
       return id;
     });
     await logPublic(req, f.practice_id, 'form.submit', 'patient_forms', formId, { patient_id: f.patient_id, template_id: item.template_id });

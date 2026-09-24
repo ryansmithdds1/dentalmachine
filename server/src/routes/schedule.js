@@ -158,8 +158,9 @@ export async function openSlots(db, practiceId, providerId, date, { duration = 6
     ...(await db.all(
       // (one waiting on its deposit only for as long as the checkout is open).
       `SELECT requested_start, duration FROM booking_requests WHERE practice_id = ? AND provider_id = ? AND status = 'pending' AND requested_start >= ? AND requested_start < ?
-         AND (deposit_status IS NULL OR deposit_status = 'paid' OR hold_until > ?)`,
-      practiceId, providerId, `${date} 00:00`, `${date} 24:00`, new Date().toISOString(),
+         AND (deposit_status = 'paid' OR hold_until > ? OR (deposit_status IS NULL AND created_at > ?))`,
+      // A request without a deposit holds its time for two days; after that the time is offered again.
+      practiceId, providerId, `${date} 00:00`, `${date} 24:00`, new Date().toISOString(), new Date(Date.now() - 48 * 3600_000).toISOString().slice(0, 19).replace('T', ' '),
     )).map((b) => ({ start_time: b.requested_start, end_time: addMinutes(b.requested_start, b.duration || 60) })),
   ].map((a) => [a.start_time.slice(0, 10) < date ? 0 : toMin(a.start_time.slice(11)), a.end_time.slice(0, 10) > date ? 24 * 60 : toMin(a.end_time.slice(11))]);
   const slots = [];
@@ -712,7 +713,7 @@ export default function scheduleRoutes({ db }) {
     res.json({ ok: true });
   });
 
-  r.get('/events', eventStream);
+  r.get('/events', requirePermission('schedule:read'), eventStream);
 
   // ---- Recall types ----
   const RECALL_TYPE_FIELDS = ['name', 'interval_months', 'codes', 'appointment_type_id', 'active'];

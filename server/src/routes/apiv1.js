@@ -1,7 +1,7 @@
 import express, { Router } from 'express';
 import { setActor } from '../actor.js';
 import { HttpError, rateLimit } from '../auth.js';
-import { insert, hashToken, normalizeDateTime, audit, practiceNow, recorded, isRealDate } from '../util.js';
+import { insert, hashToken, normalizeDateTime, audit, practiceNow, recorded, isRealDate, validEmail } from '../util.js';
 import { apiPatient, apiAppointment, apiPayment, emitEvent } from '../webhooks.js';
 import { validateAppt, openSlots } from './schedule.js';
 import { findDuplicates } from './patients.js';
@@ -78,7 +78,7 @@ export default function apiV1Routes({ db }) {
     if (creating && (!String(row.first_name || '').trim() || !String(row.last_name || '').trim())) throw new HttpError(400, 'first_name and last_name are required');
     for (const k of ['first_name', 'last_name']) if (row[k] !== undefined && !String(row[k]).trim()) throw new HttpError(400, `${k} can't be blank`);
     if (row.dob != null && (!DATE.test(row.dob) || !isRealDate(row.dob) || row.dob > new Date().toISOString().slice(0, 10))) throw new HttpError(400, 'dob must be a real date of birth (YYYY-MM-DD), not in the future');
-    if (row.email != null && row.email !== '' && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(row.email)) throw new HttpError(400, 'email is not valid');
+    if (row.email != null && row.email !== '' && !validEmail(row.email)) throw new HttpError(400, 'email is not valid');
     for (const k of ['sms_opt_in', 'email_opt_in']) if (row[k] !== undefined) row[k] = row[k] ? 1 : 0;
     for (const k of Object.keys(row)) if (typeof row[k] === 'string') row[k] = row[k].trim().slice(0, 200) || null;
     return row;

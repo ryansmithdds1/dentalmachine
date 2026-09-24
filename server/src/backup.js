@@ -34,9 +34,11 @@ export function backupTables() {
 
 // Streams the backup as JSON text, a table at a time, so big practices don't have to fit in memory.
 // Without `secrets` (a download that leaves the server unencrypted), sign-in secrets are left out: staff
-// re-enroll two-factor and webhook signing secrets are replaced after a restore.
+// re-enroll two-factor, set a new password with "Forgot password", API keys are re-issued and webhook signing
+// secrets are replaced after a restore. (Password hashes in a lost file could be cracked offline.)
 const scrub = (table, row) => {
-  if (table === 'users' && row.mfa_secret) return { ...row, mfa_secret: null, mfa_enabled: 0, mfa_last_step: null };
+  if (table === 'users') return { ...row, password_hash: 'reset-required', mfa_secret: null, mfa_enabled: 0, mfa_last_step: null };
+  if (table === 'api_keys') return { ...row, key_hash: `revoked-${randomBytes(16).toString('hex')}`, revoked_at: row.revoked_at ?? new Date().toISOString() };
   if (table === 'webhook_endpoints') return { ...row, secret: `rotate-${randomBytes(16).toString('hex')}` };
   if (table === 'practices' && row.sso_client_secret) return { ...row, sso_client_secret: null };
   return row;

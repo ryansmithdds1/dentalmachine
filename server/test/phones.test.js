@@ -127,3 +127,23 @@ test('after hours with the receptionist off: voicemail, and a text back', async 
   const forged = await fetch(`${h.origin}/api/webhooks/twilio/voice/inbound`, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Twilio-Signature': 'nope' }, body: 'From=1&To=2' });
   assert.equal(forged.status, 403);
 });
+
+test('the AI receptionist won’t discuss or change a patient’s visits until the caller proves who they are (caller ID can be faked)', async () => {
+  const { receptionTool } = await import('../src/phones.js');
+  const { api, patient, provider, practiceId } = await h.practice();
+  await api.put(`/patients/${patient.id}`, { dob: '1980-05-17' });
+  const appt = (await api.post('/appointments', { patient_id: patient.id, provider_id: provider.id, start_time: '2031-04-01 09:00', end_time: '2031-04-01 10:00', override_blockout: true })).data;
+  const callId = (await h.db.run("INSERT INTO calls (practice_id, direction, from_number, to_number, patient_id, status, purpose) VALUES (?, 'inbound', '+15125550100', '+15125559999', ?, 'in-progress', 'receptionist')", practiceId, patient.id)).id;
+  const practice = await h.db.get('SELECT * FROM practices WHERE id = ?', practiceId);
+  const call = async () => h.db.get('SELECT * FROM calls WHERE id = ?', callId);
+  const tool = async (name, input = {}) => receptionTool(h.db, await call(), practice, name, input);
+
+  assert.match((await tool('upcoming_visits')).error, /Verify the caller first/);
+  assert.match((await tool('change_visit', { appointment_id: appt.id, action: 'cancel' })).error, /Verify/);
+  assert.equal((await tool('verify_caller', { first_name: patient.first_name, dob: '1999-01-01' })).verified, false);
+  assert.equal((await tool('verify_caller', { first_name: patient.first_name.toUpperCase(), dob: '1980-05-17' })).verified, true);
+  assert.equal((await tool('upcoming_visits')).visits[0].id, appt.id);
+  // Guessing is capped.
+  await h.db.run('UPDATE calls SET ai_verified_patient_id = NULL, ai_verify_attempts = 3 WHERE id = ?', callId);
+  assert.match((await tool('verify_caller', { first_name: patient.first_name, dob: '1980-05-17' })).note, /Too many/);
+});

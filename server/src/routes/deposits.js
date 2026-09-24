@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { restricted } from '../officeaccess.js';
 import { requirePermission, HttpError } from '../auth.js';
 import { insert, update, findOr404, audit, practiceNow } from '../util.js';
 
@@ -10,14 +11,16 @@ const UNDEPOSITED = `l.practice_id = ? AND l.type IN ('payment','insurance_payme
 // Deposit slips (which checks and cash went to the bank together) and reconciling them with the bank statement.
 export default function depositRoutes({ db }) {
   const r = Router();
-  const entryCols = `l.id, l.entry_date, l.type, -l.amount AS amount, l.method, l.reference, l.description, l.location_id, p.first_name, p.last_name`;
+  const entryCols = `l.id, l.patient_id, l.entry_date, l.type, -l.amount AS amount, l.method, l.reference, l.description, l.location_id, p.first_name, p.last_name`;
+  // Someone limited to some offices works with their offices' payments only.
+  const officeSql = (req) => (restricted(req.user) ? { sql: ` AND (l.location_id IS NULL OR l.location_id IN (${req.user.location_ids.map(() => '?').join(',')}))`, args: req.user.location_ids } : { sql: '', args: [] });
 
   r.get('/deposits/undeposited', requirePermission('billing:read'), async (req, res) => {
     const methods = String(req.query.methods || 'cash,check').split(',').filter(Boolean);
     res.json(await db.all(
       `SELECT ${entryCols} FROM ledger_entries l JOIN patients p ON p.id = l.patient_id
-       WHERE ${UNDEPOSITED} AND COALESCE(l.method, 'check') IN (${methods.map(() => '?').join(',')})${req.location_id ? ' AND l.location_id = ?' : ''}
-       ORDER BY l.entry_date, l.id`, req.user.practice_id, ...methods, ...(req.location_id ? [req.location_id] : []),
+       WHERE ${UNDEPOSITED} AND COALESCE(l.method, 'check') IN (${methods.map(() => '?').join(',')})${req.location_id ? ' AND l.location_id = ?' : ''}${officeSql(req).sql}
+       ORDER BY l.entry_date, l.id`, req.user.practice_id, ...methods, ...(req.location_id ? [req.location_id] : []), ...officeSql(req).args,
     ));
   });
 
@@ -46,7 +49,7 @@ export default function depositRoutes({ db }) {
     const date = req.body?.deposit_date || (await practiceNow(db, pid)).slice(0, 10);
     if (!DATE.test(date)) throw new HttpError(400, 'deposit_date must be YYYY-MM-DD');
     const id = await db.tx(async () => {
-      const entries = await db.all(`SELECT l.id, l.amount FROM ledger_entries l WHERE ${UNDEPOSITED} AND l.id IN (${ids.map(() => '?').join(',')})`, pid, ...ids);
+      const entries = await db.all(`SELECT l.id, l.amount FROM ledger_entries l WHERE ${UNDEPOSITED} AND l.id IN (${ids.map(() => '?').join(',')})${officeSql(req).sql}`, pid, ...ids, ...officeSql(req).args);
       if (entries.length !== ids.length) throw new HttpError(409, 'Some of those payments are already on a deposit or were voided — refresh and try again');
       const depositId = await insert(db, 'deposits', {
         practice_id: pid, location_id: req.location_id ?? null, deposit_date: date, total: -entries.reduce((s, e) => s + e.amount, 0),

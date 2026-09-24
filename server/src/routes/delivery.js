@@ -63,6 +63,8 @@ export function deliveryWebhooks({ db, config }) {
       ok = false;
     }
     if (!ok) return res.status(403).send('Invalid signature');
+    // A signed batch replayed later would re-apply old bounces and opt-outs: only fresh batches count.
+    if (!/^\d{9,11}$/.test(ts) || Math.abs(Date.now() / 1000 - Number(ts)) > 600) return res.status(403).send('Stale event batch');
     let events;
     try {
       events = JSON.parse(req.body.toString('utf8'));

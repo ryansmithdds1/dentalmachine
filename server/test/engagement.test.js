@@ -338,12 +338,18 @@ test('card readers with Stripe Terminal: a location, the reader, a card-present 
 });
 
 test('two-factor authentication: enrol, required at login, replay blocked, enforceable per practice', async () => {
-  const { api, email } = await setup();
+  const first = await setup();
+  const { email } = first;
+  let { api } = first;
   const setupRes = (await api.post('/auth/mfa/setup')).data;
   assert.match(setupRes.otpauth_url, /^otpauth:\/\/totp\//);
   assert.equal((await api.post('/auth/mfa/enable', { code: '000000' })).status, 400);
   // Use the previous step so the login below (current step) isn't treated as a replay.
-  assert.equal((await api.post('/auth/mfa/enable', { code: totp(setupRes.secret, timeStep() - 1) })).status, 200);
+  const enabled = await api.post('/auth/mfa/enable', { code: totp(setupRes.secret, timeStep() - 1) });
+  assert.equal(enabled.status, 200);
+  // Turning 2FA on ends the sessions from before; this device carries on with the fresh one.
+  assert.equal((await api.get('/auth/me')).status, 401);
+  api = client(enabled.data.token);
 
   const noCode = await client().post('/auth/login', { email, password: 'correct-horse-battery' });
   assert.equal(noCode.status, 401);

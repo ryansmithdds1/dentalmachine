@@ -110,7 +110,18 @@ export default function documentRoutes({ db, storage, config = {} }) {
       requireOneOf(category, CATEGORIES, 'category');
       const tooth = req.query.tooth ? String(req.query.tooth).toUpperCase() : null;
       if (!validTooth(tooth)) throw new HttpError(400, 'tooth must be 1-32 or A-T');
-      const filename = String(req.query.filename || 'upload').replace(/[^\w.\- ()]/g, '_').slice(0, 200);
+      let filename = String(req.query.filename || 'upload').replace(/[^\w.\- ()]/g, '_').slice(0, 200);
+      // Plain text is only what it claims to be: readable UTF-8, never named as a page or script.
+      if (mime === 'text/plain') {
+        try {
+          new TextDecoder('utf-8', { fatal: true }).decode(req.body);
+        } catch {
+          throw new HttpError(415, 'That text file isn’t plain text');
+        }
+        if (req.body.includes(0)) throw new HttpError(415, 'That text file isn’t plain text');
+        // Text-format scans (ASCII STL/OBJ/PLY) keep their names; anything else (.html, .svg, .js) becomes .txt.
+        if (!/\.(txt|stl|obj|ply|csv)$/i.test(filename)) filename = `${filename.replace(/\.[^.]*$/, '')}.txt`;
+      }
       const { storageKey, encrypted } = await storage.save(req.user.practice_id, req.body);
       const id = await insert(db, 'documents', {
         practice_id: req.user.practice_id, patient_id: patient.id, category, filename, mime, size: req.body.length,

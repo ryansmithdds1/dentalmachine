@@ -20,8 +20,9 @@ const h = harness({ config: { googleBusiness: 'sandbox', assistant: { enabled: t
 test('reputation: connect Google, pull reviews, AI drafts a HIPAA-safe reply, post it', async () => {
   const { api } = await h.practice();
   assert.equal((await api.get('/reputation')).data.connected, false);
-  const { url } = (await api.get('/reputation/google/connect')).data;
-  const back = await fetch(url.replace('https://app.example.com', h.origin), { redirect: 'manual' });
+  const start = await api.get('/reputation/google/connect');
+  const cookie = start.headers.get('set-cookie').split(';')[0];
+  const back = await fetch(start.data.url.replace('https://app.example.com', h.origin), { redirect: 'manual', headers: { Cookie: cookie } });
   assert.equal(back.status, 302);
   assert.match(back.headers.get('location'), /\/reputation\?google=connected/);
 

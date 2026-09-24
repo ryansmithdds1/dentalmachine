@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { requirePermission, HttpError } from '../auth.js';
-import { insert, findOr404, audit, practiceNow } from '../util.js';
+import { insert, findOr404, audit, practiceNow, validEmail } from '../util.js';
 import { REPORTS, PERIODS, renderSaved, sendSaved } from '../savedreports.js';
 
 // Saved reports and their email schedule (Reports → Saved & scheduled).
@@ -29,7 +29,7 @@ export default function savedReportRoutes({ db, messenger }) {
     }
     if (b.recipients !== undefined) {
       const list = (Array.isArray(b.recipients) ? b.recipients : String(b.recipients || '').split(/[\s,;]+/)).map((x) => String(x).trim().toLowerCase()).filter(Boolean);
-      const bad = list.find((x) => !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x));
+      const bad = list.find((x) => !validEmail(x));
       if (bad) throw new HttpError(400, `${bad} isn't an email address`);
       if (list.length > 10) throw new HttpError(400, 'Up to 10 recipients');
       row.recipients = JSON.stringify([...new Set(list)]);

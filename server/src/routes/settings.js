@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { failed } from '../issues.js';
 import { SOURCES } from '../actor.js';
 import { HttpError, hashPassword, PERMISSION_CATALOG, PERMISSIONS } from '../auth.js';
 import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, toCents, practiceNow, staffPractice, toCsv } from '../util.js';
@@ -11,7 +12,7 @@ import { validateTemplates, DEFAULT_TEMPLATES, TEMPLATE_META } from '../template
 import { recordFeeChange } from '../fees.js';
 import { cleanRoomUrl } from '../video.js';
 import { cleanPattern, parseDurations } from '../patterns.js';
-import { assertPublicUrl } from '../netguard.js';
+import { assertPublicUrl, localUrlsAllowed } from '../netguard.js';
 
 const ROLES = ['admin', 'dentist', 'hygienist', 'assistant', 'front_desk', 'billing'];
 const CATEGORIES = ['diagnostic', 'preventive', 'restorative', 'endodontics', 'periodontics', 'prosthodontics', 'oral_surgery', 'orthodontics', 'implants', 'adjunctive'];
@@ -83,7 +84,7 @@ export function cleanKpiTargets(input) {
   return Object.keys(out).length ? JSON.stringify(out) : null;
 }
 
-export default function settingsRoutes({ db, secret, config = {} }) {
+export default function settingsRoutes({ db, secret, config = {}, messenger = null }) {
   const r = Router();
 
   r.get('/practice', async (req, res) => res.json(staffPractice(await db.get('SELECT * FROM practices WHERE id = ?', req.user.practice_id), req.user)));
@@ -108,7 +109,7 @@ export default function settingsRoutes({ db, secret, config = {} }) {
     if (!provider) Object.assign(row, { sso_client_secret: null, sso_only: 0 });
     if (provider === 'microsoft' && !row.sso_tenant) throw new HttpError(400, 'Enter your Microsoft Entra tenant ID (Azure portal → Entra ID → Overview)');
     if (provider === 'oidc' && !/^(https:\/\/|http:\/\/(localhost|127\.0\.0\.1)[:/])/.test(row.sso_issuer || '')) throw new HttpError(400, 'Enter the issuer URL (https://…) from your identity provider');
-    if (provider === 'oidc') await assertPublicUrl(row.sso_issuer, { what: 'The issuer URL', allowLocal: process.env.NODE_ENV !== 'production' });
+    if (provider === 'oidc') await assertPublicUrl(row.sso_issuer, { what: 'The issuer URL', allowLocal: localUrlsAllowed() });
     if (provider && !row.sso_client_id) throw new HttpError(400, 'Enter the client ID from your identity provider');
     const current = await db.get('SELECT sso_client_secret FROM practices WHERE id = ?', req.user.practice_id);
     if (provider && !row.sso_client_secret && !current.sso_client_secret) throw new HttpError(400, 'Enter the client secret from your identity provider');
@@ -248,7 +249,7 @@ export default function settingsRoutes({ db, secret, config = {} }) {
     validatePassword(req.body.password);
     if (await db.get('SELECT id FROM users WHERE lower(email) = lower(?)', row.email)) throw new HttpError(409, 'Email already in use');
     await permFields(req, row);
-    const id = await insert(db, 'users', { ...row, practice_id: req.user.practice_id, password_hash: hashPassword(req.body.password) });
+    const id = await insert(db, 'users', { ...row, practice_id: req.user.practice_id, password_hash: hashPassword(req.body.password), must_change_password: req.body.must_change_password ? 1 : 0 });
     await audit(db, req, 'user.create', 'users', id, { role: row.role });
     res.status(201).json(await db.get(`SELECT ${USER_COLS} FROM users WHERE id = ?`, id));
   });
@@ -263,6 +264,8 @@ export default function settingsRoutes({ db, secret, config = {} }) {
     if (req.body.password) {
       validatePassword(req.body.password);
       row.password_hash = hashPassword(req.body.password);
+      // Works once: the person picks their own at the next sign-in, so no one else knows it.
+      row.must_change_password = 1;
     }
     // Lost phone: an admin can clear a colleague's 2FA so they can enrol again.
     if (req.body.reset_mfa) Object.assign(row, { mfa_enabled: 0, mfa_secret: null, mfa_last_step: null });
@@ -274,6 +277,16 @@ export default function settingsRoutes({ db, secret, config = {} }) {
       await db.run('UPDATE users SET token_version = token_version + 1, failed_logins = 0, locked_until = NULL WHERE id = ?', existing.id);
     }
     await audit(db, req, 'user.update', 'users', existing.id, { fields: Object.keys(row).filter((k) => k !== 'password_hash') });
+    // Group ownership is for administrators: it goes when someone is demoted or deactivated.
+    if (row.active === 0 || row.active === false) await db.run('DELETE FROM org_members WHERE user_id = ?', existing.id);
+    else if (row.role && row.role !== 'admin') await db.run("UPDATE org_members SET role = 'viewer' WHERE user_id = ? AND role = 'owner'", existing.id);
+    // The person hears about security changes to their account from someone else.
+    if ((row.password_hash || req.body.reset_mfa) && messenger && existing.id !== req.user.id) {
+      messenger.send({
+        channel: 'email', to: existing.email, subject: 'Your Dental Machine sign-in was changed',
+        body: `Hi ${existing.name},\n\n${req.user.name} ${row.password_hash ? 'set a temporary password for your account' : ''}${row.password_hash && req.body.reset_mfa ? ' and ' : ''}${req.body.reset_mfa ? 'reset your two-factor sign-in' : ''}.\n\nIf you didn't expect this, tell your practice's administrator right away.`,
+      }).catch(() => { /* the change itself is in the audit log */ });
+    }
     res.json(await db.get(`SELECT ${USER_COLS} FROM users WHERE id = ?`, existing.id));
   });
 
@@ -323,6 +336,21 @@ export default function settingsRoutes({ db, secret, config = {} }) {
       if (row.user_id) await findOr404(db, 'users', row.user_id, req.user.practice_id, 'User');
       await checkOfficeSchedule(row, req);
       if ('video_room_url' in row) row.video_room_url = cleanRoomUrl(row.video_room_url);
+    },
+    // Who can sign controlled substances follows the linked login and DEA number, so changing either is
+    // loud: the prescriber and every administrator hear about it, and controlled prescriptions wait a day.
+    afterUpdate: async (existing, row, req) => {
+      const linkChanged = ('user_id' in row && Number(row.user_id || 0) !== Number(existing.user_id || 0)) || ('dea_number' in row && (row.dea_number || null) !== (existing.dea_number || null));
+      if (!linkChanged) return;
+      await db.run('UPDATE providers SET epcs_changed_at = ? WHERE id = ?', new Date().toISOString(), existing.id);
+      await audit(db, req, 'provider.prescriber_link_change', 'providers', existing.id, { user_id: { from: existing.user_id, to: row.user_id ?? existing.user_id }, dea_changed: 'dea_number' in row && row.dea_number !== existing.dea_number });
+      const tell = await db.all("SELECT DISTINCT email, name FROM users WHERE practice_id = ? AND active = 1 AND (role = 'admin' OR id = ?)", req.user.practice_id, existing.user_id ?? -1);
+      for (const u of tell) {
+        messenger?.send({
+          channel: 'email', to: u.email, subject: `Prescriber settings changed for ${existing.name}`,
+          body: `Hi ${u.name},\n\n${req.user.name} changed who signs prescriptions as ${existing.name} (the linked login or DEA number). Controlled-substance prescriptions for ${existing.name} are paused for 24 hours.\n\nIf this wasn't expected, tell the practice owner right away.`,
+        }).catch(failed(db, { practiceId: req.user.practice_id, kind: 'message', key: `prescriber-notice:${existing.id}`, role: 'admin', title: `The prescriber-change notice for ${existing.name} couldn't be emailed to ${u.name}` }));
+      }
     },
   });
 

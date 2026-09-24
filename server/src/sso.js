@@ -1,6 +1,6 @@
 import { createHash, createPublicKey, createVerify, randomBytes, createCipheriv, createDecipheriv } from 'node:crypto';
 import { HttpError } from './auth.js';
-import { assertPublicUrl } from './netguard.js';
+import { assertPublicUrl, localUrlsAllowed } from './netguard.js';
 
 // Staff single sign-on with OpenID Connect: Google Workspace, Microsoft 365 / Entra ID, Okta, or any
 // standards-compliant identity provider. Authorization-code flow with PKCE; the ID token's signature
@@ -28,7 +28,7 @@ export const pkcePair = () => {
 const cache = new Map();
 // The identity provider's addresses (a custom issuer, and whatever its discovery document names) must be
 // public https servers; plain http on localhost is allowed outside production for testing.
-const guard = (url) => assertPublicUrl(url, { what: "The identity provider's address", allowLocal: process.env.NODE_ENV !== 'production' });
+const guard = (url) => assertPublicUrl(url, { what: "The identity provider's address", allowLocal: localUrlsAllowed() });
 async function cached(url, fetchImpl) {
   const hit = cache.get(url);
   if (hit && hit.until > Date.now()) return hit.value;

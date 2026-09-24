@@ -86,7 +86,7 @@ export function can(user, permission) {
   return (user.perms || effectivePermissions(user)).includes(permission);
 }
 
-export const USER_PERMISSION_SQL = `SELECT u.id, u.practice_id, u.email, u.name, u.role, u.active, u.token_version, u.custom_role_id, u.permissions_add, u.permissions_remove, u.location_ids,
+export const USER_PERMISSION_SQL = `SELECT u.id, u.practice_id, u.email, u.name, u.role, u.active, u.token_version, u.custom_role_id, u.permissions_add, u.permissions_remove, u.location_ids, u.must_change_password,
   cr.permissions AS custom_role_permissions, cr.name AS custom_role_name FROM users u LEFT JOIN custom_roles cr ON cr.id = u.custom_role_id`;
 
 // Minutes past the idle timeout before the server refuses a session (the browser signs out on time).
@@ -119,6 +119,7 @@ export function authenticate(db, secret, { allowMfaSetup = false } = {}) {
     if (!allowMfaSetup) {
       const gate = await db.get('SELECT p.require_mfa, u.mfa_enabled FROM users u JOIN practices p ON p.id = u.practice_id WHERE u.id = ?', user.id);
       if (gate.require_mfa && !gate.mfa_enabled) return next(new HttpError(403, 'Two-factor authentication setup required', { mfa_setup_required: true }));
+      if (user.must_change_password) return next(new HttpError(403, 'Choose your own password to continue', { password_change_required: true }));
     }
     user.perms = effectivePermissions(user);
     // Multi-location: the office this screen is working in (X-Location-Id), limited to the user's offices.

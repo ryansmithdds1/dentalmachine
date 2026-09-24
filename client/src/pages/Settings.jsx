@@ -641,7 +641,8 @@ function UserForm({ user, roles = [], perms, onDone }) {
     const body = { ...form, custom_role_id: form.custom_role_id ? Number(form.custom_role_id) : null };
     if (!body.password) delete body.password;
     if (user) await api.put(`/users/${user.id}`, body);
-    else await api.post('/users', body);
+    // A new person picks their own password at their first sign-in.
+    else await api.post('/users', { ...body, must_change_password: true });
     onDone();
   });
   return (

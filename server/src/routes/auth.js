@@ -7,10 +7,16 @@ import { seedPracticeDefaults } from '../defaults.js';
 import { generateSecret, verifyTotp, otpauthUrl } from '../totp.js';
 import { PROVIDERS, issuerFor, pkcePair, discover, exchangeCode, verifyIdToken, verifiedEmail, openSecret, sealMfaSecret, openMfaSecret } from '../sso.js';
 
+// The most common passwords of 10+ characters (breach lists): long isn't enough if it's one of these.
+const COMMON = new Set(['1234567890', '0123456789', '1234567891', '12345678910', 'qwertyuiop', 'password12', 'password123', 'password1!', 'Password123', 'Password1!',
+  'iloveyou12', 'qwerty1234', '1q2w3e4r5t', 'abcdefghij', 'passw0rd12', 'welcome123', 'Welcome123', 'dentist123', 'Dentist123', 'letmein123', 'admin12345', 'changeme123',
+  'qwertyuiop1', '1qaz2wsx3edc', 'aaaaaaaaaa', '0000000000', '1111111111', 'football12', 'baseball12', 'princess12', 'sunshine12', 'superman12', 'trustno1234']);
 export function validatePassword(pw) {
   if (typeof pw !== 'string' || pw.length < 10) {
     throw new HttpError(400, 'Password must be at least 10 characters');
   }
+  if (pw.length > 200) throw new HttpError(400, 'Password must be at most 200 characters');
+  if (COMMON.has(pw) || COMMON.has(pw.toLowerCase()) || /^(.)\1+$/.test(pw)) throw new HttpError(400, 'That password is too common — choose something harder to guess');
 }
 
 async function session(user, secret, db, req = null) {
@@ -30,6 +36,7 @@ async function session(user, secret, db, req = null) {
     user: {
       id, practice_id, email, name, role, permissions: effectivePermissions(await db.get(`${USER_PERMISSION_SQL} WHERE u.id = ?`, id)),
       mfa_enabled: mfaEnabled, mfa_setup_required: requireMfa && !mfaEnabled, locations, all_locations: !allowed,
+      password_change_required: !!(await db.get('SELECT must_change_password FROM users WHERE id = ?', id))?.must_change_password,
     },
   };
 }
@@ -88,10 +95,6 @@ export default function authRoutes({ db, secret, config = {}, fetchImpl = global
   r.post('/login', limiter, async (req, res) => {
     const { email, password } = req.body || {};
     const user = email && (await db.get('SELECT * FROM users WHERE lower(email) = lower(?)', String(email).trim()));
-    if (user?.active && user.role !== 'admin') {
-      const p = await db.get('SELECT sso_only, sso_provider FROM practices WHERE id = ?', user.practice_id);
-      if (p.sso_only && p.sso_provider) throw new HttpError(403, `Your practice signs in with ${PROVIDERS[p.sso_provider].name} — use the single sign-on button`, { sso_required: true });
-    }
     // Per-account lockout (on top of the per-IP limit): guessing from many addresses still stops.
     if (user?.locked_until && user.locked_until > new Date().toISOString()) {
       throw new HttpError(429, 'Too many failed sign-ins — try again in 15 minutes, or reset your password');
@@ -108,11 +111,18 @@ export default function authRoutes({ db, secret, config = {}, fetchImpl = global
     // takes as long for an unknown email as for a wrong password.
     const passwordOk = verifyPassword(String(password || ''), user?.password_hash || DUMMY_HASH);
     if (!user || !user.active || !passwordOk) await failed('auth.login_failed', 'Invalid email or password');
+    // (After the password, so the answer doesn't tell a stranger the account exists.)
+    if (user.role !== 'admin') {
+      const p = await db.get('SELECT sso_only, sso_provider FROM practices WHERE id = ?', user.practice_id);
+      if (p.sso_only && p.sso_provider) throw new HttpError(403, `Your practice signs in with ${PROVIDERS[p.sso_provider].name} — use the single sign-on button`, { sso_required: true });
+    }
     if (user.mfa_enabled) {
       if (!req.body.mfa_code) throw new HttpError(401, 'Enter the 6-digit code from your authenticator app', { mfa_required: true });
       const step = verifyTotp(openMfaSecret(user.mfa_secret, secret), req.body.mfa_code, { lastStep: user.mfa_last_step });
       if (step == null) await failed('auth.mfa_failed', 'Invalid authentication code', { mfa_required: true });
-      await db.run('UPDATE users SET mfa_last_step = ? WHERE id = ?', step, user.id);
+      // A code works once, even for two requests racing with it.
+      const took = await db.run('UPDATE users SET mfa_last_step = ? WHERE id = ? AND (mfa_last_step IS NULL OR mfa_last_step < ?)', step, user.id, step);
+      if (!took.changes) await failed('auth.mfa_failed', 'That code was already used — wait for the next one', { mfa_required: true });
       // Keys saved before they were encrypted are sealed on the next sign-in.
       if (!String(user.mfa_secret).startsWith('v1.')) await db.run('UPDATE users SET mfa_secret = ? WHERE id = ?', sealMfaSecret(user.mfa_secret, secret), user.id);
     }
@@ -247,7 +257,9 @@ export default function authRoutes({ db, secret, config = {}, fetchImpl = global
     const row = await db.get('SELECT password_hash FROM users WHERE id = ?', req.user.id);
     if (!verifyPassword(String(current_password || ''), row.password_hash)) throw new HttpError(400, 'Current password is incorrect');
     validatePassword(new_password);
-    await db.run('UPDATE users SET password_hash = ? WHERE id = ?', hashPassword(new_password), req.user.id);
+    // Keeping the temporary password an administrator set isn't choosing your own.
+    if (req.user.must_change_password && verifyPassword(String(new_password), row.password_hash)) throw new HttpError(400, 'Choose a new password, not the temporary one');
+    await db.run('UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?', hashPassword(new_password), req.user.id);
     await db.run("UPDATE password_resets SET used_at = datetime('now') WHERE user_id = ? AND used_at IS NULL", req.user.id);
     await endOtherSessions(req.user.id);
     await audit(db, req, 'auth.password_changed', 'users', req.user.id);
@@ -322,6 +334,8 @@ export default function authRoutes({ db, secret, config = {}, fetchImpl = global
     const step = verifyTotp(openMfaSecret(row.mfa_secret, secret), req.body?.code);
     if (step == null) throw new HttpError(400, 'That code did not match. Check your phone clock and try again.');
     await db.run('UPDATE users SET mfa_enabled = 1, mfa_last_step = ? WHERE id = ?', step, req.user.id);
+    // Sessions signed in with only the password (maybe someone else's) end; this one gets a fresh token.
+    await endOtherSessions(req.user.id);
     await audit(db, req, 'auth.mfa_enabled', 'users', req.user.id);
     res.json(await session(req.user, secret, db, req));
   });

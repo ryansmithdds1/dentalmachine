@@ -54,7 +54,8 @@ export default function reportRoutes({ db }) {
       )).n,
       active_patients: (await db.get("SELECT COUNT(*) AS n FROM patients WHERE practice_id = ? AND status = 'active'", pid)).n,
     };
-    if (req.user.role === 'admin' || ['dentist', 'billing'].includes(req.user.role)) {
+    // Practice-wide money: for people who may see reports (a permission, not a job title), across every office.
+    if (can(req.user, 'reports:read') && !restricted(req.user)) {
       Object.assign(out, {
         period: { from, to },
         production: (await db.get("SELECT COALESCE(SUM(amount),0) AS n FROM ledger_entries WHERE practice_id = ? AND type = 'charge' AND entry_date BETWEEN ? AND ?", pid, from, to)).n,

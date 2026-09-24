@@ -74,6 +74,9 @@ export async function checkEpcs(db, { user, provider, schedule, refills, otp, se
   if (!['II', 'III', 'IV', 'V'].includes(schedule)) throw new HttpError(400, 'schedule must be II, III, IV or V');
   if (!provider.dea_number) throw new HttpError(400, `${provider.name} needs a DEA number (Settings → Providers) to prescribe controlled substances`);
   if (provider.user_id !== user.id) throw new HttpError(403, 'Controlled substances must be signed by the prescriber themselves');
+  // A day's pause after the prescriber's login link or DEA number changes (the prescriber and admins were told).
+  const since = provider.epcs_changed_at ? Date.now() - Date.parse(provider.epcs_changed_at) : Infinity;
+  if (since < 24 * 3600_000) throw new HttpError(403, `The prescriber settings for ${provider.name} changed recently; controlled substances can be signed after ${new Date(Date.parse(provider.epcs_changed_at) + 24 * 3600_000).toLocaleString('en-US')}`);
   if (schedule === 'II' && Number(refills) > 0) throw new HttpError(400, 'Schedule II prescriptions cannot have refills');
   const u = await db.get('SELECT mfa_enabled, mfa_secret, mfa_last_step, locked_until FROM users WHERE id = ?', user.id);
   if (u.locked_until && u.locked_until > new Date().toISOString()) throw new HttpError(429, 'Too many wrong codes — try again in 15 minutes');
@@ -86,7 +89,8 @@ export async function checkEpcs(db, { user, provider, schedule, refills, otp, se
     await db.run('UPDATE users SET locked_until = ?, failed_logins = 0 WHERE id = ? AND failed_logins >= 10', new Date(Date.now() + 15 * 60_000).toISOString(), user.id);
     throw new HttpError(403, 'That code is not valid — wait for a new one and try again', { otp_required: true });
   }
-  await db.run('UPDATE users SET mfa_last_step = ?, failed_logins = 0 WHERE id = ?', step, user.id);
+  const took = await db.run('UPDATE users SET mfa_last_step = ?, failed_logins = 0 WHERE id = ? AND (mfa_last_step IS NULL OR mfa_last_step < ?)', step, user.id, step);
+  if (!took.changes) throw new HttpError(403, 'That code was already used — wait for a new one', { otp_required: true });
   return { signed_by: user.id, two_factor: true };
 }
 

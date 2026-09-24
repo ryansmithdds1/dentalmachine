@@ -1,10 +1,11 @@
+import { idempotency } from '../idempotency.js';
 import express, { Router } from 'express';
 import { raiseIssue, resolveIssue, failed } from '../issues.js';
 import { openSlotLater } from '../fill.js';
 import { createHash, randomInt, timingSafeEqual } from 'node:crypto';
 import { HttpError, rateLimit, signToken, verifyToken } from '../auth.js';
 import { hit } from '../cluster.js';
-import { insert, audit, practiceNow, newToken, pick, mapSeq, publicPractice, recorded } from '../util.js';
+import { insert, audit, practiceNow, newToken, pick, mapSeq, publicPractice, recorded, validEmail } from '../util.js';
 import { sendMessage } from '../messaging.js';
 import { publish } from '../events.js';
 import { planStatus } from './family.js';
@@ -117,6 +118,7 @@ export function portalRoutes({ db, secret, config, payments, messenger, storage 
     if (!payload || payload.aud !== 'portal') return next(new HttpError(401, 'Please sign in again'));
     const patient = await db.get("SELECT * FROM patients WHERE id = ? AND practice_id = ? AND status != 'archived'", payload.sub, payload.pid);
     if (!patient) return next(new HttpError(401, 'Please sign in again'));
+    if (patient.portal_signed_out_at && !(Number(payload.iat) > Number(patient.portal_signed_out_at))) return next(new HttpError(401, 'Please sign in again'));
     const practice = publicPractice(await db.get('SELECT * FROM practices WHERE id = ?', payload.pid));
     // A guarantor sees their whole household; anyone else sees just themselves.
     const household = patient.guarantor_id
@@ -126,7 +128,15 @@ export function portalRoutes({ db, secret, config, payments, messenger, storage 
     _res.set('Cache-Control', 'no-store');
     next();
   });
+  r.use(idempotency(db, secret, { scopeOf: (req) => `portal${req.portal.patient.id}:${req.portal.session ?? ''}` }));
   const inList = (ids) => ids.map(() => '?').join(',');
+  // Signing out ends every portal session this patient has open (a shared or lost device included), not
+  // just the copy in this browser. Only the sign-out time changes, so it isn't a chart edit.
+  r.post('/logout', async (req, res) => {
+    await db.run('UPDATE patients SET portal_signed_out_at = ? WHERE id = ?', Math.floor(Date.now() / 1000), req.portal.patient.id);
+    await pAudit(req, 'portal.logout', 'patients', req.portal.patient.id);
+    res.json({ ok: true });
+  });
   const pAudit = (req, action, entity, id, details) => audit(db, { ip: req.ip, user: { practice_id: req.portal.practice.id, id: null } }, action, entity, id, { portal_patient_id: req.portal.patient.id, ...details });
   const ownAppt = async (req) => {
     const a = await db.get(`SELECT * FROM appointments WHERE id = ? AND practice_id = ? AND patient_id IN (${inList(req.portal.ids)})`, Number(req.params.aid), req.portal.practice.id, ...req.portal.ids);
@@ -180,7 +190,7 @@ export function portalRoutes({ db, secret, config, payments, messenger, storage 
   r.put('/contact', async (req, res) => {
     const { patient } = req.portal;
     const row = pick(req.body, ['email', 'phone', 'address', 'city', 'state', 'zip', 'sms_opt_in', 'email_opt_in']);
-    if (row.email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(row.email)) throw new HttpError(400, 'Enter a valid email address');
+    if (row.email && !validEmail(row.email)) throw new HttpError(400, 'Enter a valid email address');
     if (row.phone && digits(row.phone).length !== 10) throw new HttpError(400, 'Enter a 10-digit phone number');
     const keys = Object.keys(row);
     if (keys.length) await recorded(db, 'patients', patient.id, () => db.run(`UPDATE patients SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, ...keys.map((k) => row[k]), patient.id));

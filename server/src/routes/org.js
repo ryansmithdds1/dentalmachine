@@ -74,6 +74,8 @@ export default function orgRoutes({ db }) {
       const m = await membership(req);
       if (!m) throw new HttpError(403, 'You aren’t part of a practice group');
       if (owner && m.role !== 'owner') throw new HttpError(403, 'Only the group’s owners can do this');
+      // Owning the group changes fees and setup in every practice in it: that's for administrators only.
+      if (owner && req.user.role !== 'admin') throw new HttpError(403, 'Only an administrator can manage the group');
       req.org = m;
       next();
     } catch (err) {
@@ -151,8 +153,9 @@ export default function orgRoutes({ db }) {
   // Owners add people (from the group's practices) as owners or viewers of the group's numbers.
   r.post('/org/members', requireOrg(true), async (req, res) => {
     const role = req.body?.role === 'owner' ? 'owner' : 'viewer';
-    const u = await db.get('SELECT u.id, u.practice_id FROM users u JOIN practices p ON p.id = u.practice_id WHERE lower(u.email) = lower(?) AND p.organization_id = ? AND u.active = 1', String(req.body?.email || ''), req.org.id);
+    const u = await db.get('SELECT u.id, u.practice_id, u.role FROM users u JOIN practices p ON p.id = u.practice_id WHERE lower(u.email) = lower(?) AND p.organization_id = ? AND u.active = 1', String(req.body?.email || ''), req.org.id);
     if (!u) throw new HttpError(404, 'No active user with that email at a practice in this group');
+    if (role === 'owner' && u.role !== 'admin') throw new HttpError(400, 'Owners must be administrators of their practice');
     const have = await db.get('SELECT id FROM org_members WHERE user_id = ?', u.id);
     if (have) await db.run('UPDATE org_members SET role = ?, organization_id = ? WHERE id = ?', role, req.org.id, have.id);
     else await insert(db, 'org_members', { organization_id: req.org.id, user_id: u.id, role });

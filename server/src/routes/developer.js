@@ -43,7 +43,7 @@ export default function developerRoutes({ db, fetchImpl }) {
   const endpointView = (e) => ({ ...e, events: JSON.parse(e.events), secret: undefined, secret_hint: `${e.secret.slice(0, 10)}…` });
   const cleanEndpoint = async (b) => {
     const url = String(b?.url || '').trim();
-    if (!/^https:\/\/[^\s/]+\.[^\s]+$/.test(url)) throw new HttpError(400, 'The URL must start with https://');
+    if (url.length > 500 || !/^https:\/\/[^\s/]+\.[^\s]+$/.test(url)) throw new HttpError(400, 'The URL must start with https://');
     await assertPublicUrl(url, { what: 'The URL' });
     const events = [...new Set(Array.isArray(b.events) ? b.events : [])];
     if (!events.length || events.some((e) => e !== '*' && !EVENTS.includes(e))) throw new HttpError(400, `events must be some of: ${EVENTS.join(', ')}`);

@@ -1829,6 +1829,17 @@ CREATE TABLE IF NOT EXISTS restore_drills (
   source TEXT NOT NULL DEFAULT 'automation',
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+-- One-time, browser-bound states for connecting an outside account (see oauthstate.js).
+CREATE TABLE IF NOT EXISTS oauth_states (
+  id INTEGER PRIMARY KEY,
+  state_hash TEXT NOT NULL UNIQUE,
+  browser_hash TEXT NOT NULL,
+  purpose TEXT NOT NULL,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  expires_at TEXT NOT NULL,
+  used_at TEXT
+);
 -- Data migrations that have run (see migrations.js).
 CREATE TABLE IF NOT EXISTS schema_migrations (
   id INTEGER PRIMARY KEY,
@@ -2179,6 +2190,15 @@ const COLUMNS = [
   ['ortho_visits', 'deleted_at', 'TEXT'],
   ['ortho_visits', 'deleted_by', 'INTEGER REFERENCES users(id)'],
   ['webhook_endpoints', 'removed_at', 'TEXT'],
+  // The AI receptionist only discusses a patient's visits after the caller proves who they are (caller ID can be spoofed).
+  ['calls', 'ai_verified_patient_id', 'INTEGER REFERENCES patients(id)'],
+  ['calls', 'ai_verify_attempts', 'INTEGER NOT NULL DEFAULT 0'],
+  // A password set by an administrator works once: the person chooses their own at the next sign-in.
+  ['users', 'must_change_password', 'INTEGER NOT NULL DEFAULT 0'],
+  // Portal sessions started before this (unix seconds) no longer work: set when the patient signs out.
+  ['patients', 'portal_signed_out_at', 'INTEGER'],
+  // When a prescriber's linked login or DEA number last changed: controlled substances wait 24 hours after.
+  ['providers', 'epcs_changed_at', 'TEXT'],
   // The office each record belongs to (filled from the visit, the office being worked in, or the patient's home office).
   ['procedures', 'location_id', 'INTEGER REFERENCES locations(id)'],
   ['claims', 'location_id', 'INTEGER REFERENCES locations(id)'],

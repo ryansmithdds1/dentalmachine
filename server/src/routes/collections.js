@@ -64,7 +64,8 @@ export default function collectionRoutes({ db, messenger }) {
   r.get('/collections', requirePermission('billing:read'), async (req, res) => {
     const practice = await db.get('SELECT finance_charge_bps, finance_charge_min, late_fee, collection_agency FROM practices WHERE id = ?', req.user.practice_id);
     const accounts = await collectionsList(db, req.user.practice_id);
-    res.json({ settings: practice, accounts: paged(req, res, accounts), total_accounts: accounts.length, total_overdue: accounts.reduce((s, a) => s + a.overdue, 0) });
+    // patient_id on each row: office-limited staff see only their offices' accounts (officeAccess filters by it).
+    res.json({ settings: practice, accounts: paged(req, res, accounts).map((a) => ({ ...a, patient_id: a.id })), total_accounts: accounts.length, total_overdue: accounts.reduce((s, a) => s + a.overdue, 0) });
   });
 
   r.get('/collections/:id', requirePermission('billing:read'), async (req, res) => {

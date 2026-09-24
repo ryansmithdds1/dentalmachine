@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { requireVisiblePatients } from '../officeaccess.js';
 import { requirePermission, HttpError } from '../auth.js';
 import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, toCents, practiceNow, mapSeq, paged, recorded } from '../util.js';
 
@@ -131,7 +132,8 @@ export default function familyRoutes({ db }) {
       guarantor: { id: g.id, first_name: g.first_name, last_name: g.last_name, phone: g.phone, email: g.email, address: g.address, city: g.city, state: g.state, zip: g.zip },
       second_responsible: second,
       relationships: RELATIONSHIPS,
-      members,
+      // patient_id so office-limited staff see only the members they may see.
+      members: members.map((m) => ({ ...m, patient_id: m.id })),
       family_balance: members.reduce((s, m) => s + m.balance, 0),
     });
   });
@@ -142,6 +144,7 @@ export default function familyRoutes({ db }) {
     let memberId;
     if (req.body?.patient_id) {
       const member = await patientOr404(req, req.body.patient_id);
+      await requireVisiblePatients(db, req.user, [member.id]);
       if (member.id === g.id) throw new HttpError(400, 'That patient is already the guarantor');
       if (await db.get('SELECT id FROM patients WHERE guarantor_id = ? LIMIT 1', member.id)) {
         throw new HttpError(409, `${member.first_name} is the guarantor of another family; move those members first`);

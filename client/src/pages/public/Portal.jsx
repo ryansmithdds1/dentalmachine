@@ -57,6 +57,7 @@ export default function Portal() {
     call('GET', `/public/portal/${key}`).then((p) => { suggestLang(p.language); setPractice(p); }).catch(() => setNotFound(true));
   }, [key]);
   const signOut = () => {
+    call('POST', '/portal/logout', null, token).catch(() => { /* the session is forgotten here either way */ });
     saveToken(key, null);
     setToken(null);
   };

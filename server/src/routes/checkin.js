@@ -12,7 +12,8 @@ const practiceByKey = (db, key) => (/^p\d+$/.test(key) ? db.get('SELECT * FROM p
 export function checkinPublicRoutes({ db }) {
   const r = Router();
   const limiter = rateLimit({ windowMs: 15 * 60_000, max: 20, name: 'qr-checkin' });
-  r.get('/checkin/:practice', async (req, res) => {
+  const reader = rateLimit({ windowMs: 60_000, max: 60, name: 'qr-checkin-page' });
+  r.get('/checkin/:practice', reader, async (req, res) => {
     const p = await practiceByKey(db, String(req.params.practice));
     if (!p) throw new HttpError(404, 'Not found');
     res.json({ name: p.name, phone: p.phone });

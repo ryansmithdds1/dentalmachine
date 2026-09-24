@@ -31,7 +31,12 @@ test('surveys: build, send, answer (in Spanish too), results with NPS; the day-a
 
   const janeToken = token(msgs.find((m) => m.to !== 'ana@example.com'));
   assert.equal((await pub.post(`/public/survey/${janeToken}`, { answers: { nps: 11 } })).status, 400);
-  assert.equal((await pub.post(`/public/survey/${janeToken}`, { answers: { nps: 10, wait: 4, better: 'More parking' } })).status, 200);
+  // Two submits at the same moment (a double tap): only one counts.
+  const both = await Promise.all([
+    pub.post(`/public/survey/${janeToken}`, { answers: { nps: 10, wait: 4, better: 'More parking' } }),
+    pub.post(`/public/survey/${janeToken}`, { answers: { nps: 10, wait: 4, better: 'More parking' } }),
+  ]);
+  assert.deepEqual(both.map((x) => x.status).sort(), [200, 409]);
   assert.equal((await pub.post(`/public/survey/${janeToken}`, { answers: { nps: 1 } })).status, 409, 'once');
   await pub.post(`/public/survey/${token(msgs.find((m) => m.to === 'ana@example.com'))}`, { answers: { nps: 5, better: 'Más horarios en la tarde' } });
 

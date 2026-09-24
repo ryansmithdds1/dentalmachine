@@ -1,5 +1,5 @@
 import { HttpError } from './auth.js';
-import { insert, practiceNow } from './util.js';
+import { insert, practiceNow, validEmail } from './util.js';
 import { savePolicy } from './benefits.js';
 
 // Data conversion from another practice system. Offices export CSV files (Open Dental's query or table
@@ -394,7 +394,7 @@ export class Importer {
       first_name: r.first_name.trim(), last_name: r.last_name.trim(), status,
       preferred_name: r.preferred_name, dob: parseDate(r.dob, { past: true }), gender: parseGender(r.gender, this.source),
       phone: r.phone, phone_home: r.phone_home, phone_work: r.phone_work,
-      email: blank(r.email) ? null : (/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(r.email.trim()) ? r.email.trim() : null),
+      email: blank(r.email) ? null : (validEmail(r.email.trim()) ? r.email.trim() : null),
       address: [r.address, r.address2].filter((x) => !blank(x)).map((x) => x.trim()).join(', ') || null,
       city: r.city, state: blank(r.state) ? null : r.state.trim().slice(0, 2).toUpperCase(), zip: r.zip,
       referral_source: r.referral_source, medical_alerts: r.medical_alerts, allergies: r.allergies, medications: r.medications, notes: r.notes,

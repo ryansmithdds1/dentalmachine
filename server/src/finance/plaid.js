@@ -70,7 +70,14 @@ export function createPlaid({ config, fetchImpl = globalThis.fetch }) {
         if (!h || !p || !s) return false;
         const header = JSON.parse(Buffer.from(h, 'base64url').toString());
         if (header.alg !== 'ES256') return false;
-        if (!keys.has(header.kid)) keys.set(header.kid, (await call('/webhook_verification_key/get', { key_id: header.kid })).key);
+        // The key id comes from the sender: only well-formed ids are looked up, unknown ones are remembered
+        // as unknown, and the cache stays small — so junk requests can't make us call Plaid over and over.
+        if (!/^[\w-]{8,80}$/.test(String(header.kid || ''))) return false;
+        if (!keys.has(header.kid)) {
+          if (keys.size > 50) keys.clear();
+          keys.set(header.kid, await call('/webhook_verification_key/get', { key_id: header.kid }).then((r) => r.key, () => null));
+        }
+        if (!keys.get(header.kid)) return false;
         const key = createPublicKey({ key: keys.get(header.kid), format: 'jwk' });
         if (!verifySig('sha256', Buffer.from(`${h}.${p}`), { key, dsaEncoding: 'ieee-p1363' }, Buffer.from(s, 'base64url'))) return false;
         const claims = JSON.parse(Buffer.from(p, 'base64url').toString());

@@ -20,6 +20,9 @@ export function productionProblems(env = process.env) {
       .filter((k) => ['sandbox', 'log'].includes(String(env[k] || '').toLowerCase()));
     if (fake.length) problems.push(`APP_ENV=production can't use sandbox or log-only integrations (${fake.join(', ')}); use APP_ENV=staging or demo for those`);
   }
+  // Sign-in and public-page limits are counted in Redis when there's more than one server; on a host that
+  // runs many copies (serverless), counts kept in each copy's memory can be multiplied by spreading requests.
+  if ((env.VERCEL || env.SERVERLESS === '1') && !env.REDIS_URL) problems.push('REDIS_URL must be set on serverless hosting so sign-in and public-page limits are shared by every copy of the server');
   if (env.BACKUP_DIR && (env.BACKUP_ENCRYPTION_KEY || '').length < 32) problems.push('BACKUP_ENCRYPTION_KEY (at least 32 characters) must be set when BACKUP_DIR is, so backups are encrypted');
   return problems;
 }
