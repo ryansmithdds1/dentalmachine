@@ -717,6 +717,32 @@ RT5. **What if we did it in house:** a report of everything referred out by proc
      write-offs), per month and year — "You referred out 46 molar endos last year ≈ $58,000" — to decide what to bring
      in house (training, equipment, an associate).
 
+## Patient experience: moments that make people feel cared for (asked for — brainstorm)
+Runs on the cadence engine as "journeys" (text, email, printed/mailed letter or card via Lob, or a task for a
+handwritten note), personalized with merge fields and the personal-connection notes (PP2); every message editable,
+on/off per practice, respects quiet hours and opt-outs, and never sends anything clinical in the clear.
+PX1. **Before the first visit:** welcome letter/email from the doctor (photo, what to expect, parking, how long, what to
+     bring), a short "meet the team" page/video link, forms link (paperwork autopilot), a text the day before with the
+     arrival details, and the front desk sees "first visit — greet by name" on the card.
+PX2. **During the visit:** comfort preferences shown to the team (PP1: blanket, headphones, pillow), a "how are you
+     feeling?" check-in on the kiosk, wait-time updates by text if running late ("Dr. Chen is 10 minutes behind —
+     sorry!"), a digital welcome board option in the lobby with first names only if they opt in.
+PX3. **After the visit:** same-day thank-you text from the provider; post-op care instructions and a check-in text
+     the evening after surgery/extractions/root canals ("How are you feeling? Reply 1 good / 2 some pain / 3 need to
+     talk" → 3 alerts the doctor); a handwritten thank-you card task after big treatment or a new patient's first
+     visit (the office signs, the app tracks it was sent); review request (RV) only after a good experience.
+PX4. **Celebrations:** happy birthday text/email (and optional mailed card for kids/VIPs), practice anniversary ("5
+     years with us!"), milestones (braces off, first cavity-free visit for kids — a certificate), holiday cards,
+     congratulations on life events from the personal-connection notes (new baby, graduation) — suggested, never
+     automatic, the team chooses.
+PX5. **Staying in touch:** "we miss you" reactivation letters, recall reminders that feel personal, a short newsletter
+     option, referral thank-yous (to patients who refer friends, with an optional gift card task), and a "you're
+     all set" summary after checkout (what was done, next visit, balance, links).
+PX6. **Feedback that improves things:** quick 1-question surveys after visits, NPS trends by provider and office,
+     comments routed to the owner, and a "patient delight" score on the metrics page.
+PX7. **Team prompts:** a daily "moments" list in the huddle — today's birthdays, first visits, milestones, patients
+     who had a hard last visit, personal notes to mention — so the team can make it personal in person.
+
 ## Then: remaining workflow batches
 9. Batch 4 (32–44): new patient setup, ERA/EOB posting, prescriptions, lab cases, huddle actions, recall lists,
    pre-auths, financing, adjustments, referrals, end-of-day, review requests (fix the count bug), clock in/out.
