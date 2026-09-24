@@ -188,6 +188,35 @@ OF3. **On the schedule:** a small badge on the appointment card (e.g. "3 · $184
      show the total opportunity; the morning huddle and huddle email list them; results tracked (offered, accepted,
      done) so the office sees what it captured.
 
+## Chart audit: protect the doctor (asked for, high priority)
+CA1. **Every past visit checked:** a report (and a nightly job) that looks at each completed visit and flags: no
+     note, note not signed (and how long), note signed by someone other than the treating provider, procedures
+     completed or attached to the appointment that the note doesn't mention (and the reverse: work described but not
+     charted or billed), teeth/surfaces that differ between the note and the charting, missing anesthetic details
+     (type, amount, carpules, site) when anesthesia-related work was done, x-rays taken with no interpretation,
+     treatment done without a signed consent, medical history not reviewed within the office's interval, blood
+     pressure not recorded where the office requires it, informed refusal not documented when recommended treatment
+     was declined, post-op instructions missing after surgery, perio charting overdue, prescriptions not noted.
+CA2. **Clear, fixable list:** each flag says what's missing and why it matters (liability, insurance audit,
+     standard of care) in plain words, sorted by risk, grouped by provider, with one click to open the visit and
+     add an addendum (signed notes are never changed, rule 3); flags clear themselves when fixed; trend by provider.
+CA3. **AI reads the notes, people decide:** a structured check compares note text with the charted/billed work
+     (AI where wording varies, clearly labelled, with the quoted sentence it relied on); it only recommends — it never
+     edits a note (rule 10). Rules the office can tune (which checks, intervals, which procedures need consent).
+
+## Long recordings: a whole exam into the note (asked for)
+Builds on the ambient AI scribe and dictation transcription.
+LR1. Record an entire exam or procedure (60–90+ minutes) on a computer, phone or iPad: recorded in short chunks that
+     upload as they go (nothing lost if the browser closes or the connection drops; resumes), a clear recording
+     indicator, pause/resume, patient consent to recording noted.
+LR2. The recording is transcribed (dental vocabulary, speakers separated: doctor, assistant, patient) and turned into
+     a complete draft note in the office's template — findings by tooth, perio readings, treatment discussed,
+     options and patient's decision, consent/informed refusal, anesthetic, materials, post-op instructions — plus
+     suggested charting and codes, each with the transcript line it came from; the clinician reviews, edits and
+     signs (AI never signs or charts on its own).
+LR3. Audio and transcript stored encrypted with the visit, kept per the office's retention setting, audited on every
+     play/download; failed transcriptions show in Needs attention and retry.
+
 ## Consents, start to finish (asked for, high priority)
 Builds on consent templates, e-signature, form packets, workflow 23 (in-office signing) and the paperwork items above.
 C1. **Consent library:** ready-made consents by procedure (extraction, RCT, crown/bridge, implant, perio/SRP, sedation,
