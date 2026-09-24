@@ -15,6 +15,7 @@ import { agingReport } from './aging.js';
 import { allocationsForRange } from './allocation.js';
 import { providerHoursFor, officeHours, weekday } from './hours.js';
 import { REPORTS as SAVED_REPORTS, rangeFor } from './savedreports.js';
+import { MARKETING_LIBRARY_REPORT } from './marketing.js';
 
 export const MAX_ROWS = 5000;
 const MAX_RANGE_DAYS = 3 * 366 + 1;
@@ -760,6 +761,7 @@ def({
 });
 
 // ---- Patients ----
+def(MARKETING_LIBRARY_REPORT);
 def({
   id: 'new-patients-by-source', name: 'New patients by referral source', category: 'Patients',
   description: 'Where new patients came from (referring people, Google, signs…) and what they’ve produced since.',

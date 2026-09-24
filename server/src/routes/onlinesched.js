@@ -283,7 +283,7 @@ const LOADER = `/* Dental Machine online booking. On your website, before </body
   function url(kind) {
     var here = new URLSearchParams(window.location.search);
     var q = new URLSearchParams({ embed: '1', src: s.getAttribute('data-source') || 'website' });
-    ['utm_source', 'utm_medium', 'utm_campaign'].forEach(function (k) { if (here.get(k)) q.set(k, here.get(k).slice(0, 40)); });
+    ['utm_source', 'utm_medium', 'utm_campaign', 'promo', 'rp'].forEach(function (k) { if (here.get(k)) q.set(k, here.get(k).slice(0, 40)); });
     try { q.set('ref', window.location.hostname); } catch (e) { /* no host */ }
     if (s.getAttribute('data-lang')) q.set('lang', s.getAttribute('data-lang'));
     if (kind) q.set('kind', kind);

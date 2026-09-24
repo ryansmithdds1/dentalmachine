@@ -21,6 +21,7 @@ import { createEligibility, runEligibilityBatches } from './eligibility.js';
 import { runVerificationAutomation } from './verification.js';
 import { runRecallAgeRules } from './recallsync.js';
 import { runMissedCallCheck } from './phonecoach.js';
+import { runMarketingJobs } from './marketing.js';
 import { runScheduledReports } from './savedreports.js';
 import { runSurveys } from './surveys.js';
 import { runOrthoBilling } from './ortho.js';
@@ -246,6 +247,12 @@ if (process.env.MISSED_CALL_CHECK !== 'off') {
   const run = () => runExclusive('missed-calls', 10 * 60 * 1000, () => runMissedCallCheck(db, { messenger })).catch(jobFailed('Missed-call check'));
   setInterval(run, 15 * 60 * 1000).unref();
   setTimeout(run, 110_000).unref();
+}
+// Marketing attribution (MK): hourly capture of new leads' sources; after 2am practice time also a full pass + backfill.
+if (process.env.MARKETING_JOBS !== 'off') {
+  const marketing = () => runExclusive('marketing', 30 * 60 * 1000, () => runMarketingJobs(db)).catch(jobFailed('Marketing capture'));
+  setInterval(marketing, 60 * 60 * 1000).unref();
+  setTimeout(marketing, 130_000).unref();
 }
 // Payment-plan late fees: an installment still unpaid after the plan's grace days gets its fee once.
 if (process.env.PLAN_LATE_FEES !== 'off') {

@@ -38,6 +38,8 @@ export const HIGH_RISK = [
   ['POST', /^\/(era\/import|clearinghouse\/responses)$/, 'posting insurance payments'],
   ['POST', /^\/eob-autopilot\/(post-ready|paper\/\d+\/post|lines\/\d+\/\w+|claims\/\d+\/send-secondary)$/, 'posting insurance payments and claims'],
   ['PUT', /^\/eob-autopilot\/settings$/, 'insurance auto-posting and patient billing rules'],
+  ['POST', /^\/marketing\/costs(\/\d+\/void)?$/, 'marketing costs'],
+  ['PUT', /^\/marketing\/patients\/\d+\/attribution$/, 'where a patient came from'],
   ['POST', /^\/verification\/(policies\/\d+\/phone|reads\/\d+\/confirm|reviews\/\d+\/apply)$/, 'insurance benefits for everyone on a plan'],
   ['DELETE', /./, 'removing records'],
 ];

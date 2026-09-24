@@ -538,7 +538,10 @@ export function cleanSource(s = {}) {
   try {
     if (s.ref) ref = new URL(/^https?:/.test(String(s.ref)) ? String(s.ref) : `https://${s.ref}`).hostname.slice(0, 80) || null;
   } catch { ref = null; }
-  return { source: pick(s.src) || pick(s.utm_source) || (ref ? 'referral' : 'direct'), utm_source: pick(s.utm_source), utm_medium: pick(s.utm_medium), utm_campaign: pick(s.utm_campaign), referrer_host: ref, variant: ['a', 'b'].includes(s.variant) ? s.variant : null };
+  // A promo code (typed on the page or ?promo=) and a patient's referral link code (?rp=) — marketing.js reads them.
+  const promo = /^[A-Za-z0-9_-]{2,20}$/.test(String(s.promo || '').trim()) ? String(s.promo).trim().toUpperCase() : null;
+  const rp = /^[A-Za-z0-9]{6,16}$/.test(String(s.rp || '')) ? String(s.rp).toUpperCase() : null;
+  return { source: pick(s.src) || pick(s.utm_source) || (ref ? 'referral' : 'direct'), utm_source: pick(s.utm_source), utm_medium: pick(s.utm_medium), utm_campaign: pick(s.utm_campaign), referrer_host: ref, variant: ['a', 'b'].includes(s.variant) ? s.variant : null, promo_code: promo, referral_code: rp };
 }
 
 // Anonymous funnel steps. The session key is random from the page; nothing else about the person is kept.

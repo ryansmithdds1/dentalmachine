@@ -69,7 +69,7 @@ export default function BookingPage() {
   const source = useMemo(() => {
     let ref = params.get('ref') || '';
     if (!ref && !embed && document.referrer) { try { const h = new URL(document.referrer).hostname; if (h !== window.location.hostname) ref = h; } catch { /* no referrer */ } }
-    return { src: params.get('src') || '', utm_source: params.get('utm_source') || '', utm_medium: params.get('utm_medium') || '', utm_campaign: params.get('utm_campaign') || '', ref, variant };
+    return { src: params.get('src') || '', utm_source: params.get('utm_source') || '', utm_medium: params.get('utm_medium') || '', utm_campaign: params.get('utm_campaign') || '', ref, variant, rp: params.get('rp') || '' };
   }, [params, embed, variant]);
 
   const [info, setInfo] = useState(null);
@@ -87,6 +87,8 @@ export default function BookingPage() {
   const [contact, setContact] = useState({ phone: '', email: '' });
   const [answers, setAnswers] = useState({});
   const [notes, setNotes] = useState('');
+  // A promo code from the ad or mailer (?promo= fills it in) — credits the campaign (docs/marketing.md).
+  const [promo, setPromo] = useState(() => (params.get('promo') || '').slice(0, 20));
   const [asap, setAsap] = useState(false);
   const [showIns, setShowIns] = useState(false);
   const [ins, setIns] = useState({ carrier: '', member_id: '', subscriber: '' });
@@ -221,7 +223,7 @@ export default function BookingPage() {
     try {
       const r = await post(`/public/os/${slug}/book`, {
         key: key.current, session, visit_type_id: type.id, location_id: locationId, start: option.start, ...(providerId ? { provider_id: Number(providerId) } : {}),
-        people: list, phone: contact.phone, email: contact.email, answers, notes, asap, language: lang, website, captcha, source,
+        people: list, phone: contact.phone, email: contact.email, answers, notes, asap, language: lang, website, captcha, source: { ...source, promo },
         insurance: { carrier: ins.carrier, member_id: ins.member_id, subscriber: ins.subscriber, ...(card ? { card_front: card } : {}) },
       });
       // A deposit or saving a card happens on the card company's own secure page.
@@ -447,6 +449,7 @@ export default function BookingPage() {
               </div>
             )}
           <label className="full os-notes">{t('Anything we should know? (optional)')}<textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={500} /></label>
+          <label className="os-promo">{t('Promo code (optional)')}<input value={promo} onChange={(e) => setPromo(e.target.value.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 20))} autoComplete="off" /></label>
           <label className="checkbox"><input type="checkbox" checked={asap} onChange={(e) => setAsap(e.target.checked)} /> {t('Text me if an earlier time opens up')}</label>
           {/* Hidden from people; bots fill it in. */}
           <input tabIndex={-1} autoComplete="off" name="website" value={website} onChange={(e) => setWebsite(e.target.value)} className="os-hp" aria-hidden="true" />

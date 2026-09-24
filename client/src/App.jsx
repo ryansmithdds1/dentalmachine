@@ -91,6 +91,7 @@ const FormsKiosk = lazy(() => import('./pages/public/Kiosk.jsx'));
 const EduPage = lazy(() => import('./pages/public/EduPage.jsx'));
 const Recall = lazy(() => import('./pages/Recall.jsx'));
 const BillPay = lazy(() => import('./pages/public/BillPay.jsx'));
+const Marketing = lazy(() => import('./pages/Marketing.jsx'));
 const Phones = lazy(() => import('./pages/Phones.jsx'));
 const Verification = lazy(() => import('./pages/Verification.jsx'));
 const Metrics = lazy(() => import('./pages/Metrics.jsx'));
@@ -282,6 +283,7 @@ function StaffApp() {
     ['/documents', FolderOpen, 'Documents', can('clinical:read') || can('officedocs:read')],
     ['/intranet', BookOpen, 'Intranet', true],
     ['/reports', ChartColumn, 'Reports', can('reports:read')],
+    ['/marketing', Megaphone, 'Marketing results', can('reports:read')],
     ['/ask', Sparkles, 'Ask your data', can('reports:read')],
     ['/finance', Landmark, 'Finance', can('finance:read')],
     ['/group', Building2, 'Group', user.role === 'admin' || !!practice?.org_role],
@@ -463,6 +465,7 @@ function Shell({ nav }) {
             <Route path="/recall" element={<Recall />} />
             <Route path="/verification" element={<Verification />} />
             <Route path="/phones" element={<Phones />} />
+            <Route path="/marketing" element={<Marketing />} />
             <Route path="/metrics" element={<Metrics />} />
             <Route path="/chart-audit" element={<ChartAudit />} />
             <Route path="/documents" element={<OfficeDocuments />} />

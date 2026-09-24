@@ -4310,6 +4310,101 @@ CREATE INDEX IF NOT EXISTS idx_recall_resets_recall ON recall_resets(recall_id);
 CREATE INDEX IF NOT EXISTS idx_benefit_verif_policy ON benefit_verifications(patient_insurance_id);
 CREATE INDEX IF NOT EXISTS idx_benefit_verif_plan ON benefit_verifications(plan_id, group_status);
 CREATE INDEX IF NOT EXISTS idx_verif_runs_day ON verification_runs(practice_id, visit_date);
+-- Marketing ROI (MK1-MK2, docs/marketing.md): where patients come from. A source is a channel the practice pays or
+-- hopes for (Google Ads, a mailer, patient referrals...); match_keys are the utm_source / ?src= / call-tracking line
+-- names that mean it. Retired (active 0), never deleted.
+CREATE TABLE IF NOT EXISTS marketing_sources (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  channel TEXT NOT NULL CHECK (channel IN ('google_ads','facebook','instagram','google_business','website_organic','referral_patient','referral_doctor','insurance_directory','mailer','event','walk_in','other')),
+  name TEXT NOT NULL,
+  match_keys TEXT,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (practice_id, name)
+);
+-- A marketing campaign under a source (a spring mailer, a Google Ads campaign): matched by its utm_campaign tag,
+-- promo code or call-tracking number while it runs. message_campaign_id links a campaign sent from the app.
+CREATE TABLE IF NOT EXISTS marketing_campaigns (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  source_id INTEGER NOT NULL REFERENCES marketing_sources(id),
+  name TEXT NOT NULL,
+  utm_campaign TEXT,
+  promo_code TEXT,
+  tracking_number_id INTEGER REFERENCES tracking_numbers(id),
+  message_campaign_id INTEGER REFERENCES campaigns(id),
+  starts_on TEXT,
+  ends_on TEXT,
+  notes TEXT,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (practice_id, name)
+);
+-- What marketing cost, for a date range (spread evenly over its days for monthly figures). Integer cents.
+-- Corrected by voiding (voided_at) and entering again, never edited or deleted. client_key makes a resend safe.
+CREATE TABLE IF NOT EXISTS marketing_costs (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  source_id INTEGER NOT NULL REFERENCES marketing_sources(id),
+  campaign_id INTEGER REFERENCES marketing_campaigns(id),
+  starts_on TEXT NOT NULL,
+  ends_on TEXT NOT NULL,
+  amount INTEGER NOT NULL,
+  notes TEXT,
+  client_key TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  voided_at TEXT,
+  voided_by INTEGER REFERENCES users(id),
+  void_reason TEXT,
+  UNIQUE (practice_id, client_key)
+);
+-- Every piece of evidence of where a lead or patient came from (an online booking's UTM tags, a call to a tracking
+-- number, a promo code, a referral, the front desk's "how did you hear about us"), once each (touch_key).
+-- patients.marketing_first_touch_id / marketing_last_touch_id point at the ones that count (first and last touch).
+CREATE TABLE IF NOT EXISTS marketing_touches (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER REFERENCES patients(id),
+  touch_key TEXT NOT NULL,
+  method TEXT NOT NULL CHECK (method IN ('utm','tracking_number','promo_code','referral','staff','online_booking','call')),
+  source_id INTEGER REFERENCES marketing_sources(id),
+  campaign_id INTEGER REFERENCES marketing_campaigns(id),
+  lead INTEGER NOT NULL DEFAULT 0,
+  lead_kind TEXT,
+  entity TEXT,
+  entity_id INTEGER,
+  detail TEXT,
+  occurred_at TEXT NOT NULL,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (practice_id, touch_key)
+);
+-- A patient's own referral link code (?rp=CODE on the booking page). Codes are random, never personal details.
+CREATE TABLE IF NOT EXISTS marketing_referral_codes (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  code TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (practice_id, code)
+);
+-- How far the marketing capture job has read each kind of record (derived bookkeeping).
+CREATE TABLE IF NOT EXISTS marketing_sync_state (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  name TEXT NOT NULL,
+  last_id INTEGER NOT NULL DEFAULT 0,
+  last_run_on TEXT,
+  UNIQUE (practice_id, name)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mk_campaign_utm ON marketing_campaigns(practice_id, utm_campaign) WHERE utm_campaign IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mk_campaign_promo ON marketing_campaigns(practice_id, promo_code) WHERE promo_code IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_mk_touches_patient ON marketing_touches(patient_id, occurred_at);
+CREATE INDEX IF NOT EXISTS idx_mk_touches_lead ON marketing_touches(practice_id, lead, occurred_at);
 `;
 
 // Columns added after the first release. SQLite has no ADD COLUMN IF NOT EXISTS, so check first.
@@ -4859,6 +4954,11 @@ const COLUMNS = [
   ['practices', 'recall_due_soon_days', 'INTEGER NOT NULL DEFAULT 30'],
   ['practices', 'recall_overdue_days', 'INTEGER NOT NULL DEFAULT 30'],
   ['practices', 'verification_settings', 'TEXT'],
+  ['online_bookings', 'promo_code', 'TEXT'],
+  ['online_bookings', 'referral_code', 'TEXT'],
+  ['patients', 'marketing_first_touch_id', 'INTEGER'],
+  ['patients', 'marketing_last_touch_id', 'INTEGER'],
+  ['patients', 'marketing_pinned', 'INTEGER NOT NULL DEFAULT 0'],
 ];
 
 // CHECK constraints widened after release: [table, constraint name on Postgres, old text, new text].

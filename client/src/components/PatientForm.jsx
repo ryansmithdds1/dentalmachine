@@ -25,6 +25,8 @@ export default function PatientForm({ patient, defaults, onSaved, onCancel }) {
   const providers = useLookup('/providers?active=true');
   const officeFees = useLookup('/fee-schedules').filter((f) => f.kind === 'office');
   const offices = useLookup('/locations');
+  // "How did you hear about us?" offers the practice's own marketing sources (docs/marketing.md); a promo code works too.
+  const heard = useLookup('/marketing/picker');
   const [custom, setCustom] = useState(() => parseCustom(patient?.custom));
   const [dupes, setDupes] = useState(null);
   const nav = useNavigate();
@@ -100,8 +102,8 @@ export default function PatientForm({ patient, defaults, onSaved, onCancel }) {
         {field('emergency_contact', 'Emergency contact')}
         <label>
           How did they hear about us?
-          <input list="referral-sources" value={form.referral_source} onChange={(e) => setForm({ ...form, referral_source: e.target.value })} placeholder="e.g. Google, friend…" />
-          <datalist id="referral-sources">{['Google', 'Insurance directory', 'Friend or family', 'Existing patient referral', 'Facebook / Instagram', 'Yelp', 'Drove by', 'Doctor referral', 'Mailer', 'Website'].map((x) => <option key={x} value={x} />)}</datalist>
+          <input list="referral-sources" value={form.referral_source} onChange={(e) => setForm({ ...form, referral_source: e.target.value })} placeholder="e.g. Google, friend, promo code…" />
+          <datalist id="referral-sources">{(heard.sources?.length ? heard.sources.map((x) => x.name) : ['Google', 'Insurance directory', 'Friend or family', 'Existing patient referral', 'Facebook / Instagram', 'Yelp', 'Drove by', 'Doctor referral', 'Mailer', 'Website']).map((x) => <option key={x} value={x} />)}</datalist>
         </label>
         <label>
           Primary provider

@@ -43,6 +43,7 @@ export default {
   'First name': 'Nombre',
   'Last name': 'Apellido',
   'Anything we should know? (optional)': '¿Hay algo que debamos saber? (opcional)',
+  'Promo code (optional)': 'Código de promoción (opcional)',
   'I’m a new patient': 'Soy paciente nuevo',
   'Dental insurance (optional)': 'Seguro dental (opcional)',
   'e.g. Delta Dental': 'p. ej., Delta Dental',

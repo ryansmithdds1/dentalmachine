@@ -28,6 +28,7 @@ import { api, download } from '../api.js';
 import { CustomFieldValues, MergeDialog } from '../components/Switching.jsx';
 import { MembershipCard } from '../components/Memberships.jsx';
 import RecallPanel from '../components/RecallPanel.jsx';
+import AttributionCard from '../components/marketing/AttributionCard.jsx';
 import MedicalHistory, { medStale, MEDICAL_CONDITIONS } from '../components/patient/MedicalHistory.jsx';
 
 export { MEDICAL_CONDITIONS };
@@ -221,6 +222,7 @@ function Overview({ p, reload }) {
         <VisitHistory visits={p.past_appointments || []} />
         <Referrals patient={p} onChange={reload} />
         <MembershipCard patient={p} onChange={reload} />
+        <AttributionCard patientId={p.id} />
         <div className="card">
           <h2>Recall</h2>
           <RecallPanel patientId={p.id} heading={false} />

@@ -22,6 +22,7 @@ import clinicalRoutes from './routes/clinical.js';
 import billingRoutes from './routes/billing.js';
 import insuranceRoutes from './routes/insurance.js';
 import verificationRoutes from './routes/verification.js';
+import marketingRoutes from './routes/marketing.js';
 import recallFreqRoutes from './routes/recallfreq.js';
 import settingsRoutes from './routes/settings.js';
 import reportRoutes from './routes/reports.js';
@@ -325,6 +326,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(productionRoutes({ db }));
   api.use(scheduleRoutes({ db }));
   api.use(recallFreqRoutes({ db }));
+  api.use(marketingRoutes({ db, config }));
   api.use(dayTemplateRoutes({ db }));
   api.use(capacityRoutes({ db }));
   api.use(clinicalRoutes({ db }));
