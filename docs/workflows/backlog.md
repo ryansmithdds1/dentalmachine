@@ -471,6 +471,24 @@ FS3. **History kept:** every version of every fee schedule is kept (hidden by de
      time), with who changed it, when and why, and "last updated" shown on each schedule; estimates and claims always
      use the version effective on the date of service; reports compare write-offs by version.
 
+## Profitability on the schedule: contribution margin per appointment (asked for, high priority)
+Builds on the finance module (true cost per hour, overhead), PPO profitability, fee schedules (FS), production
+(server/src/production.js) and the schedule production bar.
+PM1. **Cost per procedure:** for each code (or category) the owner enters the direct costs: supplies/materials, lab fee
+     (or pulled from the lab case), associate/hygienist pay for it (% of production or collections, or per hour from
+     the time clock rates), merchant/financing fees; defaults suggested from categories and the finance module's
+     supply spend; kept with history like fee schedules.
+PM2. **Contribution margin of every visit:** expected collection (fee after PPO write-off and expected insurance/patient
+     payment) minus direct costs = contribution margin, and per chair-hour and per doctor-hour (using the visit's
+     doctor (X) and assistant (/) time); compared with the office's overhead per hour → profit per hour.
+PM3. **Business view on the schedule (owner-only toggle):** each appointment colored by contribution margin per hour
+     against thresholds the owner sets (e.g. red below overhead, amber, green, gold), with a hover breakdown (fee,
+     write-off, lab, supplies, associate pay, margin, per hour); column and day totals of margin and profit; hidden
+     from staff who don't have the permission.
+PM4. **Know what's not profitable:** reports by procedure, provider, payer (PPO) and appointment type — margin per
+     hour, the least profitable procedures under each PPO, and "what if" (raise a fee, drop a plan, change a lab):
+     so the dentist can see in real time what actually pays and what doesn't.
+
 ## Then: remaining workflow batches
 9. Batch 4 (32–44): new patient setup, ERA/EOB posting, prescriptions, lab cases, huddle actions, recall lists,
    pre-auths, financing, adjustments, referrals, end-of-day, review requests (fix the count bug), clock in/out.
