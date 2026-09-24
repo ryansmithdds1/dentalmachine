@@ -1,6 +1,9 @@
 import { Router } from 'express';
 import { requirePermission, HttpError } from '../auth.js';
 import { pick, requireFields, insert, update, findOr404, audit, practiceNow, localNow } from '../util.js';
+import { quickFill, aiFill } from '../notedictation.js';
+import { aiClient } from '../ai.js';
+import { log } from '../monitoring.js';
 
 // Charting support: note templates, vitals, the lab directory and the procedure code list tools.
 
@@ -25,8 +28,9 @@ export function mergeNote(body, ctx) {
     patient: ctx.patient ? `${ctx.patient.first_name} ${ctx.patient.last_name}` : '',
     date: ctx.date,
     provider: ctx.provider || '',
-    procedures: list.join(', '),
-    teeth: [...new Set(ctx.procedures.map((p) => p.tooth).filter(Boolean))].map((t) => `#${t}`).join(', '),
+    // No procedures picked yet: the teeth become a question the dentist answers (or dictates: "number 30 MO").
+    procedures: list.join(', ') || '[[Teeth: ]]',
+    teeth: [...new Set(ctx.procedures.map((p) => p.tooth).filter(Boolean))].map((t) => `#${t}`).join(', ') || '[[Teeth: ]]',
     codes: [...new Set(ctx.procedures.map((p) => p.code))].join(', '),
     bp: ctx.vitals?.bp_systolic ? `${ctx.vitals.bp_systolic}/${ctx.vitals.bp_diastolic}` : '[[BP: not taken]]',
     pulse: ctx.vitals?.pulse ? String(ctx.vitals.pulse) : '',
@@ -72,7 +76,7 @@ export function parseCsv(text) {
 
 const requireAdmin = (req, _res, next) => (req.user.role === 'admin' ? next() : next(new HttpError(403, 'Administrator access required')));
 
-export default function chartingRoutes({ db }) {
+export default function chartingRoutes({ db, config = {} }) {
   const r = Router();
 
   // ---- Note templates ----
@@ -122,6 +126,39 @@ export default function chartingRoutes({ db }) {
 
   // A note drafted from the templates for the given procedures (or one template by id), merged and
   // ready for the writer to answer its prompts.
+  // Dictation into the note being written: returns the note with the dictation worked in. Nothing is saved
+  // here — the dentist sees what changed and saves (and signs) the note as usual.
+  r.post('/patients/:id/note-dictate', requirePermission('clinical:write'), async (req, res) => {
+    const patient = await findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient');
+    const body = String(req.body?.body ?? '');
+    const dictation = String(req.body?.dictation ?? '').trim();
+    if (!dictation) throw new HttpError(400, 'Nothing was dictated');
+    if (dictation.length > 5000) throw new HttpError(400, 'That dictation is too long — dictate a section at a time');
+    if (body.length > 20000) throw new HttpError(400, 'The note is too long');
+    let result = null;
+    let warning = null;
+    if (aiClient(config)) {
+      try {
+        const filled = await aiFill(config, { body, dictation, patient: `${patient.first_name} ${patient.last_name}` });
+        if (filled) result = { ...filled, ai: true };
+        else warning = 'The AI returned nothing usable; the dictation was added as written.';
+      } catch (err) {
+        // Shown to the dentist (not swallowed): the quick fill below still does what it can.
+        log.warn('Note dictation AI failed', { error: err.message });
+        warning = `The AI couldn't help this time (${err.message}); the dictation was added as written.`;
+      }
+    }
+    if (!result) {
+      const quick = quickFill(body, dictation);
+      // Without the AI, what the quick fill can't place goes at the end, as said — never lost.
+      const placed = quick.filled.length && dictation.split(/\s+/).length <= 12;
+      const text = `${dictation.charAt(0).toUpperCase()}${dictation.slice(1)}${/[.!?]$/.test(dictation) ? '' : '.'}`;
+      result = { ...quick, body: placed ? quick.body : quick.body.trim() ? `${quick.body.trim()}\n${text}` : text, added: placed ? [] : [text], changed: [], ai: false };
+    }
+    await audit(db, req, 'note.dictate', 'patients', patient.id, { ai: result.ai, filled: result.filled.length }, { patientId: patient.id });
+    res.json({ ...result, warning });
+  });
+
   r.get('/patients/:id/note-draft', requirePermission('clinical:read'), async (req, res) => {
     const patient = await findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient');
     const ids = String(req.query.procedure_ids || '').split(',').map(Number).filter(Boolean);

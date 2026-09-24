@@ -2,7 +2,8 @@ import { useMemo, useState } from 'react';
 import { api } from '../../api.js';
 import { useApi, useLookup } from '../../hooks.js';
 import { useAuth } from '../../auth.jsx';
-import { money, fmtDate, label, age, toCents, fromCents } from '../../format.js';
+import { money, fmtDate, label, age, toCents, fromCents, practiceToday } from '../../format.js';
+import { Mic } from 'lucide-react';
 import Odontogram, { CONDITION_COLORS, codeArea, surfacesFor, QUADRANT_LABELS, baseTooth } from '../Odontogram.jsx';
 import NoteComposer from '../NoteComposer.jsx';
 import { Badge, ErrorBox, Modal, useSubmit } from '../ui.jsx';
@@ -18,7 +19,7 @@ const defaultDentition = (dob) => {
 };
 
 export default function ChartTab({ patient, onChange }) {
-  const { can } = useAuth();
+  const { can, practice } = useAuth();
   const [asOf, setAsOf] = useState('');
   const { data, reload } = useApi(`/patients/${patient.id}/chart${asOf ? `?as_of=${asOf}` : ''}`);
   const { data: plans, reload: reloadPlans } = useApi(`/patients/${patient.id}/treatment-plans`);
@@ -62,7 +63,14 @@ export default function ChartTab({ patient, onChange }) {
           </label>
           {asOf && <button className="small" onClick={() => setAsOf('')}>Back to today</button>}
           <SupernumeraryPicker onPick={setTooth} />
-          <button className="small" onClick={() => window.print()} style={{ marginLeft: 'auto' }}>Print</button>
+          {write && (
+            <button className="small primary" style={{ marginLeft: 'auto' }} title="Drafts from today's completed work and starts listening (Alt+M)" onClick={() => {
+              const today = practiceToday(practice?.timezone);
+              const done = data.procedures.filter((p) => p.status === 'completed' && String(p.completed_at || '').slice(0, 10) === today);
+              setModal({ kind: 'note', ids: done.map((p) => p.id), provider: done[0]?.provider_id ?? patient.primary_provider_id, listen: true });
+            }}><Mic size={14} aria-hidden /> Dictate today’s note</button>
+          )}
+          <button className="small" onClick={() => window.print()} style={write ? undefined : { marginLeft: 'auto' }}>Print</button>
         </div>
         {asOf && <div className="public-notice" style={{ marginBottom: 8 }}>Showing the chart as it was on {fmtDate(asOf)}: conditions recorded and work completed by then. Planned treatment isn’t shown.</div>}
         <Odontogram conditions={data.conditions} procedures={data.procedures} selected={tooth} onSelect={setTooth} dentition={dentition} />
@@ -172,7 +180,7 @@ export default function ChartTab({ patient, onChange }) {
 
       {modal?.kind === 'note' && (
         <Modal title="Clinical note" wide onClose={() => setModal(null)}>
-          <NoteComposer patient={patient} procedureIds={modal.ids} providerId={modal.provider} autoDraft onSaved={() => setModal(null)} />
+          <NoteComposer patient={patient} procedureIds={modal.ids} providerId={modal.provider} autoDraft autoListen={!!modal.listen} onSaved={() => setModal(null)} />
         </Modal>
       )}
       {modal?.kind === 'edit' && (

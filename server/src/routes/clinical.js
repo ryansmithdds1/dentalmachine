@@ -423,6 +423,8 @@ export default function clinicalRoutes({ db }) {
     if (row.appointment_id && (await findOr404(db, 'appointments', row.appointment_id, req.user.practice_id, 'Appointment')).patient_id !== patient.id) throw new HttpError(400, "That visit is another patient's");
     const id = await insert(db, 'clinical_notes', { ...row, patient_id: patient.id, practice_id: req.user.practice_id, author_id: req.user.id });
     await audit(db, req, 'note.create', 'clinical_notes', id);
+    // Dictation the AI worked into the note: the person saving it reviewed it and is the approver.
+    if (req.body?.ai_assisted) await audit(db, req, 'note.ai_draft_approved', 'clinical_notes', id, { drafted_by: 'AI (dictation)', approved_by: req.user.name }, { patientId: patient.id });
     res.status(201).json(await db.get('SELECT * FROM clinical_notes WHERE id = ?', id));
   });
 
