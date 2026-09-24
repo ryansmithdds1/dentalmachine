@@ -5,7 +5,7 @@ import { useApi } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
 import { useLiveEvents } from '../live.js';
 import { useShortcuts, useCommands } from '../shortcuts.js';
-import { money, fmtDate, toCents } from '../format.js';
+import { money, fmtDate, fmtUtcDate, toCents } from '../format.js';
 import { toast } from '../toast.js';
 import { ErrorBox, PatientPicker } from '../components/ui.jsx';
 import './eobautopilot.css';
@@ -204,7 +204,7 @@ async function shrink(file) {
   return new Promise((resolve) => canvas.toBlob((b) => resolve(b), 'image/jpeg', 0.85));
 }
 function PaperEob() {
-  const { can } = useAuth();
+  const { can, practice } = useAuth();
   const list = useApi('/eob-autopilot/paper');
   const [eob, setEob] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -271,14 +271,15 @@ function PaperEob() {
               {eob.exceptions > 0 && <span className="muted">{eob.exceptions} need a look — they go to the worklist.</span>}
             </div>
           )}
-          {eob.status === 'posted' && <div className="muted">Posted{eob.approved_at ? ` ${fmtDate(eob.approved_at.slice(0, 10))}` : ''}.</div>}
+          {eob.status === 'posted' && <div className="muted">Posted{eob.approved_at ? ` ${fmtUtcDate(eob.approved_at, practice?.timezone)}` : ''}.</div>}
         </div>
       )}
       <div className="card table-wrap">
         <table><thead><tr><th>Uploaded</th><th>Payer</th><th>Check</th><th>Amount</th><th>Status</th><th>Waiting</th></tr></thead>
-          <tbody>{(list.data || []).map((p) => (
+          <tbody>{list.data?.length === 0 && <tr><td colSpan={6} className="muted">No paper EOBs yet. Scan one above and it shows up here.</td></tr>}
+          {(list.data || []).map((p) => (
             <tr key={p.id} onClick={() => api.get(`/eob-autopilot/paper/${p.id}`).then(setEob)} style={{ cursor: 'pointer' }}>
-              <td>{fmtDate(p.created_at.slice(0, 10))}</td><td>{p.payer_name || '—'}</td><td>{p.check_number || '—'}</td><td>{money(p.total_paid)}</td>
+              <td>{fmtUtcDate(p.created_at, practice?.timezone)}</td><td>{p.payer_name || '—'}</td><td>{p.check_number || '—'}</td><td>{money(p.total_paid)}</td>
               <td>{p.status === 'posted' ? `Posted by ${p.approved_by_name || '—'}` : 'Read — not posted yet'}</td><td>{p.ready ? `${p.ready} to post` : ''}{p.exceptions ? ` ${p.exceptions} to look at` : ''}</td>
             </tr>
           ))}</tbody></table>

@@ -60,23 +60,23 @@ export default function BillingLink() {
       {page.status === 'expired' && !done && <div className="card"><p>This link has expired. Please call {practice.phone || 'the office'} and we’ll help.</p></div>}
       {page.status === 'done' && !done && <div className="card"><p>All set — nothing more to do here. Thank you, {page.first_name}!</p></div>}
       {page.status === 'open' && page.kind === 'update_card' && !done && (
-        <form className="card" onSubmit={(e) => { e.preventDefault(); saveCard(); }}>
+        <form className="card public-form" onSubmit={(e) => { e.preventDefault(); saveCard(); }}>
           <p>Hi {page.first_name}{page.old_card ? `, the ${page.old_card.brand || 'card'} ending ${page.old_card.last4} we have on file needs updating` : ''}. Add a card below and we’ll use it for your automatic payments{page.old_card ? ' — and try the payment that didn’t go through again right away' : ''}.</p>
           {cardField}
-          <button className="primary" type="submit" disabled={busy || (page.mode === 'sandbox' && !card)}>{page.mode === 'sandbox' ? 'Save card' : 'Add a card securely'}</button>
+          <button className="primary big" type="submit" disabled={busy || (page.mode === 'sandbox' && !card)}>{page.mode === 'sandbox' ? 'Save card' : 'Add a card securely'}</button>
           <p className="muted">Questions? Call {practice.phone || 'the office'}.</p>
         </form>
       )}
       {page.status === 'open' && page.kind === 'authorize' && !done && (
-        <form className="card" onSubmit={(e) => { e.preventDefault(); sign(); }}>
-          <pre style={{ whiteSpace: 'pre-wrap', fontFamily: 'inherit' }}>{page.terms}</pre>
+        <form className="card public-form" onSubmit={(e) => { e.preventDefault(); sign(); }}>
+          <pre style={{ whiteSpace: 'pre-wrap', fontFamily: 'inherit', margin: 0 }}>{page.terms}</pre>
           {page.pass_through && <p><strong>{page.pass_through.text}</strong></p>}
           {page.new_card
             ? <p>Card: {page.new_card.brand} •••• {page.new_card.last4}</p>
             : page.mode === 'sandbox' ? cardField : <button type="button" onClick={saveCard} disabled={busy}>Add a card securely</button>}
           <label>Your full name<input value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" /></label>
-          <label className="row"><input type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} /> I agree to these automatic payments</label>
-          <button className="primary" type="submit" disabled={busy || !name.trim() || !agree || (!page.new_card && page.mode !== 'sandbox') || (page.mode === 'sandbox' && !page.new_card && !card)}>Agree and set up</button>
+          <label className="public-check"><input type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} /> I agree to these automatic payments</label>
+          <button className="primary big" type="submit" disabled={busy || !name.trim() || !agree || (!page.new_card && page.mode !== 'sandbox') || (page.mode === 'sandbox' && !page.new_card && !card)}>Agree and set up</button>
         </form>
       )}
     </PublicLayout>

@@ -263,8 +263,8 @@ function Manage({ org, onChange, me }) {
             </span>
           </div>
         ))}
-        <form className="inline" style={{ gap: 6, marginTop: 8 }} onSubmit={(e) => { e.preventDefault(); add.submit(); }}>
-          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email of someone at a member office" style={{ flex: 1 }} />
+        <form className="inline" style={{ gap: 6, marginTop: 8, flexWrap: 'wrap' }} onSubmit={(e) => { e.preventDefault(); add.submit(); }}>
+          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email of someone at a member office" style={{ flex: '1 1 220px' }} />
           <select value={role} onChange={(e) => setRole(e.target.value)}><option value="viewer">Viewer</option><option value="owner">Owner</option></select>
           {role !== 'owner' && <label className="checkbox" style={{ fontSize: 12 }}><input type="checkbox" checked={billing} onChange={(e) => setBilling(e.target.checked)} /> Billing team</label>}
           <button className="small" disabled={!email || add.busy}>Add</button>

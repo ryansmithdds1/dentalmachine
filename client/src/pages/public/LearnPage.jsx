@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { api } from '../../api.js';
-import { ErrorBox } from '../../components/ui.jsx';
-import PublicLayout from './PublicLayout.jsx';
+import PublicLayout, { PublicError } from './PublicLayout.jsx';
 
 // A patient education page from the office.
 export default function LearnPage() {
@@ -10,7 +9,7 @@ export default function LearnPage() {
   const [d, setD] = useState(null);
   const [error, setError] = useState(null);
   useEffect(() => { api.get(`/public/learn/${practice}/${slug}`).then(setD).catch(setError); }, [practice, slug]);
-  if (error) return <PublicLayout><ErrorBox error={error} /></PublicLayout>;
+  if (error) return <PublicLayout><PublicError error={error} hint={false} /></PublicLayout>;
   if (!d) return <div className="empty">Loading…</div>;
   const blocks = d.body.split(/\n{2,}/);
   return (

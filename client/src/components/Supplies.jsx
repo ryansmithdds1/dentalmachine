@@ -55,30 +55,32 @@ export default function Supplies() {
         </div>
       </div>
       <ErrorBox error={err} />
-      <table className="compact-table" style={{ marginTop: 10 }}>
-        <thead><tr><th>Item</th><th className="num">On hand</th><th className="num">Reorder at</th><th>Supplier</th><th className="num">Cost</th><th>Used by</th><th /></tr></thead>
-        <tbody>
-          {data.items.map((i) => (
-            <tr key={i.id} style={{ opacity: i.active ? 1 : 0.5 }}>
-              <td>{i.name}{i.category && <div className="muted" style={{ fontSize: 11 }}>{i.category}{i.sku ? ` · ${i.sku}` : ''}</div>}</td>
-              <td className="num">{i.on_hand} {i.unit}{onOrder[i.id] ? <div><span className="badge info nocap">{onOrder[i.id].qty} on order</span></div> : i.low && <div><span className="badge warn">Reorder</span></div>}</td>
-              <td className="num">{i.reorder_at || '—'}</td>
-              <td>{i.supplier || '—'}</td>
-              <td className="num">{i.cost != null ? money(i.cost) : '—'}</td>
-              <td style={{ fontSize: 12 }}>{i.used_by.map((u) => `${u.code}${u.qty > 1 ? ` ×${u.qty}` : ''}`).join(', ') || '—'}</td>
-              <td>
-                <div className="inline" style={{ gap: 4 }}>
-                  {w && <button className="small" onClick={() => receive(i)} aria-label={`Receive ${i.name}`}>{onOrder[i.id] ? `Received ${onOrder[i.id].qty}` : 'Receive'}</button>}
-                  {w && <button className="small" onClick={() => move(i, 'used')}>Use</button>}
-                  <button className="small" onClick={() => setModal({ type: 'history', item: i })}>History</button>
-                  {w && <button className="small" onClick={() => setModal({ type: 'item', item: i })}>Edit</button>}
-                </div>
-              </td>
-            </tr>
-          ))}
-          {!data.items.length && <tr><td colSpan={7} className="muted">No supplies yet. Add the things you reorder regularly.</td></tr>}
-        </tbody>
-      </table>
+      <div className="table-wrap">
+        <table className="compact-table" style={{ marginTop: 10 }}>
+          <thead><tr><th>Item</th><th className="num">On hand</th><th className="num">Reorder at</th><th>Supplier</th><th className="num">Cost</th><th>Used by</th><th /></tr></thead>
+          <tbody>
+            {data.items.map((i) => (
+              <tr key={i.id} style={{ opacity: i.active ? 1 : 0.5 }}>
+                <td>{i.name}{i.category && <div className="muted" style={{ fontSize: 11 }}>{i.category}{i.sku ? ` · ${i.sku}` : ''}</div>}</td>
+                <td className="num">{i.on_hand} {i.unit}{onOrder[i.id] ? <div><span className="badge info nocap">{onOrder[i.id].qty} on order</span></div> : i.low && <div><span className="badge warn">Reorder</span></div>}</td>
+                <td className="num">{i.reorder_at || '—'}</td>
+                <td>{i.supplier || '—'}</td>
+                <td className="num">{i.cost != null ? money(i.cost) : '—'}</td>
+                <td style={{ fontSize: 12 }}>{i.used_by.map((u) => `${u.code}${u.qty > 1 ? ` ×${u.qty}` : ''}`).join(', ') || '—'}</td>
+                <td>
+                  <div className="inline" style={{ gap: 4 }}>
+                    {w && <button className="small" onClick={() => receive(i)} aria-label={`Receive ${i.name}`}>{onOrder[i.id] ? `Received ${onOrder[i.id].qty}` : 'Receive'}</button>}
+                    {w && <button className="small" onClick={() => move(i, 'used')}>Use</button>}
+                    <button className="small" onClick={() => setModal({ type: 'history', item: i })}>History</button>
+                    {w && <button className="small" onClick={() => setModal({ type: 'item', item: i })}>Edit</button>}
+                  </div>
+                </td>
+              </tr>
+            ))}
+            {!data.items.length && <tr><td colSpan={7} className="muted">No supplies yet. Add the things you reorder regularly.</td></tr>}
+          </tbody>
+        </table>
+      </div>
       {modal?.type === 'item' && <ItemForm item={modal.item} onClose={() => setModal(null)} onDone={() => { setModal(null); reload(); }} />}
       {modal?.type === 'count' && <CountForm items={data.items.filter((i) => i.active)} onClose={() => setModal(null)} onDone={() => { setModal(null); reload(); }} />}
       {modal?.type === 'history' && <History item={modal.item} onClose={() => setModal(null)} />}

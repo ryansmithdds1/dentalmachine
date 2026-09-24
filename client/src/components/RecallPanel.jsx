@@ -43,7 +43,8 @@ export default function RecallPanel({ patientId, compact = false, heading = true
             <div className="rf-line">
               <strong className="rf-name">{i.short}</strong>
               <span className={`badge ${TONE[i.status]}`}>{i.status === 'scheduled' && i.scheduled ? `Booked ${fmtDate(i.scheduled.start_time)}` : i.status_label}</span>
-              <span className="rf-due">{i.due_date ? `${i.status === 'overdue' || i.status === 'due' ? 'was due' : 'due'} ${fmtDate(i.due_date)}` : 'none on record'}</span>
+              {/* The badge already says "No record"; the due date only when there is one. */}
+              {i.due_date && <span className="rf-due">{`${i.status === 'overdue' || i.status === 'due' ? 'was due' : 'due'} ${fmtDate(i.due_date)}`}</span>}
             </div>
             {!compact && (
               <div className="rf-sub muted">

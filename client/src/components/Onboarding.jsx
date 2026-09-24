@@ -26,7 +26,7 @@ export default function Onboarding() {
             <div className="muted" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.4 }}>{g}</div>
             {data.steps.filter((s) => s.group === g).map((s) => (
               <div key={s.key} className="inline" style={{ gap: 6, padding: '3px 0', alignItems: 'flex-start' }}>
-                {s.done ? <CheckCircle2 size={15} color="var(--ok)" /> : <Circle size={15} color="var(--muted)" />}
+                {s.done ? <CheckCircle2 size={15} color="var(--ok)" style={{ flexShrink: 0, marginTop: 1 }} /> : <Circle size={15} color="var(--muted)" style={{ flexShrink: 0, marginTop: 1 }} />}
                 {s.done ? <span className="muted">{s.title}</span> : <Link to={s.link}>{s.title}</Link>}
               </div>
             ))}

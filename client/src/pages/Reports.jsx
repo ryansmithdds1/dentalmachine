@@ -355,13 +355,13 @@ function HygieneReport() {
               <h2 style={{ margin: 0 }}>By hygienist</h2>
               <CsvButton name={`hygiene-${from}-to-${to}`} rows={data.hygienists} columns={[['Hygienist', (r) => r.name], ['Production', (r) => dollars(r.production)], ['Visits', (r) => r.visits], ['Per visit', (r) => (r.per_visit == null ? '' : dollars(r.per_visit))], ['Reappointed', (r) => r.reappointed], ['Reappointment %', (r) => r.reappointment_rate ?? '']]} />
             </div>
-            <table className="compact-table">
+            <div className="table-wrap"><table className="compact-table">
               <thead><tr><th>Hygienist</th><th className="num">Production</th><th className="num">Visits</th><th className="num">Per visit</th><th className="num">Reappointed</th></tr></thead>
               <tbody>
                 {data.hygienists.map((r) => <tr key={r.provider_id}><td>{r.name}</td><td className="num">{money(r.production)}</td><td className="num">{r.visits}</td><td className="num">{r.per_visit == null ? '—' : money(r.per_visit)}</td><td className="num">{pctText(r.reappointment_rate)}</td></tr>)}
                 {!data.hygienists.length && <tr><td colSpan={5} className="muted">No hygienists set up (Settings → Providers, type Hygienist).</td></tr>}
               </tbody>
-            </table>
+            </table></div>
             <p className="muted" style={{ fontSize: 12 }}>Reappointed: the patient left with their next visit already booked. Perio share: scaling and root planing, perio maintenance and full-mouth debridement against adult and child prophies. Recalls seen: patients whose recall came due in these dates who have had a visit since two months before it.</p>
           </div>
         </>
@@ -383,7 +383,7 @@ function PlanReport() {
           <h2 style={{ margin: 0 }}>Presented → accepted → scheduled → done</h2>
           <CsvButton name={`treatment-plans-${from}-to-${to}`} rows={rows} columns={[['Provider', (r) => r.provider_name], ['Plans', (r) => r.plans], ['Presented', (r) => dollars(r.presented)], ['Accepted', (r) => dollars(r.accepted)], ['Acceptance %', (r) => r.acceptance_pct ?? ''], ['Scheduled', (r) => dollars(r.scheduled)], ['Completed', (r) => dollars(r.completed)], ['Accepted, not scheduled', (r) => dollars(r.unscheduled)]]} />
         </div>
-        <table className="compact-table">
+        <div className="table-wrap"><table className="compact-table">
           <thead><tr><th>Provider</th><th className="num">Plans</th><th className="num">Presented</th><th className="num">Accepted</th><th className="num">Scheduled</th><th className="num">Completed</th><th className="num">Accepted, not scheduled</th></tr></thead>
           <tbody>
             {rows.map((r) => (
@@ -395,7 +395,7 @@ function PlanReport() {
             ))}
             {data && !data.providers.length && <tr><td colSpan={7} className="muted">No treatment plans presented in these dates.</td></tr>}
           </tbody>
-        </table>
+        </table></div>
         <p className="muted" style={{ fontSize: 12 }}>By the date each plan was presented (or created). Accepted counts plans accepted or signed, and any procedure already booked or done. The follow-up list under Follow-ups → Unscheduled treatment has the patients behind the last column.</p>
       </div>
     </>
@@ -451,7 +451,7 @@ function DaySheet({ sheet, date, setDate }) {
       )}
       {sheet?.entries.length > 0 && (
         <details style={{ marginTop: 12 }}>
-          <summary>All {sheet.entries.length} transactions</summary>
+          <summary>{sheet.entries.length === 1 ? 'The 1 transaction' : `All ${sheet.entries.length} transactions`}</summary>
           <table style={{ marginTop: 8 }}>
             <thead><tr><th>Type</th><th>Patient</th><th>Description</th><th>Provider / by</th><th className="num">Amount</th></tr></thead>
             <tbody>

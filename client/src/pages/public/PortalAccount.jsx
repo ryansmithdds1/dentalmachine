@@ -271,7 +271,7 @@ function VisitsCard({ acct }) {
           return (
             <li key={k}>
               <button type="button" className="bp-row" aria-expanded={open.has(k)} onClick={() => toggle(k)}>
-                <span>{open.has(k) ? <ChevronDown size={16} aria-hidden /> : <ChevronRight size={16} aria-hidden />} <strong>{shortDate(lang, v.date)}</strong>{family ? ` · ${v.patient_name}` : ''}<span className="muted bp-small">{v.reason ? ` ${v.reason}` : ''}{v.provider_name ? ` · ${v.provider_name}` : ''}</span></span>
+                <span>{open.has(k) ? <ChevronDown size={16} aria-hidden /> : <ChevronRight size={16} aria-hidden />} <strong>{shortDate(lang, v.date)}</strong>{family ? ` · ${v.patient_name}` : ''}<span className="muted bp-small">{[v.reason, v.provider_name].filter(Boolean).join(' · ')}</span></span>
                 <span className="bp-num">{T.patient_owes > 0 ? money(T.patient_owes) : T.waiting_on_insurance > 0 ? t('Waiting on insurance') : t('Paid')}</span>
               </button>
               {open.has(k) && (

@@ -277,7 +277,7 @@ export default function DocumentsTab({ patient }) {
       <div className="card">
         <div className="docs-toolbar">
           <h2>Documents & imaging</h2>
-          <input id={`docsearch-${patient.id}`} type="search" aria-label="Search documents" placeholder="Search names, notes and the words inside…" value={search} onChange={(e) => setSearch(e.target.value)} />
+          <input id={`docsearch-${patient.id}`} type="search" aria-label="Search documents" placeholder="Search documents…" title="Searches file names, notes and the words inside" value={search} onChange={(e) => setSearch(e.target.value)} />
           <select aria-label="Show" value={filter} onChange={(e) => setFilter(e.target.value)} style={{ width: 160 }}>
             <option value="">All types</option>
             {CATEGORIES.map((c) => <option key={c} value={c}>{catLabel(c)}</option>)}
@@ -329,7 +329,7 @@ export default function DocumentsTab({ patient }) {
               }} />
             <div className="form-actions doc-actions">
               {viewing.viewer && (
-                <label className="inline" style={{ gap: 6, marginRight: 'auto' }}>Compare with
+                <label className="inline" style={{ flexDirection: 'row', gap: 6, marginRight: 'auto' }}>Compare with
                   <select aria-label="Compare with" value={compare?.id || ''} onChange={(e) => setCompare((docs || []).find((d) => d.id === Number(e.target.value)) || null)}>
                     <option value="">—</option>
                     {(docs || []).filter((d) => d.id !== viewing.doc.id && viewerable(d.mime)).map((d) => <option key={d.id} value={d.id}>{d.filename} · {fmtDate(d.taken_at || d.created_at)}{d.tooth ? ` · #${d.tooth}` : ''}</option>)}

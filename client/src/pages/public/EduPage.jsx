@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { ErrorBox } from '../../components/ui.jsx';
-import PublicLayout from './PublicLayout.jsx';
+import PublicLayout, { PublicError } from './PublicLayout.jsx';
 import { usePT } from './paperwork-i18n.js';
 import { EducationArticle } from './Kiosk.jsx';
 import './paperwork.css';
@@ -15,10 +14,10 @@ export default function EduPage() {
   const [error, setError] = useState(null);
   useEffect(() => {
     fetch(`/api/public/edu/${encodeURIComponent(token)}`)
-      .then(async (r) => { const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || r.statusText); setData(d); })
+      .then(async (r) => { const d = await r.json().catch(() => ({})); if (!r.ok) throw Object.assign(new Error(d.error || r.statusText), { status: r.status }); setData(d); })
       .catch(setError);
   }, [token]);
-  if (error) return <PublicLayout><ErrorBox error={error} /></PublicLayout>;
+  if (error) return <PublicLayout><PublicError error={error} /></PublicLayout>;
   if (!data) return <PublicLayout><p>{pt('Loading…')}</p></PublicLayout>;
   return <PublicLayout practice={data.practice}><div className="pw"><EducationArticle article={data} big={false} /></div></PublicLayout>;
 }

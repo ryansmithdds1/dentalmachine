@@ -9,6 +9,7 @@ import { PlanSummary } from '../components/patient/PaymentPlans.jsx';
 import { ChStatus, ClearinghousePanel, sendClaims, describeResponses } from '../components/ClaimEdi.jsx';
 import ClaimFollowup from '../components/billing/ClaimFollowup.jsx';
 import RefundQueue from '../components/billing/RefundQueue.jsx';
+import ClaimApprovalQueue from '../components/billing/ClaimApprovalQueue.jsx';
 import { sendPreauth } from '../components/preauthSend.js';
 import InsurancePlanForm from '../components/InsurancePlanForm.jsx';
 import AiFileRead from '../components/AiFileRead.jsx';
@@ -21,7 +22,7 @@ import Deposits from '../components/Deposits.jsx';
 const FILTERS = [['attention', 'Needs attention'], ['draft', 'Ready to send'], ['submitted', 'Submitted'], ['partially_paid', 'Partially paid'], ['denied', 'Denied'], ['paid', 'Paid'], ['void', 'Void'], ['', 'All']];
 
 // Billing workspace: claims (with 837 batches), ERA remittance posting and payment plans.
-const TABS = [['claims', 'Claims'], ['checks', 'Insurance payments'], ['eligibility', 'Eligibility'], ['followup', 'Insurance follow-up'], ['preauths', 'Pre-authorizations'], ['era', 'Remittance (ERA)'], ['insplans', 'Insurance plans'], ['statements', 'Statements'], ['refunds', 'Credits & refunds'], ['plans', 'Payment plans'], ['deposits', 'Deposits'], ['collections', 'Collections']];
+const TABS = [['claims', 'Claims'], ['approve', 'Ready to approve'], ['checks', 'Insurance payments'], ['eligibility', 'Eligibility'], ['followup', 'Insurance follow-up'], ['preauths', 'Pre-authorizations'], ['era', 'Remittance (ERA)'], ['insplans', 'Insurance plans'], ['statements', 'Statements'], ['refunds', 'Credits & refunds'], ['plans', 'Payment plans'], ['deposits', 'Deposits'], ['collections', 'Collections']];
 // Billing opens where this person last worked (G B goes straight back to the follow-up list, say). Per-browser only.
 const TAB_KEY = 'dm.billing.tab';
 const lastTab = () => { try { const t = localStorage.getItem(TAB_KEY); return TABS.some(([k]) => k === t) ? t : null; } catch { return null; } };
@@ -30,15 +31,23 @@ export default function Claims() {
   const [params, setParams] = useSearchParams();
   const tab = params.get('tab') || lastTab() || 'claims';
   useEffect(() => { try { localStorage.setItem(TAB_KEY, tab); } catch { /* a convenience only */ } }, [tab]);
+  // Claims prepared from finished work, waiting for a person's approval (the tab's badge).
+  const { can } = useAuth();
+  const { data: waiting } = useApi(can('billing:read') ? '/claim-queue/count' : null);
+  const [approveCount, setApproveCount] = useState(null);
+  const badge = approveCount ?? waiting?.count ?? 0;
   return (
     <>
       <div className="page-header"><h1>Billing</h1></div>
       <div className="tabs">
         {TABS.map(([k, l]) => (
-          <button key={k} className={tab === k ? 'active' : ''} onClick={() => setParams({ tab: k })}>{l}</button>
+          <button key={k} className={tab === k ? 'active' : ''} onClick={() => setParams({ tab: k })}>
+            {l}{k === 'approve' && badge > 0 && <span className="badge info" style={{ marginLeft: 6 }} aria-label={`${badge} waiting`}>{badge}</span>}
+          </button>
         ))}
       </div>
       {tab === 'claims' && <ClaimList />}
+      {tab === 'approve' && <ClaimApprovalQueue onCount={setApproveCount} />}
       {tab === 'era' && <EraImport />}
       {tab === 'plans' && <Plans />}
       {tab === 'insplans' && <InsurancePlans />}

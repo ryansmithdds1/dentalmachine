@@ -8,7 +8,7 @@ import { ErrorBox, Modal, useSubmit } from '../components/ui.jsx';
 
 // Where something that failed on its own (a rejected claim, a text that didn't go, a sync that broke) lands
 // as a work item for the right person, until someone fixes it or a later attempt works.
-const LINKS = { claims: (id) => `/claims/${id}`, patients: (id) => `/patients/${id}` };
+const LINKS = { claims: (id) => `/claims/${id}`, patients: (id) => `/patients/${id}`, claim_queue: () => '/claims?tab=approve' };
 
 export default function Attention() {
   const [params, setParams] = useSearchParams();

@@ -905,9 +905,9 @@ function AuditLog() {
                   <div className="muted" style={{ fontSize: 11 }}>{AUDIT_SOURCES[r.source] || r.source}{r.source === 'ai' && r.user_name ? ` · for ${r.user_name}` : ''}{r.location_name ? ` · ${r.location_name}` : ''}{r.ip ? ` · ${r.ip}` : ''}</div>
                 </td>
                 <td><code>{r.action}</code>{r.reason && <div style={{ fontSize: 12 }}>Why: {r.reason}</div>}</td>
-                <td>{r.entity ? `${r.entity} #${r.entity_id}` : ''}{r.patient_id && r.entity !== 'patients' ? <div className="muted" style={{ fontSize: 11 }}>patient #{r.patient_id}</div> : null}</td>
+                <td>{r.entity ? `${r.entity}${r.entity_id != null ? ` #${r.entity_id}` : ''}` : ''}{r.patient_id && r.entity !== 'patients' ? <div className="muted" style={{ fontSize: 11 }}>patient #{r.patient_id}</div> : null}</td>
                 <td style={{ fontSize: 12 }}><Changes json={r.changes} /></td>
-                <td className="muted" style={{ fontSize: 12, maxWidth: 260, overflowWrap: 'anywhere' }}>{r.details}</td>
+                <td className="muted" style={{ fontSize: 12, minWidth: 220, maxWidth: 320, overflowWrap: 'anywhere' }}>{r.details}</td>
               </tr>
             ))}
           </tbody>
@@ -998,7 +998,7 @@ function FeeSchedules({ admin }) {
   const [creating, setCreating] = useState(false);
   const current = list?.find((f) => f.id === sel) || list?.[0];
   return (
-    <div className="grid" style={{ gridTemplateColumns: 'minmax(200px, 260px) minmax(0, 1fr)' }}>
+    <div className="grid fee-sched-grid">
       <div className="card">
         <h2>Schedules</h2>
         <p className="muted" style={{ fontSize: 13 }}>

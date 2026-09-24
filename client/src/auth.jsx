@@ -59,7 +59,8 @@ export function AuthProvider({ children }) {
     try {
       const me = await api.get('/auth/me');
       setState({ loading: false, user: me.user, practice: me.practice });
-      startOffline(me);
+      // Not until the account is fully set up: the server refuses everything else (403) until then.
+      if (!me.user.mfa_setup_required && !me.user.password_change_required) startOffline(me);
     } catch (err) {
       // No connection (not a rejected session): keep the session and show the offline schedule.
       if (!err.status || [502, 503, 504].includes(err.status)) {

@@ -97,8 +97,12 @@ function Tile({ m, onOpen, active }) {
   );
 }
 
-function cell(key, row) {
-  const v = row[key];
+// Money coming in is negative on the ledger (it lowers what's owed). The Collections and Write-offs numbers are
+// shown as positive totals, so their rows are flipped to match (a refund then shows as a minus).
+const FLIP = new Set(['collections', 'collection_rate', 'adjustments']);
+
+function cell(key, row, metric) {
+  const v = key === 'amount' && FLIP.has(metric) && row[key] != null ? -row[key] : row[key];
   if (key === 'patient') return row.patient_id ? <Link to={`/patients/${row.patient_id}`}>{row.first_name} {row.last_name}</Link> : '—';
   if (key === 'claim_id') return <Link to={`/claims/${v}`}>#{v}</Link>;
   if (v == null || v === '') return '—';
@@ -178,7 +182,7 @@ function Drill({ m, query, onClose, canSetGoal, filters, onGoal }) {
               <div className="mx-table-wrap">
                 <table className="compact-table">
                   <thead><tr>{data.columns.map((c) => <th key={c}>{COLS[c] || labelize(c)}</th>)}</tr></thead>
-                  <tbody>{data.rows.map((r, i) => <tr key={r.id ?? r.appointment_id ?? r.claim_id ?? r.recall_id ?? r.plan_id ?? `${r.patient_id}-${i}`}>{data.columns.map((c) => <td key={c}>{cell(c, r)}</td>)}</tr>)}</tbody>
+                  <tbody>{data.rows.map((r, i) => <tr key={r.id ?? r.appointment_id ?? r.claim_id ?? r.recall_id ?? r.plan_id ?? `${r.patient_id}-${i}`}>{data.columns.map((c) => <td key={c}>{cell(c, r, m.key)}</td>)}</tr>)}</tbody>
                 </table>
               </div>
             )}

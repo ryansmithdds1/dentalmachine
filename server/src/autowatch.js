@@ -3,7 +3,8 @@
 // it's done (Efficiency Principle 8). Hourly, per practice, as the automation:
 //   - forgotten clock-outs (#44) — until now raised only when a manager opened the Today board;
 //   - yesterday's loose ends from the end-of-day checklist (#42): completed work for insured patients not on a
-//     claim, claims made but never sent, visits left open, cash and checks not on a deposit;
+//     claim (the item opens Billing → Ready to approve, where those claims are already prepared — claimprep.js),
+//     claims made but never sent, visits left open, cash and checks not on a deposit;
 //   - pre-authorizations with no answer after PREAUTH_FOLLOW_UP_DAYS (#38);
 //   - credit balances held for CREDIT_DAYS with nothing booked (#48): the Credits & refunds queue is the
 //     ready-to-approve list, a person refunds;
@@ -43,8 +44,8 @@ async function settle(db, practiceId, key, note) {
   return n;
 }
 // One count-style item: raised while n > 0, resolved when it reaches 0.
-async function tally(db, pid, n, { key, title, detail, role, kind, done }) {
-  if (n > 0) await raise(db, { practiceId: pid, key, kind, role, title, detail });
+async function tally(db, pid, n, { key, title, detail, role, kind, done, entity = null }) {
+  if (n > 0) await raise(db, { practiceId: pid, key, kind, role, title, detail, entity });
   else await settle(db, pid, key, done);
 }
 
@@ -88,18 +89,33 @@ export async function watchLooseEnds(db, pid, today) {
   const out = {};
 
   // Completed (charged) work for a patient with active insurance, on no live claim, done before yesterday.
+  // Work a person skipped with a reason (Billing → Ready to approve) has been looked at, so it isn't counted.
   out.unbilled = await count(db,
     `SELECT COUNT(*) AS n FROM procedures pr WHERE pr.practice_id = ? AND pr.status = 'completed' AND pr.fee > 0
        AND substr(pr.completed_at, 1, 10) >= ? AND substr(pr.completed_at, 1, 10) < ?
        AND EXISTS (SELECT 1 FROM patient_insurance pi WHERE pi.patient_id = pr.patient_id AND pi.active = 1)
-       AND NOT EXISTS (SELECT 1 FROM claim_items ci JOIN claims c ON c.id = ci.claim_id WHERE ci.procedure_id = pr.id AND c.status != 'void')`,
+       AND NOT EXISTS (SELECT 1 FROM claim_items ci JOIN claims c ON c.id = ci.claim_id WHERE ci.procedure_id = pr.id AND c.status != 'void')
+       AND NOT EXISTS (SELECT 1 FROM claim_prep_skips s WHERE s.procedure_id = pr.id AND s.restored_at IS NULL)`,
     pid, from, yesterday);
+  // With claims prepared for approval (the default), the item opens that list: each patient's claim is already
+  // made up and checked there, and waits for a person's A.
+  const prepared = !!(await db.get('SELECT claim_prep FROM practices WHERE id = ?', pid))?.claim_prep;
   await tally(db, pid, out.unbilled, {
     key: 'unbilled-work', kind: 'claim', role: 'billing',
     title: `${plural(out.unbilled, 'completed procedure', 'completed procedures')} for insured patients ${out.unbilled === 1 ? 'is' : 'are'} not on a claim`,
-    detail: 'Billing → Claims: bill them (B at checkout or on the Insurance tab), or note why they aren’t billed.',
+    detail: prepared
+      ? 'Billing → Ready to approve: the claims are prepared and checked — approve each one (A), fix what it says, or skip it with a reason.'
+      : 'Billing → Claims: bill them (B at checkout or on the Insurance tab), or note why they aren’t billed.',
+    ...(prepared ? { entity: 'claim_queue' } : {}),
     done: 'All recent completed work is on a claim',
   });
+
+  // Approved claims that couldn't be sent (routes/claimprep.js) clear themselves once the claim has gone out
+  // some other way (Ready to send) or was voided.
+  const notSent = await db.all(
+    `SELECT i.dedupe_key FROM issues i JOIN claims c ON c.id = i.entity_id AND i.entity = 'claims'
+     WHERE i.practice_id = ? AND i.status = 'open' AND i.dedupe_key LIKE 'claim-not-sent:%' AND c.status NOT IN ('draft','denied')`, pid);
+  for (const { dedupe_key: key } of notSent) await settle(db, pid, key, 'The claim was sent (or voided)');
 
   out.unsent = await count(db, "SELECT COUNT(*) AS n FROM claims WHERE practice_id = ? AND status = 'draft' AND substr(created_at, 1, 10) < ?", pid, yesterday);
   await tally(db, pid, out.unsent, {

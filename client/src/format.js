@@ -51,6 +51,7 @@ export function practiceToday(tz = 'America/New_York') {
 // For UTC timestamps from the server (created_at, signed_at…): show the practice-local date.
 export function fmtUtcDate(s, tz) {
   if (!s) return '';
+  if (String(s).length <= 10) return fmtDate(s); // a plain date has no time zone to convert
   const d = new Date(`${s.slice(0, 19).replace(' ', 'T')}Z`);
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', ...(tz ? { timeZone: tz } : {}) });
 }

@@ -320,7 +320,7 @@ function PlanTable({ plan, quote, codes, canEdit, act, withUndo, onBook, canBook
               ) : null,
               ...rows.map((p) => (
                 <tr key={p.id} className={drag === p.id ? 'dragging' : ''} {...dragProps(p)} {...dropProps(p.phase || 1, p.id)}>
-                  <td>{canEdit && p.status === 'planned' && <GripVertical size={12} className="drag-dot" aria-hidden="true" />}{p.priority}</td>
+                  <td style={{ whiteSpace: 'nowrap' }}>{canEdit && p.status === 'planned' && <GripVertical size={12} className="drag-dot" aria-hidden="true" />}{p.priority}</td>
                   <td>{p.code}</td>
                   <td>{p.description}</td>
                   <td>{p.tooth ? `#${p.tooth}` : ''} {p.surfaces || ''}{p.area ? QUADRANT_LABELS[p.area] : ''}</td>

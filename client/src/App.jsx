@@ -393,6 +393,25 @@ function UserMenu({ user, practice, logout }) {
   );
 }
 
+// The collapsed rail's page list scrolls (an admin has more screens than fit), and a scroll box clips
+// CSS tooltips, so the labels for those icons are drawn here, outside it.
+function RailTip() {
+  const [tip, setTip] = useState(null);
+  useEffect(() => {
+    const over = (e) => {
+      const el = e.target.closest?.('.rail-nav [data-tip]');
+      if (!el || document.querySelector('.app.rail-open') || window.innerWidth <= 800) return setTip(null);
+      const r = el.getBoundingClientRect();
+      setTip({ text: el.dataset.tip, top: r.top + r.height / 2, left: r.right + 12 });
+    };
+    const hide = () => setTip(null);
+    document.addEventListener('pointerover', over);
+    document.addEventListener('scroll', hide, true);
+    return () => { document.removeEventListener('pointerover', over); document.removeEventListener('scroll', hide, true); };
+  }, []);
+  return tip ? <div className="rail-tip" style={{ top: tip.top, left: tip.left }} aria-hidden>{tip.text}</div> : null;
+}
+
 function Shell({ nav }) {
   const location = useLocation();
   const { user, practice, logout } = useAuth();
@@ -429,6 +448,7 @@ function Shell({ nav }) {
           <Search size={19} strokeWidth={1.9} /><span className="rail-label">Search <kbd>Ctrl K</kbd></span>
         </button>
         <ChatBadge />
+        <RailTip />
         <nav className="nav rail-nav">
           {nav.filter((n) => n[3]).map(([to, Icon, text]) => (
             <NavLink key={to} to={to} end={to === '/'} className="rail-item" data-tip={text} aria-label={text}>

@@ -52,7 +52,7 @@ export default function Calls() {
           <div><strong>{s.ai_booked || 0}</strong><span>booked by the AI</span></div>
         </div>
       )}
-      <div className="inline" style={{ margin: '12px 0', gap: 8 }}>
+      <div className="inline" style={{ margin: '12px 0', gap: 8, flexWrap: 'wrap' }}>
         <div className="tabs" style={{ margin: 0 }}>
           {[['', 'All'], ['missed', 'Missed'], ['follow_up', 'Needs follow-up'], ['no_book', 'Didn’t book'], ['sources', 'Sources']].map(([k, l]) => <button key={k} className={filter === k ? 'active' : ''} onClick={() => setFilter(k)}>{l}</button>)}
         </div>

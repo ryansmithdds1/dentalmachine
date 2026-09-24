@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { api } from '../../api.js';
 import { ErrorBox, useSubmit } from '../../components/ui.jsx';
-import PublicLayout from './PublicLayout.jsx';
+import PublicLayout, { PublicError } from './PublicLayout.jsx';
 import { suggestLang, translate, useLang } from './i18n.js';
 import './review.css';
 
@@ -68,7 +68,7 @@ export default function ReviewPage() {
     window.location.assign(goTo(site));
   };
 
-  if (loadError) return <PublicLayout title={t('Thank you')}><ErrorBox error={loadError} /></PublicLayout>;
+  if (loadError) return <PublicLayout title={t('How did we do?')}><PublicError error={loadError} /></PublicLayout>;
   if (!info) return <PublicLayout title={t('How did we do?')}><p>{t('Loading…')}</p></PublicLayout>;
   const practice = { name: info.practice_name, phone: info.practice_phone };
   const step = rerate ? 'rate' : info.step;

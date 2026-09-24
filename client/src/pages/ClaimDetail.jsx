@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, getToken } from '../api.js';
 import { useApi } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
-import { money, fmtDate, toCents, fromCents } from '../format.js';
+import { money, fmtDate, fmtUtcDate, toCents, fromCents } from '../format.js';
 import { ChStatus, ClaimEdiCard, sendClaims } from '../components/ClaimEdi.jsx';
 import { Badge, ErrorBox, Modal, useSubmit } from '../components/ui.jsx';
 import { useShortcuts, isMac } from '../shortcuts.js';
@@ -12,7 +12,7 @@ import './claimdetail.css';
 
 export default function ClaimDetail() {
   const { id } = useParams();
-  const { can } = useAuth();
+  const { can, practice } = useAuth();
   const navigate = useNavigate();
   const { data: c, reload, error: loadErr } = useApi(`/claims/${id}`);
   const [modal, setModal] = useState(null);
@@ -39,7 +39,7 @@ export default function ClaimDetail() {
     <>
       <div className="page-header">
         <div>
-          <h1>Claim #{c.id} <Badge value={c.status} /> <ChStatus claim={c} />{c.frequency_code === '7' ? <span className="badge info">Corrected claim</span> : c.frequency_code === '8' ? <span className="badge warn">Void notice</span> : null}</h1>
+          <h1>Claim #{c.id} <Badge value={c.status} /> {c.ch_status && <ChStatus claim={c} />}{c.frequency_code === '7' ? <span className="badge info">Corrected claim</span> : c.frequency_code === '8' ? <span className="badge warn">Void notice</span> : null}</h1>
           <div className="muted"><Link to={`/patients/${c.patient_id}`}>{c.first_name} {c.last_name}</Link> · {c.carrier_name}</div>
         </div>
         <div className="actions no-print">
@@ -78,7 +78,7 @@ export default function ClaimDetail() {
       {c.ch_status === 'rejected' && c.status === 'draft' && <div className="error">Rejected electronically: {c.ch_message}</div>}
       <ClaimChecks id={c.id} status={c.status} version={checks} />
 
-      <div className="grid grid-2">
+      <div className="grid grid-2" style={{ marginBottom: 16 }}>
         <div className="card">
           <h2>Billing provider</h2>
           <dl className="kv">
@@ -103,6 +103,7 @@ export default function ClaimDetail() {
 
       <div className="card">
         <h2>Services</h2>
+        <div className="table-wrap">
         <table>
           <thead><tr><th>Date</th><th>Code</th><th>Description</th><th>Tooth</th><th>Surf</th><th>Provider (NPI)</th><th className="num">Fee</th><th className="num">Est. ins.</th>{paidLines && <><th className="num">Paid</th><th className="num">Write-off</th><th className="num">Patient</th></>}</tr></thead>
           <tbody>
@@ -117,8 +118,9 @@ export default function ClaimDetail() {
             <tr className="totals-row"><td colSpan={6}>Totals · paid {money(c.paid_amount)}</td><td className="num">{money(c.total_fee)}</td><td className="num">{money(c.estimated_amount)}</td>{paidLines && <td colSpan={3} />}</tr>
           </tbody>
         </table>
+        </div>
         <div className="muted" style={{ marginTop: 8 }}>
-          Created {fmtDate(c.created_at)}{c.submitted_at ? ` · Submitted ${fmtDate(c.submitted_at)}` : ''}{c.paid_at ? ` · Paid ${fmtDate(c.paid_at)}` : ''}
+          Created {fmtUtcDate(c.created_at, practice?.timezone)}{c.submitted_at ? ` · Submitted ${fmtUtcDate(c.submitted_at, practice?.timezone)}` : ''}{c.paid_at ? ` · Paid ${fmtUtcDate(c.paid_at, practice?.timezone)}` : ''}
         </div>
       </div>
 
@@ -298,6 +300,7 @@ function Appeal({ claim, onSent }) {
 
 // What the payer sent for this claim (ERAs and paper EOBs, from the insurance autopilot) and the EOB itself.
 function Remittances({ claim }) {
+  const { practice } = useAuth();
   const { data } = useApi(`/claims/${claim.id}/remittances`);
   if (!data?.length) return null;
   const open = async (url) => {
@@ -311,7 +314,7 @@ function Remittances({ claim }) {
       <table><thead><tr><th>Received</th><th>From</th><th>Paid</th><th>Written off</th><th>Patient</th><th>Status</th><th /></tr></thead>
         <tbody>{data.map((r) => (
           <tr key={r.id}>
-            <td>{fmtDate(r.created_at.slice(0, 10))}</td><td>{r.source === 'era' ? 'ERA' : 'Paper EOB'} {r.trace || ''}</td><td>{money(r.paid)}</td><td>{money(r.contractual)}</td><td>{money(r.patient_resp)}</td>
+            <td>{fmtUtcDate(r.created_at, practice?.timezone)}</td><td>{r.source === 'era' ? 'ERA' : 'Paper EOB'} {r.trace || ''}</td><td>{money(r.paid)}</td><td>{money(r.contractual)}</td><td>{money(r.patient_resp)}</td>
             <td>{STATE[r.state] || r.state}{r.state === 'exception' && r.reason ? ` — ${r.reason}` : ''}{r.state === 'exception' ? <> · <Link to="/insurance-autopilot">worklist</Link></> : null}</td>
             <td>{r.eob_url && <button className="small" onClick={() => open(r.eob_url)}>See the EOB</button>}</td>
           </tr>

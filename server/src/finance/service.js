@@ -75,7 +75,7 @@ export async function expectedDeposits(db, pid, from, to) {
      GROUP BY entry_date, CASE WHEN method IN ('care_credit','financing') THEN 'financing' WHEN method = 'ach' THEN 'ach' ELSE 'card' END`, pid, from, to,
   );
   const NAMES = { card: 'Card payments', financing: 'CareCredit payments', ach: 'Bank (ACH) payments' };
-  for (const c of byDay) if (Number(c.amount) > 0) items.push({ key: `${c.kind}:${c.date}`, kind: c.kind, date: c.date, amount: Number(c.amount), label: `${NAMES[c.kind]} ${c.date} (${c.n})` });
+  for (const c of byDay) if (Number(c.amount) > 0) items.push({ key: `${c.kind}:${c.date}`, kind: c.kind, date: c.date, amount: Number(c.amount), label: `${NAMES[c.kind]} ${new Date(`${c.date}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })} (${c.n})` });
   const matched = new Set((await db.all('SELECT match_refs FROM bank_transactions WHERE practice_id = ? AND match_refs IS NOT NULL', pid)).flatMap((r) => JSON.parse(r.match_refs)));
   return items.filter((i) => !matched.has(i.key)).sort((a, b) => a.date.localeCompare(b.date) || a.key.localeCompare(b.key));
 }

@@ -11,11 +11,15 @@ import { requestReview } from '../reviewRequest.js';
 const PAGES = [
   ['Today / huddle', '/'], ['Schedule', '/schedule'], ['Patients', '/patients'], ['Messages', '/messages'], ['Follow-up lists', '/followups'], ['Recall list', '/followups?tab=recall'],
   ['Unscheduled treatment', '/followups?tab=unscheduled'], ['Campaigns', '/campaigns'], ['Online requests', '/requests'], ['Needs attention', '/attention'], ['Calls', '/calls'],
-  ['Billing & claims', '/claims'], ['Statements', '/claims?tab=statements'], ['Insurance follow-up', '/claims?tab=followup'], ['Import ERA', '/claims?tab=era'],
-  ['Insurance checks (EOB)', '/claims?tab=checks'], ['Eligibility', '/claims?tab=eligibility'], ['Pre-authorizations', '/claims?tab=preauths'], ['Deposits', '/claims?tab=deposits'],
+  ['Billing & claims', '/claims'], ['Claims ready to approve', '/claims?tab=approve'], ['Statements', '/claims?tab=statements'], ['Insurance follow-up', '/claims?tab=followup'], ['Import ERA', '/claims?tab=era'],
+  ['Insurance checks (EOB)', '/claims?tab=checks'], ['Eligibility', '/claims?tab=eligibility'], ['Pre-authorizations', '/claims?tab=preauths'], ['Deposits (Billing tab)', '/claims?tab=deposits'],
   ['Practice KPIs', '/reports'], ['X-ray AI review', '/xray-review'], ['Day sheet', '/reports?tab=ops'], ['Month-end close', '/reports?tab=close&type=month'], ['Credits & refunds', '/claims?tab=refunds'], ['To-do & labs', '/office'], ['Sent in online (intake review)', '/intake'], ['Supplies', '/office?tab=supplies'],
   ['Time clock', '/timeclock'], ['My bonus', '/bonus'], ['Billing autopilot', '/billing-autopilot'], ['Team bonus settings', '/settings?tab=bonus'], ['Recall autopilot', '/recall'], ['Chart audit', '/chart-audit'], ['Insurance autopilot', '/insurance-autopilot'], ['Scan a paper EOB', '/insurance-autopilot?tab=paper'], ['Insurance reconciliation', '/insurance-autopilot?tab=recon'], ['Referrals', '/referrals'], ['Metrics', '/metrics'], ['Production & income', '/reports?tab=production'], ['Clock in or out', '/timeclock'], ['Staff schedules', '/timeclock?tab=schedule'], ['Who’s in today', '/timeclock?tab=today'], ['Approve payroll hours', '/timeclock?tab=period'], ['Payroll export', '/timeclock?tab=export'], ['Time off requests', '/timeclock?tab=pto'], ['Deposits and cash', '/deposits'], ['Cash drawer', '/deposits?tab=drawers'], ['Finance', '/finance'], ['Settings', '/settings'], ['Help', '/help'],
   ['Reviews & patient feedback', '/reviews'], ['Team shout-outs', '/reviews?tab=shoutouts'],
+  // Every sidebar screen can be reached from here too.
+  ['Online reviews (Google)', '/reputation'], ['Phones', '/phones'], ['Treatment follow-up', '/recall?type=treatment'], ['Insurance verification', '/verification'],
+  ['Lab check-in', '/lab-checkin'], ['Checklists', '/checklists'], ['Documents', '/documents'], ['Intranet', '/intranet'], ['Capacity', '/capacity'],
+  ['Business', '/business'], ['Marketing results', '/marketing'], ['Ask your data', '/ask'], ['Group', '/group'],
 ];
 
 // Things to do for a patient; typing the verb first ("book jane", "note doe", "perio 555-0100") shows just that.
@@ -47,6 +51,9 @@ export default function CommandPalette() {
   const [res, setRes] = useState({ patients: [], claims: [] });
   const [idx, setIdx] = useState(0);
   const input = useRef(null);
+  // Where the pointer last was: rows only take the highlight when it really moves, not when the list
+  // grows under a resting pointer (that stole Enter from the first result).
+  const pointer = useRef(null);
 
   useEffect(() => {
     const onKey = (e) => {
@@ -68,6 +75,7 @@ export default function CommandPalette() {
   }, []);
   useEffect(() => {
     if (open) {
+      pointer.current = null;
       setQ('');
       setIdx(0);
     }
@@ -85,7 +93,10 @@ export default function CommandPalette() {
     const ql = q.toLowerCase().trim();
     const hit = (label) => !ql || label.toLowerCase().includes(ql);
     const patient = (p) => ({ key: `p${p.id}`, label: nameOf(p), sub: subOf(p), alert: p.medical_alerts, to: `/patients/${p.id}`, icon: '🧑', patient: p });
-    if (action) return res.patients.map((p) => ({ key: `a${p.id}`, label: `${action.label} ${nameOf(p)}`, sub: subOf(p), ...doOrGo(action, p), icon: action.icon, patient: p }));
+    const pages = (n) => PAGES.filter(([l]) => hit(l)).slice(0, n).map(([l, to]) => ({ key: `page:${l}`, label: l, sub: 'Go to page', to, icon: '→' }));
+    // "insurance verification", "chart audit", "x-ray AI review" start with an action word, so screens
+    // whose names match are offered after the patients.
+    if (action) return [...res.patients.map((p) => ({ key: `a${p.id}`, label: `${action.label} ${nameOf(p)}`, sub: subOf(p), ...doOrGo(action, p), icon: action.icon, patient: p })), ...pages(6)];
     const top = res.patients[0];
     const activeActions = active && !res.patients.length
       ? [
@@ -104,7 +115,8 @@ export default function CommandPalette() {
       ...screen,
       ...(!ql ? recent.filter((r) => r.id !== patientId).slice(0, 5).map((p) => ({ ...patient(p), key: `r${p.id}`, sub: `Recent · ${subOf(p)}` })) : []),
       ...QUICK.filter(([l]) => hit(l)).map(([l, to, icon]) => ({ key: to, label: l, sub: 'Action', to, icon })),
-      ...PAGES.filter(([l]) => hit(l)).slice(0, ql ? 6 : 10).map(([l, to]) => ({ key: to, label: l, sub: 'Go to page', to, icon: '→' })),
+      // Keyed by label: two entries can open the same screen ("Time clock", "Clock in or out").
+      ...pages(ql ? 6 : 10),
     ];
   }, [res, q, action, active, recent, patientId, can, clear]);
 
@@ -131,7 +143,7 @@ export default function CommandPalette() {
         />
         <div className="palette-list">
           {items.map((it, i) => (
-            <button key={it.key} className={`palette-item${i === idx ? ' active' : ''}`} onMouseEnter={() => setIdx(i)} onClick={() => go(it)}>
+            <button key={it.key} className={`palette-item${i === idx ? ' active' : ''}`} onMouseMove={(e) => { const at = `${e.clientX},${e.clientY}`; if (pointer.current && pointer.current !== at) setIdx(i); pointer.current = at; }} onClick={() => go(it)}>
               <span className="palette-icon">{it.icon}</span>
               <span style={{ flex: 1, minWidth: 0 }}>
                 <strong>{it.label}</strong> {it.alert && <span className="alert-chip" style={{ fontSize: 10, padding: '1px 6px' }}>⚠</span>}

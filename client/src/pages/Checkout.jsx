@@ -13,6 +13,7 @@ import '../components/patient/moneyflows.css';
 import { requestReview } from '../reviewRequest.js';
 import { fileClaim, toastFiled } from '../components/billClaim.js';
 import { useShortcut } from '../shortcuts.js';
+import { useMakeActive } from '../activePatient.jsx';
 
 const METHODS = ['credit_card', 'debit_card', 'cash', 'check', 'care_credit', 'ach', 'other'];
 
@@ -22,6 +23,9 @@ export default function Checkout() {
   const nav = useNavigate();
   const { can, practice } = useAuth();
   const { data: co, reload, error: loadErr } = useApi(`/appointments/${id}/checkout`);
+  // The patient being checked out becomes the active patient (the bar at the top follows them).
+  const a0 = co?.appointment;
+  useMakeActive(a0 ? { id: a0.patient_id, first_name: a0.first_name, last_name: a0.last_name } : null);
   const { data: connection } = useApi(can('billing:write') ? '/clearinghouse' : null);
   const [err, setErr] = useState(null);
   const [booking, setBooking] = useState(null);
@@ -65,7 +69,7 @@ export default function Checkout() {
   if (!co) return <div className="empty">Loading…</div>;
   const a = co.appointment;
   const planned = co.procedures.filter((p) => p.status === 'planned');
-  const est = Object.fromEntries((co.estimate.items || []).map((i) => [i.procedure_id, i]));
+  const est = Object.fromEntries((co.estimate?.items || []).map((i) => [i.procedure_id, i]));
   const recall = co.recalls.find((r) => ['due', 'contacted'].includes(r.status));
   const patient = { id: a.patient_id, first_name: a.first_name, last_name: a.last_name };
 
@@ -88,21 +92,23 @@ export default function Checkout() {
       <div className="checkout-steps">
         <section className="card">
           <h2><span className="step-num">1</span> Today&apos;s work</h2>
-          <table className="compact-table">
-            <thead><tr><th>Code</th><th>Procedure</th><th>Tooth</th><th>Status</th><th className="num">Fee</th><th className="num">Est. ins.</th><th className="num">Patient</th></tr></thead>
-            <tbody>
-              {co.procedures.map((p) => (
-                <tr key={p.id}>
-                  <td>{p.code}</td><td>{p.description}</td><td>{p.tooth ? `#${p.tooth}` : ''} {p.surfaces || ''}{p.area || ''}</td>
-                  <td><Badge value={p.status} />{p.claim_id ? <div className="muted" style={{ fontSize: 11 }}><Link to={`/claims/${p.claim_id}`}>claim #{p.claim_id}</Link></div> : null}</td>
-                  <td className="num">{money(p.fee)}</td>
-                  <td className="num">{est[p.id] ? money(est[p.id].insurance) : '—'}</td>
-                  <td className="num">{est[p.id] ? money(est[p.id].patient) : p.status === 'planned' ? '—' : money(p.fee)}</td>
-                </tr>
-              ))}
-              {!co.procedures.length && <tr><td colSpan={7} className="muted">No procedures on this visit.</td></tr>}
-            </tbody>
-          </table>
+          <div className="table-wrap">
+            <table className="compact-table">
+              <thead><tr><th>Code</th><th>Procedure</th><th>Tooth</th><th>Status</th><th className="num">Fee</th><th className="num">Est. ins.</th><th className="num">Patient</th></tr></thead>
+              <tbody>
+                {co.procedures.map((p) => (
+                  <tr key={p.id}>
+                    <td>{p.code}</td><td>{p.description}</td><td>{p.tooth ? `#${p.tooth}` : ''} {p.surfaces || ''}{p.area || ''}</td>
+                    <td><Badge value={p.status} />{p.claim_id ? <div className="muted" style={{ fontSize: 11 }}><Link to={`/claims/${p.claim_id}`}>claim #{p.claim_id}</Link></div> : null}</td>
+                    <td className="num">{money(p.fee)}</td>
+                    <td className="num">{est[p.id] ? money(est[p.id].insurance) : '—'}</td>
+                    <td className="num">{est[p.id] ? money(est[p.id].patient) : p.status === 'planned' ? '—' : money(p.fee)}</td>
+                  </tr>
+                ))}
+                {!co.procedures.length && <tr><td colSpan={7} className="muted">No procedures on this visit.</td></tr>}
+              </tbody>
+            </table>
+          </div>
           <div className="form-actions" style={{ justifyContent: 'flex-start' }}>
             {planned.length > 0 && can('clinical:write') && (
               <button className="primary" onClick={() => act(() => api.post(`/appointments/${a.id}/checkout`, { complete_procedures: true, finish: false }), `Completed ${planned.length} procedure${planned.length > 1 ? 's' : ''}; charges posted.`)}>
@@ -119,12 +125,15 @@ export default function Checkout() {
 
         <section className="card">
           <h2><span className="step-num">2</span> Collect</h2>
-          <div className="checkout-money">
-            <div><span>Account balance</span><strong className={co.balance > 0 ? 'text-danger' : ''}>{money(co.balance)}</strong></div>
-            <div><span>Today&apos;s estimated patient portion</span><strong>{money(co.estimate.total_patient)}</strong></div>
-            <div><span>Paid today</span><strong>{money(co.paid_today)}</strong></div>
-            <div><span>Suggested now</span><strong>{money(co.suggested_payment)}</strong></div>
-          </div>
+          {/* Without billing access the server leaves the money out (estimate is null), so there is nothing to show. */}
+          {co.estimate && (
+            <div className="checkout-money">
+              <div><span>Account balance</span><strong className={co.balance > 0 ? 'text-danger' : ''}>{money(co.balance)}</strong></div>
+              <div><span>Today&apos;s estimated patient portion</span><strong>{money(co.estimate.total_patient)}</strong></div>
+              <div><span>Paid today</span><strong>{money(co.paid_today)}</strong></div>
+              <div><span>Suggested now</span><strong>{money(co.suggested_payment)}</strong></div>
+            </div>
+          )}
           {can('billing:write') ? <CollectForm key={co.suggested_payment} patient={patient} patientId={a.patient_id} suggested={co.suggested_payment} onDone={(amt) => { setNote(`Payment of ${money(amt)} posted.`); reload(); }} /> : <p className="muted">Ask billing to take the payment.</p>}
         </section>
 

@@ -7,6 +7,7 @@
 // a row from one practice can never pick up a patient from another.
 import { HttpError, can } from './auth.js';
 import { toolByName } from './datatools.js';
+import { computeMetrics } from './metrics.js';
 import { agingReport } from './aging.js';
 import { practiceNow, isRealDate } from './util.js';
 
@@ -297,6 +298,8 @@ export async function groupReport(db, practices, { from, to }) {
   for (const p of practices) {
     const today = (await practiceNow(db, p.id)).slice(0, 10);
     const n = await numbers.run(db, p.id, { from, to });
+    // New patients as Metrics counts them (first completed visit), so every screen shows the same number.
+    n.new_patients = (await computeMetrics(db, p.id, { from: n.from, to: n.to, today, keys: ['new_patients'] })).values.new_patients ?? n.new_patients;
     const ar = (await agingReport(db, p.id, to < today ? to : today)).totals;
     const hyg = await hygieneReappointment(db, p.id, from, to);
     rows.push({

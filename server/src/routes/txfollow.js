@@ -379,7 +379,7 @@ export function txFollowPublicRoutes({ db, config = {}, secret, storage = null }
       got = await resolve(req.params.token);
     } catch (err) {
       if (!(err instanceof HttpError)) throw err;
-      return res.status(err.status).type('html').send(page({ name: 'Your dental office' }, err.status === 410 ? 'This link has expired' : 'This link isn’t valid', `<p>${esc(err.message)}</p>`));
+      return res.status(err.status).type('html').send(page({ name: 'Your dental office' }, err.status === 410 ? 'This link has expired' : 'This link isn’t valid', err.status === 410 ? `<p>${esc(err.message)}</p>` : '<p>Please call your dental office and we’ll help you from there.</p>'));
     }
     const { plan, letter, link } = got;
     if (!plan) return res.status(404).type('html').send(page({ name: 'Your dental office' }, 'This link isn’t valid', '<p>Please call the office.</p>'));

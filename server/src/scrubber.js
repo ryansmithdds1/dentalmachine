@@ -19,16 +19,24 @@ const days = (a, b) => Math.round((Date.parse(b) - Date.parse(a)) / 86400_000);
 export async function scrubClaim(db, claimId) {
   const claim = await db.get('SELECT * FROM claims WHERE id = ?', claimId);
   const policy = await db.get('SELECT * FROM patient_insurance WHERE id = ?', claim.patient_insurance_id);
-  const carrier = await db.get('SELECT * FROM insurance_carriers WHERE id = ?', policy.carrier_id);
   const items = await db.all(
     `SELECT ci.id AS item_id, pr.*, pc.requires_tooth, pc.requires_surface FROM claim_items ci JOIN procedures pr ON pr.id = ci.procedure_id
      LEFT JOIN procedure_codes pc ON pc.id = pr.code_id WHERE ci.claim_id = ? ORDER BY pr.id`, claim.id,
   );
   const attachments = await db.all("SELECT report_type, narrative FROM claim_attachments WHERE claim_id = ? AND status != 'rejected' AND removed_at IS NULL", claim.id);
-  const hasNarrative = attachments.some((a) => a.narrative || a.report_type === 'OZ') || !!claim.remarks;
+  return scrubWork(db, { practiceId: claim.practice_id, policy, items, attachments, remarks: claim.remarks, claimId: claim.id });
+}
+
+// The same checks for work that isn't on a claim yet (Billing → Ready to approve, claimprep.js): items are
+// procedures rows with requires_tooth / requires_surface; attachments are what's been picked for them so far.
+export async function scrubWork(db, { practiceId, policy, items, attachments = [], remarks = null, claimId = null }) {
+  const claim = { id: claimId ?? 0, practice_id: practiceId, patient_insurance_id: policy.id };
+  const carrier = await db.get('SELECT * FROM insurance_carriers WHERE id = ?', policy.carrier_id);
+  const hasNarrative = attachments.some((a) => a.narrative || a.report_type === 'OZ') || !!remarks;
   const today = (await practiceNow(db, claim.practice_id)).slice(0, 10);
   const out = [];
-  const add = (level, item, message) => out.push({ level, procedure_id: item?.id ?? null, code: item?.code ?? null, tooth: item?.tooth ?? null, message });
+  // fix: 'narrative' when a narrative (or a note on the claim) clears it.
+  const add = (level, item, message, fix = null) => out.push({ level, procedure_id: item?.id ?? null, code: item?.code ?? null, tooth: item?.tooth ?? null, message, ...(fix ? { fix } : {}) });
 
   // The payer's rules, as the estimate sees them (only the procedures on this claim, as of their dates).
   if (policy.priority === 'primary') {
@@ -47,14 +55,14 @@ export async function scrubClaim(db, claimId) {
     else if (dos && days(dos, today) > limit - 30) add('warn', i, `Only ${limit - days(dos, today)} days left to file (${limit}-day limit)`);
     if (i.requires_tooth && !i.tooth) add('deny', i, 'Tooth number is missing');
     if (i.requires_surface && !i.surfaces) add('deny', i, 'Surfaces are missing');
-    for (const [re, why] of NARRATIVE) if (re.test(i.code) && !hasNarrative) add('warn', i, why);
+    for (const [re, why] of NARRATIVE) if (re.test(i.code) && !hasNarrative) add('warn', i, why, 'narrative');
     // A replacement within five years is usually denied without the reason.
     if (REPLACEMENT.test(i.code) && i.tooth) {
       const prior = await db.get(
         "SELECT completed_at FROM procedures WHERE patient_id = ? AND tooth = ? AND status = 'completed' AND id != ? AND code LIKE ? AND completed_at >= ? ORDER BY completed_at DESC LIMIT 1",
         i.patient_id, i.tooth, i.id, `${i.code.slice(0, 3)}%`, new Date(Date.parse(today) - 5 * 365 * 86400_000).toISOString().slice(0, 10),
       );
-      if (prior && !hasNarrative) add('warn', i, `Replaces work on #${i.tooth} from ${prior.completed_at.slice(0, 10)} — payers usually need the reason (fracture, decay) and date of the original`);
+      if (prior && !hasNarrative) add('warn', i, `Replaces work on #${i.tooth} from ${prior.completed_at.slice(0, 10)} — payers usually need the reason (fracture, decay) and date of the original`, 'narrative');
     }
     // The same service already billed on another live claim.
     const dup = await db.get(

@@ -13,6 +13,7 @@
 .rf-item.rf-current, .rf-item.rf-scheduled { border-left-color: var(--ok); }
 .rf-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .rf-name { min-width: 84px; }
+.rf-line .badge { text-transform: none; }
 .rf-due { font-size: 13px; color: var(--text-2); font-variant-numeric: tabular-nums; }
 .rf-sub { font-size: 12px; line-height: 1.45; margin-top: 2px; }
 .rf-ins-warn { color: var(--warn); font-weight: 600; }
@@ -40,3 +41,5 @@
   .rf-name { min-width: 0; }
   .rf-filters input { max-width: none !important; }
 }
+/* On the chart overview the reminder autopilot sits right under the recall panel: give it room. */
+.rf-panel + .rcs { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }

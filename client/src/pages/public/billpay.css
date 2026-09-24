@@ -36,6 +36,7 @@
 .bp-choice input[type='radio'] { width: 18px; height: 18px; margin: 0; }
 .bp-other { flex: 1 1 120px; max-width: 160px; font-size: 16px; }
 .bp-check { flex-direction: row; align-items: center; gap: 8px; font-size: 14px; color: var(--text); min-height: 36px; }
+.bp-check input[type='checkbox'] { width: 18px; height: 18px; margin: 0; flex: none; }
 .bp-test { font-size: 13px; }
 .bp-test input { font-size: 16px; letter-spacing: 0.04em; }
 .bp-actions { display: flex; flex-direction: column; align-items: center; gap: 8px; }

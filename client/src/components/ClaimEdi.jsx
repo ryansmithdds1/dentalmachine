@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, getToken } from '../api.js';
 import { useApi } from '../hooks.js';
-import { fmtDate, fmtUtcDate, fmtUtcDateTime } from '../format.js';
+import { fmtDate, fmtUtcDate, fmtUtcDateTime, todayLocal, shiftDate } from '../format.js';
 import { useAuth } from '../auth.jsx';
 import { ErrorBox, useSubmit } from './ui.jsx';
 
@@ -157,7 +157,7 @@ export const CALL_OUTCOMES = {
 
 // A call to the payer about the claim, with when to follow up next.
 export function CallForm({ claim, onDone, onCancel }) {
-  const inDays = (n) => new Date(Date.now() + n * 86400_000).toISOString().slice(0, 10);
+  const inDays = (n) => shiftDate(todayLocal(), n);
   const [form, setForm] = useState({ outcome: 'in_process', contact: '', reference: '', note: '', follow_up_date: inDays(14) });
   const { submit, busy, error } = useSubmit(async () => { await api.post(`/claims/${claim.id}/calls`, form); onDone(); });
   return (

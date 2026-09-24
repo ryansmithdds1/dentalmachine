@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../../api.js';
 import { useApi } from '../../hooks.js';
 import { useAuth } from '../../auth.jsx';
-import { money, fmtDate } from '../../format.js';
+import { money, fmtDate, todayLocal } from '../../format.js';
 import { toast } from '../../toast.js';
 import { ErrorBox, useSubmit } from '../ui.jsx';
 
@@ -12,7 +12,7 @@ import { ErrorBox, useSubmit } from '../ui.jsx';
 // only accepts the set-up with the fingerprint of what was shown.
 // Props: patientId, kind? ('payment_plan' | 'recurring' | 'membership' | 'ortho_case'), sourceId?, total? (cents), onDone, onClose.
 const KINDS = [['payment_plan', 'Payment plan'], ['recurring', 'Recurring charge'], ['membership', 'Membership autopay'], ['ortho_case', 'Ortho autopay']];
-const today = () => new Date().toISOString().slice(0, 10);
+const today = todayLocal; // the office's calendar day, not UTC's
 
 export default function SetUpPayments({ patientId, kind: initialKind = 'payment_plan', sourceId = null, total = null, onDone, onClose }) {
   const { can } = useAuth();
@@ -71,8 +71,8 @@ export default function SetUpPayments({ patientId, kind: initialKind = 'payment_
         </label>
         <fieldset>
           <legend>The patient agrees</legend>
-          <label className="row"><input type="radio" checked={f.how === 'screen'} onChange={() => setF((x) => ({ ...x, how: 'screen' }))} /> Here, on this screen</label>
-          <label className="row"><input type="radio" checked={f.how === 'link'} onChange={() => setF((x) => ({ ...x, how: 'link' }))} /> By a text or email link</label>
+          <label className="checkbox"><input type="radio" checked={f.how === 'screen'} onChange={() => setF((x) => ({ ...x, how: 'screen' }))} /> Here, on this screen</label>
+          <label className="checkbox"><input type="radio" checked={f.how === 'link'} onChange={() => setF((x) => ({ ...x, how: 'link' }))} /> By a text or email link</label>
         </fieldset>
         {!preview && <div className="drawer-actions"><button className="primary" type="submit" disabled={look.busy}>Show the terms</button></div>}
         {preview && (

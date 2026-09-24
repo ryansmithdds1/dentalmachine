@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { ShieldAlert } from 'lucide-react';
 import { useApi } from '../../hooks.js';
-import { money, fmtDate, shiftDate, practiceToday } from '../../format.js';
+import { money, fmtDate, fmtUtcDate, shiftDate, practiceToday } from '../../format.js';
 import { useAuth } from '../../auth.jsx';
 import { ErrorBox } from '../ui.jsx';
 
@@ -78,7 +78,7 @@ export default function CashIntegrity() {
             <table className="dep-table">
               <thead><tr><th>Date</th><th>What</th><th>Patient</th><th>Taken by</th><th>Done by</th><th>Manager OK</th><th className="num">Amount</th></tr></thead>
               <tbody>
-                {r.cash_voids.map((v) => <tr key={`v${v.id}`}><td>{fmtDate(v.voided_at.slice(0, 10))}</td><td>Void{v.reason ? `: ${v.reason}` : ''}</td><td>{v.patient}</td><td>{v.taken_by}</td><td>{v.voided_by}{v.same_person && <span className="dep-chip warn" style={{ marginLeft: 6 }}>same person</span>}</td><td>{v.approved_by || <span className="dep-short">no</span>}</td><td className="num">{money(v.amount)}</td></tr>)}
+                {r.cash_voids.map((v) => <tr key={`v${v.id}`}><td>{fmtUtcDate(v.voided_at, practice?.timezone)}</td><td>Void{v.reason ? `: ${v.reason}` : ''}</td><td>{v.patient}</td><td>{v.taken_by}</td><td>{v.voided_by}{v.same_person && <span className="dep-chip warn" style={{ marginLeft: 6 }}>same person</span>}</td><td>{v.approved_by || <span className="dep-short">no</span>}</td><td className="num">{money(v.amount)}</td></tr>)}
                 {r.cash_refunds.map((f) => <tr key={`r${f.id}`}><td>{fmtDate(f.entry_date)}</td><td>Refund in cash</td><td>{f.patient}</td><td>—</td><td>{f.by}</td><td>{f.approved_by || <span className="dep-short">no</span>}</td><td className="num">{money(f.amount)}</td></tr>)}
                 {!r.cash_voids.length && !r.cash_refunds.length && <tr><td colSpan={7} className="muted">None.</td></tr>}
               </tbody>

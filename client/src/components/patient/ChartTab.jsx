@@ -141,48 +141,51 @@ export default function ChartTab({ patient, onChange }) {
           {tooth && <button className="small" onClick={() => setTooth(null)}>Show all teeth</button>}
         </div>
         <ErrorBox error={err} />
-        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 380px), 1fr))' }}>
-          <div>
+        {/* Side by side only when the procedures table has room; each table scrolls inside its column on a phone. */}
+        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 520px), 1fr))' }}>
+          <div style={{ minWidth: 0 }}>
             <h3>Conditions</h3>
-            <table>
-              <tbody>
-                {conditions.map((c) => (
-                  <tr key={c.id} style={{ opacity: c.resolved ? 0.5 : 1 }}>
-                    <td>#{c.tooth} {c.surfaces}</td>
-                    <td>
-                      <span className="badge" style={{ background: `${CONDITION_COLORS[c.condition]}22`, color: CONDITION_COLORS[c.condition] }}>{label(c.condition)}</span>
-                      {noteFor === c.id
-                        ? (
-                          <form className="inline" style={{ gap: 4, marginTop: 4 }} onSubmit={(e) => { e.preventDefault(); const notes = e.currentTarget.notes.value; setNoteFor(null); act(() => api.put(`/conditions/${c.id}`, { notes })); }}>
-                            <input name="notes" defaultValue={c.notes || ''} autoFocus aria-label={`Note for ${label(c.condition)} on #${c.tooth}`} onKeyDown={(e) => e.key === 'Escape' && setNoteFor(null)} style={{ fontSize: 12, padding: '3px 6px' }} />
-                            <button className="small">Save</button>
-                          </form>
-                        )
-                        : c.notes && <div className="muted" style={{ fontSize: 12 }}>{c.notes}</div>}
-                    </td>
-                    <td className="muted">{fmtDate(c.recorded_at)}{c.resolved ? ` · resolved ${fmtDate(c.resolved_at)}` : ''}</td>
-                    <td>
-                      {write && (
-                        <div className="row-actions">
-                          <button className="small" onClick={() => setNoteFor(c.id)}>Note</button>
-                          {c.resolved
-                            ? <button className="small" onClick={() => act(() => api.put(`/conditions/${c.id}`, { resolved: false }))}>Reopen</button>
-                            : <button className="small" onClick={() => act(() => api.put(`/conditions/${c.id}`, { resolved: true }))}>Resolve</button>}
-                          <button className="small" title="Charted in error: take it off the chart (kept on record)" onClick={() => undoable(
-                            `Removed ${label(c.condition)} on #${c.tooth}`,
-                            async () => { await api.post(`/conditions/${c.id}/void`, { reason: 'Charted in error' }); refresh(); },
-                            async () => { await api.post(`/patients/${patient.id}/conditions`, { tooth: c.tooth, surfaces: c.surfaces, condition: c.condition, notes: c.notes }); refresh(); },
-                          ).catch(() => { /* shown as a toast */ })}>Remove</button>
-                        </div>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div className="table-wrap">
+              <table>
+                <tbody>
+                  {conditions.map((c) => (
+                    <tr key={c.id} style={{ opacity: c.resolved ? 0.5 : 1 }}>
+                      <td>#{c.tooth} {c.surfaces}</td>
+                      <td>
+                        <span className="badge" style={{ background: `${CONDITION_COLORS[c.condition]}22`, color: CONDITION_COLORS[c.condition] }}>{label(c.condition)}</span>
+                        {noteFor === c.id
+                          ? (
+                            <form className="inline" style={{ gap: 4, marginTop: 4 }} onSubmit={(e) => { e.preventDefault(); const notes = e.currentTarget.notes.value; setNoteFor(null); act(() => api.put(`/conditions/${c.id}`, { notes })); }}>
+                              <input name="notes" defaultValue={c.notes || ''} autoFocus aria-label={`Note for ${label(c.condition)} on #${c.tooth}`} onKeyDown={(e) => e.key === 'Escape' && setNoteFor(null)} style={{ fontSize: 12, padding: '3px 6px' }} />
+                              <button className="small">Save</button>
+                            </form>
+                          )
+                          : c.notes && <div className="muted" style={{ fontSize: 12 }}>{c.notes}</div>}
+                      </td>
+                      <td className="muted">{fmtDate(c.recorded_at)}{c.resolved ? ` · resolved ${fmtDate(c.resolved_at)}` : ''}</td>
+                      <td>
+                        {write && (
+                          <div className="row-actions">
+                            <button className="small" onClick={() => setNoteFor(c.id)}>Note</button>
+                            {c.resolved
+                              ? <button className="small" onClick={() => act(() => api.put(`/conditions/${c.id}`, { resolved: false }))}>Reopen</button>
+                              : <button className="small" onClick={() => act(() => api.put(`/conditions/${c.id}`, { resolved: true }))}>Resolve</button>}
+                            <button className="small" title="Charted in error: take it off the chart (kept on record)" onClick={() => undoable(
+                              `Removed ${label(c.condition)} on #${c.tooth}`,
+                              async () => { await api.post(`/conditions/${c.id}/void`, { reason: 'Charted in error' }); refresh(); },
+                              async () => { await api.post(`/patients/${patient.id}/conditions`, { tooth: c.tooth, surfaces: c.surfaces, condition: c.condition, notes: c.notes }); refresh(); },
+                            ).catch(() => { /* shown as a toast */ })}>Remove</button>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
             {!conditions.length && <div className="muted">None recorded.</div>}
           </div>
-          <div>
+          <div style={{ minWidth: 0 }}>
             <h3>Procedures</h3>
             {write && (
               <CompleteWork
@@ -197,66 +200,68 @@ export default function ChartTab({ patient, onChange }) {
                 <button className="small" onClick={() => setModal(null)}>Dismiss</button>
               </div>
             )}
-            <table>
-              <tbody>
-                {procs.map((p) => (
-                  <tr key={p.id}>
-                    <td>
-                      {write && p.status === 'planned' && (
-                        <input
-                          type="checkbox" className="proc-check" aria-label={`Select ${p.code}${p.tooth ? ` #${p.tooth}` : ''} to complete`} checked={picked.has(p.id)}
-                          onChange={() => setPicked((s) => { const n = new Set(s); if (n.has(p.id)) n.delete(p.id); else n.add(p.id); return n; })}
-                        />
-                      )}
-                    </td>
-                    <td>{p.code}{todays.visit && p.status === 'planned' && p.appointment_id === todays.visit.id ? <div className="muted" style={{ fontSize: 11 }}>today</div> : null}</td>
-                    <td>
-                      {p.description}
-                      <div className="muted">
-                        {p.tooth ? `#${p.tooth} ` : ''}{p.surfaces || ''}{p.area ? QUADRANT_LABELS[p.area] : ''} {p.provider_name ? `· ${p.provider_name.replace(/,.*$/, '')}` : ''}
-                        {p.plan_name ? ` · ${p.plan_name}${p.plan_option ? ` (${p.plan_option})` : ''}` : ''}
-                      </div>
-                    </td>
-                    <td><Badge value={p.status} /></td>
-                    <td className="num">{money(p.fee)}<div className="muted" style={{ fontSize: 11 }}>{fmtDate(p.completed_at || p.created_at)}</div></td>
-                    <td>
-                      {write && (
-                        <div className="row-actions">
-                          {p.status === 'planned' && (
-                            <>
-                              <button className="small primary" onClick={() => complete(p)}>Complete</button>
-                              <button className="small" onClick={() => setModal({ kind: 'edit', proc: p })}>Edit</button>
-                              {!p.treatment_plan_id && openPlans.length > 0 && (
-                                <select className="small" value="" aria-label="Add to plan" style={{ width: 'auto' }} onChange={(e) => e.target.value && act(() => api.post(`/treatment-plans/${e.target.value}/procedures`, { procedure_ids: [p.id] }))}>
-                                  <option value="">Add to plan…</option>
-                                  {openPlans.map((tp) => <option key={tp.id} value={tp.id}>{tp.name}{tp.option_label ? ` (${tp.option_label})` : ''}</option>)}
-                                </select>
-                              )}
-                              <button className="small danger" onClick={() => undoable(
-                                `Removed ${p.code}${p.tooth ? ` #${p.tooth}` : ''} from the chart`,
-                                async () => { await api.post(`/procedures/${p.id}/cancel`); refresh(); },
-                                async () => { await api.post(`/procedures/${p.id}/restore`); refresh(); },
-                              ).catch(() => { /* shown as a toast */ })}>Remove</button>
-                            </>
-                          )}
-                          {p.status === 'completed' && (
-                            <>
-                              <button className="small" onClick={() => setModal({ kind: 'note', ids: [p.id], provider: p.provider_id })}>Note</button>
-                              {can('billing:write') && undoFor !== p.id && (
-                                <button className="small" title="Charted in error? Reverses the charge and puts it back to planned" onClick={() => setUndoFor(p.id)}>Undo</button>
-                              )}
-                            </>
-                          )}
+            <div className="table-wrap">
+              <table>
+                <tbody>
+                  {procs.map((p) => (
+                    <tr key={p.id}>
+                      <td>
+                        {write && p.status === 'planned' && (
+                          <input
+                            type="checkbox" className="proc-check" aria-label={`Select ${p.code}${p.tooth ? ` #${p.tooth}` : ''} to complete`} checked={picked.has(p.id)}
+                            onChange={() => setPicked((s) => { const n = new Set(s); if (n.has(p.id)) n.delete(p.id); else n.add(p.id); return n; })}
+                          />
+                        )}
+                      </td>
+                      <td>{p.code}{todays.visit && p.status === 'planned' && p.appointment_id === todays.visit.id ? <div className="muted" style={{ fontSize: 11 }}>today</div> : null}</td>
+                      <td>
+                        {p.description}
+                        <div className="muted">
+                          {p.tooth ? `#${p.tooth} ` : ''}{p.surfaces || ''}{p.area ? QUADRANT_LABELS[p.area] : ''} {p.provider_name ? `· ${p.provider_name.replace(/,.*$/, '')}` : ''}
+                          {p.plan_name ? ` · ${p.plan_name}${p.plan_option ? ` (${p.plan_option})` : ''}` : ''}
                         </div>
-                      )}
-                      {write && undoFor === p.id && (
-                        <UncompleteForm proc={p} onCancel={() => setUndoFor(null)} onDone={() => { setUndoFor(null); refresh(); }} />
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                      </td>
+                      <td><Badge value={p.status} /></td>
+                      <td className="num">{money(p.fee)}<div className="muted" style={{ fontSize: 11 }}>{fmtDate(p.completed_at || p.created_at)}</div></td>
+                      <td>
+                        {write && (
+                          <div className="row-actions">
+                            {p.status === 'planned' && (
+                              <>
+                                <button className="small primary" onClick={() => complete(p)}>Complete</button>
+                                <button className="small" onClick={() => setModal({ kind: 'edit', proc: p })}>Edit</button>
+                                {!p.treatment_plan_id && openPlans.length > 0 && (
+                                  <select className="small" value="" aria-label="Add to plan" style={{ width: 'auto' }} onChange={(e) => e.target.value && act(() => api.post(`/treatment-plans/${e.target.value}/procedures`, { procedure_ids: [p.id] }))}>
+                                    <option value="">Add to plan…</option>
+                                    {openPlans.map((tp) => <option key={tp.id} value={tp.id}>{tp.name}{tp.option_label ? ` (${tp.option_label})` : ''}</option>)}
+                                  </select>
+                                )}
+                                <button className="small danger" onClick={() => undoable(
+                                  `Removed ${p.code}${p.tooth ? ` #${p.tooth}` : ''} from the chart`,
+                                  async () => { await api.post(`/procedures/${p.id}/cancel`); refresh(); },
+                                  async () => { await api.post(`/procedures/${p.id}/restore`); refresh(); },
+                                ).catch(() => { /* shown as a toast */ })}>Remove</button>
+                              </>
+                            )}
+                            {p.status === 'completed' && (
+                              <>
+                                <button className="small" onClick={() => setModal({ kind: 'note', ids: [p.id], provider: p.provider_id })}>Note</button>
+                                {can('billing:write') && undoFor !== p.id && (
+                                  <button className="small" title="Charted in error? Reverses the charge and puts it back to planned" onClick={() => setUndoFor(p.id)}>Undo</button>
+                                )}
+                              </>
+                            )}
+                          </div>
+                        )}
+                        {write && undoFor === p.id && (
+                          <UncompleteForm proc={p} onCancel={() => setUndoFor(null)} onDone={() => { setUndoFor(null); refresh(); }} />
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
             {!procs.length && <div className="muted">None recorded.</div>}
           </div>
         </div>
@@ -300,7 +305,7 @@ function SupernumeraryPicker({ onPick }) {
   const ok = /^(5[1-9]|[67]\d|8[0-2]|[A-T]S)$/i.test(v.trim());
   return (
     <form className="inline" onSubmit={(e) => { e.preventDefault(); if (ok) { onPick(v.trim().toUpperCase()); setV(''); } }} style={{ gap: 4 }}>
-      <input value={v} onChange={(e) => setV(e.target.value)} placeholder="Supernumerary #" title="51-82 beside a permanent tooth (51 = beside #1), AS-TS beside a primary tooth" style={{ width: 130 }} />
+      <input value={v} onChange={(e) => setV(e.target.value)} placeholder="Supernumerary #" title="51-82 beside a permanent tooth (51 = beside #1), AS-TS beside a primary tooth" style={{ width: 150 }} />
       <button className="small" disabled={!ok}>Select</button>
     </form>
   );

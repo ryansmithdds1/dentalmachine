@@ -67,7 +67,9 @@ export function BusinessOverlay({ biz, columns }) {
         if (!v) { el.classList.remove('biz'); el.removeAttribute('data-biz'); continue; }
         if (!el.classList.contains('biz')) el.classList.add('biz');
         if (!el.classList.contains(band)) el.classList.add(band);
-        const label = v.value == null ? '' : $h(v.value);
+        // Too short for a second tag (a 30-minute visit at a small zoom): the $/h would sit on the name line and
+        // cover its badges (Late, $?). The hover title still has the full breakdown.
+        const label = v.value == null || el.offsetHeight < 34 ? '' : $h(v.value);
         if (el.getAttribute('data-biz') !== label) el.setAttribute('data-biz', label);
         const title = visitBreakdown(v, basis);
         if (el.getAttribute('title') !== title) el.setAttribute('title', title);
@@ -86,7 +88,7 @@ export function BusinessOverlay({ biz, columns }) {
     };
     paint();
     const obs = new MutationObserver(() => paint());
-    obs.observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ['class'] });
+    obs.observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'style'] }); // style: a zoom change resizes the cards
     return () => {
       obs.disconnect();
       for (const el of root.querySelectorAll('.cal-appt.biz, .cal-col-head[data-biz]')) {

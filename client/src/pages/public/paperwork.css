@@ -22,7 +22,9 @@
 }
 .pw-field input:focus, .pw-field textarea:focus, .pw-initials input:focus { outline: none; border-color: var(--primary); box-shadow: var(--ring); }
 .pw-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
-.pw-check { display: flex; gap: 14px; align-items: flex-start; padding: 14px 16px; border-radius: 14px; border: 1.5px solid var(--border-strong); cursor: pointer; min-height: 56px; }
+/* Labels are small, muted and stacked app-wide; here they read at the page's patient-sized text. */
+.pw-field, .pw-check { font-size: inherit; font-weight: 400; color: var(--text); }
+.pw-check { display: flex; flex-direction: row; gap: 14px; align-items: flex-start; padding: 14px 16px; border-radius: 14px; border: 1.5px solid var(--border-strong); cursor: pointer; min-height: 56px; }
 .pw-check.on { border-color: var(--primary); background: var(--primary-soft); }
 .pw-check input { width: 28px; height: 28px; margin: 0; flex: none; accent-color: var(--primary); }
 .pw-initials { display: flex; gap: 14px; align-items: center; }

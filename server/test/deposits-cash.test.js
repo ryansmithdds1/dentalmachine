@@ -26,7 +26,7 @@ let origin;
 let server;
 const dir = mkdtempSync(join(tmpdir(), 'dm-deposits-'));
 before(async () => {
-  for (let i = 0; !h.db && i < 1500; i++) await new Promise((r) => setTimeout(r, 20));
+  for (let i = 0; !h.db && i < 3000; i++) await new Promise((r) => setTimeout(r, 20));
   const app = express();
   app.use(actorMiddleware(h.db, flushChanges));
   app.use(express.json());

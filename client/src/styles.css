@@ -76,6 +76,15 @@ kbd { font: 500 11px/1 inherit; border: 1px solid currentColor; border-radius: 4
 .rail-item .rail-label { flex-direction: row; align-items: center; gap: 6px; }
 /* Collapsed: the label appears as a tooltip beside the icon */
 .app:not(.rail-open) .rail-item[data-tip]:hover::after { content: attr(data-tip); position: absolute; left: calc(100% + 12px); top: 50%; transform: translateY(-50%); background: #0c1524; color: #fff; font-size: 12.5px; font-weight: 500; padding: 6px 10px; border-radius: 8px; white-space: nowrap; box-shadow: var(--shadow-lg); pointer-events: none; z-index: 50; }
+/* The page list scrolls when it's taller than the window, so the menu under your initials stays on screen.
+   Its labels come from RailTip (App.jsx) because the scroll box would clip the tooltip above. */
+@media (min-width: 801px) {
+  .rail-nav { min-height: 0; overflow-y: auto; overflow-x: hidden; margin: 0 -8px; padding: 0 0 0 8px; scrollbar-width: thin; scrollbar-color: transparent transparent; }
+  .rail-nav:hover { scrollbar-color: rgba(255, 255, 255, 0.2) transparent; }
+  .rail-nav > .rail-item { flex: none; }
+  .app:not(.rail-open) .rail-nav .rail-item[data-tip]:hover::after { display: none; }
+}
+.rail-tip { position: fixed; transform: translateY(-50%); background: #0c1524; color: #fff; font-size: 12.5px; font-weight: 500; padding: 6px 10px; border-radius: 8px; white-space: nowrap; box-shadow: var(--shadow-lg); pointer-events: none; z-index: 100; }
 .nav-badge { background: #ef4444; color: #fff; border-radius: 999px; font-size: 10.5px; font-weight: 700; padding: 1px 6px; margin-left: auto; line-height: 1.4; }
 .app:not(.rail-open) .nav-badge { position: absolute; top: 4px; right: 4px; padding: 0 5px; font-size: 10px; box-shadow: 0 0 0 2px var(--sidebar); }
 .rail-foot { border-top: 1px solid rgba(255, 255, 255, 0.08); padding-top: 8px; display: flex; flex-direction: column; gap: 2px; }
@@ -218,7 +227,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .fav-codes button { font-size: 12px; padding: 2px 8px; }
 .row-actions { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
 /* Dictating into a note */
-.dictate-bar { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; padding: 6px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2, #f8fafc); }
+.dictate-bar { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; padding: 6px; border: 1px solid var(--border); border-radius: 10px; background: var(--subtle); }
 .dictate-bar.live { border-color: var(--danger); box-shadow: 0 0 0 3px rgba(194, 65, 12, 0.12); }
 .dictate-btn { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; background: var(--primary); border-color: var(--primary); color: #fff; white-space: nowrap; }
 .dictate-btn:hover { background: var(--primary-hover); }
@@ -261,6 +270,15 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .public-footer { text-align: center; color: var(--muted); font-size: 12px; padding: 16px; }
 .public-notice { background: var(--info-soft); color: #1e3a8a; padding: 14px 16px; border-radius: 10px; line-height: 1.5; word-break: break-word; }
 .public-notice.ok { background: var(--ok-soft); color: #14532d; }
+/* Buttons are nowrap by default; on a phone a long link-style button ("No statement handy? …") must wrap, not scroll the page. */
+.public-page button.link { white-space: normal; text-align: left; }
+/* A checkbox with its words beside it (labels stack by default, and inputs are full width). */
+.public-check { flex-direction: row; align-items: center; gap: 10px; font-size: 15px; font-weight: 500; color: var(--text); min-height: 44px; }
+.public-check input[type='checkbox'] { width: 20px; height: 20px; margin: 0; flex: none; }
+.public-form { display: flex; flex-direction: column; gap: 12px; }
+/* Fields inside a label would inherit its small bold caption; patients type at 16px (which also stops phones zooming
+   in on focus). :where keeps this weaker than any page's own field styles. */
+:where(.public-page) label :is(input, select, textarea) { font-size: 16px; font-weight: 400; color: var(--text); }
 .confirm-visit { padding: 10px 0; border-top: 1px solid var(--border); }
 .confirm-visit:first-of-type { border-top: 0; }
 .confirm-visit-status { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 6px; }
@@ -332,6 +350,8 @@ button.big { width: 100%; justify-content: center; padding: 13px 18px; font-size
 
 /* ---------- Schedule / calendar ---------- */
 .schedule-page { display: flex; flex-direction: column; height: calc(100vh - 18px); min-height: 520px; }
+/* Only the grid gives up room: the toolbar, banners and panels above it keep their full height. */
+.schedule-page > :not(.sched-main) { flex-shrink: 0; }
 .sched-toolbar { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin-bottom: 8px; min-height: 40px; }
 .sched-nav { display: flex; gap: 2px; align-items: center; background: var(--panel); border: 1px solid var(--border-strong); border-radius: 10px; padding: 2px; }
 .sched-nav button { border: none; box-shadow: none; min-height: 30px; border-radius: 8px; }
@@ -357,12 +377,15 @@ button.sched-title:hover { background: rgba(15, 23, 42, 0.04); }
 .seg { display: inline-flex; border: 1px solid var(--border-strong); border-radius: 10px; background: var(--panel); padding: 2px; gap: 2px; }
 .seg button { border: none; border-radius: 8px; padding: 0 11px; min-height: 28px; box-shadow: none; color: var(--muted); }
 .seg button:hover { color: var(--text); }
+/* On a phone a long segmented control wraps onto two lines instead of pushing the page sideways. */
+@media (max-width: 700px) { .seg { flex-wrap: wrap; max-width: 100%; } }
 button.active, .seg button.active { background: var(--primary-soft); color: var(--primary-ink); font-weight: 600; }
 .seg button.active { background: #0c1524; color: #fff; }
 .view-options { position: relative; }
 .popover { position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; background: var(--panel); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow-lg); padding: 10px; width: 330px; display: flex; flex-direction: column; gap: 8px; animation: pop-in 0.12s ease-out; }
 .popover-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 13px; color: var(--muted); font-weight: 550; }
-.sched-main { flex: 1; min-height: 0; display: flex; gap: 10px; }
+/* A floor for the grid: when banners and the business view stack up above it, the page scrolls instead of squeezing the calendar to a sliver. */
+.sched-main { flex: 1; min-height: min(440px, 70vh); display: flex; gap: 10px; }
 .placing-banner { background: #fef3c7; color: #92400e; padding: 8px 12px; border-radius: 10px; margin-bottom: 8px; display: flex; gap: 10px; align-items: center; justify-content: space-between; }
 
 .cal { --cal-col-min: 170px; flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; box-shadow: var(--shadow); }
@@ -404,7 +427,7 @@ button.active, .seg button.active { background: var(--primary-soft); color: var(
 .cal-appt.selected { box-shadow: 0 0 0 2px var(--primary), 0 8px 20px rgba(15, 23, 42, 0.16); z-index: 3; }
 .cal-appt.dragging { opacity: 0.3; }
 .cal-appt.pending { opacity: 0.7; }
-.cal-appt.status-completed { background: #f6f7f9; border-color: var(--border); color: var(--muted); }
+.cal-appt.status-completed { background: var(--subtle); border-color: var(--border); color: var(--muted); }
 .cal-appt.status-completed::before { opacity: 0.45; }
 .cal-appt.status-checked_in { box-shadow: inset 0 0 0 1.5px #f59e0b; }
 .cal-appt.status-in_chair { box-shadow: inset 0 0 0 1.5px #7c3aed; }
@@ -671,10 +694,18 @@ button.active, .seg button.active { background: var(--primary-soft); color: var(
 .integration-env { font-size: 12px; color: var(--muted); }
 .integration-env code { font-size: 11px; word-break: break-word; }
 .integration-link { font-size: 13px; margin-top: auto; }
+.fee-sched-grid { grid-template-columns: minmax(200px, 260px) minmax(0, 1fr); }
 @media (max-width: 800px) {
   .settings-layout { grid-template-columns: 1fr; }
   .settings-nav { display: none; }
   .settings-select { display: block; margin-bottom: 12px; }
+  /* On a phone: rows wrap, long links break, and wide tables scroll inside their card, not the page. */
+  .settings-body .inline { flex-wrap: wrap; }
+  .settings-body .inline > input, .settings-body .inline > select { max-width: 100%; }
+  .settings-body code { overflow-wrap: anywhere; }
+  .settings-body .card { overflow-x: auto; }
+  .settings-body button.link { white-space: normal; text-align: left; }
+  .fee-sched-grid { grid-template-columns: minmax(0, 1fr); }
 }
 tr.voided td { color: var(--muted); } tr.voided td:nth-child(3), tr.voided td.num:not(:last-child) { text-decoration: line-through; }
 .addendum { border-left: 3px solid var(--border); padding: 4px 0 4px 10px; margin-top: 10px; }
@@ -724,7 +755,7 @@ span.perio-site { border-color: transparent; }
 .form-preview { max-height: 60vh; overflow: auto; }
 @media (max-width: 800px) { .form-editor { grid-template-columns: 1fr; } }
 .stars { display: flex; justify-content: center; gap: 6px; margin: 10px 0; }
-.star { font-size: 42px; line-height: 1; background: none; border: none; color: #cbd5e1; cursor: pointer; padding: 4px; }
+.star { font-size: 42px; line-height: 1; background: none; border: none; color: #cbd5e1; cursor: pointer; padding: 4px; box-shadow: none; }
 .stars:hover .star { color: #f59e0b; }
 .stars .star:hover ~ .star { color: #cbd5e1; }
 a.button { display: inline-block; text-decoration: none; padding: 10px 18px; border-radius: 8px; }
@@ -927,6 +958,8 @@ p a, .muted a, li a, .public-notice a { text-decoration: underline; }
 .comments li { margin-bottom: 4px; }
 .offline-page { max-width: 1000px; margin: 24px auto; padding: 0 16px; }
 .clock-button { margin-bottom: 10px; color: rgba(255, 255, 255, 0.75); } .clock-button button { width: 100%; }
+.builder-layout { grid-template-columns: minmax(260px, 340px) minmax(0, 1fr); }
+@media (max-width: 700px) { .builder-layout { grid-template-columns: minmax(0, 1fr); } }
 .builder-cols { border: none; padding: 0; margin: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 2px 8px; }
 .builder-cols legend { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
 .builder-filter { display: grid; grid-template-columns: 1fr 0.8fr 1fr auto; gap: 4px; margin-bottom: 6px; }
@@ -1146,6 +1179,9 @@ kbd { display: inline-block; min-width: 20px; padding: 1px 6px; border: 1px soli
   color-scheme: dark;
 }
 :root[data-theme='dark'] th { background: var(--subtle); }
+/* Notices inside the staff app (Finance, claims, close…): the light-mode navy/green text is unreadable on dark. */
+:root[data-theme='dark'] .public-notice { color: var(--info); }
+:root[data-theme='dark'] .public-notice.ok { color: var(--ok); }
 :root[data-theme='dark'] .seg button.active { background: var(--primary); color: #04201d; }
 :root[data-theme='dark'] button.primary { color: #04201d; }
 :root[data-theme='dark'] .badge { background: #223047; color: var(--text-2); }
@@ -1366,7 +1402,8 @@ button.assist-fab.busy { animation: assist-busy 1.4s ease-in-out infinite; }
 .patient-bar { display: flex; align-items: center; gap: 8px 12px; flex-wrap: wrap; padding: 7px 14px; margin: 0 0 12px; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04); font-size: 13px; }
 .patient-bar.loading { height: 42px; }
 .main.full-bleed .patient-bar { margin: 8px 12px 0; }
-.pb-name { display: inline-flex; align-items: baseline; gap: 8px; background: none; border: 0; padding: 0; font: inherit; color: var(--text); cursor: pointer; }
+/* Scoped to the bar: the schedule's production bar has its own .pb-name (flex: 1, clipped) that would squeeze the name. */
+.patient-bar .pb-name { display: inline-flex; align-items: baseline; gap: 8px; background: none; border: 0; padding: 0; font: inherit; color: var(--text); cursor: pointer; flex: 0 0 auto; max-width: 100%; overflow: visible; min-height: 0; box-shadow: none; }
 .pb-name strong { font-size: 14px; }
 .pb-name:hover strong { color: var(--primary); text-decoration: underline; }
 .pb-alert { display: inline-flex; align-items: center; gap: 4px; background: var(--danger-soft); color: var(--danger); font-weight: 600; padding: 3px 8px; border-radius: 6px; max-width: 320px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

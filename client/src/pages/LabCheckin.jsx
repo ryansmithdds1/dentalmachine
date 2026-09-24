@@ -27,6 +27,13 @@ const STATE = {
 };
 const newKey = () => globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 const pname = (x) => `${x.preferred_name || x.first_name} ${x.last_name}`;
+// " #3" after the description, unless the description already says it ("Zirconia crown #3").
+const toothTag = (desc = '', tooth, sep = ' ') => {
+  if (!tooth) return '';
+  const at = (desc || '').indexOf(`#${tooth}`);
+  const said = at >= 0 && !/\d/.test((desc || '')[at + String(tooth).length + 1] || '');
+  return said ? '' : `${sep}#${tooth}`;
+};
 const stateOf = (x, today) => {
   if (x.type === 'part') return x.status;
   if (x.check_status === 'problem') return 'problem';
@@ -204,7 +211,7 @@ export default function LabCheckin() {
       <li key={`${x.type}-${x.id}`}>
         <button type="button" className={`lbc-item${sel && sel.type === x.type && sel.id === x.id ? ' active' : ''}`} onClick={() => select(x)} data-testid={`lbc-${x.type}-${x.id}`}>
           <div className="top"><strong>{pname(x)}</strong><span className={`rdy-chip ${tone}`}>{label}</span></div>
-          <div>{x.type === 'part' ? <Package size={13} aria-hidden="true" /> : <FlaskConical size={13} aria-hidden="true" />} {x.description || x.item_name}{x.tooth ? ` #${x.tooth}` : ''}{x.qty > 1 ? ` × ${x.qty}` : ''}</div>
+          <div>{x.type === 'part' ? <Package size={13} aria-hidden="true" /> : <FlaskConical size={13} aria-hidden="true" />} {x.description || x.item_name}{toothTag(x.description || x.item_name, x.tooth)}{x.qty > 1 ? ` × ${x.qty}` : ''}</div>
           <div className="sub">
             {x.lab_name ? `${x.lab_name} · ` : ''}{x.due_date ? `due ${fmtDate(x.due_date)}` : ''}{x.appointment_time ? `${x.due_date ? ' · ' : ''}visit ${fmtDate(x.appointment_time.slice(0, 10))} ${fmtTime(x.appointment_time)}` : ' · no visit linked'}
           </div>
@@ -246,12 +253,12 @@ export default function LabCheckin() {
           {heard && (
             <div className="lbc-heard" aria-live="polite">
               Heard <q>{heard.text}</q>
-              {heard.match && !heard.ambiguous && <div>→ {heard.match.patient}, {heard.match.description}{heard.match.tooth ? ` #${heard.match.tooth}` : ''} ({heard.match.why.join(', ')}). Check the photo and confirm below.</div>}
+              {heard.match && !heard.ambiguous && <div>→ {heard.match.patient}, {heard.match.description}{toothTag(heard.match.description, heard.match.tooth)} ({heard.match.why.join(', ')}). Check the photo and confirm below.</div>}
               {heard.question && <div><strong>{heard.question}</strong></div>}
               {heard.ambiguous && heard.candidates.length > 0 && (
                 <div className="lbc-cands">{heard.candidates.map((c) => {
                   const x = items.find((i) => i.type === c.type && i.id === c.id);
-                  return x ? <button key={`${c.type}-${c.id}`} type="button" className="small" onClick={() => select(x, heard)}>{c.patient}: {c.description}{c.tooth ? ` #${c.tooth}` : ''}</button> : null;
+                  return x ? <button key={`${c.type}-${c.id}`} type="button" className="small" onClick={() => select(x, heard)}>{c.patient}: {c.description}{toothTag(c.description, c.tooth)}</button> : null;
                 })}</div>
               )}
               {heard.warnings?.map((w) => <div key={w} className="warn">{w}</div>)}
@@ -270,7 +277,7 @@ export default function LabCheckin() {
           {!sel ? <div className="empty">Pick a case from the list, scan its slip, or hold the mic and say which one.</div> : (
             <>
               <h2>{pname(sel)}</h2>
-              <div>{sel.description || sel.item_name}{sel.tooth ? ` · #${sel.tooth}` : ''}{sel.shade ? ` · shade ${sel.shade}` : ''}{sel.lab_name ? ` · ${sel.lab_name}` : ''}</div>
+              <div>{sel.description || sel.item_name}{toothTag(sel.description || sel.item_name, sel.tooth, ' · ')}{sel.shade ? ` · shade ${sel.shade}` : ''}{sel.lab_name ? ` · ${sel.lab_name}` : ''}</div>
               {sel.rx && <div className="lbc-rx">{['material', 'shade', 'margin', 'contacts', 'occlusion', 'teeth'].filter((k) => sel.rx[k]).map((k) => <span key={k}><span className="muted">{k.replace('_', ' ')}:</span> {sel.rx[k]}</span>)}</div>}
               {sel.details && <div className="lbc-rx">{Object.entries(sel.details).filter(([k]) => k !== 'part').map(([k, v]) => <span key={k}><span className="muted">{k}:</span> {String(v)}</span>)}</div>}
               <div className="muted" style={{ fontSize: 13 }}>{sel.appointment_time ? `For the visit ${fmtDate(sel.appointment_time.slice(0, 10))} at ${fmtTime(sel.appointment_time)}` : 'No visit linked yet — link it from the schedule'}</div>

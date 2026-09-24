@@ -40,7 +40,7 @@ button.rdy-badge { cursor: pointer; }
 .lbc-heard q { font-style: italic; }
 .lbc-heard .warn { color: var(--warn); font-weight: 600; }
 .lbc-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.lbc-item { display: block; width: 100%; text-align: left; padding: 10px 12px; min-height: 56px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--panel); color: var(--text); box-shadow: none; }
+.lbc-item { display: block; width: 100%; text-align: left; white-space: normal; padding: 10px 12px; min-height: 56px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--panel); color: var(--text); box-shadow: none; }
 .lbc-item:hover { border-color: var(--border-strong); background: var(--hover); }
 .lbc-item.active, .lbc-item:focus-visible { border-color: var(--primary); box-shadow: var(--ring); }
 .lbc-item .top { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }

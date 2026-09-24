@@ -80,6 +80,7 @@
   padding: 14px 16px 6px;
 }
 .why-balance > header h2 { margin: 0; }
+.why-balance > header .actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .why-balance .why-summary { padding: 0 16px 10px; color: var(--text-2); }
 .why-visit { border-top: 1px solid var(--border); padding: 10px 16px; }
 .why-visit h4 { margin: 0 0 4px; display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; font-size: 14px; }

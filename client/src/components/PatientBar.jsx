@@ -5,7 +5,7 @@ import { useApi } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
 import { useActivePatient } from '../activePatient.jsx';
 import { useShortcuts, useCommands, comboLabel } from '../shortcuts.js';
-import { money, age, fmtDate } from '../format.js';
+import { money, age, fmtDate, fmtTime } from '../format.js';
 import ReferralChip from './referrals/ReferralChip.jsx';
 import ConnectionChips from './cards/Connection.jsx';
 
@@ -31,7 +31,7 @@ export const PATIENT_COMMANDS = [
 // Runs an action for a patient: goes to its screen, or does it right here.
 export const runPatientAction = (a, id, nav) => (a.run ? a.run(id) : nav(a.to(id)));
 
-const when = (dt) => (dt ? `${fmtDate(dt.slice(0, 10))} ${dt.slice(11, 16)}` : '');
+const when = (dt) => (dt ? `${fmtDate(dt.slice(0, 10))} ${fmtTime(dt)}` : ''); // same 1:00 PM style as the rest of the app
 
 // A slim bar with the active patient on every screen: alerts, balance, insurance, next visit, and actions.
 export default function PatientBar() {

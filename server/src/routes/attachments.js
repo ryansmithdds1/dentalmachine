@@ -34,10 +34,121 @@ function perioPdf(exam, patient, practice) {
   return doc.toBuffer();
 }
 
+// The attachment sender and file storage this app was built with, by database. Billing → Ready to approve
+// (routes/claimprep.js) sends a claim's attachments on approval, and is mounted where these aren't passed in.
+const deps = new WeakMap();
+export const attachmentDeps = (db) => deps.get(db) || null;
+
+// Files a perio exam in the chart as a one-page PDF perio chart (reused when it was filed before).
+export async function filePerioChart(db, storage, { practiceId, patientId, exam, userId, note }) {
+  const filed = await db.get('SELECT id FROM documents WHERE patient_id = ? AND practice_id = ? AND source = ? AND deleted_at IS NULL', patientId, practiceId, `perio:${exam.id}`);
+  if (filed) return filed.id;
+  const patient = await db.get('SELECT first_name, last_name, dob FROM patients WHERE id = ?', patientId);
+  const practice = await db.get('SELECT name FROM practices WHERE id = ?', practiceId);
+  const pdf = perioPdf(exam, patient, practice);
+  const saved = await storage.save(practiceId, pdf);
+  return insert(db, 'documents', {
+    practice_id: practiceId, patient_id: patientId, category: 'document', filename: `Perio chart ${exam.exam_date}.pdf`, mime: 'application/pdf',
+    size: pdf.length, storage_key: saved.storageKey, encrypted: saved.encrypted ? 1 : 0, uploaded_by: userId, source: `perio:${exam.id}`, notes: note,
+  });
+}
+
+// What to attach, worked out for the person: the validator's "payers want an attachment for this" list says
+// which kinds are needed; the chart supplies x-rays of those teeth taken within a year of the service, and the
+// latest perio exam for perio codes. The best match for each need comes preselected.
+// items: [{ code, tooth, service_date }]; attached: what's already attached ({ report_type, document_id }).
+export async function suggestAttachments(db, { practiceId, patientId, items, attached }) {
+  const today = (await practiceNow(db, practiceId)).slice(0, 10);
+  // A kind is needed when adding it would clear a validator warning; each item's own warning is its reason.
+  const needs = [];
+  for (const type of ['RB', 'P6']) {
+    const itemsNeeding = items.filter((i) => attachmentHints([i], []).length > attachmentHints([i], [{ report_type: type }]).length);
+    if (!itemsNeeding.length || attachmentHints(items, attached).length === attachmentHints(items, [...attached, { report_type: type }]).length) continue;
+    needs.push({ type, label: REPORT_TYPES[type], items: itemsNeeding, reasons: [...new Set(itemsNeeding.flatMap((i) => attachmentHints([i], [])))] });
+  }
+  const taken = new Set(attached.filter((a) => a.document_id).map((a) => a.document_id));
+  const out = [];
+  for (const need of needs) {
+    const dates = need.items.map((i) => i.service_date || today).sort();
+    const from = shiftDate(dates[0], -LOOK_BACK_DAYS);
+    const to = shiftDate(dates[dates.length - 1], LOOK_AHEAD_DAYS);
+    if (need.type === 'RB') {
+      const films = await db.all(
+        `SELECT id, filename, tooth, substr(COALESCE(taken_at, created_at), 1, 10) AS taken FROM documents
+         WHERE practice_id = ? AND patient_id = ? AND category = 'xray' AND deleted_at IS NULL
+           AND substr(COALESCE(taken_at, created_at), 1, 10) BETWEEN ? AND ? ORDER BY COALESCE(taken_at, created_at) DESC, id DESC`,
+        practiceId, patientId, from, to,
+      );
+      const teeth = [...new Set(need.items.map((i) => i.tooth).filter(Boolean))];
+      const picked = new Set();
+      // The newest film of each tooth on the claim; if a tooth has none, the newest full-mouth film (pano, FMX).
+      for (const tooth of teeth.length ? teeth : [null]) {
+        const best = films.find((f) => tooth && f.tooth === tooth && !taken.has(f.id)) || films.find((f) => !f.tooth && !taken.has(f.id));
+        if (best) picked.add(best.id);
+      }
+      for (const f of films) {
+        if (taken.has(f.id) || (f.tooth && !teeth.includes(f.tooth))) continue;
+        out.push({
+          key: `doc-${f.id}`, kind: 'document', document_id: f.id, report_type: 'RB', label: f.filename, tooth: f.tooth, date: f.taken, preselected: picked.has(f.id),
+          why: f.tooth ? `X-ray of #${f.tooth}` : 'Full-mouth x-ray',
+        });
+      }
+    } else {
+      const exams = await db.all(
+        'SELECT id, exam_date FROM perio_exams WHERE practice_id = ? AND patient_id = ? AND deleted_at IS NULL AND exam_date BETWEEN ? AND ? ORDER BY exam_date DESC, id DESC',
+        practiceId, patientId, from, to,
+      );
+      for (const [i, e] of exams.entries()) {
+        const filed = await db.get('SELECT id FROM documents WHERE patient_id = ? AND source = ? AND deleted_at IS NULL', patientId, `perio:${e.id}`);
+        if (filed && taken.has(filed.id)) continue;
+        out.push({ key: `perio-${e.id}`, kind: 'perio', perio_exam_id: e.id, report_type: 'P6', label: `Perio chart, ${e.exam_date}`, date: e.exam_date, preselected: i === 0, why: 'Latest perio exam' });
+      }
+    }
+  }
+  return { needs: needs.map(({ items: its, ...n }) => ({ ...n, teeth: [...new Set(its.map((i) => i.tooth).filter(Boolean))] })), suggestions: out };
+}
+
+// Sends every attachment on the claim that hasn't gone yet; each one that works gets its control number.
+export async function sendPendingAttachments(db, { storage, sender }, claim) {
+  if (!claim.control_number) {
+    claim.control_number = `DM${claim.id}`;
+    await db.run('UPDATE claims SET control_number = ? WHERE id = ?', claim.control_number, claim.id);
+  }
+  const ctx = await db.get(
+    `SELECT p.first_name, p.last_name, p.dob, pi.subscriber_id, c.name AS payer_name, c.payer_id, pr.npi AS billing_npi
+     FROM claims cl JOIN patients p ON p.id = cl.patient_id JOIN patient_insurance pi ON pi.id = cl.patient_insurance_id
+     JOIN insurance_carriers c ON c.id = pi.carrier_id JOIN practices pr ON pr.id = cl.practice_id WHERE cl.id = ?`, claim.id,
+  );
+  const pending = await db.all("SELECT * FROM claim_attachments WHERE claim_id = ? AND status IN ('pending','rejected') AND removed_at IS NULL", claim.id);
+  const results = [];
+  for (const a of pending) {
+    try {
+      let file = null;
+      if (a.document_id && sender.electronic && sender.mode !== 'sandbox') {
+        const doc = await db.get('SELECT * FROM documents WHERE id = ?', a.document_id);
+        const data = await storage.read(doc.storage_key, !!doc.encrypted);
+        file = { name: doc.filename, mime: doc.mime, base64: Buffer.from(data).toString('base64') };
+      }
+      const out = await sender.send({
+        claim_control: claim.control_number, payer_id: ctx.payer_id, payer_name: ctx.payer_name, billing_npi: ctx.billing_npi,
+        patient: { first_name: ctx.first_name, last_name: ctx.last_name, dob: ctx.dob }, subscriber_id: ctx.subscriber_id,
+        report_type: a.report_type, narrative: a.narrative, file,
+      });
+      await db.run("UPDATE claim_attachments SET control_number = ?, status = ?, vendor_ref = ?, error = NULL, sent_at = datetime('now') WHERE id = ?", out.control_number, out.status, out.vendor_ref || null, a.id);
+      results.push({ id: a.id, ok: true, control_number: out.control_number });
+    } catch (err) {
+      await db.run('UPDATE claim_attachments SET error = ? WHERE id = ?', String(err.message).slice(0, 300), a.id);
+      results.push({ id: a.id, ok: false, error: err.message });
+    }
+  }
+  return results;
+}
+
 // Claim attachments: pick x-rays or a perio chart from the chart, or write a narrative; send them to
 // get control numbers, which the claim then references (837 PWK).
 export default function attachmentRoutes({ db, storage, sender }) {
   const r = Router();
+  deps.set(db, { storage, sender });
   const list = (claimId) => db.all(
     `SELECT a.*, d.filename, d.mime, d.category AS document_category FROM claim_attachments a LEFT JOIN documents d ON d.id = a.document_id
      WHERE a.claim_id = ? AND a.removed_at IS NULL ORDER BY a.id`, claimId,
@@ -70,65 +181,12 @@ export default function attachmentRoutes({ db, storage, sender }) {
     res.status(201).json(await list(claim.id));
   });
 
-  // What to attach, worked out for the person: the validator's "payers want an attachment for this" list says
-  // which kinds are needed; the chart supplies x-rays of those teeth taken within a year of the service, and the
-  // latest perio exam for perio codes. The best match for each need comes preselected.
+  // The claim's own suggestions (suggestAttachments above).
   const claimItems = (claimId) => db.all(
     `SELECT ci.procedure_id, pr.code, pr.tooth, substr(COALESCE(pr.completed_at, cl.created_at), 1, 10) AS service_date
      FROM claim_items ci JOIN procedures pr ON pr.id = ci.procedure_id JOIN claims cl ON cl.id = ci.claim_id WHERE ci.claim_id = ? ORDER BY ci.id`, claimId,
   );
-  async function suggestionsFor(claim) {
-    const items = await claimItems(claim.id);
-    const attached = await list(claim.id);
-    const today = (await practiceNow(db, claim.practice_id)).slice(0, 10);
-    // A kind is needed when adding it would clear a validator warning; each item's own warning is its reason.
-    const needs = [];
-    for (const type of ['RB', 'P6']) {
-      const itemsNeeding = items.filter((i) => attachmentHints([i], []).length > attachmentHints([i], [{ report_type: type }]).length);
-      if (!itemsNeeding.length || attachmentHints(items, attached).length === attachmentHints(items, [...attached, { report_type: type }]).length) continue;
-      needs.push({ type, label: REPORT_TYPES[type], items: itemsNeeding, reasons: [...new Set(itemsNeeding.flatMap((i) => attachmentHints([i], [])))] });
-    }
-    const taken = new Set(attached.filter((a) => a.document_id).map((a) => a.document_id));
-    const out = [];
-    for (const need of needs) {
-      const dates = need.items.map((i) => i.service_date || today).sort();
-      const from = shiftDate(dates[0], -LOOK_BACK_DAYS);
-      const to = shiftDate(dates[dates.length - 1], LOOK_AHEAD_DAYS);
-      if (need.type === 'RB') {
-        const films = await db.all(
-          `SELECT id, filename, tooth, substr(COALESCE(taken_at, created_at), 1, 10) AS taken FROM documents
-           WHERE practice_id = ? AND patient_id = ? AND category = 'xray' AND deleted_at IS NULL
-             AND substr(COALESCE(taken_at, created_at), 1, 10) BETWEEN ? AND ? ORDER BY COALESCE(taken_at, created_at) DESC, id DESC`,
-          claim.practice_id, claim.patient_id, from, to,
-        );
-        const teeth = [...new Set(need.items.map((i) => i.tooth).filter(Boolean))];
-        const picked = new Set();
-        // The newest film of each tooth on the claim; if a tooth has none, the newest full-mouth film (pano, FMX).
-        for (const tooth of teeth.length ? teeth : [null]) {
-          const best = films.find((f) => tooth && f.tooth === tooth && !taken.has(f.id)) || films.find((f) => !f.tooth && !taken.has(f.id));
-          if (best) picked.add(best.id);
-        }
-        for (const f of films) {
-          if (taken.has(f.id) || (f.tooth && !teeth.includes(f.tooth))) continue;
-          out.push({
-            key: `doc-${f.id}`, kind: 'document', document_id: f.id, report_type: 'RB', label: f.filename, tooth: f.tooth, date: f.taken, preselected: picked.has(f.id),
-            why: f.tooth ? `X-ray of #${f.tooth}` : 'Full-mouth x-ray',
-          });
-        }
-      } else {
-        const exams = await db.all(
-          'SELECT id, exam_date FROM perio_exams WHERE practice_id = ? AND patient_id = ? AND deleted_at IS NULL AND exam_date BETWEEN ? AND ? ORDER BY exam_date DESC, id DESC',
-          claim.practice_id, claim.patient_id, from, to,
-        );
-        for (const [i, e] of exams.entries()) {
-          const filed = await db.get('SELECT id FROM documents WHERE patient_id = ? AND source = ? AND deleted_at IS NULL', claim.patient_id, `perio:${e.id}`);
-          if (filed && taken.has(filed.id)) continue;
-          out.push({ key: `perio-${e.id}`, kind: 'perio', perio_exam_id: e.id, report_type: 'P6', label: `Perio chart, ${e.exam_date}`, date: e.exam_date, preselected: i === 0, why: 'Latest perio exam' });
-        }
-      }
-    }
-    return { needs: needs.map(({ items: its, ...n }) => ({ ...n, teeth: [...new Set(its.map((i) => i.tooth).filter(Boolean))] })), suggestions: out };
-  }
+  const suggestionsFor = async (claim) => suggestAttachments(db, { practiceId: claim.practice_id, patientId: claim.patient_id, items: await claimItems(claim.id), attached: await list(claim.id) });
 
   r.get('/claims/:cid/attachments/suggest', requirePermission('billing:read'), async (req, res) => {
     const claim = await findOr404(db, 'claims', req.params.cid, req.user.practice_id, 'Claim');
@@ -164,19 +222,7 @@ export default function attachmentRoutes({ db, storage, sender }) {
     for (const p of plan) {
       let documentId = p.document_id;
       if (p.exam) {
-        const filed = await db.get('SELECT id FROM documents WHERE patient_id = ? AND practice_id = ? AND source = ? AND deleted_at IS NULL', claim.patient_id, req.user.practice_id, `perio:${p.exam.id}`);
-        if (filed) documentId = filed.id;
-        else {
-          const patient = await db.get('SELECT first_name, last_name, dob FROM patients WHERE id = ?', claim.patient_id);
-          const practice = await db.get('SELECT name FROM practices WHERE id = ?', req.user.practice_id);
-          const pdf = perioPdf(p.exam, patient, practice);
-          const saved = await storage.save(req.user.practice_id, pdf);
-          documentId = await insert(db, 'documents', {
-            practice_id: req.user.practice_id, patient_id: claim.patient_id, category: 'document', filename: `Perio chart ${p.exam.exam_date}.pdf`, mime: 'application/pdf',
-            size: pdf.length, storage_key: saved.storageKey, encrypted: saved.encrypted ? 1 : 0, uploaded_by: req.user.id, source: `perio:${p.exam.id}`,
-            notes: `Perio exam of ${p.exam.exam_date}, filed for claim #${claim.id}`,
-          });
-        }
+        documentId = await filePerioChart(db, storage, { practiceId: req.user.practice_id, patientId: claim.patient_id, exam: p.exam, userId: req.user.id, note: `Perio exam of ${p.exam.exam_date}, filed for claim #${claim.id}` });
       }
       const already = await db.get('SELECT id FROM claim_attachments WHERE claim_id = ? AND document_id = ? AND removed_at IS NULL', claim.id, documentId);
       if (already) continue;
@@ -201,37 +247,7 @@ export default function attachmentRoutes({ db, storage, sender }) {
   // Sends every attachment that hasn't gone yet. Each one that works gets its control number.
   r.post('/claims/:cid/attachments/send', requirePermission('billing:write'), async (req, res) => {
     const claim = await findOr404(db, 'claims', req.params.cid, req.user.practice_id, 'Claim');
-    if (!claim.control_number) {
-      claim.control_number = `DM${claim.id}`;
-      await db.run('UPDATE claims SET control_number = ? WHERE id = ?', claim.control_number, claim.id);
-    }
-    const ctx = await db.get(
-      `SELECT p.first_name, p.last_name, p.dob, pi.subscriber_id, c.name AS payer_name, c.payer_id, pr.npi AS billing_npi
-       FROM claims cl JOIN patients p ON p.id = cl.patient_id JOIN patient_insurance pi ON pi.id = cl.patient_insurance_id
-       JOIN insurance_carriers c ON c.id = pi.carrier_id JOIN practices pr ON pr.id = cl.practice_id WHERE cl.id = ?`, claim.id,
-    );
-    const pending = await db.all("SELECT * FROM claim_attachments WHERE claim_id = ? AND status IN ('pending','rejected') AND removed_at IS NULL", claim.id);
-    const results = [];
-    for (const a of pending) {
-      try {
-        let file = null;
-        if (a.document_id && sender.electronic && sender.mode !== 'sandbox') {
-          const doc = await db.get('SELECT * FROM documents WHERE id = ?', a.document_id);
-          const data = await storage.read(doc.storage_key, !!doc.encrypted);
-          file = { name: doc.filename, mime: doc.mime, base64: Buffer.from(data).toString('base64') };
-        }
-        const out = await sender.send({
-          claim_control: claim.control_number, payer_id: ctx.payer_id, payer_name: ctx.payer_name, billing_npi: ctx.billing_npi,
-          patient: { first_name: ctx.first_name, last_name: ctx.last_name, dob: ctx.dob }, subscriber_id: ctx.subscriber_id,
-          report_type: a.report_type, narrative: a.narrative, file,
-        });
-        await db.run("UPDATE claim_attachments SET control_number = ?, status = ?, vendor_ref = ?, error = NULL, sent_at = datetime('now') WHERE id = ?", out.control_number, out.status, out.vendor_ref || null, a.id);
-        results.push({ id: a.id, ok: true, control_number: out.control_number });
-      } catch (err) {
-        await db.run('UPDATE claim_attachments SET error = ? WHERE id = ?', String(err.message).slice(0, 300), a.id);
-        results.push({ id: a.id, ok: false, error: err.message });
-      }
-    }
+    const results = await sendPendingAttachments(db, { storage, sender }, claim);
     await audit(db, req, 'claim.attachments_send', 'claims', claim.id, { sent: results.filter((x) => x.ok).length });
     res.json({ results, attachments: await list(claim.id) });
   });

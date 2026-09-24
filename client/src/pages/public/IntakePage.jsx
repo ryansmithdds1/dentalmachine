@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom';
 import { ErrorBox, useSubmit } from '../../components/ui.jsx';
 import SignaturePad from '../../components/SignaturePad.jsx';
 import FormFields, { formComplete } from '../../components/FormFields.jsx';
-import PublicLayout from './PublicLayout.jsx';
+import PublicLayout, { PublicError } from './PublicLayout.jsx';
 import { suggestLang, useT, HEARD_FROM } from './i18n.js';
 import { DobGate, publicCall, readPass, savePass } from './LinkPass.jsx';
 import { BackToOffice, useHandoff } from './HandOff.jsx';
@@ -36,7 +36,7 @@ export default function IntakePage() {
         verify={async (dob) => (await formCall('POST', `/forms/${token}/verify`, { dob })).pass} />
     );
   }
-  if (loadError) return <PublicLayout title={t('Patient forms')}><ErrorBox error={loadError} /></PublicLayout>;
+  if (loadError) return <PublicLayout title={t('Patient forms')}><PublicError error={loadError} /></PublicLayout>;
   if (!info) return <PublicLayout title={t('Patient forms')}><p>{t('Loading…')}</p></PublicLayout>;
   const practice = { name: info.practice_name };
   const forms = info.forms || [{ id: 0, kind: 'medical_history', name: 'Health history', status: 'pending' }];

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useApi } from '../hooks.js';
-import { fmtDate, fmtUtcDate } from '../format.js';
+import { fmtDate, fmtUtcDate, todayLocal } from '../format.js';
 import { useAuth } from '../auth.jsx';
 import { Badge } from './ui.jsx';
 import { ProviderSelect, CsvButton, PrintButton } from './ReportControls.jsx';
@@ -10,7 +10,7 @@ import { ProviderSelect, CsvButton, PrintButton } from './ReportControls.jsx';
 // patients told the office.
 export default function ReviewReport() {
   const { practice } = useAuth();
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayLocal();
   const [range, setRange] = useState({ from: `${today.slice(0, 7)}-01`, to: today });
   const [prov, setProv] = useState('');
   const { data } = useApi(`/reports/reviews?from=${range.from}&to=${range.to}${prov ? `&provider_id=${prov}` : ''}`);
@@ -20,7 +20,7 @@ export default function ReviewReport() {
       <div className="card">
         <div className="inline" style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
           <h2 style={{ margin: 0 }}>Patient reviews</h2>
-          <div className="inline" style={{ gap: 6 }}>
+          <div className="inline" style={{ gap: 6, flexWrap: 'wrap' }}>
             <input type="date" value={range.from} onChange={(e) => setRange({ ...range, from: e.target.value })} aria-label="From" />
             <input type="date" value={range.to} onChange={(e) => setRange({ ...range, to: e.target.value })} aria-label="To" />
             <ProviderSelect value={prov} onChange={setProv} />

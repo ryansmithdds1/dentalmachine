@@ -3,6 +3,8 @@
 **Budget: 1 action** once the patient's chart (Insurance tab) or checkout is open; **3** from any other screen for
 the active patient. Measured: **1** (B) on the Insurance tab, **3** (Ctrl/⌘K, "bill", Enter) from the schedule.
 Tested by `e2e/workflows/24-26-27.test.mjs`.
+**Ready to approve (24b): 2 actions** from the Billing page (the "Ready to approve" tab, then Approve — or A).
+Measured: **2** (tab 1, Approve 1). Tested by `e2e/workflows/24b-claims-approve.test.mjs`.
 
 ## Trigger and who does it
 The billing coordinator or front desk after a visit's work is set complete — at checkout, from the patient's
@@ -32,6 +34,52 @@ policy (`GET /patients/:id/unclaimed-procedures?patient_insurance_id=`), any dra
 One action makes the claim for what's ticked **and sends it** when it passes the checks — through the
 clearinghouse, or as an 837 file to upload when there's no clearinghouse. A toast says what happened
 ("Claim #41 ($182.00) sent to Delta Dental through Sandbox"). No window, no confirm.
+
+## Ready to approve (24b): prepared by itself, approved by a person
+Owner's decision: claims are prepared automatically, but nothing goes to a payer without a person's approval.
+
+**Preparing (background, nothing made or sent).** `GET /claim-queue` works the list out when it's read
+(`server/src/claimprep.js`; no job and no stored copy, so it can't go stale or duplicate): completed, unbilled
+work (fee > 0, the last 365 days) for patients with an active policy — the policy billing would use, primary
+first — grouped by patient, policy and office (claims are billed per office). Work from a visit still checked in
+or in the chair waits until the visit ends. Each group gets every check a claim gets before it's sent:
+`claimProblems` (routes/edi.js — what clearinghouses reject), the subscriber ID/name, `attachmentHints` (x-rays
+and perio charts payers want) and the scrubber (`scrubWork`, the unsaved-work form of `scrubClaim`: payer rules,
+filing limits, duplicates, missing tooth/surface, narratives). It shows as:
+- **Ready** — clean.
+- **Needs a fix** — in plain words, with the fix inline: the chart's x-ray or perio chart of those teeth already
+  suggested (**Attach** it — `POST /claim-queue/fixes`), a narrative box, or a link to where the missing detail
+  lives (practice NPI → Settings, payer ID → Insurance carriers, subscriber ID → the patient's Insurance tab).
+  Missing attachments, narratives and likely denials can be approved anyway with a reason (kept on the audit
+  row); what the clearinghouse would reject (NPI, payer ID, date of birth, subscriber ID) can't.
+Nothing here writes to the ledger or makes a claim.
+
+**Approving (a person).** Billing → **Ready to approve** (badge = how many are waiting): J/K move, **A** or
+Enter approves the selected claim, **S** skips it for now with a reason (Skipped → Put back). Approving makes the
+claim (`createClaim`), moves the picked x-rays/narratives onto it and sends them, then sends the claim — through
+the clearinghouse, or saved as an 837 file (downloaded, and kept to download again) with no clearinghouse
+connection. **Approve all n ready…** shows one line — "Send 12 claims for $2,340.00 to the payers? A sent claim
+can't be unsent." — and Enter sends them in one batch. That confirmation is the only one, because sending can't
+be undone; the server re-checks the count and total the person confirmed (409 if the list changed).
+
+**Safety.**
+- *Idempotent*: each group key (policy, office, procedure ids) is unique in `claim_approvals`, so a double
+  click, a retry or two people at once make one claim (a repeat gets the first claim back); `createClaim` still
+  refuses work already on a claim (409), and a key whose work changed since the list loaded is refused (409 with
+  the group as it is now).
+- *A person approves*: approve, approve all and skip go through `requireHuman`; the assistant gets 428.
+  `billing:write` to approve, skip or fix; `billing:read` to see the list. Audited as that person:
+  `claim_queue.approve` (with the procedures, total and any "approve anyway" reason), `claim.create`,
+  `claims.submit` / `claims.export_837`, `claim_queue.skip` (with the reason), `claim_queue.unskip`,
+  `claim_queue.attach` / `detach`, `practice.claim_prep`.
+- *Never silent*: a claim approved but not sent stays a draft under Claims → Ready to send and becomes a Needs
+  attention item (`claim-not-sent:<id>`), resolved when it's sent.
+- *Practice and office*: every id is checked against the practice; people limited to some offices see and approve
+  only their patients (and the list follows the office they're working in).
+- *Setting*: "Prepare claims for approval automatically" (`practices.claim_prep`, on by default — it only
+  prepares; administrators switch it at the foot of the tab). There is no automatic sending.
+- *Automation pass*: its "completed procedures not on a claim" item links to this tab and doesn't count skipped
+  work.
 
 ## Smart defaults
 - **What's billed** — every finished, unbilled procedure with a fee is ticked by default (zero-fee lines are
@@ -68,6 +116,12 @@ search for them again.
   "was made but not sent: … It's waiting under Billing → Ready to send"; the tab then offers "Send claim #n".
 
 ## Acceptance
+- 24b: `server/test/claims-approve.test.js` — groups prepared with no claim, nothing sent and the ledger untouched;
+  approve makes and sends exactly once; double/concurrent approve is harmless; approve all with the confirmed
+  count/total; needs-fix blocked until fixed (x-ray, narrative) or approved anyway with a reason, hard problems
+  never; skip with a reason audited and put back; the assistant gets 428; permissions; practice isolation and
+  office restriction; the 837 file without a clearinghouse. `e2e/workflows/24b-claims-approve.test.mjs` — 2
+  actions from the Billing page, and J/K + A.
 - e2e: Insurance tab B = 1 action, one submitted claim with every finished procedure, a second B makes no second
   claim; command bar = 3 actions; a failing claim stays a draft and a second B sends the same draft (no new claim);
   no dialogs.

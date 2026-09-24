@@ -24,3 +24,19 @@ export default function PublicLayout({ title, practice, children, logo = null, c
     </div>
   );
 }
+
+// A page that couldn't load from its link: the server's plain words (translated when we have them), and for a
+// link that's wrong or used up, what to do next. Never says more than the server did about whose link it was.
+export function PublicError({ error, hint = true }) {
+  const t = useT();
+  if (!error) return null;
+  const raw = error.message || String(error);
+  const message = raw === 'Not found' ? t('We couldn’t find that page.') : t(raw);
+  const gone = hint && (error.status === 404 || error.status === 410) && !/call|office|llam/i.test(message);
+  return (
+    <div className="error" role="alert">
+      {message}{/[.!?]$/.test(message) ? '' : '.'}
+      {gone && <> {t('Please call the office and we’ll send you a new link.')}</>}
+    </div>
+  );
+}

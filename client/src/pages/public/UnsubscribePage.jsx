@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { api } from '../../api.js';
 import { ErrorBox, useSubmit } from '../../components/ui.jsx';
-import PublicLayout from './PublicLayout.jsx';
+import PublicLayout, { PublicError } from './PublicLayout.jsx';
 import { suggestLang, useT } from './i18n.js';
 
 // One click to stop marketing messages from the practice.
@@ -13,7 +13,7 @@ export default function UnsubscribePage() {
   const [error, setError] = useState(null);
   useEffect(() => { api.get(`/public/unsubscribe/${token}`).then((i) => { suggestLang(i.language); setInfo(i); }).catch(setError); }, [token]);
   const go = useSubmit(async () => setInfo(await api.post(`/public/unsubscribe/${token}`)));
-  if (error) return <PublicLayout title={t('Unsubscribe')}><ErrorBox error={error} /></PublicLayout>;
+  if (error) return <PublicLayout title={t('Unsubscribe')}><PublicError error={error} /></PublicLayout>;
   if (!info) return <PublicLayout title={t('Unsubscribe')}><p>{t('Loading…')}</p></PublicLayout>;
   const sms = info.channel === 'sms';
   const vars = { practice: info.practice_name };

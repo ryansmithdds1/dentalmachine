@@ -15,7 +15,13 @@ const fetchImpl = async (url, init) => {
   return new Response('{}', { status: 404 });
 };
 const h = harness({ fetchImpl });
-const settle = () => new Promise((r) => setTimeout(r, 50));
+// Background delivery (a DNS check, the send, then the row update) can take well over 50 ms on a busy
+// machine or on Postgres: wait until no delivery is still unsent or mid-send.
+const settle = async () => {
+  const busy = "SELECT COUNT(*) AS n FROM webhook_deliveries WHERE status = 'sending' OR (status = 'pending' AND attempts = 0)";
+  await new Promise((r) => setTimeout(r, 50));
+  for (let i = 0; i < 200 && (await h.db.get(busy)).n > 0; i++) await new Promise((r) => setTimeout(r, 50));
+};
 const apiClient = (key) => ({
   call: async (method, path, body) => {
     const res = await fetch(`${h.origin}/api/v1${path}`, { method, headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });

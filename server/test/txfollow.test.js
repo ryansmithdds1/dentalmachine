@@ -47,7 +47,7 @@ const storage = createStorage({ dir, key: 'txfollow-test-key', s3: null });
 let origin;
 let server;
 before(async () => {
-  for (let i = 0; !h.db && i < 1500; i++) await new Promise((r) => setTimeout(r, 20)); // Postgres takes longer to open
+  for (let i = 0; !h.db && i < 3000; i++) await new Promise((r) => setTimeout(r, 20)); // Postgres takes longer to open
   const app = express();
   app.use(actorMiddleware(h.db, flushChanges));
   app.use(express.json({ limit: '5mb' }));

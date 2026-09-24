@@ -17,7 +17,7 @@ let origin;
 let server;
 before(async () => {
   // The harness opens its database in its own before hook; wait for it.
-  for (let i = 0; !h.db && i < 100; i++) await new Promise((r) => setTimeout(r, 20));
+  for (let i = 0; !h.db && i < 3000; i++) await new Promise((r) => setTimeout(r, 20));
   const app = express();
   app.use(actorMiddleware(h.db, flushChanges));
   app.use(express.json());

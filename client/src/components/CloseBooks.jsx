@@ -65,7 +65,7 @@ export default function CloseBooks() {
                 <tr><td><strong>Net collections</strong></td><td className="num"><strong>{money(t.net_collections)}</strong></td></tr>
               </tbody>
             </table>
-            <h3>Before closing</h3>
+            <h3 style={{ marginTop: 16 }}>Before closing</h3>
             <ul className="close-list">
               {data.checks.map((c) => (
                 <li key={c.key} className={c.count ? 'todo' : 'done'}>
@@ -90,7 +90,7 @@ export default function CloseBooks() {
       </div>
       <div className="card">
         <h2>Closed periods</h2>
-        <p className="muted" style={{ fontSize: 13 }}>Currently locked through {data?.lock_date ? fmtDate(data.lock_date) : '—'}. Administrators can move the lock date in Settings → Practice.</p>
+        <p className="muted" style={{ fontSize: 13 }}>{data?.lock_date ? `Currently locked through ${fmtDate(data.lock_date)}.` : 'Nothing is locked yet.'} Administrators can move the lock date in Settings → Practice.</p>
         <table className="compact-table">
           <tbody>
             {data?.history.map((hh) => {

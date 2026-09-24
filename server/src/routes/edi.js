@@ -10,8 +10,25 @@ import { importEra, parseControl } from '../era.js';
 import { attachmentHints } from '../attachments.js';
 import { adaForm } from '../adaform.js';
 import { createEligibility } from '../eligibility.js';
+import claimPrepRoutes from './claimprep.js';
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+// Pre-flight checks clearinghouses reject on.
+export function claimProblems(bundle, practice) {
+  const p = [];
+  if (!/^\d{10}$/.test(String(practice.npi || ''))) p.push('Practice NPI missing (Settings → Practice)');
+  if (!String(practice.tax_id || '').replace(/\D/g, '')) p.push('Practice tax ID missing');
+  if (!practice.address || !practice.zip) p.push('Practice address incomplete');
+  if (!bundle.carrier.payer_id) p.push(`Payer ID missing for ${bundle.carrier.name}`);
+  if (!bundle.patient.dob) p.push('Patient date of birth missing');
+  if (!bundle.items.length) p.push('Claim has no procedures');
+  if (bundle.items.some((i) => !i.provider_npi)) p.push('Treating provider NPI missing');
+  if (bundle.policy.priority === 'secondary' && !bundle.primary) p.push('Secondary claim: post the primary insurance payment first (the secondary payer needs it)');
+  if (['7', '8'].includes(String(bundle.claim.frequency_code)) && !bundle.claim.original_reference) p.push("Corrected or void claim: the payer's original claim number is required");
+  if (bundle.attachments.some((a) => !a.control_number)) p.push('Send the claim’s attachments first (they need control numbers for the claim to reference)');
+  return p;
+}
 
 // Electronic claims (837D), eligibility (270/271) and remittance (835) through a clearinghouse.
 // EDI_MODE=manual (default): files are generated for upload to the clearinghouse portal and responses are imported.
@@ -63,22 +80,6 @@ export default function ediRoutes({ db, config, clearinghouse: ch }) {
     };
   }
 
-  // Pre-flight checks clearinghouses reject on.
-  function claimProblems(bundle, practice) {
-    const p = [];
-    if (!/^\d{10}$/.test(String(practice.npi || ''))) p.push('Practice NPI missing (Settings → Practice)');
-    if (!String(practice.tax_id || '').replace(/\D/g, '')) p.push('Practice tax ID missing');
-    if (!practice.address || !practice.zip) p.push('Practice address incomplete');
-    if (!bundle.carrier.payer_id) p.push(`Payer ID missing for ${bundle.carrier.name}`);
-    if (!bundle.patient.dob) p.push('Patient date of birth missing');
-    if (!bundle.items.length) p.push('Claim has no procedures');
-    if (bundle.items.some((i) => !i.provider_npi)) p.push('Treating provider NPI missing');
-    if (bundle.policy.priority === 'secondary' && !bundle.primary) p.push('Secondary claim: post the primary insurance payment first (the secondary payer needs it)');
-    if (['7', '8'].includes(String(bundle.claim.frequency_code)) && !bundle.claim.original_reference) p.push("Corrected or void claim: the payer's original claim number is required");
-    if (bundle.attachments.some((a) => !a.control_number)) p.push('Send the claim’s attachments first (they need control numbers for the claim to reference)');
-    return p;
-  }
-
   // The claim laid out as the ADA Dental Claim Form, for payers that need paper.
   r.get('/claims/:cid/ada', requirePermission('billing:read'), async (req, res) => {
     const pid = req.user.practice_id;
@@ -114,43 +115,46 @@ export default function ediRoutes({ db, config, clearinghouse: ch }) {
     res.json({ problems: claimProblems(bundle, practice), warnings: attachmentHints(bundle.items, bundle.attachments), risks: await scrubClaim(db, bundle.claim.id) });
   });
 
-  // Builds a validated 837D batch for the given claims.
+  // Builds a validated 837D batch for the given claims (the request's claim_ids, resend and force).
   async function batchFile(req, { control = nextControl(), controlFor = null } = {}) {
-    const pid = req.user.practice_id;
+    return buildBatch({ pid: req.user.practice_id, claimIds: req.body?.claim_ids, resend: !!req.body?.resend, force: !!req.body?.force }, { control, controlFor });
+  }
+  async function buildBatch({ pid, claimIds: wanted, resend = false, force = false }, { control = nextControl(), controlFor = null } = {}) {
     const practice = await db.get('SELECT * FROM practices WHERE id = ?', pid);
-    const claimIds = [...new Set((req.body?.claim_ids || []).map(Number))];
+    const claimIds = [...new Set((wanted || []).map(Number))];
     if (!claimIds.length) throw new HttpError(400, 'claim_ids is required');
     const bundles = await mapSeq(claimIds, (id) => claimBundle(id, pid));
     for (const b of bundles) {
       if (['void', 'paid'].includes(b.claim.status)) throw new HttpError(409, `Claim #${b.claim.id} is ${b.claim.status}`);
       // Resending a claim the payer already has causes duplicate-claim denials; it must be deliberate.
-      if (['submitted', 'partially_paid'].includes(b.claim.status) && !req.body?.resend) {
+      if (['submitted', 'partially_paid'].includes(b.claim.status) && !resend) {
         throw new HttpError(409, `Claim #${b.claim.id} was already sent — check its status first, or choose "resend"`, { claim_id: b.claim.id, already_sent: true });
       }
       const problems = claimProblems(b, practice);
-      if (problems.length && !req.body?.force) throw new HttpError(422, `Claim #${b.claim.id}: ${problems.join('; ')}`, { claim_id: b.claim.id, problems });
+      if (problems.length && !force) throw new HttpError(422, `Claim #${b.claim.id}: ${problems.join('; ')}`, { claim_id: b.claim.id, problems });
     }
     if (controlFor) for (const b of bundles) b.claim.control_number = controlFor(b.claim);
     return { practice, bundles, claimIds, control, file: build837D({ practice, claims: bundles, ...ids(practice), control, taxonomy: practice.billing_provider_taxonomy }) };
   }
 
-  // Send claims straight to the clearinghouse (SFTP or sandbox). Responses arrive by polling.
-  r.post('/claims/submit', requirePermission('billing:write'), async (req, res) => {
+  // Sends claims to the clearinghouse in one batch (the /claims/submit route, and approvals from Billing →
+  // Ready to approve). Throws — with nothing sent and every claim as it was — when it can't.
+  async function submitBatch({ pid, userId, claimIds, resend = false, force = false }) {
     if (!ch?.batch) throw new HttpError(409, 'No clearinghouse connection is set up — download the 837 file instead', { mode: ch?.mode || 'manual' });
     // The batch row comes first: its id goes into each claim's control number (DM<claim>B<batch>),
     // so responses to this submission can be told apart from earlier ones.
     const control = nextControl();
     const batchId = await insert(db, 'edi_batches', {
-      practice_id: req.user.practice_id, control: String(control), claim_ids: '[]', status: 'sending', transport: ch.batch.transport, created_by: req.user.id,
+      practice_id: pid, control: String(control), claim_ids: '[]', status: 'sending', transport: ch.batch.transport, created_by: userId,
     });
     let built;
     try {
-      built = await batchFile(req, { control, controlFor: (claim) => `DM${claim.id}B${batchId}` });
+      built = await buildBatch({ pid, claimIds, resend, force }, { control, controlFor: (claim) => `DM${claim.id}B${batchId}` });
     } catch (err) {
       await db.run('DELETE FROM edi_batches WHERE id = ?', batchId);
       throw err;
     }
-    const { claimIds, file, bundles } = built;
+    const { claimIds: ids, file, bundles } = built;
     // Take each claim for this batch atomically, so two people sending at once can't both submit it.
     const taken = [];
     const release = async () => {
@@ -166,23 +170,51 @@ export default function ediRoutes({ db, config, clearinghouse: ch }) {
       }
       taken.push(b);
     }
-    const filename = `DM${req.user.practice_id}_${control}.837`;
+    const filename = `DM${pid}_${control}.837`;
     try {
       await ch.batch.submit({ filename, content: file }); // network I/O stays outside transactions
     } catch (err) {
       await release();
       throw new HttpError(502, `Couldn't reach the clearinghouse: ${err.message}. Nothing was sent; try again.`);
     }
-    await db.run("UPDATE edi_batches SET status = 'sent', filename = ?, claim_ids = ?, x12 = ? WHERE id = ?", filename, JSON.stringify(claimIds), file, batchId);
+    await db.run("UPDATE edi_batches SET status = 'sent', filename = ?, claim_ids = ?, x12 = ? WHERE id = ?", filename, JSON.stringify(ids), file, batchId);
     for (const b of bundles) {
       await recorded(db, 'claims', b.claim.id, () => db.run("UPDATE claims SET status = CASE WHEN status IN ('draft','denied') THEN 'submitted' ELSE status END, submitted_at = COALESCE(submitted_at, datetime('now')), denial_reason = NULL, batch_id = ?, control_number = ? WHERE id = ?", batchId, b.claim.control_number, b.claim.id));
       await claimEvent(db, { ...b.claim }, 'submit', 'sent', `Sent to ${ch.name} in batch ${control}`);
     }
-    await audit(db, req, 'claims.submit', 'edi_batches', batchId, { claim_ids: claimIds, transport: ch.batch.transport });
     // The sandbox answers at once, so pick its acknowledgments up straight away.
     const responses = ch.batch.transport === 'sandbox' ? await runExclusive('clearinghouse-poll', 60_000, () => pollClearinghouse(db, ch)) : null;
-    res.status(201).json({ batch_id: batchId, control: String(control), claims: claimIds.length, filename, transport: ch.batch.transport, responses });
+    return { batch_id: batchId, control: String(control), claims: ids.length, claim_ids: ids, filename, transport: ch.batch.transport, responses };
+  }
+
+  // Without a clearinghouse connection: the claims go into one 837 file, kept (edi_batches, transport 'file') so it
+  // can be downloaded again, and they count as sent — as with "Download as 837". Acknowledgments uploaded later
+  // match it by its control number.
+  async function saveBatchFile({ pid, userId, claimIds }) {
+    const control = nextControl();
+    const { bundles, claimIds: ids, file } = await buildBatch({ pid, claimIds }, { control });
+    const filename = `claims-${(await practiceNow(db, pid)).slice(0, 10)}-${control}.837`;
+    const batchId = await insert(db, 'edi_batches', {
+      practice_id: pid, control: String(control), claim_ids: JSON.stringify(ids), status: 'saved', transport: 'file', filename, x12: file, created_by: userId,
+    });
+    for (const b of bundles) {
+      await recorded(db, 'claims', b.claim.id, () => db.run("UPDATE claims SET status = 'submitted', submitted_at = COALESCE(submitted_at, datetime('now')), denial_reason = NULL, batch_id = ? WHERE id = ? AND status IN ('draft','denied')", batchId, b.claim.id));
+      await claimEvent(db, { ...b.claim }, 'submit', 'sent', `Saved in the 837 file ${filename} to upload in the clearinghouse portal`);
+    }
+    return { batch_id: batchId, control: String(control), claims: ids.length, claim_ids: ids, filename, transport: 'file', responses: null };
+  }
+
+  // Send claims straight to the clearinghouse (SFTP or sandbox). Responses arrive by polling.
+  r.post('/claims/submit', requirePermission('billing:write'), async (req, res) => {
+    const out = await submitBatch({ pid: req.user.practice_id, userId: req.user.id, claimIds: req.body?.claim_ids, resend: !!req.body?.resend, force: !!req.body?.force });
+    await audit(db, req, 'claims.submit', 'edi_batches', out.batch_id, { claim_ids: out.claim_ids, transport: out.transport });
+    const body = { ...out };
+    delete body.claim_ids;
+    res.status(201).json(body);
   });
+
+  // Billing → Ready to approve (routes/claimprep.js): prepared claims a person approves and sends.
+  r.use(claimPrepRoutes({ db, ch, claimProblems, send: (args) => (ch?.batch ? submitBatch(args) : saveBatchFile(args)) }));
 
   // Connection overview for the billing screen.
   r.get('/clearinghouse', requirePermission('billing:read'), async (req, res) => {

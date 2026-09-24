@@ -36,7 +36,7 @@ export default function NotesTab({ patient }) {
   };
 
   return (
-    <div className="grid" style={{ gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1.3fr)' }}>
+    <div className="grid notes-layout">
       {can('clinical:write') && (
         <div>
           <LongRecorder patient={patient} appointmentId={focusVisit} onSaved={reload} />

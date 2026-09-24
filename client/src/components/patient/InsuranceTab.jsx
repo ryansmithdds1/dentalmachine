@@ -114,26 +114,28 @@ export default function InsuranceTab({ patient, onChange }) {
         <ErrorBox error={cardErr} />
         {policies?.length === 0 && <div className="muted">No insurance on file (self-pay).</div>}
         {policies?.length > 0 && (
-          <table>
-            <thead><tr><th>Priority</th><th>Carrier</th><th>Subscriber</th><th>Member ID / Group</th><th>Coverage (P/B/M)</th><th className="num">Annual max</th><th className="num">Deductible</th><th /></tr></thead>
-            <tbody>
-              {policies.map((p) => (
-                <tr key={p.id} style={{ opacity: p.active ? 1 : 0.5 }}>
-                  <td><Badge value={p.active ? p.priority : 'inactive'} /></td>
-                  <td>{p.carrier_name}</td>
-                  <td>{p.subscriber_name}<div className="muted">{p.relationship}</div></td>
-                  <td>{p.subscriber_id}<div className="muted">{p.group_number}</div></td>
-                  <td>
-                    {p.pct_preventive}% / {p.pct_basic}% / {p.pct_major}%
-                    {p.plan && <div className="muted" style={{ fontSize: 11 }}>{p.plan.name || 'Plan'}{p.plan.members > 1 ? ` · shared by ${p.plan.members}` : ''} · <button className="link" style={{ fontSize: 11 }} onClick={() => setModal({ plan: p.plan })}>limits & rules</button></div>}
-                  </td>
-                  <td className="num">{money(p.annual_max)}</td>
-                  <td className="num">{money(p.deductible_met)} of {money(p.deductible)}{p.benefit_month > 1 && <div className="muted" style={{ fontSize: 12 }}>year starts {new Date(2000, p.benefit_month - 1, 1).toLocaleString('en-US', { month: 'short' })} 1</div>}</td>
-                  <td>{can('patients:write') && <button className="small" onClick={() => setModal({ policy: p })}>Edit</button>}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>Priority</th><th>Carrier</th><th>Subscriber</th><th>Member ID / Group</th><th>Coverage (P/B/M)</th><th className="num">Annual max</th><th className="num">Deductible</th><th /></tr></thead>
+              <tbody>
+                {policies.map((p) => (
+                  <tr key={p.id} style={{ opacity: p.active ? 1 : 0.5 }}>
+                    <td><Badge value={p.active ? p.priority : 'inactive'} /></td>
+                    <td>{p.carrier_name}</td>
+                    <td>{p.subscriber_name}<div className="muted">{p.relationship}</div></td>
+                    <td>{p.subscriber_id}<div className="muted">{p.group_number}</div></td>
+                    <td>
+                      {p.pct_preventive}% / {p.pct_basic}% / {p.pct_major}%
+                      {p.plan && <div className="muted" style={{ fontSize: 11 }}>{p.plan.name || 'Plan'}{p.plan.members > 1 ? ` · shared by ${p.plan.members}` : ''} · <button className="link" style={{ fontSize: 11 }} onClick={() => setModal({ plan: p.plan })}>limits & rules</button></div>}
+                    </td>
+                    <td className="num">{money(p.annual_max)}</td>
+                    <td className="num">{money(p.deductible_met)} of {money(p.deductible)}{p.benefit_month > 1 && <div className="muted" style={{ fontSize: 12 }}>year starts {new Date(2000, p.benefit_month - 1, 1).toLocaleString('en-US', { month: 'short' })} 1</div>}</td>
+                    <td>{can('patients:write') && <button className="small" onClick={() => setModal({ policy: p })}>Edit</button>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 
@@ -171,22 +173,24 @@ export default function InsuranceTab({ patient, onChange }) {
             </div>
           )}
           {claims?.length === 0 ? <div className="muted">No claims.</div> : (
-            <table>
-              <thead><tr><th>Claim</th><th>Created</th><th>Carrier</th><th>Status</th><th className="num">Billed</th><th className="num">Estimated</th><th className="num">Paid</th></tr></thead>
-              <tbody>
-                {claims?.map((c) => (
-                  <tr key={c.id}>
-                    <td><Link to={`/claims/${c.id}`}>#{c.id}</Link></td>
-                    <td>{fmtDate(c.created_at)}</td>
-                    <td>{c.carrier_name}</td>
-                    <td><Badge value={c.status} /></td>
-                    <td className="num">{money(c.total_fee)}</td>
-                    <td className="num">{money(c.estimated_amount)}</td>
-                    <td className="num">{money(c.paid_amount)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div className="table-wrap">
+              <table>
+                <thead><tr><th>Claim</th><th>Created</th><th>Carrier</th><th>Status</th><th className="num">Billed</th><th className="num">Estimated</th><th className="num">Paid</th></tr></thead>
+                <tbody>
+                  {claims?.map((c) => (
+                    <tr key={c.id}>
+                      <td><Link to={`/claims/${c.id}`}>#{c.id}</Link></td>
+                      <td>{fmtDate(c.created_at)}</td>
+                      <td>{c.carrier_name}</td>
+                      <td><Badge value={c.status} /></td>
+                      <td className="num">{money(c.total_fee)}</td>
+                      <td className="num">{money(c.estimated_amount)}</td>
+                      <td className="num">{money(c.paid_amount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
       )}

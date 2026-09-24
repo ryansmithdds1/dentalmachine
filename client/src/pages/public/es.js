@@ -389,4 +389,18 @@ export default {
   'Braces': 'Frenos',
   'Cosmetic / whitening': 'Estética / blanqueamiento',
   'Something else': 'Otra cosa',
+  // Links that don't work (PublicError in PublicLayout.jsx): the server's words, then what to do next.
+  'This link is not valid': 'Este enlace no es válido',
+  'This link is no longer valid': 'Este enlace ya no es válido',
+  'This link has expired': 'Este enlace ha vencido',
+  'This form link is not valid': 'Este enlace del formulario no es válido',
+  'This survey link is not valid': 'Este enlace de la encuesta no es válido',
+  'This link has expired — call us, or reply to our text, and we’ll find you a time': 'Este enlace ha vencido: llámenos o responda a nuestro mensaje y le buscaremos un horario',
+  'This welcome page has expired — we can’t wait to see you!': 'Esta página de bienvenida ha vencido. ¡Tenemos muchas ganas de verle!',
+  'Online booking is not available for this practice': 'Este consultorio no ofrece citas en línea',
+  'Patient portal not found': 'No encontramos este portal del paciente',
+  'We couldn’t find that page.': 'No encontramos esa página.',
+  'Please call the office and we’ll send you a new link.': 'Llame al consultorio y le enviaremos un enlace nuevo.',
+  'Welcome!': '¡Bienvenido/a!',
+  'Newsletter': 'Boletín',
 };

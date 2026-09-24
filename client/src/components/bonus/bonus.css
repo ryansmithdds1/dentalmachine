@@ -52,8 +52,8 @@
 
 /* Settings */
 .bn-settings { display: flex; flex-direction: column; gap: 16px; }
-.bn-switch { display: flex; align-items: center; gap: 10px; font-weight: 600; }
-.bn-switch input { width: 18px; height: 18px; }
+.bn-switch { display: flex; flex-direction: row; align-items: center; gap: 10px; font-weight: 600; font-size: 14px; color: var(--text); }
+.bn-switch input { width: 18px; height: 18px; min-height: 0; flex: none; }
 .bn-types { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
 .bn-type { border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; background: var(--subtle); display: flex; flex-direction: column; gap: 8px; }
 .bn-type h3 { margin: 0; font-size: 15px; }
@@ -69,6 +69,7 @@
 .bn-fields input, .bn-fields select { font-size: 14px; }
 .bn-checks { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13.5px; }
 .bn-checks label { display: inline-flex; align-items: center; gap: 6px; color: var(--text); flex-direction: row; }
+.bn-checks input { width: auto; min-height: 0; flex: none; }
 .bn-lines { display: flex; flex-direction: column; gap: 6px; }
 .bn-line { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)) auto; gap: 8px; align-items: end; }
 .bn-line label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }

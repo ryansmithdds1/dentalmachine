@@ -68,6 +68,9 @@ button.pi-toggle:hover { background: none; color: var(--primary-ink); }
 
 @media (max-width: 700px) {
   .pi-projection { grid-column: auto; }
+  /* Four date presets don't fit a phone in one row: let them wrap instead of pushing the page sideways. */
+  .pi-controls { min-width: 0; max-width: 100%; }
+  .pi-controls .seg { flex-wrap: wrap; max-width: 100%; }
 }
 
 @media print {

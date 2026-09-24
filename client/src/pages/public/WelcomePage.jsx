@@ -1,17 +1,18 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { api } from '../../api.js';
-import { ErrorBox } from '../../components/ui.jsx';
-import PublicLayout from './PublicLayout.jsx';
+import PublicLayout, { PublicError } from './PublicLayout.jsx';
+import { useT } from './i18n.js';
 
 // The new-patient welcome page (PX1), linked from the welcome email: the doctor's photo, when and where, parking,
 // what to bring and what to expect, and the way to the forms. First name and the visit time only — nothing clinical.
 export default function WelcomePage() {
+  const t = useT();
   const { token } = useParams();
   const [info, setInfo] = useState(null);
   const [error, setError] = useState(null);
   useEffect(() => { api.get(`/public/journeys/welcome/${token}`).then(setInfo).catch(setError); }, [token]);
-  if (error) return <PublicLayout title="Welcome!"><ErrorBox error={error} /></PublicLayout>;
+  if (error) return <PublicLayout title={t('Welcome!')}><PublicError error={error} /></PublicLayout>;
   if (!info) return <PublicLayout title="Welcome!"><p>Loading…</p></PublicLayout>;
   const maps = info.practice.address ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${info.practice.name}, ${info.practice.address}`)}` : null;
   return (

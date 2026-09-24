@@ -5,6 +5,7 @@ import { insert, audit, hashToken, practiceNow, recorded } from '../util.js';
 import { toolByName } from '../datatools.js';
 import { agingReport } from '../aging.js';
 import { financeOverview } from '../finance/metrics.js';
+import { computeMetrics } from '../metrics.js';
 import { recordFeeChange } from '../fees.js';
 import { ensureBaseline, snapshotVersion } from '../feeversions.js';
 import orgBillingRoutes from './orgbilling.js';
@@ -197,6 +198,9 @@ export default function orgRoutes({ db }) {
     for (const p of await practicesOf(req.org.id)) {
       const today = (await practiceNow(db, p.id)).slice(0, 10);
       const n = await numbers.run(db, p.id, { from: req.query.from, to: req.query.to });
+      // New patients as Metrics counts them (first completed visit in the dates), so the group's number matches
+      // what each office sees on its own Metrics page — not patient records added.
+      n.new_patients = (await computeMetrics(db, p.id, { from: n.from, to: n.to, today, keys: ['new_patients'] })).values.new_patients ?? n.new_patients;
       const ar = (await agingReport(db, p.id, today)).totals;
       const fin = await financeOverview(db, p.id, { months: 3, today }).catch(() => null);
       const s = fin?.summary?.months ? fin.summary : null;

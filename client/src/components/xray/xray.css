@@ -28,7 +28,7 @@
 .xr-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 10px; }
 .xr-head h2 { margin: 0; }
 .xr-head .xr-spacer { flex: 1; }
-.xr-tabs { display: inline-flex; gap: 4px; }
+.xr-tabs { display: inline-flex; flex-wrap: wrap; gap: 4px; }
 .xr-tabs button[aria-pressed='true'] { background: var(--primary-soft); color: var(--primary-ink); border-color: var(--primary); }
 .xr-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 360px); gap: 14px; }
 .xr-body.solo { grid-template-columns: minmax(0, 1fr); }

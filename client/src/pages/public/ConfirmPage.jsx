@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { api } from '../../api.js';
 import { ErrorBox } from '../../components/ui.jsx';
-import PublicLayout from './PublicLayout.jsx';
+import PublicLayout, { PublicError } from './PublicLayout.jsx';
 import { fmtDateL, fmtTimeL, suggestLang, useLang, useT } from './i18n.js';
 
 // The page behind the link in a reminder: one visit, or a family's visits on one day. Confirm them all with
@@ -45,7 +45,7 @@ export default function ConfirmPage() {
     }
   };
 
-  if (!appt) return <PublicLayout title={t('Your appointment')}><ErrorBox error={error} />{!error && <p>{t('Loading…')}</p>}</PublicLayout>;
+  if (!appt) return <PublicLayout title={t('Your appointment')}><PublicError error={error} />{!error && <p>{t('Loading…')}</p>}</PublicLayout>;
   const p = appt.practice;
   const visits = appt.visits?.length ? appt.visits : [{ ...appt, id: null, upcoming: true }];
   const family = visits.length > 1 || visits.some((v) => v.first_name !== appt.first_name);

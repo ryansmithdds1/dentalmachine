@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom';
 import { CheckCircle2, ChevronLeft, ChevronRight, Camera, PenLine, ShieldCheck, XCircle, UserRound } from 'lucide-react';
 import { ErrorBox } from '../../components/ui.jsx';
 import SignaturePad from '../../components/SignaturePad.jsx';
-import PublicLayout from './PublicLayout.jsx';
+import PublicLayout, { PublicError } from './PublicLayout.jsx';
 import { setLang, suggestLang, useLang } from './i18n.js';
 import { usePT } from './paperwork-i18n.js';
 import { DobGate, publicCall, readPass, savePass } from './LinkPass.jsx';
@@ -35,7 +35,7 @@ export default function PaperworkPage() {
         verify={async (dob) => (await publicCall('POST', `/papers/${token}/verify`, { dob })).pass} />
     );
   }
-  if (error) return <PublicLayout title={pt('Patient forms')}><ErrorBox error={error} /></PublicLayout>;
+  if (error) return <PublicLayout title={pt('Patient forms')}><PublicError error={error} /></PublicLayout>;
   if (!view) return <PublicLayout title={pt('Patient forms')}><p>{pt('Loading…')}</p></PublicLayout>;
   return (
     <PublicLayout practice={view.practice}>

@@ -84,12 +84,14 @@ export default function DepositBuilder({ onSubmitted }) {
   if (done) return <Submitted dep={done} onAnother={startOver} />;
 
   const nothing = !data.entries.length && !closedDrawers.length;
+  // Payments from earlier days still waiting for a deposit: why the totals below can be more than the day's ledger.
+  const earlier = data.entries.filter((e) => e.earlier).reduce((s, e) => s + e.amount, 0);
   return (
     <form className="dep-grid" onSubmit={submit} onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) submit(e); }}>
       <div>
         <div className="dep-toolbar">
           <label>Payments taken on <input type="date" value={date} max={today} onChange={(e) => { setDate(e.target.value || today); setExcluded(new Set()); }} /></label>
-          <span className="muted" style={{ fontSize: 13 }}>Ledger for the day: {money(data.day_ledger.cash)} cash · {money(data.day_ledger.check)} checks{data.day_ledger.cash_refund ? ` · ${money(-data.day_ledger.cash_refund)} cash refunded` : ''}</span>
+          <span className="muted" style={{ fontSize: 13 }}>Ledger for the day: {money(data.day_ledger.cash)} cash · {money(data.day_ledger.check)} checks{data.day_ledger.cash_refund ? ` · ${money(-data.day_ledger.cash_refund)} cash refunded` : ''}{earlier ? ` · plus ${money(earlier)} from earlier days, not deposited yet` : ''}</span>
         </div>
         {data.reopened?.length > 0 && <div className="dep-flag"><AlertTriangle size={16} />A reopened deposit ({fmtDate(data.reopened[0].business_date)}) is waiting to be redone: “{data.reopened[0].reopen_reason}”. Its payments are back on this list.</div>}
         {data.drawers_open > 0 && <div className="dep-flag note"><Banknote size={16} />{data.drawers_open} cash drawer{data.drawers_open === 1 ? ' is' : 's are'} still open or waiting for a second person. Close {data.drawers_open === 1 ? 'it' : 'them'} on Cash drawers first.</div>}

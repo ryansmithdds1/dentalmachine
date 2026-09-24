@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { api, ApiError } from '../../api.js';
 import { ErrorBox } from '../../components/ui.jsx';
-import PublicLayout from './PublicLayout.jsx';
+import PublicLayout, { PublicError } from './PublicLayout.jsx';
 import BookingPageClassic from './BookingPageClassic.jsx';
 import { fmtDateL, fmtTimeL, useLang, useT } from './i18n.js';
 import './onlinebook.css';
@@ -156,7 +156,7 @@ export default function BookingPage() {
 
   // A server without the online scheduling routes yet answers the API's plain 404: use the earlier page.
   if (loadError?.status === 404 && loadError.message === 'Not found') return <BookingPageClassic />;
-  if (loadError) return <PublicLayout title={t('Online booking')}><ErrorBox error={loadError} /></PublicLayout>;
+  if (loadError) return <PublicLayout title={t('Online booking')}><PublicError error={loadError} hint={false} /></PublicLayout>;
   if (!info) return <PublicLayout title={t('Online booking')}><p aria-live="polite">{t('Loading…')}</p></PublicLayout>;
 
   const practice = info.practice;

@@ -66,7 +66,7 @@ export default function RxTab({ patient, onChange }) {
   const controlled = !!form.schedule;
 
   return (
-    <div className="grid" style={{ gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)' }}>
+    <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 420px), 1fr))', alignItems: 'start' }}>
       <div>
         <div className="card">
           <div className="inline" style={{ justifyContent: 'space-between' }}>

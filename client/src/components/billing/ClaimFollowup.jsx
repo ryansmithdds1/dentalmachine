@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { api, downloadCsv, dollars } from '../../api.js';
 import { useApi, useLookup } from '../../hooks.js';
 import { useAuth } from '../../auth.jsx';
-import { money, fmtDate } from '../../format.js';
+import { money, fmtDate, fmtUtcDate } from '../../format.js';
 import { Badge, ErrorBox, MoreRows } from '../ui.jsx';
 import { CALL_OUTCOMES } from '../ClaimEdi.jsx';
 import { useShortcuts } from '../../shortcuts.js';
@@ -21,7 +21,7 @@ const rememberContact = (carrierName, v) => { try { if (v) localStorage.setItem(
 // call come first; J/K move, L (or Enter) opens the call panel beside the list, a digit picks what the payer
 // said, the cursor lands in the reference box and Enter saves and moves on to the next claim.
 export default function ClaimFollowup() {
-  const { can } = useAuth();
+  const { can, practice } = useAuth();
   const [carrier, setCarrier] = useState('');
   const [limit, setLimit] = useState(500);
   const [only, setOnly] = useState(null); // null until the first load decides: due calls when there are any.
@@ -98,12 +98,12 @@ export default function ClaimFollowup() {
                   <td><Link to={`/claims/${c.id}`}>#{c.id}</Link></td>
                   <td><Link to={`/patients/${c.patient_id}`}>{c.first_name} {c.last_name}</Link></td>
                   <td>{c.carrier_name}{c.carrier_phone ? <div className="muted"><a href={`tel:${c.carrier_phone}`}>{c.carrier_phone}</a></div> : null}</td>
-                  <td>{fmtDate(c.submitted_at)}</td>
+                  <td>{fmtUtcDate(c.submitted_at, practice?.timezone)}</td>
                   <td className="num" style={{ color: c.days_out > 60 ? 'var(--danger)' : c.days_out > 30 ? 'var(--warn)' : undefined, fontWeight: c.days_out > 30 ? 700 : 400 }}>{c.days_out}</td>
                   <td className="num">{money(c.estimated_amount - c.paid_amount)}</td>
                   <td><Badge value={c.status} /></td>
                   <td style={{ fontSize: 13 }}>
-                    {c.last_call_at ? <>{CALL_OUTCOMES[c.last_call_outcome] || c.last_call_outcome} <span className="muted">· {fmtDate(c.last_call_at.slice(0, 10))}</span></> : <span className="muted">—</span>}
+                    {c.last_call_at ? <>{CALL_OUTCOMES[c.last_call_outcome] || c.last_call_outcome} <span className="muted">· {fmtUtcDate(c.last_call_at, practice?.timezone)}</span></> : <span className="muted">—</span>}
                     {c.follow_up_date && <div className={c.due ? 'text-danger' : 'muted'}>Follow up {fmtDate(c.follow_up_date)}</div>}
                   </td>
                   <td className="no-print" style={{ whiteSpace: 'nowrap' }}>

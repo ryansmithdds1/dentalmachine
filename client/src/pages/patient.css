@@ -3,3 +3,7 @@
 .office-alert-banner span { flex: 1; color: var(--text); }
 @keyframes alert-in { from { transform: translateY(-4px); opacity: 0; box-shadow: 0 0 0 6px color-mix(in srgb, var(--warn) 30%, transparent); } to { transform: none; opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .office-alert-banner { animation: none; } }
+
+/* Clinical notes: composer beside the list; stacked on a phone. */
+.grid.notes-layout { grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); align-items: start; }
+@media (max-width: 800px) { .grid.notes-layout { grid-template-columns: minmax(0, 1fr); } }

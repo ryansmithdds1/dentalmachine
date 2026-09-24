@@ -233,6 +233,8 @@ export default function Schedule() {
   const [carry, setCarry] = useState(null);
   // Cancel / no-show from the keyboard (X, Shift+X): which picker the drawer opens with.
   const [brokenAsk, setBrokenAsk] = useState(null);
+  // Closing the panel drops the request, so the next visit opened doesn't come up on the reason picker again.
+  useEffect(() => { if (!selectedId) setBrokenAsk(null); }, [selectedId]);
   // Keep today's list on this computer for when the internet is down (see offline.js).
   useEffect(() => {
     if (data && from <= today && to >= today) saveOfflineDay(practice, today, data.appointments, operatories, providers);
@@ -531,7 +533,8 @@ export default function Schedule() {
     { combo: STEP_KEYS.ready, handler: stepKey('ready'), label: 'Ready for the doctor (again to clear)', section: 'Patient flow', enabled: w },
     { combo: STEP_KEYS.ready_checkout, handler: stepKey('ready_checkout'), label: 'Ready for checkout (again to clear)', section: 'Patient flow', enabled: w },
     { combo: STEP_KEYS.out, handler: stepKey('out'), label: 'Out — visit complete', section: 'Patient flow', enabled: w },
-    { combo: 'g', handler: () => { const a = target(); if (a) openOpps(a); else toast('Pick a visit first: click it, or press F'); }, label: 'Opportunities for the selected visit (Enter adds one)', section: 'Patient flow', enabled: can('clinical:read') },
+    // No visit picked: stay quiet — G is also the start of the "G then a letter" page jumps (G P → Patients).
+    { combo: 'g', handler: () => { const a = target(); if (a) openOpps(a); }, label: 'Opportunities for the selected visit (Enter adds one)', section: 'Patient flow', enabled: can('clinical:read') },
     { combo: 'm', handler: () => { const a = target(); if (a || !pins.length) pickUp(a); else pickUp(pins.at(-1), true); }, label: 'Move the selected visit (or the last pinned one): ↑ ↓ ← →, Enter to put it down', section: 'Moving visits', enabled: w },
     { combo: 'x', handler: askBroken('cancelled'), label: 'Cancel the selected visit (pick a reason, then rebook)', section: 'Moving visits', enabled: w },
     { combo: 'shift+x', handler: askBroken('no_show'), label: 'No-show (pick a reason, then rebook)', section: 'Moving visits', enabled: w },

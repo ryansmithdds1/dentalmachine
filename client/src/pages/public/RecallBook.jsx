@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom';
 import { Check } from 'lucide-react';
 import { api } from '../../api.js';
 import { ErrorBox } from '../../components/ui.jsx';
-import PublicLayout from './PublicLayout.jsx';
+import PublicLayout, { PublicError } from './PublicLayout.jsx';
 import { fmtDateL, fmtTimeL, suggestLang, useLang, useT } from './i18n.js';
 import '../recall.css';
 
@@ -63,7 +63,7 @@ export default function RecallBook() {
     }
   };
 
-  if (!page) return <PublicLayout title={t('Book your visit')}><ErrorBox error={error} />{!error && <p>{t('Loading…')}</p>}</PublicLayout>;
+  if (!page) return <PublicLayout title={t('Book your visit')}><PublicError error={error} />{!error && <p>{t('Loading…')}</p>}</PublicLayout>;
   const practice = page.practice;
   const booked = page.people.filter((p) => p.booked);
 

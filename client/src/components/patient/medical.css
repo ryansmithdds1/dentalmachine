@@ -4,6 +4,7 @@
 .med-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 .med-head h2 { margin: 0; }
 .med-head kbd { margin-left: 4px; }
+.med-head > .inline { flex-wrap: wrap; min-width: 0; }
 .med-status { font-size: 12px; color: var(--muted); margin: 4px 0 8px; display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
 .med-status.due { color: var(--warn); background: var(--warn-soft); padding: 6px 9px; border-radius: 6px; font-size: 13px; }
 .med-kv dd { min-width: 0; }

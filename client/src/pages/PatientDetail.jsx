@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import RecallStatus from '../components/RecallStatus.jsx';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useApi, useLookup } from '../hooks.js';
@@ -49,6 +49,15 @@ export default function PatientDetail() {
   }, [params]);
   const [modal, setModal] = useState(null);
   const [popup, setPopup] = useState(null);
+  // On a phone the tab strip scrolls sideways; keep the open tab in view (e.g. when a link opens ?tab=insurance).
+  const tabsRef = useRef(null);
+  useEffect(() => {
+    const strip = tabsRef.current;
+    const btn = strip?.querySelector('button.active');
+    if (!btn || strip.scrollWidth <= strip.clientWidth) return;
+    const left = btn.offsetLeft - strip.offsetLeft;
+    if (left < strip.scrollLeft || left + btn.offsetWidth > strip.scrollLeft + strip.clientWidth) strip.scrollLeft = left - 16;
+  }, [tab, !!p]);
 
   // The office alert stands out the first time a patient is opened in a session (like Dentrix/Open Dental
   // pop-ups), as a banner rather than a dialog so it never blocks what the user came to do.
@@ -137,7 +146,7 @@ export default function PatientDetail() {
           <button type="button" className="link" onClick={() => setPopup(null)} aria-label="Hide the office alert">Got it</button>
         </div>
       )}
-      <div className="tabs" style={{ marginTop: 16 }}>
+      <div className="tabs" style={{ marginTop: 16 }} ref={tabsRef}>
         {tabs.map(([key, text]) => (
           <button key={key} className={tab === key ? 'active' : ''} onClick={() => setTab(key)}>{text}</button>
         ))}

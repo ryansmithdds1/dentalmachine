@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { api } from '../../api.js';
 import { ErrorBox, useSubmit } from '../../components/ui.jsx';
-import PublicLayout from './PublicLayout.jsx';
+import PublicLayout, { PublicError } from './PublicLayout.jsx';
 import { suggestLang, useLang, useT } from './i18n.js';
 
 // A short patient survey (the link in the message after a visit).
@@ -16,7 +16,7 @@ export default function SurveyPage() {
   const [done, setDone] = useState(false);
   useEffect(() => { api.get(`/public/survey/${token}`).then((i) => { suggestLang(i.language); setInfo(i); }).catch(setLoadError); }, [token]);
   const send = useSubmit(async () => { await api.post(`/public/survey/${token}`, { answers }); setDone(true); });
-  if (loadError) return <PublicLayout title={t('Thank you')}><ErrorBox error={loadError} /></PublicLayout>;
+  if (loadError) return <PublicLayout title={t('How did we do?')}><PublicError error={loadError} /></PublicLayout>;
   if (!info) return <PublicLayout title={t('How did we do?')}><p>{t('Loading…')}</p></PublicLayout>;
   const practice = { name: info.practice_name, phone: info.practice_phone };
   if (done || info.answered) return <PublicLayout title={t('Thank you')} practice={practice}><div className="public-notice ok">{t('Thank you, {name}! Your answers go straight to {practice}.', { name: info.first_name, practice: info.practice_name })}</div></PublicLayout>;

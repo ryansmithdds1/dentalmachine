@@ -1,6 +1,11 @@
 /* Deposits and cash handling (pages/Deposits.jsx). Colours come from the :root tokens in styles.css, so dark mode follows. */
 .dep-grid { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(300px, 1fr); gap: 16px; align-items: start; }
-@media (max-width: 1000px) { .dep-grid { grid-template-columns: 1fr; } }
+@media (max-width: 1000px) { .dep-grid { grid-template-columns: minmax(0, 1fr); } }
+.dep-grid > * { min-width: 0; }
+.card:has(.dep-table) { overflow-x: auto; } /* wide tables scroll inside their card on a phone */
+/* Cards side by side in the grid line up at the top; stacked sections keep the usual gap. */
+.dep-grid > .card + .card { margin-top: 0; }
+.dep-grid + .dep-grid, .dep-grid + .card, .card + .dep-grid { margin-top: 16px; }
 
 .dep-toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
 .dep-toolbar label { display: flex; gap: 6px; align-items: center; font-size: 13px; color: var(--muted); }
@@ -74,6 +79,9 @@
 .integrity-tiles div { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; }
 .integrity-tiles strong { display: block; font-size: 22px; font-variant-numeric: tabular-nums; }
 .integrity-tiles span { font-size: 12px; color: var(--muted); }
+.integrity-tiles strong span { font-size: inherit; color: inherit; }
+.integrity-tiles strong .dep-over { color: var(--ok); }
+.integrity-tiles strong .dep-short { color: var(--danger); }
 .integrity-tiles .bad strong { color: var(--danger); }
 .trend { display: flex; align-items: flex-end; gap: 4px; height: 90px; padding: 8px 0; border-bottom: 1px solid var(--border); }
 .trend .bar { flex: 1; min-width: 6px; border-radius: 3px 3px 0 0; background: var(--ok); }

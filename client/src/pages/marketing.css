@@ -26,8 +26,8 @@
 .mk-void td { text-decoration: line-through; }
 .mk-void td:nth-child(5) { text-decoration: none; }
 .mk-inline { display: inline-flex; gap: 6px; }
-.mk-attr { padding: 12px 14px; }
+.mk-attr { padding: 18px 20px; } /* same as every other card on the chart overview */
 .mk-attr-touch { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; margin: 4px 0; }
 .mk-attr-touch b { min-width: 76px; color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
 .mk-attr ol { margin: 6px 0 0 18px; padding: 0; font-size: 12.5px; }
-@media (max-width: 900px) { .mk-layout { flex-direction: column; } .mk-drill { width: 100%; position: static; } }
+@media (max-width: 900px) { .mk-layout { flex-direction: column; align-items: stretch; } .mk-drill { width: 100%; position: static; } }

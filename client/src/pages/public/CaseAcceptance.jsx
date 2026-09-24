@@ -7,7 +7,7 @@ import SignaturePad from '../../components/SignaturePad.jsx';
 import ToothMap from '../../components/patient/ToothMap.jsx';
 import FinOptionCards, { LENDER_NAMES } from '../../components/patient/FinOptionCards.jsx';
 import CompareBoard from '../../components/patient/CompareBoard.jsx';
-import PublicLayout from './PublicLayout.jsx';
+import PublicLayout, { PublicError } from './PublicLayout.jsx';
 import { locale, suggestLang, useLang, useT } from './i18n.js';
 import { DobGate, publicCall, readPass, savePass } from './LinkPass.jsx';
 import { BackToOffice, useHandoff } from './HandOff.jsx';
@@ -95,7 +95,7 @@ export default function CaseAcceptance() {
       throw err;
     }
   });
-  if (loadError) return <PublicLayout title={t('Treatment plan')}><ErrorBox error={loadError} /><BackToOffice back={hand.back} /></PublicLayout>;
+  if (loadError) return <PublicLayout title={t('Treatment plan')}><PublicError error={loadError} /><BackToOffice back={hand.back} /></PublicLayout>;
   if (locked && !plan) {
     return (
       <DobGate title={t('Treatment plan')} practice={locked.practice} onPass={(p) => { savePass('tp', token, p); setPass(p); }}

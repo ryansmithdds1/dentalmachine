@@ -88,7 +88,7 @@
 .cal-corner-tools .icon-btn { width: 26px; min-height: 24px; height: 24px; box-shadow: none; }
 
 /* Provider out */
-.po-panel { width: 520px; }
+.drawer.po-panel { width: 520px; }
 .po-form { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 10px; }
 .po-form label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
 .po-form label.wide { grid-column: 1 / -1; }
@@ -103,14 +103,13 @@
 .po-table { width: 100%; margin: 8px 0; font-size: 13px; }
 @media (max-width: 640px) {
   .move-why { left: 16px; max-width: calc(100vw - 32px); }
-  .po-panel { width: 100vw; }
   .po-form { grid-template-columns: 1fr; }
   .po-visit { grid-template-columns: 56px 1fr; }
   .po-visit select { grid-column: 1 / -1; }
 }
 
 /* Card layout editor */
-.cle-panel { width: 640px; }
+.drawer.cle-panel { width: 640px; }
 .cle { display: flex; flex-direction: column; gap: 12px; }
 .cle-top { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .cle-lines { display: flex; flex-direction: column; gap: 6px; }
@@ -131,7 +130,25 @@
 .cle-labels input { width: 160px; }
 .cle-save { position: sticky; bottom: 0; background: var(--panel); padding: 8px 0; }
 @media (max-width: 700px) {
-  .cle-panel { width: 100vw; }
   .cle-body { grid-template-columns: 1fr; }
   .cle-items { grid-template-columns: 1fr; }
 }
+
+/* Phones: these panels become the full-width bottom sheet like every drawer (styles.css, 760px). */
+@media (max-width: 760px) { .drawer.po-panel, .drawer.cle-panel { width: 100vw; } }
+
+/* Dark mode: the pink "urgent" and amber "note" chips above use light pastel fills; swap them for tinted fills with
+   light ink so they stay readable (and don't glow) on the dark panels. */
+:root[data-theme='dark'] .cc-urgent, :root[data-theme='dark'] .pp-row.urgent { background: rgba(236, 72, 153, 0.18); color: #f9a8d4; }
+:root[data-theme='dark'] .cc-personal, :root[data-theme='dark'] .cc-personal-chip, :root[data-theme='dark'] .pp-urgent-btn { color: #f9a8d4; }
+:root[data-theme='dark'] .cc-cake { color: #f472b6; }
+:root[data-theme='dark'] .cc-prefs.urgent, :root[data-theme='dark'] .ve-urgent { background: rgba(236, 72, 153, 0.16); border-color: rgba(236, 72, 153, 0.45); color: #fbcfe8; }
+:root[data-theme='dark'] .cc-prefs.urgent b { color: #fbcfe8; }
+:root[data-theme='dark'] .pp-urgent-btn.active { background: #db2777; border-color: #db2777; color: #fff; }
+:root[data-theme='dark'] .cc-note.open, :root[data-theme='dark'] .ve-note.open, :root[data-theme='dark'] .dn-pick, :root[data-theme='dark'] .dn-bubble {
+  background: rgba(251, 191, 36, 0.16); border-color: rgba(251, 191, 36, 0.45); color: #fde68a; }
+:root[data-theme='dark'] .cc-note.open { box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.55) inset; }
+:root[data-theme='dark'] .dn-pick:hover { background: rgba(251, 191, 36, 0.26); }
+:root[data-theme='dark'] .dn-bubble { box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4); }
+:root[data-theme='dark'] .po-visit.reschedule { border-color: rgba(251, 146, 60, 0.5); }
+:root[data-theme='dark'] .po-visit.keep { border-color: rgba(74, 222, 128, 0.45); }

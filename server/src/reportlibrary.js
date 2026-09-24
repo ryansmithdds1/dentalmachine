@@ -168,7 +168,8 @@ const NO_PROVIDER = 'none';
 
 async function hasTable(db, name) {
   const row = db.dialect === 'postgres'
-    ? await db.get('SELECT table_name AS name FROM information_schema.tables WHERE table_name = ?', name)
+    // Only this database's schema: another schema (a test's, or a second app on the server) may have the table.
+    ? await db.get('SELECT table_name AS name FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = ?', name)
     : await db.get("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?", name);
   return !!row;
 }

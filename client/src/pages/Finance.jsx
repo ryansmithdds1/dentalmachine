@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { api } from '../api.js';
 import { useApi } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
-import { money, fmtDate } from '../format.js';
+import { money, fmtDate, fmtUtcDate } from '../format.js';
 import { ErrorBox } from '../components/ui.jsx';
 
 // The business side: what the practice really costs to run and earns (the schedule and ledger next to the
@@ -11,7 +11,7 @@ import { ErrorBox } from '../components/ui.jsx';
 const TABS = [['overview', 'Profit & costs'], ['ppo', 'Insurance plans'], ['deposits', 'Deposits'], ['bank', 'Bank activity'], ['connections', 'Connections']];
 const pct = (n) => (n == null ? '—' : `${n}%`);
 const cents = (n) => (n == null ? '—' : money(n));
-const monthName = (m) => new Date(`${m}-15T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', year: '2-digit', timeZone: 'UTC' });
+const monthName = (m) => new Date(`${m}-15T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' });
 
 export default function Finance() {
   const [params, setParams] = useSearchParams();
@@ -60,9 +60,9 @@ function Overview() {
         <select value={months} onChange={(e) => setMonths(Number(e.target.value))}><option value={6}>6 months</option><option value={12}>12 months</option><option value={24}>24 months</option></select>
       </div>
       <div className="stat-strip">
-        <div><strong>{cents(s.collections)}</strong><span>collected · {pct(s.collection_pct)} of net production</span></div>
+        <div><strong>{cents(s.months ? s.collections : null)}</strong><span>collected · {pct(s.collection_pct)} of net production</span></div>
         <div><strong>{pct(s.overhead_pct)}</strong><span>overhead (typical {s.typical_overhead[0]}–{s.typical_overhead[1]}%)</span></div>
-        <div><strong>{cents(s.profit)}</strong><span>left after all costs · {pct(s.profit_pct)}</span></div>
+        <div><strong>{cents(s.months ? s.profit : null)}</strong><span>left after all costs · {pct(s.profit_pct)}</span></div>
         <div><strong>{cents(s.cost_per_visit)}</strong><span>overhead per visit</span></div>
         <div><strong>{cents(s.cost_per_chair_hour)}</strong><span>overhead per chair hour</span></div>
         <div><strong>{cents(s.profit_per_chair_hour)}</strong><span>profit per chair hour</span></div>
@@ -315,6 +315,7 @@ function Deposits() {
                   <td>{writable && !m.qbo_id && <button className="small" onClick={() => run(() => api.del(`/finance/bank/transactions/${m.id}/match`))}>Undo</button>}</td>
                 </tr>
               ))}
+              {!data.matched.length && <tr><td colSpan={6} className="muted">Nothing matched yet. Bank deposits are matched here once the bank is connected.</td></tr>}
             </tbody>
           </table>
         </div>
@@ -345,7 +346,7 @@ function Bank({ categories }) {
   return (
     <>
       <ErrorBox error={err} />
-      <div className="inline" style={{ marginBottom: 8, alignItems: 'center' }}>
+      <div className="inline" style={{ marginBottom: 8, alignItems: 'center', flexWrap: 'wrap' }}>
         <select value={filter.direction} onChange={(e) => setFilter({ ...filter, direction: e.target.value })}><option value="">In and out</option><option value="in">Money in</option><option value="out">Money out</option></select>
         <select value={filter.category} onChange={(e) => setFilter({ ...filter, category: e.target.value })}><option value="">All categories</option>{categories.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}</select>
         <input placeholder="Search" value={filter.q} onChange={(e) => setFilter({ ...filter, q: e.target.value })} style={{ width: 180 }} />
@@ -391,7 +392,7 @@ const loadPlaid = () => new Promise((resolve, reject) => {
 });
 
 function Connections({ status, reload, notice, message }) {
-  const { user } = useAuth();
+  const { user, practice } = useAuth();
   const admin = user?.role === 'admin';
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
@@ -445,7 +446,7 @@ function Connections({ status, reload, notice, message }) {
                 <span className={`badge ${c.status === 'active' ? 'ok' : 'warn'}`}>{c.status === 'relink' ? 'Needs sign-in again' : c.status}</span>
               </div>
               {c.error && <div className="text-danger" style={{ fontSize: 12 }}>{c.error}</div>}
-              <div className="muted" style={{ fontSize: 12 }}>Last update {c.last_synced_at ? fmtDate(c.last_synced_at) : 'never'}</div>
+              <div className="muted" style={{ fontSize: 12 }}>Last update {c.last_synced_at ? fmtUtcDate(c.last_synced_at, practice?.timezone) : 'never'}</div>
               {status.accounts.filter((a) => a.connection_id === c.id).map((a) => (
                 <div key={a.id} className="inline" style={{ justifyContent: 'space-between', fontSize: 13, marginTop: 6 }}>
                   <span>{a.name} ••{a.mask} · {money(a.current_balance)}</span>
@@ -475,7 +476,7 @@ function Connections({ status, reload, notice, message }) {
                 <span className={`badge ${q.status === 'active' ? 'ok' : 'warn'}`}>{q.status === 'reconnect' ? 'Needs sign-in again' : q.status}</span>
               </div>
               {q.error && <div className="text-danger" style={{ fontSize: 12 }}>{q.error}</div>}
-              <div className="muted" style={{ fontSize: 12 }}>Last update {q.last_synced_at ? fmtDate(q.last_synced_at) : 'never'}</div>
+              <div className="muted" style={{ fontSize: 12 }}>Last update {q.last_synced_at ? fmtUtcDate(q.last_synced_at, practice?.timezone) : 'never'}</div>
               {admin && (
                 <>
                   <h3 style={{ marginTop: 14 }}>Send deposits to QuickBooks</h3>

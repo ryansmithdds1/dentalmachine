@@ -1,7 +1,7 @@
 /* Chart audit: calm and plain — risk shown with a thin colour edge, not alarms. */
 .ca-h-icon { vertical-align: -3px; color: var(--primary); }
 .ca-filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 8px 0; }
-.ca-filters select, .ca-filters input { width: auto; }
+.ca-filters select, .ca-filters input { width: auto; max-width: 100%; }
 .ca-filters button svg { vertical-align: -2px; }
 .ca-spacer { flex: 1; }
 .ca-last { font-size: 12px; margin-bottom: 8px; }

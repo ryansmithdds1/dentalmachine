@@ -33,7 +33,7 @@ export default function ReportBuilder() {
   const setFilter = (i, patch) => set({ filters: spec.filters.map((f, j) => (j === i ? { ...f, ...patch } : f)) });
   const setAgg = (i, patch) => set({ aggregates: spec.aggregates.map((a, j) => (j === i ? { ...a, ...patch } : a)) });
   return (
-    <div className="grid" style={{ gridTemplateColumns: 'minmax(260px, 340px) minmax(0, 1fr)', alignItems: 'start' }}>
+    <div className="grid builder-layout" style={{ alignItems: 'start' }}>
       <div className="card">
         <h2>Report builder</h2>
         <label>Report on<select value={spec.dataset} onChange={(e) => set({ dataset: e.target.value, columns: Object.keys(meta.datasets[e.target.value].columns).slice(0, 5), filters: [], group_by: Object.keys(meta.datasets[e.target.value].columns)[0], aggregates: [{ fn: 'count' }], sort: null })}>

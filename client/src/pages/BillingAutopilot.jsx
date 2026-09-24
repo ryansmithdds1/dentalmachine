@@ -4,7 +4,7 @@ import { api } from '../api.js';
 import { useApi } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
 import { useCommands } from '../shortcuts.js';
-import { money, fmtDate } from '../format.js';
+import { money, fmtDate, fmtUtcDate } from '../format.js';
 import { toast } from '../toast.js';
 import { ErrorBox, Badge, useSubmit } from '../components/ui.jsx';
 
@@ -45,6 +45,7 @@ export default function BillingAutopilot() {
 
 // ---- BL1: every plan and what's next ----
 function Plans() {
+  const { practice } = useAuth();
   const [kind, setKind] = useState('');
   const { data, error } = useApi(`/billing/active${kind ? `?kind=${kind}` : ''}`);
   return (
@@ -52,7 +53,7 @@ function Plans() {
       <ErrorBox error={error} />
       {data && (
         <div className="card">
-          <div className="row" style={{ gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+          <div className="inline" style={{ gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
             <strong>{data.counts.total} active</strong>
             <span>{data.counts.retrying} retrying</span>
             <span>{data.counts.paused} paused</span>
@@ -69,7 +70,7 @@ function Plans() {
       {data?.waiting_for_patient?.length > 0 && (
         <div className="card">
           <h3>Waiting for the patient to agree</h3>
-          <ul>{data.waiting_for_patient.map((w) => <li key={w.id}><Link to={`/patients/${w.patient_id}`}>{w.patient}</Link> — {KIND[w.kind]}, link sent {fmtDate(w.sent_at)}</li>)}</ul>
+          <ul>{data.waiting_for_patient.map((w) => <li key={w.id}><Link to={`/patients/${w.patient_id}`}>{w.patient}</Link> — {KIND[w.kind]}, link sent {fmtUtcDate(w.sent_at, practice?.timezone)}</li>)}</ul>
         </div>
       )}
       <div className="card table-wrap">
@@ -79,11 +80,11 @@ function Plans() {
             {(data?.items || []).map((i) => (
               <tr key={`${i.kind}:${i.id}`}>
                 <td><Link to={`/patients/${i.patient_id}`}>{i.patient}</Link></td>
-                <td>{KIND[i.kind]} · {i.label}</td>
+                <td>{i.label?.startsWith(KIND[i.kind]) ? i.label : `${KIND[i.kind]} · ${i.label}`}</td>
                 <td>{i.next_date ? fmtDate(i.next_date) : '—'}</td>
                 <td>{money(i.next_amount)}</td>
                 <td>{i.card ? <>{i.card.label}{i.card.expiring && <> <Badge value="expiring" /></>}</> : <span className="muted">No card — billed to the account</span>}</td>
-                <td>{i.authorization ? fmtDate(i.authorization.signed_at) : <span className="muted">not on file</span>}</td>
+                <td>{i.authorization ? fmtUtcDate(i.authorization.signed_at, practice?.timezone) : <span className="muted">not on file</span>}</td>
                 <td>{i.dunning ? <span title={i.dunning.reason}>{i.status === 'paused' ? 'Paused' : `Retry ${fmtDate(i.dunning.next_retry_on)}`}</span> : <Badge value={i.status} />}</td>
               </tr>
             ))}
@@ -112,7 +113,7 @@ function Declined() {
       {data && !data.length && <div className="card muted">No declined payments. When a card is declined nothing is posted, the patient gets a link to update it, and it’s tried again on its own.</div>}
       {(data || []).map((d) => (
         <div key={d.id} className="card">
-          <div className="row" style={{ justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+          <div className="inline" style={{ justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
             <div>
               <strong><Link to={`/patients/${d.patient_id}`}>{d.patient}</Link></strong> — {d.label}, {money(d.amount)} {d.card && <span className="muted">({d.card})</span>}
               <div className="muted">{d.last_reason} · {d.failures} {d.failures === 1 ? 'try' : 'tries'} · {d.status === 'paused' ? 'paused — needs a person' : `next try ${fmtDate(d.next_retry_on)}`}{d.patient_notified_at ? ' · patient sent an update-card link' : ' · patient not reached yet'}</div>
@@ -136,7 +137,7 @@ function Declined() {
             </div>
           )}
           {write && (
-            <div className="row" style={{ gap: 8, marginTop: 6 }}>
+            <div className="inline" style={{ gap: 8, marginTop: 6 }}>
               <input aria-label="Why stop the retries" placeholder="Stop retries — why? (e.g. paid by check, sent to collections)" value={note[d.id] || ''} onChange={(e) => setNote({ ...note, [d.id]: e.target.value })} style={{ flex: 1 }} />
               <button onClick={() => act.submit(d, 'stop', { note: note[d.id] })} disabled={act.busy || !note[d.id]}>Stop retries</button>
             </div>
@@ -148,6 +149,7 @@ function Declined() {
 }
 
 function Disputes() {
+  const { practice } = useAuth();
   const { data, error } = useApi('/billing/disputes');
   return (
     <div className="card table-wrap">
@@ -157,7 +159,7 @@ function Disputes() {
         <tbody>
           {(data || []).map((d) => (
             <tr key={d.id}>
-              <td>{fmtDate(d.created_at)}</td>
+              <td>{fmtUtcDate(d.created_at, practice?.timezone)}</td>
               <td>{d.patient_id ? <Link to={`/patients/${d.patient_id}`}>{d.first_name} {d.last_name}</Link> : <span className="muted">not matched</span>}</td>
               <td>{d.kind === 'dispute' ? `Card dispute${d.reason ? ` (${d.reason.replace(/_/g, ' ')})` : ''}` : 'Refund made at the processor'}</td>
               <td>{money(d.amount)}</td>
@@ -201,6 +203,7 @@ function DailyCheck() {
             ))}
           </tbody>
         </table>
+        {data && !data.days?.length && <p className="muted">No days checked yet{data.available ? '' : ' — there’s nothing to check until card processing is connected'}.</p>}
       </div>
     </>
   );
@@ -208,7 +211,7 @@ function DailyCheck() {
 
 function Expiring() {
   const { data, error, reload } = useApi('/billing/expiring-cards');
-  const { can } = useAuth();
+  const { can, practice } = useAuth();
   const send = useSubmit(async (c) => { await api.post(`/payment-methods/${c.id}/update-link`, {}); toast('Update-card link sent'); reload(); });
   const runAll = useSubmit(async () => { const out = await api.post('/billing/expiring-cards/run', {}); toast(`${out.sent} update-card request${out.sent === 1 ? '' : 's'} sent`); reload(); });
   return (
@@ -227,7 +230,7 @@ function Expiring() {
                 <td><Link to={`/patients/${c.patient_id}`}>{c.patient}</Link></td>
                 <td>{c.brand} •••• {c.last4}</td>
                 <td>{fmtDate(c.expires)}</td>
-                <td>{c.notified_at ? fmtDate(c.notified_at) : '—'}</td>
+                <td>{c.notified_at ? fmtUtcDate(c.notified_at, practice?.timezone) : '—'}</td>
                 <td>{can('billing:write') && <button className="small" onClick={() => send.submit(c)} disabled={send.busy}>Text link again</button>}</td>
               </tr>
             ))}
@@ -310,8 +313,8 @@ function Fees() {
             {form.kind === 'percent' && <label>At least ($)<input inputMode="decimal" value={form.min} onChange={(e) => set('min', e.target.value)} /></label>}
             <label>At most ($, cap)<input inputMode="decimal" value={form.max} onChange={(e) => set('max', e.target.value)} /></label>
             <label>Times a year per patient (blank = no limit)<input inputMode="numeric" value={form.max_per_year} onChange={(e) => set('max_per_year', e.target.value)} /></label>
-            <label className="row"><input type="checkbox" checked={form.waivable} onChange={(e) => set('waivable', e.target.checked)} /> Managers can waive it (with a reason)</label>
-            <label className="row"><input type="checkbox" checked={form.active} onChange={(e) => set('active', e.target.checked)} /> On</label>
+            <label className="checkbox"><input type="checkbox" checked={form.waivable} onChange={(e) => set('waivable', e.target.checked)} /> Managers can waive it (with a reason)</label>
+            <label className="checkbox"><input type="checkbox" checked={form.active} onChange={(e) => set('active', e.target.checked)} /> On</label>
             <div className="drawer-actions"><button className="primary" type="submit" disabled={save.busy}>Save</button></div>
           </form>
         </aside>
@@ -348,17 +351,17 @@ function Settings() {
       <p>{data.processors.filter((p) => p.available).map((p) => p.name).join(', ')} {data.mode === 'sandbox' ? '(sandbox — test cards only)' : data.mode === 'none' ? '(not connected)' : ''}. Coming later: {data.processors.filter((p) => !p.available).map((p) => p.name).join(', ')}.</p>
       <h3>Pass card costs on to patients</h3>
       <p className="muted">State: {data.state || 'not set'}. {data.state_rule?.note || (data.surcharge_allowed ? `Card brands allow up to ${pct(data.brand_max_bps)} on credit cards, never on debit.` : '')}</p>
-      <fieldset disabled={!admin}>
-        <label className="row"><input type="radio" checked={s.pass_through === 'off'} onChange={() => set('pass_through', 'off')} /> Don’t pass card costs on</label>
-        <label className="row"><input type="radio" checked={s.pass_through === 'surcharge'} disabled={!data.surcharge_allowed} onChange={() => set('pass_through', 'surcharge')} /> A surcharge on credit cards {!data.surcharge_allowed && '(not allowed in this state)'}</label>
+      <fieldset disabled={!admin} style={{ border: 0, padding: 0, margin: 0, minWidth: 0, display: 'grid', gap: 10 }}>
+        <label className="checkbox"><input type="radio" checked={s.pass_through === 'off'} onChange={() => set('pass_through', 'off')} /> Don’t pass card costs on</label>
+        <label className="checkbox"><input type="radio" checked={s.pass_through === 'surcharge'} disabled={!data.surcharge_allowed} onChange={() => set('pass_through', 'surcharge')} /> A surcharge on credit cards {!data.surcharge_allowed && '(not allowed in this state)'}</label>
         {s.pass_through === 'surcharge' && (
           <div style={{ marginLeft: 24 }}>
             <label>What card processing costs you (%)<input inputMode="decimal" value={s.cost} onChange={(e) => set('cost', e.target.value)} /></label>
             <label>Surcharge (%) — at most {pct(data.surcharge_max_bps ?? data.brand_max_bps)} and never more than your cost<input inputMode="decimal" value={s.surcharge} onChange={(e) => set('surcharge', e.target.value)} /></label>
-            <label className="row"><input type="checkbox" checked={s.notified} onChange={(e) => set('notified', e.target.checked)} /> I told my processor (card brands require 30 days’ notice)</label>
+            <label className="checkbox"><input type="checkbox" checked={s.notified} onChange={(e) => set('notified', e.target.checked)} /> I told my processor (card brands require 30 days’ notice)</label>
           </div>
         )}
-        <label className="row"><input type="radio" checked={s.pass_through === 'convenience_fee'} onChange={() => set('pass_through', 'convenience_fee')} /> A flat convenience fee for paying online</label>
+        <label className="checkbox"><input type="radio" checked={s.pass_through === 'convenience_fee'} onChange={() => set('pass_through', 'convenience_fee')} /> A flat convenience fee for paying online</label>
         {s.pass_through === 'convenience_fee' && <label style={{ marginLeft: 24 }}>Fee ($)<input inputMode="decimal" value={s.fee} onChange={(e) => set('fee', e.target.value)} /></label>}
         {data.disclosure && <p className="muted">Patients see: “{data.disclosure.text}” before they pay, and it’s on the receipt.</p>}
         <h3>Declined payments</h3>

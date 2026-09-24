@@ -31,6 +31,7 @@
 .eob-preview { background: var(--primary-soft); border-radius: 8px; padding: 10px 12px; margin: 8px 0 12px; }
 .eob-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; align-items: end; margin-bottom: 8px; }
 .eob-form label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.eob-form > button { justify-self: start; }
 @media (max-width: 900px) {
   .eob-split { grid-template-columns: 1fr; }
   .eob-panel { position: static; }

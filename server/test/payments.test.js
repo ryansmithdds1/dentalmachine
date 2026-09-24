@@ -80,7 +80,9 @@ test('autopay charges each installment once, even when runs overlap or the answe
     enabled: true,
     async charge(args) {
       calls.push(args.idempotencyKey);
-      await new Promise((r) => setTimeout(r, 30));
+      // Long enough that the three runs really overlap: on Postgres each run's first queries can open a new
+      // pool connection, so they reach the lock up to ~100 ms apart.
+      await new Promise((r) => setTimeout(r, 300));
       if (lose-- > 0) return { ok: false, ambiguous: true, reason: "Couldn't confirm the charge (timeout)" };
       return { ok: true, reference: `pi_${args.idempotencyKey}` };
     },

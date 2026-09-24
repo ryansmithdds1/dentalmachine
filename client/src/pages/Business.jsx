@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { api, getLocationId, downloadCsv } from '../api.js';
 import { useApi } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
-import { practiceToday, shiftDate } from '../format.js';
+import { practiceToday, shiftDate, fmtDate } from '../format.js';
 import { ErrorBox } from '../components/ui.jsx';
 import { toast } from '../toast.js';
 import { useShortcuts } from '../shortcuts.js';
@@ -162,6 +162,13 @@ function WhatIf({ q, carriers }) {
 }
 
 // ---- BD4: trends ----
+// A trends row's period as office staff read it: "Week of Aug 23, 2026", "Sep 2026", "Sep 24, 2026".
+function periodLabel(p, group) {
+  if (/^\d{4}-\d{2}$/.test(p)) return new Date(`${p}-01T00:00:00`).toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+  if (/^\d{4}-\d{2}-\d{2}$/.test(p)) return group === 'week' ? `Week of ${fmtDate(p)}` : fmtDate(p);
+  return p;
+}
+
 function Trends({ today, access }) {
   const [from, setFrom] = useState(shiftDate(today, -27));
   const [to, setTo] = useState(today);
@@ -186,7 +193,7 @@ function Trends({ today, access }) {
               <tbody>
                 {[...data.rows, { ...data.total, period: 'Total' }].map((r) => (
                   <tr key={r.period} style={r.period === 'Total' ? { fontWeight: 700 } : undefined}>
-                    <td>{r.period}</td><td className="num">{$(r.production)}</td><td className="num">{$(r.collections)}</td>
+                    <td>{periodLabel(r.period, group)}</td><td className="num">{$(r.production)}</td><td className="num">{$(r.collections)}</td>
                     {access.rates && <><td className="num"><button className="link" onClick={() => setDrill('labor')}>{$(r.labor_cost)}</button></td><td className="num">{pct(r.labor_pct_production)}</td><td className="num">{pct(r.labor_pct_collections)}</td><td className="num"><button className="link" onClick={() => setDrill('overtime')}>{$(r.overtime_premium)}</button></td></>}
                     <td className="num">{hrs(r.paid_minutes)}</td><td className="num">{$h(r.production_per_labor_hour)}</td><td className="num">{pct(r.productivity_pct)}</td><td className="num">{r.idle_hours == null ? '—' : `${r.idle_hours} h`}</td>{access.rates && <td className="num">{$(r.idle_cost)}</td>}
                   </tr>
@@ -198,20 +205,24 @@ function Trends({ today, access }) {
           {data.people.length > 0 && (
             <div className="biz-section">
               <h3>By person</h3>
+              <div className="table-wrap">
               <table className="biz-table">
                 <thead><tr><th>Person</th><th>Role</th><th className="num">Paid h</th><th className="num">Busy %</th><th className="num">Idle h</th><th className="num">Production supported / h</th></tr></thead>
                 <tbody>{data.people.map((p) => <tr key={p.user_id}><td>{p.name}</td><td>{p.kind}</td><td className="num">{hrs(p.paid_minutes)}</td><td className="num">{pct(p.productivity_pct)}</td><td className="num">{hrs(p.idle_minutes)}</td><td className="num">{$h(p.production_per_labor_hour)}</td></tr>)}</tbody>
               </table>
+              </div>
               <p className="muted">By role: {data.roles.map((r) => `${r.kind} ${pct(r.productivity_pct)} busy, ${r.idle_hours} h idle`).join(' · ')}</p>
             </div>
           )}
           {drill && rows && (
             <div className="biz-section">
               <h3>{drill === 'overtime' ? 'Overtime' : 'Hours and labor'} behind the numbers <button className="link" onClick={() => setDrill(null)}>close</button></h3>
+              <div className="table-wrap">
               <table className="biz-table">
                 <thead><tr><th>Date</th><th>Person</th><th>In</th><th>Out</th><th className="num">Hours</th><th className="num">Overtime h</th>{access.rates && <th className="num">Cost</th>}</tr></thead>
                 <tbody>{rows.map((r, i) => <tr key={i}><td>{r.date}</td><td>{r.name}</td><td>{r.clock_in?.slice(11)}</td><td>{r.clock_out?.slice(11)}</td><td className="num">{hrs(r.minutes)}</td><td className="num">{hrs((r.overtime || 0) + (r.doubletime || 0))}</td>{access.rates && <td className="num">{$(r.cost)}</td>}</tr>)}</tbody>
               </table>
+              </div>
             </div>
           )}
         </>
@@ -316,6 +327,7 @@ function ProfileEditor({ cp, can, rates, onSave }) {
   const rows = useMemo(() => [...cp.profiles].sort((a, b) => (a.scope === b.scope ? a.scope_key.localeCompare(b.scope_key) : a.scope === 'category' ? -1 : 1)), [cp.profiles]);
   return (
     <>
+      <div className="table-wrap">
       <table className="biz-table">
         <thead><tr><th>Code / kind</th><th className="num">Supplies</th><th>Lab</th><th className="num">Card fee</th>{rates && <th className="num">Pay override</th>}<th>Since</th><th className="num">Versions</th><th /></tr></thead>
         <tbody>
@@ -334,6 +346,7 @@ function ProfileEditor({ cp, can, rates, onSave }) {
           {!rows.length && <tr><td colSpan={8} className="muted">No costs entered yet: typical amounts are used (and labelled) until you do.</td></tr>}
         </tbody>
       </table>
+      </div>
       {can && (
         <form className="biz-form" style={{ marginTop: 8 }} onSubmit={(e) => {
           e.preventDefault();
@@ -363,10 +376,12 @@ function PayPlans({ pay, can, onSave }) {
   return (
     <div className="biz-section">
       <h3>How providers are paid</h3>
+      <div className="table-wrap">
       <table className="biz-table">
         <thead><tr><th>Provider</th><th>Paid</th><th>Since</th><th className="num">Time clock rate</th></tr></thead>
         <tbody>{pay.providers.map((p) => <tr key={p.id}><td>{p.name}</td><td>{p.current ? `${pay.bases[p.current.basis]}${p.current.pct_bp ? ` — ${p.current.pct_bp / 100}%` : ''}${p.current.hourly_cents ? ` — ${$h(p.current.hourly_cents)}` : ''}${p.current.lab_deducted ? ', after lab' : ''}` : 'not per visit (owner)'}</td><td>{p.current?.effective_from || ''}</td><td className="num">{p.clock_rate_cents != null ? $h(p.clock_rate_cents) : '—'}</td></tr>)}</tbody>
       </table>
+      </div>
       {can && (
         <form className="biz-form" style={{ marginTop: 8 }} onSubmit={(e) => {
           e.preventDefault();
@@ -389,6 +404,7 @@ function StaffRoles({ roles, onSave }) {
     <div className="biz-section">
       <h3>Who works with whom (staff lanes)</h3>
       <p className="muted" style={{ marginTop: 0 }}>Assistants linked to a provider or chair count as busy when that provider or chair has a patient; unlinked assistants share the doctor chairs in the order they clocked in.</p>
+      <div className="table-wrap">
       <table className="biz-table">
         <thead><tr><th>Person</th><th>Works as</th><th>With provider</th><th>In chair</th></tr></thead>
         <tbody>{roles.people.map((p) => (
@@ -400,6 +416,7 @@ function StaffRoles({ roles, onSave }) {
           </tr>
         ))}</tbody>
       </table>
+      </div>
     </div>
   );
 }

@@ -25,10 +25,10 @@ export default function OpportunityDay({ date: given, locationId = null, onOpen,
     <section className="card opp-day" aria-label="Opportunities today">
       <div className="opp-day-head">
         <h3><Sparkles size={16} /> Opportunities</h3>
-        {day.totals && (
+        {day.totals?.count > 0 && (
           <div className="opp-day-total">
             <strong>{money(day.totals.fee)}</strong>
-            <span className="muted">{day.totals.count} on {day.totals.visits} of {day.visits.length} {day.visits.length === 1 ? 'visit' : 'visits'}</span>
+            <span className="muted">{day.totals.count} {day.totals.count === 1 ? 'item' : 'items'} on {day.totals.visits} of {day.visits.length} {day.visits.length === 1 ? 'visit' : 'visits'}</span>
           </div>
         )}
       </div>

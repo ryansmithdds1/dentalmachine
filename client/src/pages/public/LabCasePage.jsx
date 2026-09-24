@@ -23,7 +23,7 @@ export default function LabCasePage() {
       load();
     } catch (err) { setError(err); }
   };
-  if (error && !d) return <div className="public-page"><div className="card"><ErrorBox error={error} /></div></div>;
+  if (error && !d) return <div className="public-page" style={{ maxWidth: 760, margin: '0 auto', padding: 16 }}><div className="card"><ErrorBox error={error} /></div></div>;
   if (!d) return <div className="empty">Loading…</div>;
   const c = d.case;
   return (
@@ -34,7 +34,7 @@ export default function LabCasePage() {
             <h1 style={{ margin: 0 }}>{c.description}</h1>
             <div className="muted">Case #{c.id} from <strong>{d.practice.name}</strong>{d.practice.phone ? ` · ${d.practice.phone}` : ''}</div>
           </div>
-          <div style={{ textAlign: 'right' }}>
+          <div>
             <div>Sent {fmtDate(c.sent_date)}</div>
             <div><strong>Due back {c.due_date ? fmtDate(c.due_date) : '—'}</strong></div>
             {d.appointment && <div className="muted">Patient seats {fmtDate(d.appointment)}</div>}

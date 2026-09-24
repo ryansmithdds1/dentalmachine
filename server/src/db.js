@@ -5372,6 +5372,57 @@ CREATE TABLE IF NOT EXISTS journey_broadcast_recipients (
 CREATE INDEX IF NOT EXISTS idx_journey_checkins_phone ON journey_checkins(practice_id, phone);
 CREATE INDEX IF NOT EXISTS idx_journey_moments_status ON journey_moments(practice_id, status);
 CREATE INDEX IF NOT EXISTS idx_journey_bcr_status ON journey_broadcast_recipients(broadcast_id, status);
+-- Claims ready to approve (claimprep.js): the queue itself is worked out on read from completed, unbilled work;
+-- these tables hold only what people decided about it.
+-- A person's approval of one prepared group. The group key (policy, office, procedure ids) is unique, so two
+-- approvals of the same work at once (a double click, two people) can't both make a claim.
+CREATE TABLE IF NOT EXISTS claim_approvals (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  patient_insurance_id INTEGER NOT NULL REFERENCES patient_insurance(id),
+  group_key TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'working' CHECK (status IN ('working','done','failed')),
+  claim_id INTEGER REFERENCES claims(id),
+  approved_by INTEGER REFERENCES users(id),
+  override_reason TEXT,
+  error TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (practice_id, group_key)
+);
+-- "Skip for now": procedures a person chose not to bill yet, with the reason. Put back = restored_at.
+CREATE TABLE IF NOT EXISTS claim_prep_skips (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  patient_insurance_id INTEGER NOT NULL REFERENCES patient_insurance(id),
+  procedure_id INTEGER NOT NULL REFERENCES procedures(id),
+  skip_group TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  skipped_by INTEGER REFERENCES users(id),
+  restored_at TEXT,
+  restored_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- An x-ray, perio chart or narrative chosen for work that isn't on a claim yet; it moves onto the claim
+-- (claim_attachments) when the group is approved.
+CREATE TABLE IF NOT EXISTS claim_prep_attachments (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  patient_insurance_id INTEGER NOT NULL REFERENCES patient_insurance(id),
+  document_id INTEGER REFERENCES documents(id),
+  report_type TEXT NOT NULL,
+  narrative TEXT,
+  claim_id INTEGER REFERENCES claims(id),
+  created_by INTEGER REFERENCES users(id),
+  removed_at TEXT,
+  removed_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_claim_prep_skips_proc ON claim_prep_skips(procedure_id, patient_insurance_id);
+CREATE INDEX IF NOT EXISTS idx_claim_prep_att_policy ON claim_prep_attachments(patient_insurance_id);
 `;
 
 // Columns added after the first release. SQLite has no ADD COLUMN IF NOT EXISTS, so check first.
@@ -5958,6 +6009,8 @@ const COLUMNS = [
   // Billing autopilot: how many times staff resumed a paused dunning. It is part of the retry's idempotency key,
   // so a retry after a resume never reuses a key the processor already declined.
   ['billing_dunning', 'resumes', 'INTEGER NOT NULL DEFAULT 0'],
+  // Claims ready to approve: prepare claims from finished work for a person to approve (never sent on its own).
+  ['practices', 'claim_prep', 'INTEGER NOT NULL DEFAULT 1'],
 ];
 
 // CHECK constraints widened after release: [table, constraint name on Postgres, old text, new text].
@@ -6401,7 +6454,22 @@ async function openPostgres(url, { freshSchema = false } = {}) {
       }
     },
     async close() {
-      if (schema) await pool.query(`DROP SCHEMA ${schema} CASCADE`);
+      if (schema) {
+        // Dropping a whole schema locks every table in it, as creating one does. Take the migration lock so
+        // many test files finishing at once don't exhaust Postgres's shared lock table ("out of shared memory").
+        const client = await pool.connect();
+        try {
+          await client.query('BEGIN');
+          await client.query('SELECT pg_advisory_xact_lock(424242)');
+          await client.query(`DROP SCHEMA ${schema} CASCADE`);
+          await client.query('COMMIT');
+        } catch (err) {
+          await client.query('ROLLBACK').catch(() => {}); // the drop's own error is what matters; rethrown below
+          throw err;
+        } finally {
+          client.release();
+        }
+      }
       await pool.end();
     },
   };

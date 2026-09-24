@@ -2,10 +2,12 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { api } from '../../api.js';
 import { ErrorBox, useSubmit } from '../../components/ui.jsx';
-import PublicLayout from './PublicLayout.jsx';
+import PublicLayout, { PublicError } from './PublicLayout.jsx';
+import { useT } from './i18n.js';
 
 // Leaving the newsletter (PX5): one tap. Appointment reminders and the rest are unaffected.
 export default function NewsUnsubscribe() {
+  const t = useT();
   const { token } = useParams();
   const [info, setInfo] = useState(null);
   const [error, setError] = useState(null);
@@ -13,7 +15,7 @@ export default function NewsUnsubscribe() {
   useEffect(() => { api.get(`/public/journeys/unsubscribe/${token}`).then(setInfo).catch(setError); }, [token]);
   const go = useSubmit(async () => { await api.post(`/public/journeys/unsubscribe/${token}`); setDone(true); });
   const practice = info ? { name: info.practice_name } : null;
-  if (error) return <PublicLayout title="Newsletter"><ErrorBox error={error} /></PublicLayout>;
+  if (error) return <PublicLayout title={t('Newsletter')}><PublicError error={error} /></PublicLayout>;
   if (!info) return <PublicLayout title="Newsletter"><p>Loading…</p></PublicLayout>;
   return (
     <PublicLayout title="Newsletter" practice={practice}>

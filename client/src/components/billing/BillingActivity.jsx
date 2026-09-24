@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { api } from '../../api.js';
 import { useApi } from '../../hooks.js';
 import { useAuth } from '../../auth.jsx';
-import { money, fmtDate } from '../../format.js';
+import { money, fmtDate, fmtUtcDate } from '../../format.js';
 import { toast } from '../../toast.js';
 import { ErrorBox, useSubmit } from '../ui.jsx';
 import SetUpPayments from './SetUpPayments.jsx';
@@ -11,7 +11,7 @@ import SetUpPayments from './SetUpPayments.jsx';
 // retries, links sent, agreements, fees (waivable by a manager, with a reason), disputes and refunds — plus the
 // "Set up payments" panel and adding an office fee. For the patient's ledger / account page.
 export default function BillingActivity({ patientId }) {
-  const { can } = useAuth();
+  const { can, practice } = useAuth();
   const { data, error, reload } = useApi(`/patients/${patientId}/billing-activity`);
   const fees = useApi(`/patients/${patientId}/fee-charges`);
   const defs = useApi('/billing/fees');
@@ -33,10 +33,10 @@ export default function BillingActivity({ patientId }) {
   const offered = (defs.data?.fees || []).filter((f) => f.active && (f.applies === 'offered' || f.occasion === 'manual') && f.occasion !== 'plan_setup');
   return (
     <div className="card">
-      <div className="row" style={{ justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+      <div className="inline" style={{ justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
         <h3 style={{ margin: 0 }}>Automatic payments &amp; fees</h3>
         {can('billing:write') && (
-          <div className="row" style={{ gap: 6 }}>
+          <div className="inline" style={{ gap: 6 }}>
             <button onClick={() => setSetup(true)}>Set up payments</button>
             {offered.length > 0 && (
               <>
@@ -56,14 +56,14 @@ export default function BillingActivity({ patientId }) {
           <thead><tr><th>Fee</th><th>Amount</th><th>Date</th><th /></tr></thead>
           <tbody>
             {fees.data.filter((c) => c.status === 'posted').map((c) => (
-              <tr key={c.id}><td>{c.name}</td><td>{money(c.amount)}</td><td>{fmtDate(c.created_at)}</td>
+              <tr key={c.id}><td>{c.name}</td><td>{money(c.amount)}</td><td>{fmtUtcDate(c.created_at, practice?.timezone)}</td>
                 <td>{c.waivable && can('billing:write') && <button className="small" onClick={() => setWaive(c)}>Waive</button>}</td></tr>
             ))}
           </tbody>
         </table>
       )}
       {waive && (
-        <form className="row" style={{ gap: 6 }} onSubmit={(e) => { e.preventDefault(); doWaive.submit(); }}>
+        <form className="inline" style={{ gap: 6 }} onSubmit={(e) => { e.preventDefault(); doWaive.submit(); }}>
           <input autoFocus aria-label="Why waive it" placeholder={`Why waive the ${money(waive.amount)} ${waive.name}? (needs a manager)`} value={reason} onChange={(e) => setReason(e.target.value)} style={{ flex: 1 }} />
           <button type="submit" disabled={!reason.trim() || doWaive.busy}>Waive</button>
           <button type="button" onClick={() => setWaive(null)}>Cancel</button>
