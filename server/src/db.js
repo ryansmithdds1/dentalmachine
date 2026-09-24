@@ -1111,6 +1111,17 @@ CREATE TABLE IF NOT EXISTS upload_links (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- What each person used last (payment method, note template, booking length…), so forms start where they left off.
+-- A convenience, not a record: overwritten freely.
+CREATE TABLE IF NOT EXISTS user_prefs (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  key TEXT NOT NULL,
+  value TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (user_id, key)
+);
+
 -- Staff sign-in sessions: ended at sign-out, and refused after the practice's idle timeout.
 CREATE TABLE IF NOT EXISTS staff_sessions (
   id INTEGER PRIMARY KEY,

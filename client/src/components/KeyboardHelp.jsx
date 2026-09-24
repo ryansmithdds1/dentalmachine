@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Modal } from './ui.jsx';
+import { useShortcutList, comboLabel } from '../shortcuts.js';
 
 // "?" shows every keyboard shortcut; "g" then a letter jumps to a main area (like Gmail or GitHub).
 const GO = { t: ['/', 'Today'], s: ['/schedule', 'Schedule'], p: ['/patients', 'Patients'], m: ['/messages', 'Messages'], f: ['/followups', 'Follow-up lists'], b: ['/claims', 'Billing'], r: ['/reports', 'Reports'], o: ['/office', 'To-do & labs'], x: ['/settings', 'Settings'] };
@@ -12,6 +13,7 @@ const SECTIONS = [
     [[isMac ? '⌘' : 'Ctrl', 'K'], 'Search patients and jump anywhere', '+'],
     [['/'], 'Search (when not typing in a box)'],
     [['?'], 'This list of shortcuts'],
+    [[isMac ? '⌘' : 'Ctrl', 'Z'], 'Undo the last change (while its notice is showing)', '+'],
     [['Esc'], 'Close a dialog or panel'],
     ...Object.entries(GO).map(([k, [, l]]) => [['G', k.toUpperCase()], `Go to ${l}`, 'then']),
   ]],
@@ -38,6 +40,7 @@ const SECTIONS = [
 
 export default function KeyboardHelp() {
   const [open, setOpen] = useState(false);
+  const registered = useShortcutList();
   const navigate = useNavigate();
   const pendingG = useRef(0);
   useEffect(() => {
@@ -70,7 +73,7 @@ export default function KeyboardHelp() {
   return (
     <Modal title="Keyboard shortcuts" wide onClose={() => setOpen(false)}>
       <div className="shortcuts">
-        {SECTIONS.map(([title, rows]) => (
+        {[...SECTIONS, ...Object.entries(registered.reduce((acc, r) => ({ ...acc, [r.section]: [...(acc[r.section] || []), [comboLabel(r.combo), r.label, '+']] }), {}))].map(([title, rows]) => (
           <section key={title}>
             <h3>{title}</h3>
             <dl>

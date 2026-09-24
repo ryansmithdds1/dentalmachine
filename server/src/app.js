@@ -1,3 +1,4 @@
+import prefsRoutes from './routes/prefs.js';
 import express from 'express';
 import { loggedFetch } from './issues.js';
 import { idempotency } from './idempotency.js';
@@ -268,6 +269,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
     res.set('Cache-Control', 'no-store'); // PHI must not be cached by intermediaries
     next();
   });
+  api.use(prefsRoutes({ db }));
   api.use(patientRoutes({ db }));
   api.use(scheduleRoutes({ db }));
   api.use(clinicalRoutes({ db }));

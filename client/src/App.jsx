@@ -4,6 +4,9 @@ import { useAuth } from './auth.jsx';
 import { label } from './format.js';
 import Login from './pages/Login.jsx';
 import Dashboard from './pages/Dashboard.jsx';
+import Toasts from './components/Toasts.jsx';
+import PatientBar from './components/PatientBar.jsx';
+import { ActivePatientProvider } from './activePatient.jsx';
 import CommandPalette from './components/CommandPalette.jsx';
 import Assistant from './components/assistant/Assistant.jsx';
 import CallPop from './components/CallPop.jsx';
@@ -244,7 +247,7 @@ function StaffApp() {
       <Route path="/deposits/:id/slip" element={<DepositSlipPrint />} />
       <Route path="/appointments/:id/walkout" element={<WalkoutPrint />} />
       <Route path="/referrals/:id/letter" element={<ReferralLetterPrint />} />
-      <Route path="*" element={<Shell nav={nav} />} />
+      <Route path="*" element={<ActivePatientProvider><Shell nav={nav} /></ActivePatientProvider>} />
     </Routes>
   );
 }
@@ -340,6 +343,7 @@ function Shell({ nav }) {
       <a href="#main" className="skip-link">Skip to content</a>
       <CommandPalette />
       <KeyboardHelp />
+      <Toasts />
       <Assistant />
       <CallPop />
       <IdleLogout />
@@ -377,6 +381,7 @@ function Shell({ nav }) {
           <div className="setup-banner no-print">Finish setting up {practice.name} — providers, fees, insurance and reminders. <NavLink to="/setup">Continue setup →</NavLink></div>
         )}
         {user.role === 'admin' && practice?.setup_status === 'pending' && location.pathname === '/' && !seenSetup() && <Navigate to="/setup" replace />}
+        <PatientBar />
         <ErrorBoundary key={location.pathname}>
         <Suspense fallback={<div className="empty">Loading…</div>}>
           <Routes>

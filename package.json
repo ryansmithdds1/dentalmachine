@@ -15,9 +15,10 @@
     "invite": "npm run invite --workspace server --",
     "rotate-keys": "npm run rotate-keys --workspace server",
     "test": "npm test --workspace server",
-    "e2e": "node --test e2e/*.test.mjs",
+    "e2e": "node --test e2e/*.test.mjs e2e/workflows/*.test.mjs",
     "loadtest": "npm run loadtest --workspace server --",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "e2e:workflows": "node --test e2e/workflows/*.test.mjs"
   },
   "type": "module",
   "engines": {

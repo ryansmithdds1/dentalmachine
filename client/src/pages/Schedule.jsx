@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { toast as showToast } from '../toast.js';
 import { api, getLocationId } from '../api.js';
 import { saveOfflineDay, PINBOARD_KEY } from '../offline.js';
 import { useLookup } from '../hooks.js';
@@ -162,12 +163,8 @@ export default function Schedule() {
 
   // ---- Live updates from other workstations, patient confirmations and texts ----
   const [live, setLive] = useState(false);
-  const [toasts, setToasts] = useState([]);
-  const toast = useCallback((text, opts = {}) => {
-    const id = Math.random();
-    setToasts((t) => [...t.slice(-3), { id, text, ...opts }]);
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), opts.action ? 8000 : 4000);
-  }, []);
+  // Notices go through the shared toasts (Undo also answers Ctrl/⌘+Z).
+  const toast = useCallback((text, opts = {}) => showToast(text, { tone: opts.error ? 'error' : 'ok', undo: opts.action?.run || null }), []);
   useLiveEvents((evt) => {
     if (evt.type !== 'schedule') return;
     for (const k of [...cache.current.keys()]) {
@@ -647,14 +644,6 @@ export default function Schedule() {
         </Modal>
       )}
 
-      <div className="toasts" aria-live="polite">
-        {toasts.map((t) => (
-          <div key={t.id} className={`toast${t.error ? ' error' : ''}`}>
-            <span>{t.text}</span>
-            {t.action && <button className="small" onClick={() => { t.action.run(); setToasts((x) => x.filter((y) => y.id !== t.id)); }}>{t.action.label}</button>}
-          </div>
-        ))}
-      </div>
     </div>
   );
 }

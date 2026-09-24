@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useApi, useLookup } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
+import { useMakeActive } from '../activePatient.jsx';
 import { money, fullName, age, fmtDate, fmtDateTime, fmtUtcDate, label, practiceToday } from '../format.js';
 import { Modal, Badge, ErrorBox, useSubmit, Menu } from '../components/ui.jsx';
 import { Pin, Pill, TriangleAlert, MoreHorizontal, GitMerge, FileArchive, ShieldCheck, CalendarPlus, Pencil } from 'lucide-react';
@@ -29,6 +30,7 @@ export default function PatientDetail() {
   const { can, practice, user } = useAuth();
   const navigate = useNavigate();
   const { data: p, error, reload } = useApi(`/patients/${id}`);
+  useMakeActive(p);
   // Links can open a tab directly (?tab=ledger, ?tab=insurance…).
   const [params] = useSearchParams();
   const [tab, setTab] = useState(() => params.get('tab') || 'overview');

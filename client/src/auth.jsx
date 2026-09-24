@@ -1,3 +1,5 @@
+import { resetPrefs } from './prefs.js';
+import { clearPatientSession } from './activePatient.jsx';
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { api, getToken, setToken } from './api.js';
 import { clearOfflineDay } from './offline.js';
@@ -86,6 +88,8 @@ export function AuthProvider({ children }) {
     if (getToken()) api.post('/auth/logout', reason === 'idle' ? { reason } : {}).catch(() => {});
     setToken(null);
     clearOfflineDay();
+    resetPrefs();
+    clearPatientSession();
     setState({ loading: false, user: null, practice: null });
   };
   // After a password change or "sign out everywhere", the server hands this device a fresh session.
