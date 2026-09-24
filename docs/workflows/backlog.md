@@ -101,6 +101,27 @@ P4. **Straight into the chart, no retyping:** contact details and insurance appl
 P5. **Status and follow-up:** each visit shows forms done / not done on the schedule and the huddle, automatic
     reminders to finish, and the few that need a person land in one worklist (from workflow 30).
 
+## Insurance payments posted and billed on autopilot (asked for, high priority)
+Builds on ERA (835) import and matching, paper EOB reading (AI), claims, statements, text-to-pay and autopay.
+Goal: a person only touches the exceptions.
+A1. **Electronic EOBs (ERA) post themselves:** each 835 is matched to its claims and procedures; payments,
+    contractual write-offs (from the PPO fee schedule / CARC codes) and patient responsibility post automatically
+    when everything reconciles (paid + write-off + patient portion = billed, per line); the claim closes;
+    idempotent by ERA trace number + claim + line. The EFT/deposit is matched to the bank deposit (finance module).
+A2. **Paper EOBs by scan or phone camera:** scan or photograph the EOB (desk scanner, phone, iPad); AI reads it into
+    the same line-by-line structure as an ERA, and it follows the same path — clean ones need a single person's
+    "looks right" (AI never posts money on its own: rule 10), with the EOB image filed on each claim.
+A3. **Exceptions only:** denials (with the reason in plain words and the next step: correct and resend, appeal,
+    bill patient), underpayments vs the expected fee schedule, overpayments/refund needed, unmatched claims, split
+    or partial payments, and secondary claims to send — all in one worklist with one-key actions.
+A4. **Then bill the patient automatically:** when the claim closes and a patient balance remains, the secondary
+    claim goes out if there is one; otherwise the patient gets a text/email statement with a pay link (their
+    preferred channel), autopay/payment plans charge as agreed, reminders follow a schedule, and a paper
+    statement goes out if they don't open it. The practice sets the rules (minimum balance, wait days, which
+    patients to hold); everything sent is logged, and failures show in Needs attention.
+A5. **Reconciliation:** ERA totals vs posted vs deposited, and claims billed vs paid vs written off vs billed to
+    patient — shown daily, with any gap as an exception.
+
 ## Consents, start to finish (asked for, high priority)
 Builds on consent templates, e-signature, form packets, workflow 23 (in-office signing) and the paperwork items above.
 C1. **Consent library:** ready-made consents by procedure (extraction, RCT, crown/bridge, implant, perio/SRP, sedation,
