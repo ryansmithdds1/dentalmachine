@@ -101,6 +101,53 @@ P4. **Straight into the chart, no retyping:** contact details and insurance appl
 P5. **Status and follow-up:** each visit shows forms done / not done on the schedule and the huddle, automatic
     reminders to finish, and the few that need a person land in one worklist (from workflow 30).
 
+## Consents, start to finish (asked for, high priority)
+Builds on consent templates, e-signature, form packets, workflow 23 (in-office signing) and the paperwork items above.
+C1. **Consent library:** ready-made consents by procedure (extraction, RCT, crown/bridge, implant, perio/SRP, sedation,
+    ortho, whitening, refusal of treatment, financial) that the office can edit; each version is kept, and a signed
+    consent always shows the exact version and wording the patient saw.
+C2. **Picked from the treatment:** booking or planning a procedure attaches the right consent automatically, with the
+    patient's name, teeth, procedures, fees, risks and alternatives filled in (nothing typed twice).
+C3. **Ahead of time or at the chair:** sent by text/email days before (with reminders until signed), or at the chair
+    in one step: show a QR code / send to the patient's phone, or hand over the operatory iPad in kiosk mode. The
+    schedule and the chair show "consent signed / not signed" live, and the clinician sees it before starting.
+C4. **Signed = in the chart:** the signed PDF (signature, time, device, IP, who witnessed) files to the chart and the
+    visit, the treatment row is marked consented, and nothing can change it afterwards (a new version needs a new
+    signature). Guardian signatures for minors, a witness signature option, Spanish versions, and a "patient declined"
+    record that's just as traceable.
+
+## Patient education (asked for)
+E1. **Education in the operatory:** an education library by topic and procedure (short illustrated explanations,
+    and videos where the office has them — the library supports adding video links/files now; a licensed video set
+    can come later), shown on the chair screen or the iPad with one key from the chart or the treatment plan.
+E2. **Proof it was given:** sending or showing an item records it on the chart ("Crown education shown in Op 2 by
+    Maria, 10:42; emailed to patient") — who, what version, how (shown / emailed / texted), and when the patient
+    opened it; this appears in the consent record and the clinical note so informed consent is documented.
+E3. **Take-home:** one click emails/texts the same material (and post-op instructions) to the patient, logged the
+    same way.
+
+## Time clock and staff schedules (asked for; replaces workflow 44's small scope)
+TC1. **Clock in and out in the app:** one screen/key per person (PIN or their sign-in), breaks and lunches, the
+     office they clocked in at, and the device/IP; missed punches fixed by a manager with a reason (audited, the
+     original kept).
+TC2. **Staff schedules:** weekly shifts per person built from templates, with the window when they may clock in
+     (e.g. no earlier than 7 minutes before the shift); early/late clock-ins and outs are flagged, and a manager can
+     see at a glance who's late, missing, on break or in overtime today.
+TC3. **Rules that make payroll easy:** overtime (daily/weekly, state rules), rounding rules, paid time off requests
+     and approvals, holidays, and a pay-period review screen where the manager approves each person's hours.
+TC4. **Export to payroll:** one click for Gusto, ADP, Paychex, QuickBooks Payroll and a plain CSV, with totals by
+     person and pay type (regular, overtime, PTO, holiday), and a reconciliation check (approved hours = exported).
+TC5. **Reports:** hours by person/office/period, tardiness, overtime trends and labor cost as a percent of production.
+
+## Office intranet (asked for)
+I1. **Quick links:** an office "Links" page and a shortcut in the command bar for the websites the team uses daily
+    (insurance portals, lab sites, supply ordering, payroll…), per office and per role, with icons.
+I2. **SOPs and documents:** a simple internal wiki — pages with headings, checklists, images and attachments
+    (office manual, SOPs, emergency procedures, how-tos), organized in sections, searchable from the command bar,
+    with version history, "last reviewed" dates and optional "read and acknowledged" sign-off per person.
+I3. **Office announcements** pinned at the top (ties into team chat), and new-hire onboarding checklists that link
+    to the SOPs.
+
 ## Then: remaining workflow batches
 9. Batch 4 (32–44): new patient setup, ERA/EOB posting, prescriptions, lab cases, huddle actions, recall lists,
    pre-auths, financing, adjustments, referrals, end-of-day, review requests (fix the count bug), clock in/out.
