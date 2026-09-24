@@ -23,6 +23,9 @@ import { useProduction, ProductionBar, summarize, KINDS, KIND_LABEL } from '../c
 import LateBanner, { useLateChime } from '../components/calendar/LateBanner.jsx';
 import { lateList, runningBehind, lateSettings } from '../components/calendar/late.js';
 import { useDayOpportunities, OpportunityTotal } from '../components/opportunities/OpportunityBadge.jsx';
+import { useDayReadiness } from '../components/readiness/ReadinessBadge.jsx';
+import { OptimizerLauncher } from '../components/optimizer/OptimizerPanel.jsx';
+import { useOptimizer } from '../components/optimizer/useOptimizer.js';
 
 // "Fit" sizes the grid so the whole office day fits the screen without scrolling; S/M/L are fixed sizes.
 const ZOOMS = [{ label: 'Fit', px: 0 }, { label: 'S', px: 1 }, { label: 'M', px: 1.5 }, { label: 'L', px: 2.2 }];
@@ -376,7 +379,11 @@ export default function Schedule() {
   // Opportunity finder: what each visit today is eligible for (G opens the list for the selected visit).
   const [focusOpps, setFocusOpps] = useState(0);
   const opps = useDayOpportunities(view === 'day' ? date : null, getLocationId(), { enabled: can('clinical:read') });
+  // Today's optimizer: goal gaps and the moves that close them (O opens the plan).
+  const optimizer = useOptimizer(view === 'day' ? date : null, getLocationId(), { enabled: can('schedule:read') });
   const openOpps = (a) => { setSelectedId(a.id); makeActive(a); setFocusOpps((n) => n + 1); };
+  // Lab case and parts readiness (LB1/LB5): one icon per visit; clicking it opens the check-in for that visit.
+  const readiness = useDayReadiness(view === 'agenda' ? null : from, to, { enabled: can('clinical:read') });
   const runStep = async (a, kind) => {
     const plan = planStep(a, kind);
     if (plan.error) return toast(plan.error);
@@ -819,6 +826,7 @@ export default function Schedule() {
               )}
             </div>
           )}
+          {view === 'day' && <OptimizerLauncher date={date} locationId={getLocationId()} />}
           <button onClick={() => setShowAsap(!showAsap)} className={`icon-btn wide${showAsap ? ' active' : ''}`} title="Waitlist and ASAP list"><Hourglass size={16} /> Waitlist</button>
           {can('schedule:write') && <button className="icon-btn" onClick={() => setModal({ type: 'block', defaults: { date } })} title="Block time"><Ban size={16} /></button>}
           {can('schedule:write') && <button className="primary" onClick={() => setModal({ type: 'new', defaults: { date } })} title="New appointment (N)"><Plus size={16} strokeWidth={2.5} /> Appointment</button>}
@@ -877,6 +885,7 @@ export default function Schedule() {
           <CalendarGrid
             columns={gridColumns} appointments={appts} range={timeRange} pxPerMin={pxPerMin} nowMin={nowMin} step={step} colorBy={colorBy}
             onMove={onMove} onResize={onResize} readOnly={!can('schedule:write')} opportunities={opps.byAppt} onOpportunities={openOpps}
+            readiness={readiness.byAppt} onReadiness={(a) => { makeActive(a); nav('/lab-checkin'); }} optimizer={optimizer.data}
             onSelectRange={onSelectRange} onOpen={(a) => { setSelectedId(a.id); makeActive(a); }} onFocusAppt={makeActive}
             onNext={w ? (a) => runStep(a, nextKind(a)) : undefined}
             onOpenBlockout={(b) => can('schedule:write') && setModal({ type: 'block', blockout: b })}

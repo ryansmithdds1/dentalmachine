@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useApi } from '../hooks.js';
+import QRCode from 'qrcode';
 import { money, fmtDate, fmtUtcDate } from '../format.js';
 import { useAuth } from '../auth.jsx';
 
@@ -99,6 +100,21 @@ export function PrescriptionPrint() {
   );
 }
 
+// The code on the slip the office scans when the case comes back (Check in lab work). It's the case number, not a
+// key: it only finds the case for someone signed in to this practice. Drawn as SVG so it's there when printing starts.
+function SlipQr({ text, size = 72 }) {
+  const qr = QRCode.create(text, { errorCorrectionLevel: 'M' });
+  const n = qr.modules.size;
+  const cells = [];
+  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) if (qr.modules.get(x, y)) cells.push(`M${x + 2} ${y + 2}h1v1h-1z`);
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${n + 4} ${n + 4}`} role="img" aria-label={`Scan to check in: ${text}`} style={{ background: '#fff', flex: 'none' }} shapeRendering="crispEdges">
+      <path d={cells.join('')} fill="#000" />
+      <title>{text}</title>
+    </svg>
+  );
+}
+
 // Printable lab prescription (slip) that goes in the box with the case.
 export function LabSlipPrint() {
   const { id } = useParams();
@@ -111,7 +127,10 @@ export function LabSlipPrint() {
       <div className="no-print" style={{ marginBottom: 12 }}><Link to={`/patients/${d.patient.id}`}>← Back</Link> <button onClick={() => window.print()}>Print</button></div>
       <header className="doc-head">
         <div><h1>{d.practice.name}</h1><div>{[d.practice.address, d.practice.city, d.practice.state, d.practice.zip].filter(Boolean).join(', ')}</div><div>{d.practice.phone}</div></div>
-        <div style={{ textAlign: 'right' }}><h2>Lab prescription</h2><div>Case #{c.id}</div></div>
+        <div style={{ textAlign: 'right', display: 'flex', gap: 12, alignItems: 'center' }}>
+          <div><h2>Lab prescription</h2><div>Case #{c.id}</div></div>
+          <SlipQr text={`DM-LAB-${c.id}`} />
+        </div>
       </header>
       <div className="grid grid-2" style={{ marginBottom: 12 }}>
         <div>

@@ -1,0 +1,118 @@
+/* Today's schedule optimizer: the side panel, the huddle card and the markers on the grid. Colours come from the
+   theme variables in styles.css (plus the few below, redefined for dark mode), so both themes follow. */
+:root {
+  --opt-accent: #6d28d9;
+  --opt-accent-soft: #f3edff;
+  --opt-plan: color-mix(in srgb, var(--opt-accent) 55%, transparent);
+  --opt-gap: color-mix(in srgb, var(--opt-accent) 6%, transparent);
+  --opt-gap-line: color-mix(in srgb, var(--opt-accent) 45%, transparent);
+}
+:root[data-theme='dark'] {
+  --opt-accent: #a78bfa;
+  --opt-accent-soft: rgba(167, 139, 250, 0.14);
+  --opt-gap: rgba(167, 139, 250, 0.07);
+  --opt-gap-line: rgba(167, 139, 250, 0.45);
+}
+
+/* The side panel: beside the screen, not over it (no backdrop — the schedule stays usable). */
+.opt-panel { position: fixed; top: 0; right: 0; bottom: 0; width: 400px; max-width: 100vw; background: var(--panel); z-index: 38; display: flex; flex-direction: column;
+  box-shadow: -12px 0 40px rgba(15, 23, 42, 0.16); border-left: 1px solid var(--border); border-radius: 16px 0 0 16px; animation: slide-in 0.16s ease-out; }
+.opt-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; padding: 16px 18px 12px; border-bottom: 1px solid var(--border); border-top: 4px solid var(--opt-accent); border-radius: 16px 0 0 0; }
+.opt-head h2 { display: flex; align-items: center; gap: 7px; margin: 0; font-size: 18px; }
+.opt-head h2 svg { color: var(--opt-accent); }
+.opt-date { font-size: 12px; margin-top: 3px; }
+.opt-date kbd, .opt-card kbd, .opt-huddle kbd { font-size: 10px; padding: 0 4px; margin-left: 4px; border-radius: 4px; border: 1px solid var(--border-strong); background: var(--subtle); color: var(--muted); font-family: inherit; }
+.opt-card .primary kbd { background: transparent; color: inherit; border-color: color-mix(in srgb, currentColor 40%, transparent); }
+.opt-body { padding: 14px 18px 24px; overflow-y: auto; flex: 1; }
+.opt-loading, .opt-empty { padding: 10px 0; }
+.opt-empty { display: flex; gap: 6px; align-items: center; color: var(--ok); font-weight: 550; }
+.opt-headline { font-size: 16px; font-weight: 650; letter-spacing: -0.01em; margin-bottom: 10px; }
+
+/* Each provider: booked now, what the plan adds, and the goal at the end of the bar. */
+.opt-provs, .opt-huddle-provs { display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px; }
+.opt-huddle-provs { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px 18px; }
+.opt-prov-line { display: flex; align-items: center; gap: 7px; font-size: 13px; }
+.opt-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+.opt-prov-pct { margin-left: auto; font-variant-numeric: tabular-nums; color: var(--muted); font-size: 12.5px; }
+.opt-prov-pct b { color: var(--opt-accent); }
+.opt-prov-pct b.ok { color: var(--ok); }
+.opt-bar { position: relative; height: 7px; margin: 5px 0 4px; border-radius: 99px; background: var(--subtle); box-shadow: inset 0 0 0 1px var(--border); overflow: hidden; }
+.opt-bar i { position: absolute; top: 0; bottom: 0; left: 0; border-radius: 99px; }
+.opt-bar i.now { background: var(--primary); }
+.opt-bar i.plan { background: repeating-linear-gradient(135deg, var(--opt-accent) 0 4px, var(--opt-plan) 4px 8px); border-radius: 0 99px 99px 0; }
+.opt-prov-sub { font-size: 12px; color: var(--muted); }
+.opt-prov.compact .opt-prov-sub { font-size: 12px; }
+
+/* The AI note: clearly labelled. */
+.opt-ai { margin: 4px 0 12px; }
+.opt-ai button svg { color: var(--opt-accent); }
+.opt-ai-note { border: 1px dashed var(--opt-gap-line); background: var(--opt-accent-soft); border-radius: var(--radius-sm); padding: 8px 10px; font-size: 13px; }
+.opt-ai-note p { margin: 4px 0 0; }
+.opt-ai-label { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--opt-accent); }
+.opt-card-ai { font-size: 12px; margin-top: 3px; color: var(--text-2); display: flex; gap: 4px; align-items: baseline; }
+.opt-card-ai svg { color: var(--opt-accent); flex: none; }
+.opt-ai-tag { font-size: 10px; font-weight: 700; color: var(--opt-accent); }
+
+/* Sections and cards. */
+.opt-section { margin-top: 14px; }
+.opt-section h3 { display: flex; align-items: center; gap: 6px; margin: 0 0 7px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+.opt-section h3 span { margin-left: auto; color: var(--opt-accent); font-variant-numeric: tabular-nums; letter-spacing: 0; }
+.opt-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 7px; }
+.opt-card { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 11px; background: var(--panel); outline: none; transition: border-color 0.12s, box-shadow 0.12s, opacity 0.12s; cursor: default; }
+.opt-card:hover { border-color: var(--border-strong); }
+.opt-card.in-plan { border-left: 3px solid var(--opt-accent); }
+.opt-card.active { border-color: var(--opt-accent); box-shadow: 0 0 0 3px var(--opt-accent-soft); }
+.opt-card.busy { opacity: 0.55; }
+.opt-card-top { display: flex; gap: 9px; align-items: flex-start; }
+.opt-kind { flex: none; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 7px; background: var(--opt-accent-soft); color: var(--opt-accent); }
+.opt-card.k-confirm .opt-kind { background: var(--warn-soft); color: var(--warn); }
+.opt-card.k-shorten .opt-kind { background: var(--info-soft); color: var(--info); }
+.opt-card-main { flex: 1; min-width: 0; }
+.opt-card-title { font-weight: 600; font-size: 13.5px; line-height: 1.3; }
+.opt-card-why { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+.opt-card-why.opt-no { margin-top: 7px; color: var(--warn); }
+.opt-card-meta { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 5px; font-size: 11.5px; color: var(--faint); }
+.opt-card-meta span { display: inline-flex; align-items: center; gap: 3px; }
+.opt-reply { color: var(--opt-accent); }
+.opt-card-money { flex: none; text-align: right; display: flex; flex-direction: column; align-items: flex-end; font-variant-numeric: tabular-nums; }
+.opt-card-money b { font-size: 15px; color: var(--ok); }
+.opt-card.k-confirm .opt-card-money b { color: var(--text-2); }
+.opt-card-money small { font-size: 11px; color: var(--muted); }
+.opt-card-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; padding-left: 33px; }
+.opt-card-actions .opt-not { margin-left: auto; color: var(--muted); }
+.opt-mini { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; font-size: 12.5px; }
+.opt-mini li { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.opt-mini li small { width: 100%; color: var(--faint); }
+.opt-mini button.link { display: inline-flex; align-items: center; gap: 3px; }
+.opt-toggle { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font-size: 12.5px; }
+.opt-foot { margin-top: 14px; font-size: 12px; }
+
+/* The schedule's launch button. */
+.opt-launch svg { color: var(--opt-accent); }
+.opt-count { margin-left: 4px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 99px; background: var(--opt-accent); color: var(--panel); font-size: 11px; font-weight: 700; display: inline-grid; place-items: center; }
+
+/* The huddle card. */
+.opt-huddle { margin-top: 16px; }
+.opt-huddle-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 8px; }
+.opt-huddle-head h3 { display: inline-flex; align-items: center; gap: 6px; margin: 0; }
+.opt-huddle-head h3 svg { color: var(--opt-accent); }
+.opt-huddle-moves { margin: 4px 0 0; padding-left: 20px; display: flex; flex-direction: column; gap: 3px; }
+.opt-huddle-moves button.link { display: inline-flex; align-items: center; gap: 8px; text-align: left; color: var(--text); }
+.opt-huddle-moves button.link b { color: var(--ok); font-variant-numeric: tabular-nums; }
+.opt-huddle-moves button.link svg { color: var(--faint); }
+.opt-huddle-foot { margin-top: 8px; font-size: 12.5px; }
+
+/* Markers on the grid: open time (behind the visits) and pills (above the lanes, small). */
+button.opt-gap { position: absolute; left: 2px; right: 2px; z-index: 1; min-height: 0; padding: 2px 5px; display: block; text-align: left; border: 1px dashed var(--opt-gap-line); border-radius: 6px; background: var(--opt-gap); box-shadow: none; color: var(--opt-accent); font-size: 10.5px; font-weight: 600; cursor: pointer; opacity: 0.8; }
+button.opt-gap:not(.has) { border-color: var(--border-strong); color: var(--faint); background: transparent; }
+button.opt-gap:hover, button.opt-gap:focus-visible { opacity: 1; background: var(--opt-accent-soft); }
+button.opt-pill { position: absolute; right: 4px; z-index: 4; min-height: 0; height: 16px; padding: 0 6px; display: inline-flex; align-items: center; gap: 3px; border: none; border-radius: 99px; font-size: 10.5px; font-weight: 700; font-variant-numeric: tabular-nums; background: var(--panel); color: var(--opt-accent); box-shadow: 0 0 0 1px var(--opt-gap-line); cursor: pointer; }
+button.opt-pill.in-plan { background: var(--opt-accent); color: var(--panel); box-shadow: none; }
+button.opt-pill.k-confirm { color: var(--warn); box-shadow: 0 0 0 1px color-mix(in srgb, var(--warn) 45%, transparent); }
+button.opt-pill:focus-visible { box-shadow: var(--ring); }
+
+@media (max-width: 640px) {
+  .opt-panel { width: 100vw; border-radius: 0; }
+  .opt-head { border-radius: 0; }
+}
+@media print { .opt-panel, button.opt-gap, button.opt-pill, .opt-launch { display: none !important; } }

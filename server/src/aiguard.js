@@ -25,6 +25,8 @@ export const HIGH_RISK = [
   ['POST', /^\/timeclock\/(punches(\/\d+\/(correct|void))?|period\/(approve|unlock)|pto\/(\d+\/decide|adjust)|kiosks)$/, 'payroll time, approvals and time off'],
   ['PUT', /^\/timeclock\/(punches\/\d+|staff\/\d+|settings)$/, 'payroll time, pay rates and rules'],
   ['POST', /^\/checklists\/(flags\/\d+\/resolve|occurrences\/\d+\/correct)$/, 'checklist corrective actions and corrections'],
+  ['POST', /^\/optimizer\/\d+\/(act|undo)$/, 'booking, changing visits or texting patients from the schedule optimizer'],
+  ['POST', /^\/lab-checkin(\/\d+\/lab-message)?$/, 'checking in lab work and asking the lab for a remake'],
   ['POST', /^\/daily-deposits(\/\d+\/(verify|reopen|bank-note))?$/, 'deposits'],
   ['POST', /^\/cash\/(sessions\/\d+\/(count|verify)|drawers(\/\d+\/open)?)$/, 'cash drawers'],
   ['POST', /^\/patients\/\d+\/insurance-card\/confirm$/, 'insurance'],

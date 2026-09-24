@@ -28,7 +28,7 @@ import { pendingCount } from './offline/index.js';
 import { ClockButton } from './components/TimeClock.jsx';
 import { useLiveEvents } from './live.js';
 import MfaSetup from './components/MfaSetup.jsx';
-import { Sun, CalendarDays, Users, MessageSquare, Inbox as InboxIcon, PhoneCall, Megaphone, Receipt, ListChecks, ChartColumn, Landmark, Settings as SettingsIcon, Search, PanelLeftClose, PanelLeftOpen, LogOut, Keyboard, Monitor, Moon, Sparkles, Phone, Building2, Star, HelpCircle, AlertTriangle, BookOpen, Clock, Banknote, Gauge, Repeat, ShieldCheck, FolderOpen, CalendarRange, ClipboardCheck } from 'lucide-react';
+import { Sun, CalendarDays, Users, MessageSquare, Inbox as InboxIcon, PhoneCall, Megaphone, Receipt, ListChecks, ChartColumn, Landmark, Settings as SettingsIcon, Search, PanelLeftClose, PanelLeftOpen, LogOut, Keyboard, Monitor, Moon, Sparkles, Phone, Building2, Star, HelpCircle, AlertTriangle, BookOpen, Clock, Banknote, Gauge, Repeat, ShieldCheck, FolderOpen, CalendarRange, ClipboardCheck, PackageCheck } from 'lucide-react';
 import { getThemePref, setThemePref, watchTheme } from './theme.js';
 
 // Pages load on demand so the first screen appears quickly.
@@ -93,6 +93,7 @@ const ChartAudit = lazy(() => import('./pages/ChartAudit.jsx'));
 const OfficeDocuments = lazy(() => import('./pages/OfficeDocuments.jsx'));
 const Capacity = lazy(() => import('./pages/Capacity.jsx'));
 const Checklists = lazy(() => import('./pages/Checklists.jsx'));
+const LabCheckin = lazy(() => import('./pages/LabCheckin.jsx'));
 const CheckinPage = lazy(() => import('./pages/public/CheckinPage.jsx'));
 const StatusPage = lazy(() => import('./pages/public/StatusPage.jsx'));
 const Help = lazy(() => import('./pages/Help.jsx'));
@@ -255,6 +256,7 @@ function StaffApp() {
     ['/recall', Repeat, 'Recall autopilot', can('schedule:read')],
     ['/metrics', Gauge, 'Metrics', can('reports:read') || can('reports:own')],
     ['/capacity', CalendarRange, 'Capacity', can('schedule:read')],
+    ['/lab-checkin', PackageCheck, 'Lab check-in', can('clinical:write')],
     ['/campaigns', Megaphone, 'Campaigns', can('patients:write')],
     ['/reputation', Star, 'Reviews', can('patients:read')],
     ['/claims', Receipt, 'Billing', can('billing:read')],
@@ -455,6 +457,7 @@ function Shell({ nav }) {
             <Route path="/messages" element={<Inbox />} />
             <Route path="/office" element={<Office />} />
             <Route path="/checklists/*" element={<Checklists />} />
+            <Route path="/lab-checkin" element={<LabCheckin />} />
             <Route path="/timeclock" element={<TimeClockPage />} />
             <Route path="/deposits" element={<Deposits />} />
             <Route path="/claims" element={<Claims />} />

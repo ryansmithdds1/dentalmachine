@@ -7,7 +7,9 @@ import { useLiveEvents } from '../live.js';
 import { money, fmtTime, shiftDate, practiceToday } from '../format.js';
 import { Badge } from '../components/ui.jsx';
 import OpportunityDay from '../components/opportunities/OpportunityDay.jsx';
+import ReadinessHuddle from '../components/readiness/ReadinessHuddle.jsx';
 import CapacityWidget from '../components/CapacityWidget.jsx';
+import HuddlePlanCard from '../components/optimizer/HuddlePlanCard.jsx';
 import { getLocationId } from '../api.js';
 
 export const FLAG_INFO = {
@@ -87,7 +89,9 @@ export default function Dashboard() {
         </div>
       )}
 
+      {can('schedule:read') && <HuddlePlanCard date={date} locationId={getLocationId()} />}
       {can('clinical:read') && <div style={{ marginTop: 16 }}><OpportunityDay date={date} locationId={getLocationId()} /></div>}
+      {can('clinical:read') && <ReadinessHuddle date={date} />}
       <div style={{ marginTop: 16 }}><CapacityWidget locationId={getLocationId()} /></div>
       <div className="card" style={{ marginTop: 16, padding: 0 }}>
         <div className="page-header" style={{ padding: '14px 16px', marginBottom: 0 }}>

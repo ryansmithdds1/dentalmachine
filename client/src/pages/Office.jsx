@@ -14,6 +14,7 @@ import { undoable } from '../toast.js';
 import { tasksChanged } from '../components/QuickCommands.jsx';
 import IntakeReview from '../components/IntakeReview.jsx';
 import MyChecklist from '../components/checklists/MyChecklist.jsx';
+import LabStatsCard from '../components/readiness/LabStatsCard.jsx';
 import './office.css';
 
 // Team to-do list and lab case tracking, and the time clock.
@@ -110,6 +111,7 @@ function OfficeBoard() {
                   <button className={labFilter === 'open' ? 'active' : ''} onClick={() => setLabFilter('open')}>Open</button>
                   <button className={labFilter === 'all' ? 'active' : ''} onClick={() => setLabFilter('all')}>All</button>
                 </div>
+                {can('clinical:write') && <Link to="/lab-checkin"><button>Check in a case</button></Link>}
                 {can('clinical:write') && <button className="primary" onClick={() => setModal({ type: 'lab' })}>+ Lab case</button>}
               </div>
             </div>
@@ -136,6 +138,7 @@ function OfficeBoard() {
             </div>
           </div>
         )}
+        {can('clinical:read') && <LabStatsCard compact />}
       </div>
 
       {modal?.type === 'task' && (

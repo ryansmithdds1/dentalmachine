@@ -30,6 +30,7 @@ import { runDigests } from './digests.js';
 import { depositWatchAll } from './deposits.js';
 import { runCapacitySnapshots } from './capacity.js';
 import { runChecklistJobs } from './checklists.js';
+import { runReadinessJob } from './labcheck.js';
 import { runPaperworkSafely } from './paperwork.js';
 import { loggedFetch } from './issues.js';
 import { runChartAudits } from './chartaudit.js';
@@ -136,6 +137,12 @@ if (process.env.CHECKLISTS !== 'off') {
   const checklists = () => runExclusive('checklists', 4 * 60 * 1000, () => runChecklistJobs(db, messenger)).catch(jobFailed('Checklists'));
   setInterval(checklists, 5 * 60 * 1000).unref();
   setTimeout(checklists, 55_000).unref();
+}
+// Visit readiness (lab cases and parts): late ones flagged for the huddle with one to-do each (hourly).
+if (process.env.READINESS_JOBS !== 'off') {
+  const readiness = () => runExclusive('readiness', 30 * 60 * 1000, () => runReadinessJob(db)).catch(jobFailed('Visit readiness'));
+  setInterval(readiness, 60 * 60 * 1000).unref();
+  setTimeout(readiness, 100_000).unref();
 }
 // Chart audit: each practice's completed visits checked once a day after 1am practice time.
 if (process.env.CHART_AUDIT !== 'off') {

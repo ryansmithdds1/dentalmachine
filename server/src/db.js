@@ -3588,6 +3588,95 @@ CREATE TABLE IF NOT EXISTS online_booking_events (
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE (practice_id, session_key, step)
 );
+-- Today's schedule optimizer (optimizer.js): each suggestion shown, and what was done with it.
+CREATE TABLE IF NOT EXISTS optimizer_suggestions (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  location_id INTEGER REFERENCES locations(id),
+  date TEXT NOT NULL,
+  key TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  action TEXT,
+  patient_id INTEGER REFERENCES patients(id),
+  provider_id INTEGER REFERENCES providers(id),
+  appointment_id INTEGER REFERENCES appointments(id),
+  title TEXT,
+  fee INTEGER NOT NULL DEFAULT 0,
+  collectible INTEGER NOT NULL DEFAULT 0,
+  minutes INTEGER NOT NULL DEFAULT 0,
+  in_plan INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'shown' CHECK (status IN ('shown','accepted','done','declined','failed','undone')),
+  times_shown INTEGER NOT NULL DEFAULT 1,
+  result TEXT,
+  reason TEXT,
+  source TEXT,
+  created_by INTEGER REFERENCES users(id),
+  updated_by INTEGER REFERENCES users(id),
+  done_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (practice_id, date, key)
+);
+
+-- Visit readiness (labcheck.js): lab cases and parts each visit needs, and every check-in.
+CREATE TABLE IF NOT EXISTS visit_requirements (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  location_id INTEGER REFERENCES locations(id),
+  appointment_id INTEGER NOT NULL REFERENCES appointments(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  kind TEXT NOT NULL CHECK (kind IN ('lab_case','part')),
+  link_key TEXT NOT NULL,
+  lab_case_id INTEGER REFERENCES lab_cases(id),
+  procedure_id INTEGER REFERENCES procedures(id),
+  item_name TEXT,
+  details TEXT,
+  inventory_item_id INTEGER REFERENCES inventory_items(id),
+  qty INTEGER NOT NULL DEFAULT 1,
+  status TEXT NOT NULL CHECK (status IN ('needed','linked','to_order','ordered','arrived','checked','set_aside','problem','cancelled')),
+  source TEXT NOT NULL DEFAULT 'manual',
+  reason TEXT,
+  ordered_at TEXT,
+  arrived_at TEXT,
+  checked_at TEXT,
+  checked_by INTEGER REFERENCES users(id),
+  photo_ids TEXT,
+  task_id INTEGER,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (appointment_id, link_key)
+);
+CREATE TABLE IF NOT EXISTS lab_checkins (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  location_id INTEGER REFERENCES locations(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  lab_case_id INTEGER REFERENCES lab_cases(id),
+  requirement_id INTEGER REFERENCES visit_requirements(id),
+  appointment_id INTEGER REFERENCES appointments(id),
+  verdict TEXT NOT NULL CHECK (verdict IN ('ok','problem')),
+  checklist TEXT NOT NULL,
+  problem_kind TEXT,
+  problem_note TEXT,
+  photo_ids TEXT,
+  via TEXT NOT NULL DEFAULT 'screen',
+  transcript TEXT,
+  lab_id INTEGER REFERENCES labs(id),
+  lab_name TEXT,
+  sent_date TEXT,
+  promised_date TEXT,
+  received_date TEXT,
+  client_key TEXT,
+  lab_message_at TEXT,
+  lab_message_by INTEGER REFERENCES users(id),
+  checked_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (practice_id, client_key)
+);
+CREATE INDEX IF NOT EXISTS idx_visit_req_appt ON visit_requirements(practice_id, appointment_id);
+CREATE INDEX IF NOT EXISTS idx_lab_checkins_case ON lab_checkins(practice_id, lab_case_id);
+
+
 `;
 
 // Columns added after the first release. SQLite has no ADD COLUMN IF NOT EXISTS, so check first.
@@ -4060,6 +4149,12 @@ const COLUMNS = [
   ['booking_requests', 'card_files', 'TEXT'],
   ['booking_requests', 'asap', 'INTEGER NOT NULL DEFAULT 0'],
   ['appointments', 'online_booking_id', 'INTEGER REFERENCES online_bookings(id)'],
+  // Visit readiness and the schedule optimizer.
+  ['lab_cases', 'check_status', 'TEXT'],
+  ['lab_cases', 'checked_at', 'TEXT'],
+  ['lab_cases', 'promised_date', 'TEXT'],
+  ['practices', 'readiness_settings', 'TEXT'],
+  ['practices', 'optimizer_ai', 'INTEGER NOT NULL DEFAULT 0'],
 ];
 
 // CHECK constraints widened after release: [table, constraint name on Postgres, old text, new text].

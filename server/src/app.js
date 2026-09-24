@@ -16,6 +16,8 @@ import scheduleRoutes from './routes/schedule.js';
 import productionRoutes from './routes/production.js';
 import dayTemplateRoutes from './routes/daytemplates.js';
 import capacityRoutes from './routes/capacity.js';
+import optimizerRoutes from './routes/optimizer.js';
+import labCheckinRoutes from './routes/labcheckin.js';
 import clinicalRoutes from './routes/clinical.js';
 import billingRoutes from './routes/billing.js';
 import insuranceRoutes from './routes/insurance.js';
@@ -351,6 +353,8 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(reportLibraryRoutes({ db }));
   api.use(productionReportRoutes({ db }));
   api.use(opportunityRoutes({ db }));
+  api.use(optimizerRoutes({ db, config, messenger, app: () => app }));
+  api.use(labCheckinRoutes({ db, storage, config, messenger, transcriber }));
   api.use(cadenceRoutes({ db, messenger, mailer, config, secret }));
   api.use(metricRoutes({ db }));
   api.use(digestRoutes({ db, messenger, config, secret }));

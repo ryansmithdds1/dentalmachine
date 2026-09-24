@@ -1,0 +1,72 @@
+/* Visit readiness and lab / parts check-in (LB1–LB5). Colours come from the theme variables in styles.css,
+   so dark mode follows. */
+
+/* The icon on a schedule card. */
+.rdy-badge { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; min-height: 0; padding: 0; border: none; border-radius: 99px; flex: none; cursor: default; box-shadow: none; }
+button.rdy-badge { cursor: pointer; }
+.rdy-badge.ok { background: var(--ok-soft); color: var(--ok); }
+.rdy-badge.info { background: var(--info-soft); color: var(--info); }
+.rdy-badge.muted { background: var(--subtle); color: var(--muted); box-shadow: 0 0 0 1px var(--border); }
+.rdy-badge.warn { background: var(--warn-soft); color: var(--warn); }
+.rdy-badge.danger { background: var(--danger-soft); color: var(--danger); }
+.rdy-badge:focus-visible { box-shadow: var(--ring); }
+
+/* A state chip in lists. */
+.rdy-chip { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: 99px; font-size: 12px; font-weight: 600; white-space: nowrap; background: var(--subtle); color: var(--muted); }
+.rdy-chip.ok { background: var(--ok-soft); color: var(--ok); }
+.rdy-chip.info { background: var(--info-soft); color: var(--info); }
+.rdy-chip.warn { background: var(--warn-soft); color: var(--warn); }
+.rdy-chip.danger { background: var(--danger-soft); color: var(--danger); }
+
+/* Huddle card and lab stats. */
+.rdy-card h2 { display: flex; align-items: center; gap: 8px; margin: 0; }
+.rdy-rows { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.rdy-row { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--panel); }
+.rdy-row .rdy-when { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px; min-width: 88px; }
+.rdy-row .rdy-items { color: var(--text-2); font-size: 13px; flex: 1 1 220px; }
+.rdy-stats { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+.rdy-stats th, .rdy-stats td { text-align: right; padding: 5px 8px; border-bottom: 1px solid var(--border); }
+.rdy-stats th:first-child, .rdy-stats td:first-child { text-align: left; }
+.rdy-stats .bad { color: var(--danger); font-weight: 650; }
+
+/* The check-in screen: one column on a phone, list + panel side by side on a wide screen. */
+.lbc { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); max-width: 1100px; }
+@media (min-width: 900px) { .lbc { grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); align-items: start; } }
+.lbc-tools { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+.lbc-tools input[type=search], .lbc-tools input[type=text] { flex: 1 1 180px; min-width: 0; }
+.lbc-talk { display: inline-flex; align-items: center; gap: 6px; user-select: none; -webkit-user-select: none; touch-action: none; }
+.lbc-talk.on { background: var(--danger); color: #fff; border-color: var(--danger); }
+.lbc-heard { margin: 0 0 10px; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--info-soft); color: var(--text); font-size: 13.5px; }
+.lbc-heard q { font-style: italic; }
+.lbc-heard .warn { color: var(--warn); font-weight: 600; }
+.lbc-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.lbc-item { display: block; width: 100%; text-align: left; padding: 10px 12px; min-height: 56px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--panel); color: var(--text); box-shadow: none; }
+.lbc-item:hover { border-color: var(--border-strong); background: var(--hover); }
+.lbc-item.active, .lbc-item:focus-visible { border-color: var(--primary); box-shadow: var(--ring); }
+.lbc-item .top { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.lbc-item .sub { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+.lbc-group { font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--faint); margin: 12px 0 4px; }
+.lbc-panel { position: sticky; top: 12px; }
+.lbc-panel h2 { margin: 0 0 2px; font-size: 18px; }
+.lbc-rx { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 13px; color: var(--text-2); margin: 6px 0 10px; }
+.lbc-photos { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 10px 0; }
+.lbc-photos img { width: 72px; height: 72px; object-fit: cover; border-radius: var(--radius-sm); border: 1px solid var(--border); }
+.lbc-camera { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; padding: 0 14px; border: 1px dashed var(--border-strong); border-radius: var(--radius-sm); cursor: pointer; color: var(--text-2); background: var(--subtle); }
+.lbc-camera:hover { border-color: var(--primary); color: var(--primary-ink); }
+.lbc-checks { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 6px; margin: 8px 0 12px; }
+.lbc-check { display: flex; align-items: center; gap: 8px; padding: 8px 10px; min-height: 40px; border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 13.5px; cursor: pointer; background: var(--panel); }
+.lbc-check.yes { border-color: color-mix(in srgb, var(--ok) 40%, var(--border)); background: var(--ok-soft); }
+.lbc-check.no { border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); background: var(--danger-soft); }
+.lbc-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.lbc-actions button { min-height: 48px; font-size: 15px; display: inline-flex; align-items: center; gap: 6px; }
+.lbc-actions .good { flex: 1 1 200px; justify-content: center; }
+.lbc-problem { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+.lbc-problem textarea { min-height: 70px; }
+.lbc-next { margin-top: 12px; padding: 12px; border-radius: var(--radius-sm); border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--border)); background: var(--danger-soft); display: flex; flex-direction: column; gap: 8px; }
+.lbc-next textarea { min-height: 150px; font-size: 13px; background: var(--panel); }
+.lbc-done { margin-top: 12px; padding: 12px; border-radius: var(--radius-sm); background: var(--ok-soft); color: var(--ok); font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.lbc-scan video { width: 100%; max-height: 260px; border-radius: var(--radius-sm); background: #000; }
+.lbc-cands { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+@media (max-width: 899px) {
+  .lbc-panel { position: static; }
+}
