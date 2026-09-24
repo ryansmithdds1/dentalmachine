@@ -7,6 +7,7 @@ import { lateness, waitLabel } from './late.js';
 import './late.css';
 import { nextKind, NEXT_LABEL, READY_LABEL, READY_SHORT } from './flow.js';
 import './workflow.css';
+import OpportunityBadge, { OpportunityTotal } from '../opportunities/OpportunityBadge.jsx';
 
 export const toMin = (t) => Number(t.slice(-5, -3)) * 60 + Number(t.slice(-2));
 export const fmtMin = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
@@ -55,7 +56,7 @@ export const STATUS_COLORS = { scheduled: '#64748b', confirmed: '#16a34a', check
 export default function CalendarGrid({
   columns, appointments, range, pxPerMin, nowMin, onMove, onResize, onSelectRange, onOpen, onOpenBlockout, onPin,
   placing, onPlace, selectedId, scrollKey, headerExtra, readOnly = false, step = 10, colorBy = 'type', onReorderColumn, onFocusAppt, onNext, carry = null,
-  now = null, late = null,
+  now = null, late = null, opportunities = null, onOpportunities,
 }) {
   const [dragCol, setDragCol] = useState(null);
   const [overCol, setOverCol] = useState(null);
@@ -293,6 +294,7 @@ export default function CalendarGrid({
               <div className="cal-col-info">
                 {c.prod ? <ColumnProduction title={c.prodTitle || c.label} prod={c.prod} now={c.now} />
                   : c.sub && <span className={`cal-col-sub${c.subClass ? ` ${c.subClass}` : ''}`}>{c.sub}</span>}
+                {opportunities && (() => { const o = appointments.filter((a) => c.accepts(a)).reduce((s, a) => ({ count: s.count + (opportunities[a.id]?.count || 0), fee: s.fee + (opportunities[a.id]?.fee || 0) }), { count: 0, fee: 0 }); return o.count ? <OpportunityTotal {...o} /> : null; })()}
                 {c.people?.length > 0 && (
                   <span className="cal-col-people">
                     {c.people.map((p) => <i key={p.name} style={{ background: p.color || '#64748b' }} title={p.name}>{initialsOf(p.name)}</i>)}
@@ -403,6 +405,7 @@ export default function CalendarGrid({
                           {a.asap ? <span className="cal-asap" title="Wants an earlier time">ASAP</span> : null}
                           {a.series_id ? <Repeat className="cal-repeat" size={11} strokeWidth={2.5} aria-label="Recurring visit" /> : null}
                           {(() => { const b = eligibilityBadge(a.eligibility); return b ? <span className={`cal-elig ${b.tone}`} title={b.text}>{b.icon}</span> : null; })()}
+                          {opportunities?.[a.id]?.count ? <OpportunityBadge count={opportunities[a.id].count} fee={opportunities[a.id].fee} compact={h < 28} onClick={() => onOpportunities?.(a)} /> : null}
                           {col.isToday && nowMin != null && a.status === 'checked_in' && a.arrived_at && (
                             <span className={`cal-flow${nowMin - toMin(a.arrived_at.slice(11, 16)) >= 15 ? ' long' : ''}`} title="Waiting since arrival">⏱ {Math.max(0, nowMin - toMin(a.arrived_at.slice(11, 16)))}m</span>
                           )}

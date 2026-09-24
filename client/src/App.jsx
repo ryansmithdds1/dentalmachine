@@ -10,6 +10,9 @@ import { ActivePatientProvider } from './activePatient.jsx';
 import CommandPalette from './components/CommandPalette.jsx';
 import IntranetCommands from './components/intranet/IntranetCommands.jsx';
 import QuickCommands, { TaskBadge } from './components/QuickCommands.jsx';
+import ChatPanel from './components/chat/ChatPanel.jsx';
+import ChatBadge from './components/chat/ChatBadge.jsx';
+import UrgentBanner from './components/chat/UrgentBanner.jsx';
 import Assistant from './components/assistant/Assistant.jsx';
 import CallPop from './components/CallPop.jsx';
 import KeyboardHelp from './components/KeyboardHelp.jsx';
@@ -22,7 +25,7 @@ import { pendingCount } from './offline/index.js';
 import { ClockButton } from './components/TimeClock.jsx';
 import { useLiveEvents } from './live.js';
 import MfaSetup from './components/MfaSetup.jsx';
-import { Sun, CalendarDays, Users, MessageSquare, Inbox as InboxIcon, PhoneCall, Megaphone, Receipt, ListChecks, ChartColumn, Landmark, Settings as SettingsIcon, Search, PanelLeftClose, PanelLeftOpen, LogOut, Keyboard, Monitor, Moon, Sparkles, Phone, Building2, Star, HelpCircle, AlertTriangle, BookOpen } from 'lucide-react';
+import { Sun, CalendarDays, Users, MessageSquare, Inbox as InboxIcon, PhoneCall, Megaphone, Receipt, ListChecks, ChartColumn, Landmark, Settings as SettingsIcon, Search, PanelLeftClose, PanelLeftOpen, LogOut, Keyboard, Monitor, Moon, Sparkles, Phone, Building2, Star, HelpCircle, AlertTriangle, BookOpen, Clock, Banknote, Gauge, Repeat, ShieldCheck } from 'lucide-react';
 import { getThemePref, setThemePref, watchTheme } from './theme.js';
 
 // Pages load on demand so the first screen appears quickly.
@@ -66,6 +69,9 @@ const Attention = lazy(() => import('./pages/Attention.jsx'));
 const AttentionBadge = lazy(() => import('./pages/Attention.jsx').then((m) => ({ default: m.AttentionBadge })));
 const Inbox = lazy(() => import('./pages/Inbox.jsx'));
 const Office = lazy(() => import('./pages/Office.jsx'));
+const TimeClockPage = lazy(() => import('./pages/TimeClock.jsx'));
+const TimeClockKiosk = lazy(() => import('./pages/TimeClock.jsx').then((m) => ({ default: m.Kiosk })));
+const Deposits = lazy(() => import('./pages/Deposits.jsx'));
 const BookingPage = lazy(() => import('./pages/public/BookingPage.jsx'));
 const ConfirmPage = lazy(() => import('./pages/public/ConfirmPage.jsx'));
 const IntakePage = lazy(() => import('./pages/public/IntakePage.jsx'));
@@ -74,6 +80,10 @@ const SurveyPage = lazy(() => import('./pages/public/SurveyPage.jsx'));
 const PayResult = lazy(() => import('./pages/public/PayResult.jsx'));
 const LabCasePage = lazy(() => import('./pages/public/LabCasePage.jsx'));
 const LearnPage = lazy(() => import('./pages/public/LearnPage.jsx'));
+const RecallBook = lazy(() => import('./pages/public/RecallBook.jsx'));
+const Recall = lazy(() => import('./pages/Recall.jsx'));
+const Metrics = lazy(() => import('./pages/Metrics.jsx'));
+const ChartAudit = lazy(() => import('./pages/ChartAudit.jsx'));
 const CheckinPage = lazy(() => import('./pages/public/CheckinPage.jsx'));
 const StatusPage = lazy(() => import('./pages/public/StatusPage.jsx'));
 const Help = lazy(() => import('./pages/Help.jsx'));
@@ -97,6 +107,8 @@ export default function App() {
         <Route path="/tp/:token" element={<CaseAcceptance />} />
         <Route path="/scan/:token" element={<PhoneUpload />} />
         <Route path="/portal/:key" element={<Portal />} />
+        <Route path="/timeclock/kiosk" element={<TimeClockKiosk />} />
+        <Route path="/rb/:token" element={<RecallBook />} />
         <Route path="*" element={<StaffApp />} />
       </Routes>
     </Suspense>
@@ -221,16 +233,21 @@ function StaffApp() {
   const nav = [
     ['/', Sun, 'Today', true],
     ['/attention', AlertTriangle, 'Needs attention', can('patients:read')],
+    ['/chart-audit', ShieldCheck, 'Chart audit', can('clinical:read')],
     ['/schedule', CalendarDays, 'Schedule', can('schedule:read')],
     ['/patients', Users, 'Patients', can('patients:read')],
     ['/messages', MessageSquare, 'Messages', can('patients:read')],
     ['/requests', InboxIcon, 'Online requests', can('schedule:read')],
     ['/calls', Phone, 'Calls', can('patients:read')],
     ['/followups', PhoneCall, 'Follow-up lists', can('schedule:read')],
+    ['/recall', Repeat, 'Recall autopilot', can('schedule:read')],
+    ['/metrics', Gauge, 'Metrics', can('reports:read') || can('reports:own')],
     ['/campaigns', Megaphone, 'Campaigns', can('patients:write')],
     ['/reputation', Star, 'Reviews', can('patients:read')],
     ['/claims', Receipt, 'Billing', can('billing:read')],
     ['/office', ListChecks, 'To-do & labs', true],
+    ['/timeclock', Clock, 'Time clock', true],
+    ['/deposits', Banknote, 'Deposits & cash', can('billing:read')],
     ['/intranet', BookOpen, 'Intranet', true],
     ['/reports', ChartColumn, 'Reports', can('reports:read')],
     ['/ask', Sparkles, 'Ask your data', can('reports:read')],
@@ -355,6 +372,7 @@ function Shell({ nav }) {
       <Toasts />
       <Assistant />
       <CallPop />
+      <ChatPanel />
       <IdleLogout />
       <aside className="sidebar rail">
         <div className="rail-brand" title={practice?.name}>
@@ -366,6 +384,7 @@ function Shell({ nav }) {
         <button className="rail-item" onClick={() => window.dispatchEvent(new Event('dm:search'))} data-tip="Search (Ctrl K)">
           <Search size={19} strokeWidth={1.9} /><span className="rail-label">Search <kbd>Ctrl K</kbd></span>
         </button>
+        <ChatBadge />
         <nav className="nav rail-nav">
           {nav.filter((n) => n[3]).map(([to, Icon, text]) => (
             <NavLink key={to} to={to} end={to === '/'} className="rail-item" data-tip={text} aria-label={text}>
@@ -387,6 +406,7 @@ function Shell({ nav }) {
       </aside>
       <main className={`main${fullBleed ? ' full-bleed' : ''}`} id="main" tabIndex={-1}>
         <EnvironmentBanner />
+        <UrgentBanner />
         <OfflineBanner />
         {user.role === 'admin' && practice?.setup_status === 'pending' && location.pathname !== '/setup' && (
           <div className="setup-banner no-print">Finish setting up {practice.name} — providers, fees, insurance and reminders. <NavLink to="/setup">Continue setup →</NavLink></div>
@@ -404,12 +424,17 @@ function Shell({ nav }) {
             <Route path="/patients/:id" element={<PatientDetail />} />
             <Route path="/patients/:id/statement" element={<Statement />} />
             <Route path="/followups" element={<Followups />} />
+            <Route path="/recall" element={<Recall />} />
+            <Route path="/metrics" element={<Metrics />} />
+            <Route path="/chart-audit" element={<ChartAudit />} />
             <Route path="/campaigns" element={<Campaigns />} />
             <Route path="/recalls" element={<Navigate to="/followups" replace />} />
             <Route path="/requests" element={<Requests />} />
             <Route path="/attention" element={<Attention />} />
             <Route path="/messages" element={<Inbox />} />
             <Route path="/office" element={<Office />} />
+            <Route path="/timeclock" element={<TimeClockPage />} />
+            <Route path="/deposits" element={<Deposits />} />
             <Route path="/claims" element={<Claims />} />
             <Route path="/claims/:id" element={<ClaimDetail />} />
             <Route path="/reports" element={<Reports />} />

@@ -70,7 +70,8 @@ const daysBetween = (a, b) => Math.round((Date.parse(`${b}T12:00:00Z`) - Date.pa
 // they haven't had yet. One message per patient per run, however many recalls they have due.
 export async function runRecallSequences(db, messenger, { appUrl, now = new Date() } = {}) {
   let sent = 0;
-  for (const practice of await db.all('SELECT * FROM practices WHERE recall_auto = 1')) {
+  // A practice on the recall cadence (cadence.js) gets its recall messages from there instead.
+  for (const practice of await db.all('SELECT * FROM practices WHERE recall_auto = 1 AND recall_cadence = 0')) {
     const steps = recallSteps(practice);
     if (!steps.length) continue;
     const nowLocal = localNow(practice.timezone, now);

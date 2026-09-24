@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { api } from '../../api.js';
 import { useApi, useLookup } from '../../hooks.js';
 import { useAuth } from '../../auth.jsx';
@@ -6,6 +7,8 @@ import { fmtDateTime, fmtDate } from '../../format.js';
 import { ErrorBox } from '../ui.jsx';
 import NoteComposer from '../NoteComposer.jsx';
 import Scribe from './Scribe.jsx';
+import LongRecorder from './LongRecorder.jsx';
+import CheckMyChart from '../chartaudit/CheckMyChart.jsx';
 
 export default function NotesTab({ patient }) {
   const { user, can } = useAuth();
@@ -18,6 +21,10 @@ export default function NotesTab({ patient }) {
   const [editing, setEditing] = useState(null);
   const [addendum, setAddendum] = useState(null);
   const [actionErr, setActionErr] = useState(null);
+  // ?visit=<appointment id> (from the chart audit or the review queue): that visit's check opens by itself.
+  const [params] = useSearchParams();
+  const focusVisit = Number(params.get('visit')) || null;
+  const checkable = notes?.filter((n) => n.appointment_id && !n.signed) || [];
   const act = async (fn) => {
     setActionErr(null);
     try {
@@ -32,6 +39,7 @@ export default function NotesTab({ patient }) {
     <div className="grid" style={{ gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1.3fr)' }}>
       {can('clinical:write') && (
         <div>
+          <LongRecorder patient={patient} appointmentId={focusVisit} onSaved={reload} />
           <Scribe patient={patient} onSaved={reload} />
           <div className="card">
             <h2>New note</h2>
@@ -69,6 +77,9 @@ export default function NotesTab({ patient }) {
                 </select>
               ) : 'Not linked to a visit'}
             </div>
+            {n.appointment_id && !n.signed && (
+              <CheckMyChart patientId={patient.id} visitKey={`a${n.appointment_id}`} autoOpen={focusVisit === n.appointment_id} shortcut={n.id === (checkable.find((c) => c.appointment_id === focusVisit) || checkable[0])?.id} onChanged={reload} compact />
+            )}
             {editing?.id === n.id ? (
               <>
                 <textarea rows={6} value={editing.body} onChange={(e) => setEditing({ ...editing, body: e.target.value })} />

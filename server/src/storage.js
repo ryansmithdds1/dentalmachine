@@ -1,5 +1,5 @@
 import { mkdirSync, existsSync } from 'node:fs';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, writeFile, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomUUID, createCipheriv, createDecipheriv, randomBytes, createHash, createHmac } from 'node:crypto';
 
@@ -77,6 +77,11 @@ export function createStorage({ dir, key, previousKeys = [], s3 = s3FromEnv(), f
       await backend.put(storageKey, encrypt(plain));
       return 'changed';
     },
+    // Deletes a stored file. Only for source files whose retention has ended (e.g. exam recordings after the
+    // practice's retention period); records that matter are never removed this way. Missing files are fine.
+    async remove(storageKey) {
+      await backend.remove(checkKey(storageKey));
+    },
   };
 }
 
@@ -90,6 +95,9 @@ function diskBackend(dir) {
     async get(storageKey) {
       const path = join(dir, storageKey);
       return existsSync(path) ? readFile(path) : null;
+    },
+    async remove(storageKey) {
+      await unlink(join(dir, storageKey)).catch((err) => { if (err.code !== 'ENOENT') throw err; });
     },
   };
 }
@@ -124,6 +132,10 @@ function s3Backend(cfg, fetchImpl) {
       if (res.status === 404) return null;
       if (!res.ok) throw new Error(`S3 download failed (${res.status})`);
       return Buffer.from(await res.arrayBuffer());
+    },
+    async remove(storageKey) {
+      const res = await request('DELETE', storageKey);
+      if (!res.ok && res.status !== 404) throw new Error(`S3 delete failed (${res.status})`);
     },
   };
 }

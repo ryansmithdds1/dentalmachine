@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { restricted, canSeePatient, requireVisiblePatients } from '../officeaccess.js';
 import { requirePermission, HttpError } from '../auth.js';
-import { insert, audit, practiceNow, toCents, utcRange, publicPractice, toCsv } from '../util.js';
+import { insert, audit, practiceNow, toCents, publicPractice, toCsv } from '../util.js';
 import { backupTables } from '../backup.js';
 import { sendMessage, preferredChannel } from '../messaging.js';
 import { renderTemplate, templatesFor, patientLang, fixedText, subjectFor, messageText } from '../templates.js';
@@ -10,6 +10,7 @@ import { statementData } from './billing.js';
 import { portalKey } from './portal.js';
 import { pendingInsurance } from '../services.js';
 import { allocationsForRange } from '../allocation.js';
+import { computeMetrics, adjustmentKind } from '../metrics.js';
 
 const requireAdmin = (req, _res, next) => (req.user.role === 'admin' ? next() : next(new HttpError(403, 'Administrator access required')));
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -17,9 +18,8 @@ const addDays = (d, n) => new Date(Date.parse(`${d}T12:00:00Z`) + n * 86400_000)
 const pct = (a, b) => (b ? Math.round((a / b) * 1000) / 10 : null);
 
 // Practice analytics (KPIs), statement batches, bulk recall and full data export.
-// Which kind of credit adjustment an entry is, for the KPI split.
-export const adjustmentKind = (e) => (e.adjustment_type === 'Insurance write-off' || e.claim_id ? 'insurance_write_offs'
-  : /write-?off|bad debt|collection/i.test(e.adjustment_type || '') ? 'other_write_offs' : 'discounts');
+// Which kind of credit adjustment an entry is, for the KPI split (defined with the KPIs in metrics.js).
+export { adjustmentKind };
 
 export default function growthRoutes({ db, messenger, config, mailer = { enabled: false } }) {
   const r = Router();
@@ -31,84 +31,35 @@ export default function growthRoutes({ db, messenger, config, mailer = { enabled
     const to = req.query.to || today;
     if (!DATE.test(from) || !DATE.test(to)) throw new HttpError(400, 'from/to must be YYYY-MM-DD');
     const range = [pid, from, to];
-    const [fromUtc, toUtc] = await utcRange(db, pid, from, to); // for UTC created_at columns
     const one = async (sql, ...p) => (await db.get(sql, ...p)).n;
     // One provider's numbers: their production, visits and plans; payments and write-offs credited to
     // their work (the same allocation as Collections by provider).
     const prov = Number(req.query.provider_id) || null;
     const byProv = (col = 'provider_id') => (prov ? ` AND ${col} = ${prov}` : '');
 
-    const production = await one(`SELECT COALESCE(SUM(amount),0) AS n FROM ledger_entries WHERE practice_id = ? AND type = 'charge' AND entry_date BETWEEN ? AND ?${byProv()}`, ...range);
-    let collections;
-    let adjustments;
-    // Credit adjustments split three ways: insurance write-offs (the PPO contract), discounts the office
-    // chose to give, and other write-offs (bad debt, small balances). Voided ones don't count.
-    const split = { insurance_write_offs: 0, discounts: 0, other_write_offs: 0 };
-    if (prov) {
-      const alloc = (await allocationsForRange(db, pid, from, to)).filter((a) => a.provider_id === prov);
-      collections = alloc.filter((a) => ['payment', 'insurance_payment'].includes(a.credit_type)).reduce((s, a) => s + a.amount, 0);
-      const adj = alloc.filter((a) => a.credit_type === 'adjustment');
-      const ids = [...new Set(adj.map((a) => a.credit_id))];
-      const kinds = new Map();
-      for (let i = 0; i < ids.length; i += 500) {
-        const chunk = ids.slice(i, i + 500);
-        for (const e of await db.all(`SELECT id, adjustment_type, claim_id, voided_at, reverses_id FROM ledger_entries WHERE id IN (${chunk.map(() => '?').join(',')})`, ...chunk)) kinds.set(e.id, e);
-      }
-      for (const a of adj) {
-        const e = kinds.get(a.credit_id);
-        if (!e || e.voided_at || e.reverses_id) continue;
-        split[adjustmentKind(e)] += a.amount;
-      }
-      adjustments = split.insurance_write_offs + split.discounts + split.other_write_offs;
-    } else {
-      collections = -(await one("SELECT COALESCE(SUM(amount),0) AS n FROM ledger_entries WHERE practice_id = ? AND type IN ('payment','insurance_payment') AND entry_date BETWEEN ? AND ?", ...range));
-      const rows = await db.all("SELECT adjustment_type, claim_id IS NOT NULL AS on_claim, -SUM(amount) AS n FROM ledger_entries WHERE practice_id = ? AND type = 'adjustment' AND amount < 0 AND voided_at IS NULL AND reverses_id IS NULL AND entry_date BETWEEN ? AND ? GROUP BY adjustment_type, claim_id IS NOT NULL", ...range);
-      for (const r2 of rows) split[adjustmentKind({ adjustment_type: r2.adjustment_type, claim_id: Number(r2.on_claim) ? 1 : null })] += Number(r2.n);
-      adjustments = split.insurance_write_offs + split.discounts + split.other_write_offs;
-    }
+    // The headline numbers come from the one set of KPI definitions (metrics.js, docs/metrics.md), so this screen,
+    // Reports → Metrics and the metric emails always show the same number. New patients and recall are counted for
+    // the whole practice even when one provider is picked (as before).
+    const K = ['production_gross', 'adjustments', 'collections', 'collection_rate', 'case_acceptance', 'hygiene_reappointment', 'broken_appointments', 'broken_rate'];
+    const { values: v, parts: pt } = await computeMetrics(db, pid, { from, to, today, providerId: prov, keys: K });
+    const whole = await computeMetrics(db, pid, { from, to, today, keys: ['new_patients', 'recall_current_rate'] });
+    const production = v.production_gross;
+    const collections = v.collections;
+    const split = pt.adjustments;
+    const adjustments = v.adjustments;
     const hygieneProduction = await one(
       `SELECT COALESCE(SUM(l.amount),0) AS n FROM ledger_entries l JOIN providers pv ON pv.id = l.provider_id
        WHERE l.practice_id = ? AND l.type = 'charge' AND pv.type = 'hygienist' AND l.entry_date BETWEEN ? AND ?${byProv('l.provider_id')}`, ...range,
     );
-    const appts = await db.all(
-      `SELECT status, COUNT(*) AS n FROM appointments WHERE practice_id = ? AND start_time >= ? AND start_time < ? AND start_time < ?${byProv()} GROUP BY status`,
-      pid, `${from} 00:00`, `${to} 24:00`, `${today} 24:00`,
-    );
-    const count = (s) => appts.filter((a) => s.includes(a.status)).reduce((x, a) => x + a.n, 0);
-    const kept = count(['completed', 'checked_in', 'in_chair']);
-    const broken = count(['no_show', 'cancelled']);
-    const noShows = count(['no_show']);
-
-    // Case acceptance: presented plan dollars that were accepted.
-    const plans = await db.get(
-      `SELECT COALESCE(SUM(pr.fee),0) AS presented, COALESCE(SUM(CASE WHEN tp.status IN ('accepted','completed') THEN pr.fee ELSE 0 END),0) AS accepted,
-         COUNT(DISTINCT tp.id) AS plans, COUNT(DISTINCT CASE WHEN tp.status IN ('accepted','completed') THEN tp.id END) AS accepted_plans
-       FROM treatment_plans tp JOIN procedures pr ON pr.treatment_plan_id = tp.id
-       WHERE tp.practice_id = ? AND tp.created_at >= ? AND tp.created_at < ? AND pr.status != 'cancelled'${byProv('pr.provider_id')}`, pid, fromUtc, toUtc,
-    );
-
-    // Hygiene reappointment: hygiene visits completed in range whose patient left with their next visit
-    // already booked (booked by the day of the visit — not an appointment made weeks later).
-    const hyg = await db.get(
-      `SELECT COUNT(*) AS visits, SUM(CASE WHEN EXISTS (SELECT 1 FROM appointments b WHERE b.patient_id = a.patient_id AND b.start_time > a.start_time
-           AND b.status NOT IN ('cancelled','no_show') AND substr(b.created_at, 1, 10) <= substr(a.start_time, 1, 10)) THEN 1 ELSE 0 END) AS reappointed
-       FROM appointments a JOIN providers pv ON pv.id = a.provider_id
-       WHERE a.practice_id = ? AND pv.type = 'hygienist' AND a.status = 'completed' AND a.start_time >= ? AND a.start_time < ?${byProv('a.provider_id')}`,
-      pid, `${from} 00:00`, `${to} 24:00`,
-    );
-
-    const newPatients = await db.all(
-      `SELECT COALESCE(NULLIF(referral_source, ''), 'Not recorded') AS source, COUNT(*) AS n FROM patients
-       WHERE practice_id = ? AND created_at >= ? AND created_at < ? GROUP BY source ORDER BY n DESC`, pid, fromUtc, toUtc,
-    );
+    const kept = pt.broken_rate.kept;
+    const broken = pt.broken_rate.broken;
+    const noShows = pt.broken_appointments.no_shows;
+    const plans = pt.case_acceptance;
+    const hyg = pt.hygiene_reappointment;
+    const newPatients = whole.parts.new_patients.by_source;
     const active = await one(
       `SELECT COUNT(DISTINCT patient_id) AS n FROM appointments WHERE practice_id = ? AND status = 'completed' AND start_time >= ?`,
       pid, `${addDays(today, -547)} 00:00`,
-    );
-    const recallTotal = await one("SELECT COUNT(*) AS n FROM recalls r JOIN patients p ON p.id = r.patient_id WHERE r.practice_id = ? AND p.status = 'active' AND r.status != 'inactive'", pid);
-    const recallCurrent = await one(
-      `SELECT COUNT(*) AS n FROM recalls r JOIN patients p ON p.id = r.patient_id WHERE r.practice_id = ? AND p.status = 'active' AND r.status != 'inactive'
-       AND (r.due_date >= ? OR r.status = 'scheduled')`, pid, today,
     );
     const byProvider = await db.all(
       `SELECT pv.id, pv.name, pv.type, COALESCE(SUM(l.amount),0) AS production, COUNT(DISTINCT l.patient_id) AS patients
@@ -137,14 +88,14 @@ export default function growthRoutes({ db, messenger, config, mailer = { enabled
       from, to, provider_id: prov,
       production, collections, adjustments, ...split, hygiene_production: hygieneProduction,
       net_production: production - adjustments,
-      collection_rate: pct(collections, production - adjustments),
+      collection_rate: v.collection_rate,
       avg_daily_production: Math.round(production / days),
       appointments: { kept, broken, no_shows: noShows, no_show_rate: pct(noShows, kept + broken) },
       case_acceptance: { presented: plans.presented, accepted: plans.accepted, rate: pct(plans.accepted, plans.presented), plans: plans.plans, accepted_plans: plans.accepted_plans },
       hygiene_reappointment: { visits: hyg.visits, reappointed: hyg.reappointed || 0, rate: pct(hyg.reappointed || 0, hyg.visits) },
       new_patients: { total: newPatients.reduce((s, x) => s + x.n, 0), by_source: newPatients },
       active_patients: active,
-      recall_current_rate: pct(recallCurrent, recallTotal),
+      recall_current_rate: whole.values.recall_current_rate,
       by_provider: byProvider,
       monthly,
     });

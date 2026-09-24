@@ -125,7 +125,7 @@ test('forms go out automatically before a visit, once', async () => {
   d.setUTCDate(d.getUTCDate() + 2);
   const day = d.toISOString().slice(0, 10);
   const proc = (await api.post(`/patients/${patient.id}/procedures`, { code: 'D7140', tooth: '3', provider_id: provider.id })).data;
-  const appt = await api.post('/appointments', { patient_id: patient.id, provider_id: provider.id, start_time: `${day} 09:00`, end_time: `${day} 10:00`, procedure_ids: [proc.id] });
+  const appt = await api.post('/appointments', { patient_id: patient.id, provider_id: provider.id, start_time: `${day} 09:00`, end_time: `${day} 10:00`, procedure_ids: [proc.id], override_blockout: true }); // two days out may be a weekend
   assert.equal(appt.status, 201, JSON.stringify(appt.data));
 
   const before = h.sent.length;

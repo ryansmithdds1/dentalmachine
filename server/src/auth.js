@@ -67,6 +67,8 @@ export const PERMISSION_CATALOG = {
   'reports:read': 'See all practice reports', 'reports:own': 'See their own production',
   'timeclock:manage': 'See and fix everyone’s timesheets, export payroll',
   'timeclock:rates': 'See and set staff pay rates and labor cost',
+  'chartaudit:manage': 'See everyone’s chart audit findings and tune the checks',
+  'deposits:manage': 'Verify deposits and cash drawers, reopen deposits, approve cash voids, refunds and discounts',
   'intranet:manage': 'Edit the office intranet: links, office manual, announcements and onboarding',
   'finance:read': 'See bank activity, costs and profit', 'finance:write': 'Sort bank lines and match deposits',
 };

@@ -1,0 +1,153 @@
+/* Recall autopilot (pages/Recall.jsx), the patient's recall status (components/RecallStatus.jsx) and the
+   patient's booking page (pages/public/RecallBook.jsx). Theme tokens only, so dark mode follows. */
+.rc-page { display: flex; flex-direction: column; gap: 4px; }
+.rc-head-actions { flex-wrap: wrap; justify-content: flex-end; }
+.rc-state { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--muted); padding: 4px 10px; border-radius: 999px; background: var(--subtle); }
+.rc-state.on { color: var(--ok); background: var(--ok-soft); }
+.rc-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+.rc-state.on .rc-dot { animation: rc-pulse 2s ease-in-out infinite; }
+@keyframes rc-pulse { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .rc-state.on .rc-dot { animation: none; } }
+.rc-note { background: var(--warn-soft); color: var(--warn); border-radius: var(--radius-sm); padding: 10px 14px; font-size: 13.5px; margin-bottom: 8px; }
+
+.rc-section { margin-bottom: 22px; }
+.rc-section-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+.rc-section-head h2 { font-size: 16px; margin: 0; display: inline-flex; align-items: center; gap: 8px; }
+.rc-section-head .count { background: var(--primary-soft); color: var(--primary-ink); border-radius: 99px; padding: 0 8px; font-size: 12px; font-weight: 700; }
+.rc-section-head select { width: auto; }
+.rc-mine { font-size: 13px; gap: 6px; }
+.rc-empty { display: flex; align-items: center; gap: 10px; padding: 18px 20px; border: 1px dashed var(--border-strong); border-radius: var(--radius); color: var(--muted); background: var(--panel); }
+.rc-empty svg { color: var(--ok); }
+
+/* Tiles */
+.rc-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; margin-bottom: 14px; }
+.rc-tile { background: var(--panel); border: 1px solid var(--border); border-left: 4px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); padding: 12px 14px; display: flex; flex-direction: column; gap: 2px; }
+.rc-tile.good { border-left-color: var(--ok); }
+.rc-tile.warn { border-left-color: var(--warn); }
+.rc-tile.bad { border-left-color: var(--danger); }
+.rc-tile-label { font-size: 11.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+.rc-tile-value { font-size: 26px; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.rc-tile-hint { font-size: 12px; color: var(--muted); }
+
+.rc-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 12px; }
+.rc-grid .card + .card { margin-top: 0; }
+.rc-grid h3 { font-size: 14px; margin: 0 0 12px; }
+.rc-grid h4 { font-size: 12.5px; margin: 14px 0 6px; color: var(--muted); font-weight: 600; }
+.rc-wide { grid-column: 1 / -1; }
+.rc-bar-row { display: grid; grid-template-columns: minmax(130px, 38%) 1fr auto; align-items: center; gap: 10px; padding: 5px 0; font-size: 13px; }
+.rc-bar-label { display: inline-flex; align-items: center; gap: 6px; color: var(--text); }
+.rc-bar-label svg { color: var(--muted); flex-shrink: 0; }
+.rc-bar { height: 8px; border-radius: 999px; background: var(--subtle); overflow: hidden; }
+.rc-bar i { display: block; height: 100%; border-radius: 999px; background: var(--primary); }
+.rc-bar-n { font-weight: 600; font-variant-numeric: tabular-nums; min-width: 2ch; text-align: right; }
+.rc-bar-n small { font-weight: 400; color: var(--muted); }
+.rc-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.rc-table th, .rc-table td { padding: 6px 4px; border-bottom: 1px solid var(--border); text-align: left; }
+.rc-table th { font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.03em; color: var(--muted); font-weight: 600; }
+.rc-table td svg { vertical-align: -2px; color: var(--muted); }
+.rc-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.rc-table .bad { color: var(--danger); font-weight: 600; }
+.rc-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.rc-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; padding: 2px 8px; border-radius: 999px; background: var(--subtle); color: var(--text); white-space: nowrap; }
+.rc-chip.sent, .rc-chip.done { background: var(--ok-soft); color: var(--ok); }
+.rc-chip.failed { background: var(--danger-soft); color: var(--danger); }
+.rc-chip.skipped { color: var(--muted); text-decoration: line-through; }
+.rc-chip.task, .rc-chip.due { background: var(--warn-soft); color: var(--warn); }
+.rc-chip.planned { background: transparent; border: 1px dashed var(--border-strong); color: var(--muted); }
+
+/* Calls to make */
+.rc-calls { display: flex; flex-direction: column; gap: 8px; }
+.rc-call { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; box-shadow: var(--shadow); cursor: default; }
+.rc-call.current { border-color: var(--primary); box-shadow: var(--ring); }
+.rc-call-main { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.rc-call-who { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
+.rc-call-name { font-weight: 700; font-size: 15px; color: var(--text); }
+.rc-call-phone { font-variant-numeric: tabular-nums; font-weight: 600; }
+.rc-overdue { font-size: 12px; padding: 1px 8px; border-radius: 999px; background: var(--info-soft); color: var(--info); }
+.rc-overdue.late { background: var(--warn-soft); color: var(--warn); }
+.rc-history { display: flex; flex-wrap: wrap; gap: 4px; }
+.rc-script-toggle { align-self: flex-start; font-size: 12.5px; }
+.rc-script { margin: 0; padding: 8px 12px; border-left: 3px solid var(--primary); background: var(--subtle); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; font-size: 13.5px; line-height: 1.5; }
+.rc-outcomes { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; max-width: 430px; }
+.rc-outcomes button { min-height: 30px; padding: 4px 10px; font-size: 12.5px; }
+.rc-outcomes button kbd { font-size: 10px; }
+.rc-outcomes button.good { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 35%, var(--border)); }
+.rc-outcomes button.danger-ghost { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 30%, var(--border)); }
+
+/* Sequences */
+.rc-seq-pills { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.rc-seq-pills button { border-radius: 999px; min-height: 30px; font-size: 13px; }
+.rc-seq-pills button.active { background: var(--primary-soft); border-color: var(--primary); color: var(--primary-ink); font-weight: 600; }
+.rc-timeline-card { padding: 18px 20px 14px; margin-bottom: 12px; }
+.rc-timeline-foot { font-size: 12.5px; margin-top: 8px; line-height: 1.5; }
+.rc-timeline { position: relative; height: 92px; margin: 0 4px; }
+.rc-line { position: absolute; left: 2%; right: 2%; top: 44px; height: 2px; background: linear-gradient(90deg, var(--border-strong), var(--primary) 50%, var(--border-strong)); border-radius: 2px; opacity: 0.7; }
+.rc-anchor { position: absolute; top: 20px; bottom: 16px; width: 0; border-left: 2px dashed var(--primary); }
+.rc-anchor span { position: absolute; top: -18px; left: 0; transform: translateX(-50%); font-size: 11px; font-weight: 700; color: var(--primary-ink); text-transform: uppercase; letter-spacing: 0.05em; white-space: nowrap; }
+.rc-point { position: absolute; top: 31px; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.rc-point-dot { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: var(--panel); border: 2px solid var(--primary); color: var(--primary-ink); box-shadow: var(--shadow); }
+.rc-point.email .rc-point-dot { border-color: var(--info); color: var(--info); }
+.rc-point.ai_call .rc-point-dot, .rc-point.task_call .rc-point-dot { border-color: var(--warn); color: var(--warn); }
+.rc-point.letter .rc-point-dot, .rc-point.postcard .rc-point-dot { border-color: var(--muted); color: var(--muted); }
+.rc-point.ghost { opacity: 0.4; }
+.rc-point-label { font-size: 11px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rc-point.low .rc-point-label { transform: translateY(2px); }
+.rc-timeline-more { position: absolute; right: 0; top: 0; font-size: 11px; color: var(--muted); display: inline-flex; gap: 4px; align-items: center; }
+.rc-steps { display: flex; flex-direction: column; gap: 8px; }
+.rc-steps .card + .card { margin-top: 0; }
+.rc-step { padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+.rc-step-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.rc-step-head select { width: auto; }
+.rc-step-icon { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; background: var(--primary-soft); color: var(--primary-ink); }
+.rc-step-icon.email { background: var(--info-soft); color: var(--info); }
+.rc-step-icon.ai_call, .rc-step-icon.task_call { background: var(--warn-soft); color: var(--warn); }
+.rc-step-icon.letter, .rc-step-icon.postcard { background: var(--subtle); color: var(--muted); }
+.rc-field { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; }
+.rc-field input { width: 76px; }
+.rc-repeat input { width: 62px; }
+.rc-repeat svg { color: var(--muted); }
+.rc-when { font-size: 12.5px; min-width: 96px; }
+.rc-step textarea, .rc-subject { width: 100%; }
+.rc-preview { font-size: 12.5px; line-height: 1.5; background: var(--subtle); border-radius: var(--radius-sm); padding: 6px 10px; }
+.rc-page .icon-button { margin-left: auto; min-height: 30px; padding: 4px 8px; color: var(--muted); }
+.rc-editor-bar { position: sticky; bottom: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 0; margin-top: 10px; background: var(--bg); border-top: 1px solid var(--border); z-index: 2; }
+.rc-small-input { width: 60px !important; }
+.rc-spacer { flex: 1; }
+.rc-vars { font-size: 12px; }
+
+/* Patient page: RecallStatus */
+.rcs { display: flex; flex-direction: column; gap: 8px; }
+.rcs-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.rcs-title { font-weight: 600; display: inline-flex; align-items: center; gap: 6px; }
+.rcs-sub { font-size: 12.5px; color: var(--muted); }
+.rcs-steps { display: flex; flex-wrap: wrap; gap: 4px; }
+.rcs-hold { display: flex; align-items: center; gap: 8px; font-size: 13px; background: var(--warn-soft); color: var(--warn); border-radius: var(--radius-sm); padding: 6px 10px; }
+.rcs-hold button { margin-left: auto; min-height: 28px; font-size: 12px; }
+.rcs-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.rcs-actions select { width: auto; font-size: 12.5px; }
+
+/* Public booking page (RC2) */
+.rb-people { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+.rb-person { background: var(--panel); border: 1px solid var(--border); border-radius: 999px; padding: 6px 14px; font-size: 14px; }
+.rb-person b { font-weight: 700; }
+.rb-day { margin-bottom: 16px; }
+.rb-day h2 { font-size: 16px; margin: 0 0 8px; }
+.rb-times { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 8px; }
+.rb-time { justify-content: center; flex-direction: column; gap: 2px; min-height: 52px; font-size: 16px; font-weight: 600; white-space: normal; text-align: center; }
+.rb-time small { font-size: 11.5px; font-weight: 400; color: var(--muted); }
+.rb-time.chosen { background: var(--primary); border-color: var(--primary); color: #fff; }
+.rb-time.chosen small { color: rgba(255, 255, 255, 0.85); }
+.rb-confirm { position: sticky; bottom: 0; background: var(--panel); border-top: 1px solid var(--border); padding: 12px 0 14px; margin-top: 8px; display: flex; flex-direction: column; gap: 8px; }
+.rb-summary { font-size: 15px; line-height: 1.45; }
+.rb-links { display: flex; flex-wrap: wrap; gap: 14px; margin: 6px 0 14px; font-size: 14px; }
+.rb-done { text-align: center; padding: 18px 8px; }
+.rb-done .rb-check { width: 56px; height: 56px; border-radius: 50%; background: var(--ok-soft); color: var(--ok); display: grid; place-items: center; margin: 0 auto 10px; }
+.rb-visit { font-size: 18px; font-weight: 700; margin: 4px 0; }
+
+@media (max-width: 720px) {
+  .rc-call { flex-direction: column; }
+  .rc-outcomes { justify-content: flex-start; max-width: none; }
+  .rc-bar-row { grid-template-columns: 1fr 80px auto; }
+  .rc-timeline { height: 100px; }
+  .rc-point-dot { width: 24px; height: 24px; }
+}

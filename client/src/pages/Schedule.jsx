@@ -22,6 +22,7 @@ import OverrideBanner from '../components/calendar/OverrideBanner.jsx';
 import { useProduction, ProductionBar, summarize, KINDS, KIND_LABEL } from '../components/calendar/ProductionBar.jsx';
 import LateBanner, { useLateChime } from '../components/calendar/LateBanner.jsx';
 import { lateList, runningBehind, lateSettings } from '../components/calendar/late.js';
+import { useDayOpportunities, OpportunityTotal } from '../components/opportunities/OpportunityBadge.jsx';
 
 // "Fit" sizes the grid so the whole office day fits the screen without scrolling; S/M/L are fixed sizes.
 const ZOOMS = [{ label: 'Fit', px: 0 }, { label: 'S', px: 1 }, { label: 'M', px: 1.5 }, { label: 'L', px: 2.2 }];
@@ -372,6 +373,10 @@ export default function Schedule() {
   const { setActive } = useActivePatient();
   const makeActive = useCallback((a) => a?.patient_id && setActive({ id: a.patient_id, first_name: a.first_name, last_name: a.last_name, preferred_name: a.preferred_name, dob: a.dob }), [setActive]);
   const [focusComplete, setFocusComplete] = useState(0);
+  // Opportunity finder: what each visit today is eligible for (G opens the list for the selected visit).
+  const [focusOpps, setFocusOpps] = useState(0);
+  const opps = useDayOpportunities(view === 'day' ? date : null, getLocationId(), { enabled: can('clinical:read') });
+  const openOpps = (a) => { setSelectedId(a.id); makeActive(a); setFocusOpps((n) => n + 1); };
   const runStep = async (a, kind) => {
     const plan = planStep(a, kind);
     if (plan.error) return toast(plan.error);
@@ -515,6 +520,7 @@ export default function Schedule() {
     { combo: STEP_KEYS.ready, handler: stepKey('ready'), label: 'Ready for the doctor (again to clear)', section: 'Patient flow', enabled: w },
     { combo: STEP_KEYS.ready_checkout, handler: stepKey('ready_checkout'), label: 'Ready for checkout (again to clear)', section: 'Patient flow', enabled: w },
     { combo: STEP_KEYS.out, handler: stepKey('out'), label: 'Out — visit complete', section: 'Patient flow', enabled: w },
+    { combo: 'g', handler: () => { const a = target(); if (a) openOpps(a); else toast('Pick a visit first: click it, or press F'); }, label: 'Opportunities for the selected visit (Enter adds one)', section: 'Patient flow', enabled: can('clinical:read') },
     { combo: 'm', handler: () => { const a = target(); if (a || !pins.length) pickUp(a); else pickUp(pins.at(-1), true); }, label: 'Move the selected visit (or the last pinned one): ↑ ↓ ← →, Enter to put it down', section: 'Moving visits', enabled: w },
     { combo: 'x', handler: askBroken('cancelled'), label: 'Cancel the selected visit (pick a reason, then rebook)', section: 'Moving visits', enabled: w },
     { combo: 'shift+x', handler: askBroken('no_show'), label: 'No-show (pick a reason, then rebook)', section: 'Moving visits', enabled: w },
@@ -827,6 +833,7 @@ export default function Schedule() {
           onMove={(a) => { setPlacing(a); pickUp(a); }} />
       )}
       {prodSum && <ProductionBar title={prodHeading} sum={prodSum} unscheduled={prodData.unscheduled} kind={prodKind} onKind={rememberKind} now={nowStamp} />}
+      {opps.totals?.count > 0 && <OpportunityTotal count={opps.totals.count} fee={opps.totals.fee} />}
       {override && <OverrideBanner message={override.message} name={`${override.appt.first_name} ${override.appt.last_name}`} onAnswer={answerOverride} />}
       {carry && (() => {
         const col = columns[carry.col];
@@ -869,7 +876,7 @@ export default function Schedule() {
           )}
           <CalendarGrid
             columns={gridColumns} appointments={appts} range={timeRange} pxPerMin={pxPerMin} nowMin={nowMin} step={step} colorBy={colorBy}
-            onMove={onMove} onResize={onResize} readOnly={!can('schedule:write')}
+            onMove={onMove} onResize={onResize} readOnly={!can('schedule:write')} opportunities={opps.byAppt} onOpportunities={openOpps}
             onSelectRange={onSelectRange} onOpen={(a) => { setSelectedId(a.id); makeActive(a); }} onFocusAppt={makeActive}
             onNext={w ? (a) => runStep(a, nextKind(a)) : undefined}
             onOpenBlockout={(b) => can('schedule:write') && setModal({ type: 'block', blockout: b })}
@@ -919,6 +926,7 @@ export default function Schedule() {
         <AppointmentDrawer
           onPin={() => { onPin(selected); setSelectedId(null); }}
           appt={selected} can={can} onClose={() => setSelectedId(null)}
+          focusOpportunities={focusOpps} onOpportunitiesChanged={() => { cache.current.clear(); reload({ silent: true }); }}
           onStatus={(s, scope, extra) => setStatus(selected, s, scope, extra)}
           onStep={(kind) => runStep(selected, kind)} focusComplete={focusComplete}
           brokenAsk={brokenAsk} onBroken={(kind, choice) => breakVisit(selected, kind, choice)}

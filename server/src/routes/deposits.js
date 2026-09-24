@@ -80,6 +80,7 @@ export default function depositRoutes({ db }) {
     const d = await findOr404(db, 'deposits', req.params.did, req.user.practice_id, 'Deposit');
     if (d.status === 'reconciled') throw new HttpError(409, 'A reconciled deposit can’t be undone');
     if (d.voided_at) throw new HttpError(409, 'This deposit was already undone');
+    if (await db.get("SELECT id FROM deposit_slips WHERE deposit_id = ? AND stage <> 'reopened'", d.id)) throw new HttpError(409, 'This deposit is locked — a manager reopens it from Deposits and cash');
     const reason = String(req.body?.reason || '').trim().slice(0, 300);
     if (!reason) throw new HttpError(400, 'Say why the deposit is being undone');
     // The slip is kept (voided, with who and why); its payments go back to the not-deposited list.

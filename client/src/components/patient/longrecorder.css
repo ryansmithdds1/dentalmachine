@@ -1,0 +1,30 @@
+/* Long recordings (LR1-LR3): a clear recording indicator, calm review panel. */
+.lr-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.lr-head h2 { margin: 0; }
+.lr-live { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; color: var(--danger); background: var(--danger-soft); border-radius: 999px; padding: 3px 12px; font-variant-numeric: tabular-nums; }
+.lr-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--danger); animation: lr-pulse 1.4s ease-in-out infinite; }
+@keyframes lr-pulse { 50% { opacity: 0.25; } }
+@media (prefers-reduced-motion: reduce) { .lr-dot { animation: none; } }
+.lr-paused { color: var(--warn); background: var(--warn-soft); border-radius: 999px; padding: 3px 12px; font-variant-numeric: tabular-nums; }
+.lr-queue { font-size: 12px; color: var(--muted); display: inline-flex; align-items: center; gap: 4px; }
+.lr-intro { font-size: 13px; }
+.lr-consent { margin: 6px 0 10px; }
+.lr-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.lr-controls button svg, .lr .primary svg { vertical-align: -2px; }
+.lr-small { font-size: 12px; }
+.lr-notice { background: var(--warn-soft); border-radius: var(--radius-sm); padding: 8px 10px; margin: 8px 0; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 13px; }
+.lr-review { margin-top: 8px; }
+.lr-meta { font-size: 12px; margin-bottom: 6px; }
+.lr-missing { background: var(--info-soft); border-radius: var(--radius-sm); padding: 6px 10px; font-size: 13px; margin-bottom: 8px; }
+.lr-note { width: 100%; font-family: inherit; }
+.lr-sections { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 8px; margin-top: 10px; }
+.lr-section { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 6px 10px; background: var(--subtle); }
+.lr-section h3 { font-size: 13px; margin: 2px 0 4px; }
+.lr-section ul { margin: 0; padding-left: 16px; font-size: 13px; }
+.lr-ref { display: inline-block; font-size: 10.5px; color: var(--info); background: var(--info-soft); border-radius: 4px; padding: 0 4px; margin-left: 3px; cursor: help; }
+.lr-suggested { margin-top: 10px; }
+.lr-suggested h3 { font-size: 13px; margin: 0 0 4px; }
+.lr-transcript { margin-top: 10px; font-size: 13px; }
+.lr-transcript ol { max-height: 320px; overflow: auto; padding-left: 40px; }
+.lr-history { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 8px; display: grid; gap: 4px; }
+.lr-row { display: flex; align-items: center; gap: 8px; font-size: 13px; flex-wrap: wrap; }

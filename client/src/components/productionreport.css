@@ -1,0 +1,83 @@
+/* Reports → Production & income. Colours come from the theme variables in styles.css, so dark mode follows. */
+.pi { position: relative; }
+.pi .print-only { display: none; }
+.pi-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
+.pi-head h2 { font-size: 20px; margin: 0 0 2px; }
+.pi-sub { font-size: 13px; }
+.pi-controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.pi-controls select { width: auto; }
+.pi-date { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); }
+.pi-date input { width: 150px; }
+
+.pi-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(178px, 1fr)); gap: 10px; margin-bottom: 16px; }
+.pi-tile { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); display: flex; flex-direction: column; min-width: 0; }
+.pi-tile-main { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 12px 14px 8px; text-align: left; }
+button.pi-tile-main { border: none; background: none; box-shadow: none; min-height: 0; border-radius: var(--radius) var(--radius) 0 0; white-space: normal; width: 100%; }
+button.pi-tile-main:hover { background: var(--hover); }
+button.pi-tile-main:hover .pi-tile-value { color: var(--primary-ink); }
+.pi-tile-label { font-size: 11.5px; font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase; color: var(--faint); }
+.pi-tile-value { font-size: 24px; font-weight: 680; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; color: var(--text); line-height: 1.2; }
+.pi-tile.strong { border-color: color-mix(in srgb, var(--primary) 40%, var(--border)); }
+.pi-tile.strong .pi-tile-value { color: var(--primary-ink); }
+.pi-tile.ok .pi-tile-value { color: var(--ok); }
+.pi-tile.warn .pi-tile-value { color: var(--warn); }
+.pi-tile-parts { display: flex; flex-direction: column; gap: 1px; padding: 0 14px 11px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.pi-tile-parts button.link { color: var(--muted); font-size: 12px; text-align: left; font-weight: 500; }
+.pi-tile-parts button.link:hover { color: var(--primary-ink); }
+.pi-tile-parts svg { vertical-align: -2px; }
+.pi-projection { grid-column: span 2; background: linear-gradient(135deg, var(--primary-soft), var(--panel) 70%); }
+.pi-goalbar { position: relative; display: flex; height: 7px; margin: 0 14px 8px; background: var(--grid-major); border-radius: 99px; overflow: hidden; }
+.pi-goalbar i { display: block; height: 100%; }
+.pi-goalbar i.done { background: var(--primary); }
+.pi-goalbar i.sched { background: color-mix(in srgb, var(--primary) 40%, transparent); }
+.pi-goal-src { font-size: 11px; color: var(--faint); padding: 0 14px 10px; }
+
+.pi-card { padding: 14px 16px; }
+.pi-card + .pi-card { margin-top: 14px; }
+.pi-card-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+.pi-card-head h3 { margin: 0; }
+.pi-card-head .muted { font-size: 12px; }
+.pi-table { width: 100%; font-size: 13px; }
+.pi-table td, .pi-table th { white-space: nowrap; }
+.pi-table .neg, .pi-table .neg button { color: var(--danger); }
+.pi-table tfoot th { border-top: 2px solid var(--border-strong); }
+.pi-rest td:first-child { color: var(--muted); font-style: italic; }
+button.pi-num { border: none; background: none; box-shadow: none; padding: 0 2px; min-height: 0; font: inherit; color: inherit; font-variant-numeric: tabular-nums; border-radius: 4px; }
+button.pi-num:hover { color: var(--primary-ink); text-decoration: underline; background: none; }
+button.pi-toggle { border: none; background: none; box-shadow: none; padding: 0; min-height: 0; font-weight: 650; }
+button.pi-toggle:hover { background: none; color: var(--primary-ink); }
+.pi-days .table-wrap { margin-top: 10px; }
+.pi-collapsed { display: none; }
+.pi-foot { font-size: 12px; margin: 12px 2px 0; }
+
+/* The entries behind a number: a panel on the right, the report stays in view. */
+.pi-drill { position: fixed; top: 0; right: 0; bottom: 0; width: min(440px, 100vw); background: var(--panel); border-left: 1px solid var(--border); box-shadow: var(--shadow-lg); z-index: 30; display: flex; flex-direction: column; gap: 10px; padding: 16px; overflow-y: auto; animation: pi-in 0.14s ease-out; }
+.pi-drill:focus { outline: none; }
+.pi-drill header { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+.pi-drill h3 { margin: 0 0 2px; }
+.pi-drill-note { font-size: 12px; margin: 0; }
+.pi-entries { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.pi-entries li { padding: 8px 0; border-bottom: 1px solid var(--border); }
+.pi-entry-top { display: flex; justify-content: space-between; gap: 8px; font-weight: 600; }
+.pi-entry-amt { font-variant-numeric: tabular-nums; }
+.pi-entry-amt.neg { color: var(--danger); }
+.pi-entry-meta, .pi-entry-desc { font-size: 12px; color: var(--muted); }
+.pi-void .pi-entry-amt { text-decoration: line-through; color: var(--muted); }
+.pi-flag { margin-left: 6px; font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--warn); background: var(--warn-soft); border-radius: 99px; padding: 0 6px; }
+@keyframes pi-in { from { transform: translateX(16px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+@media (max-width: 700px) {
+  .pi-projection { grid-column: auto; }
+}
+
+@media print {
+  .pi .print-only { display: block; }
+  .pi-sub .print-only { display: inline; }
+  .pi-collapsed { display: block; }
+  .pi-tiles { grid-template-columns: repeat(4, 1fr); gap: 6px; }
+  .pi-tile, .pi-card { box-shadow: none; break-inside: avoid; }
+  .pi-projection { background: none; }
+  .pi-tile-value { font-size: 18px; }
+  button.pi-num, .pi-tile-parts button.link { color: inherit; text-decoration: none; }
+  .pi-goalbar { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}

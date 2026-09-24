@@ -23,6 +23,16 @@ import { runSurveys } from './surveys.js';
 import { runOrthoBilling } from './ortho.js';
 import { log } from './monitoring.js';
 import { productionProblems } from './preflight.js';
+import { runCadences } from './cadence.js';
+import { createMailer } from './mail.js';
+import { runChatJobs } from './chat.js';
+import { runDigests } from './digests.js';
+import { depositWatchAll } from './deposits.js';
+import { loggedFetch } from './issues.js';
+import { runChartAudits } from './chartaudit.js';
+import { createNoteComparer } from './ai/notecompare.js';
+import { runRecordingJobs, createExamTranscriber } from './longrecording.js';
+import { createTranscriber } from './phones.js';
 
 let secret = process.env.JWT_SECRET;
 if (process.env.NODE_ENV === 'production') {
@@ -82,6 +92,49 @@ if (process.env.MEMBERSHIP_BILLING !== 'off') {
     .catch(jobFailed('Membership billing'));
   setInterval(bill, 60 * 60 * 1000).unref();
   setTimeout(bill, 45_000).unref();
+}
+// Recall autopilot (and later treatment follow-up): due steps every 5 minutes; each step claimed once.
+if (process.env.CADENCES !== 'off') {
+  const cadenceMailer = createMailer();
+  const cadence = () => runExclusive('cadence', 4 * 60 * 1000, () => runCadences(db, { messenger, mailer: cadenceMailer, appUrl: config.appUrl, secret }))
+    .catch(jobFailed('Recall autopilot'));
+  setInterval(cadence, 5 * 60 * 1000).unref();
+  setTimeout(cadence, 50_000).unref();
+}
+// Team chat: repeating tasks and the unread-message digest email.
+if (process.env.CHAT_JOBS !== 'off') {
+  const chat = () => runExclusive('chat', 10 * 60 * 1000, () => runChatJobs(db, messenger, { appUrl: config.appUrl }))
+    .catch(jobFailed('Team chat jobs'));
+  setInterval(chat, 15 * 60 * 1000).unref();
+  setTimeout(chat, 70_000).unref();
+}
+// Metric emails (huddle, end of day, weekly, monthly) at each practice's local time; once per period.
+if (process.env.DIGESTS !== 'off') {
+  const digests = () => runExclusive('digests', 4 * 60 * 1000, () => runDigests(db, messenger, { config, secret }))
+    .then((n) => n && log.info(`Metric emails: ${n} sent`)).catch(jobFailed('Metric emails'));
+  setInterval(digests, 5 * 60 * 1000).unref();
+  setTimeout(digests, 40_000).unref();
+}
+// Deposits: submitted deposits followed to the bank; late or short ones become Needs attention items (hourly).
+if (process.env.DEPOSIT_WATCH !== 'off') {
+  const watch = () => runExclusive('deposit-watch', 30 * 60 * 1000, () => depositWatchAll(db)).catch(jobFailed('Deposit watch'));
+  setInterval(watch, 60 * 60 * 1000).unref();
+  setTimeout(watch, 90_000).unref();
+}
+// Chart audit: each practice's completed visits checked once a day after 1am practice time.
+if (process.env.CHART_AUDIT !== 'off') {
+  const audit = () => runExclusive('chart-audit', 60 * 60 * 1000, () => runChartAudits(db, { comparer: createNoteComparer({ config: { ...config, aiFetch: loggedFetch(db) } }) }))
+    .then((r) => r?.length && log.info(`Chart audit: ${r.length} practice(s) checked`)).catch(jobFailed('Chart audit'));
+  setInterval(audit, 60 * 60 * 1000).unref();
+  setTimeout(audit, 180_000).unref();
+}
+// Long exam recordings: transcription retries, stuck uploads and the retention clean-up.
+{
+  const examTranscriber = createExamTranscriber({ config, fetchImpl: loggedFetch(db), transcriber: createTranscriber({ config, fetchImpl: loggedFetch(db) }) });
+  const recordings = () => runExclusive('long-recordings', 9 * 60 * 1000, () => runRecordingJobs(db, { storage: app.locals.storage, examTranscriber, config }))
+    .catch(jobFailed('Long recordings'));
+  setInterval(recordings, 10 * 60 * 1000).unref();
+  setTimeout(recordings, 200_000).unref();
 }
 // Nightly backups of every practice to BACKUP_DIR (checked hourly; a day's file is only written once).
 // Documents are included when they live on this server's disk, unless BACKUP_DOCUMENTS says otherwise.

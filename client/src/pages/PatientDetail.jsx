@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import RecallStatus from '../components/RecallStatus.jsx';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useApi, useLookup } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
@@ -225,6 +226,7 @@ function Overview({ p, reload }) {
               <span>Due {fmtDate(r.due_date)} <Badge value={r.status} /></span>
             </div>
           ))}
+          <RecallStatus patientId={p.id} />
         </div>
         <div className="card">
           <h2>Primary insurance</h2>

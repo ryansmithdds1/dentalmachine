@@ -7,6 +7,7 @@ import { Badge } from '../ui.jsx';
 import { nextKind, NEXT_LABEL, READY_LABEL, STEP_KEYS, postsCharges } from './flow.js';
 import BrokenPicker, { brokenLabel } from './BrokenPicker.jsx';
 import './workflow.css';
+import OpportunityPanel from '../opportunities/OpportunityPanel.jsx';
 
 // Side panel for one appointment: keeps the calendar visible while the front desk works.
 const CONFIRM = [['phone', 'By phone'], ['text', 'By text'], ['email', 'By email'], ['in_person', 'In person']];
@@ -15,7 +16,7 @@ export const CONFIRMED_VIA = { phone: 'by phone', text: 'by text', email: 'by em
 // Minutes between two practice-local 'YYYY-MM-DD HH:MM' times.
 const mins = (a, b) => (a && b ? Math.round((Date.parse(`${b.replace(' ', 'T')}Z`) - Date.parse(`${a.replace(' ', 'T')}Z`)) / 60000) : null);
 
-export default function AppointmentDrawer({ appt: a, can, onClose, onStatus, onStep, focusComplete = 0, brokenAsk = null, onBroken, onEdit, onChart, onMove, onPin, onToggleAsap, onReminder, onCheckout }) {
+export default function AppointmentDrawer({ appt: a, can, onClose, onStatus, onStep, focusComplete = 0, brokenAsk = null, onBroken, onEdit, onChart, onMove, onPin, onToggleAsap, onReminder, onCheckout, focusOpportunities = 0, onOpportunitiesChanged }) {
   useEffect(() => {
     const onKey = (e) => e.key === 'Escape' && onClose();
     window.addEventListener('keydown', onKey);
@@ -130,6 +131,7 @@ export default function AppointmentDrawer({ appt: a, can, onClose, onStatus, onS
           )}
           {a.notes && (<><dt>Notes</dt><dd style={{ whiteSpace: 'pre-wrap' }}>{a.notes}</dd></>)}
         </dl>
+        {can('clinical:read') && <OpportunityPanel appointmentId={a.id} canAdd={can('clinical:write') && !['cancelled', 'no_show'].includes(a.status)} autoFocus={focusOpportunities} onChanged={onOpportunitiesChanged} />}
         <div className="drawer-actions">
           <button onClick={onChart}>Open chart</button>
           {w && active && <button onClick={onMove}>Move…</button>}

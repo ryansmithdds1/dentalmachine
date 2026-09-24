@@ -149,6 +149,239 @@ const R = [];
 const def = (d) => R.push({ params: [], range: 'mtd', phi: false, ...d });
 
 // ---- Production ----
+
+// Production & income (PR1): the one-screen report. Built from the same ledger sums as the reports below, so its
+// numbers match them exactly: gross = charges (production-by-provider / by-day), adjustments split into PPO
+// (insurance) write-offs and everything else (the adjustments-by-type split: an 'Insurance write-off' or an
+// adjustment on a claim), net = gross + adjustments, collections = patient + insurance payments (refunds shown
+// apart, as on the month-end summary), collection % = collections ÷ net. Voided entries and their reversals net to
+// zero. Per provider: production by the charge's provider, payments and credit adjustments by the work they paid
+// for (allocation.js, as collections-by-provider and gross-vs-net do); whatever can't be tied to a provider's work
+// in the dates (unapplied credit, debit adjustments, corrections of other periods) is its own row, so the provider
+// rows always add up to the office total. Run over today, it also projects the month: production so far this
+// month + the fees of work still planned on this month's visits from today on (not money yet), beside the goal.
+const IS_PPO = "(COALESCE(l.adjustment_type, '') = 'Insurance write-off' OR l.claim_id IS NOT NULL)";
+export const PI_METRICS = ['gross', 'ppo_writeoffs', 'other_adjustments', 'adjustments', 'net', 'patient', 'insurance', 'collections', 'refunds', 'scheduled', 'month_to_date'];
+const NO_PROVIDER = 'none';
+
+async function hasTable(db, name) {
+  const row = db.dialect === 'postgres'
+    ? await db.get('SELECT table_name AS name FROM information_schema.tables WHERE table_name = ?', name)
+    : await db.get("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?", name);
+  return !!row;
+}
+
+// The month's production goal: the goal set for the office (or the practice) on the KPI goals screen
+// (metric_goals, gross production per month), else the practice's daily goal × the office's open days that month.
+// Someone limited to some offices only sees an office's own goal. None set: null (the screen leaves it blank).
+async function monthlyProductionGoal(ctx, month) {
+  const scope = ctx.locationId ? `location:${ctx.locationId}` : ctx.officeIds ? null : 'practice';
+  if (!scope) return null;
+  if (await hasTable(ctx.db, 'metric_goals')) {
+    const row = await ctx.db.get("SELECT value FROM metric_goals WHERE practice_id = ? AND metric = 'production_gross' AND scope_key = ?", ctx.pid, scope);
+    if (row && num(row.value) > 0) return { amount: num(row.value), source: ctx.locationId ? 'Office monthly goal' : 'Practice monthly goal' };
+  }
+  if (scope !== 'practice') return null;
+  const p = await ctx.db.get('SELECT daily_goal, office_hours FROM practices WHERE id = ?', ctx.pid);
+  if (!(num(p?.daily_goal) > 0)) return null;
+  const hours = officeHours(p);
+  let open = 0;
+  for (let d = `${month}-01`; d <= monthEnd(month); d = addDays(d, 1)) if ((hours[weekday(d)] || []).length) open++;
+  return { amount: num(p.daily_goal) * open, source: `Daily goal × ${open} open days` };
+}
+
+// Credit entries' kinds (PPO write-off or other adjustment), for allocations.
+async function ppoCredits(ctx, ids) {
+  const out = new Set();
+  const list = [...new Set(ids)];
+  for (let i = 0; i < list.length; i += 500) {
+    const chunk = list.slice(i, i + 500);
+    const rows = await ctx.db.all(`SELECT l.id FROM ledger_entries l WHERE l.practice_id = ? AND l.id IN (${chunk.map(() => '?').join(',')}) AND l.type = 'adjustment' AND ${IS_PPO}`, ctx.pid, ...chunk);
+    for (const r of rows) out.add(r.id);
+  }
+  return out;
+}
+
+// Planned (not yet done) procedure fees on visits from `from` to `to` that aren't cancelled or missed.
+function plannedSql(ctx, from, to, joins = '') {
+  const w = ctx.office('a.location_id', { nullable: true });
+  return {
+    sql: `FROM procedures pr JOIN appointments a ON a.id = pr.appointment_id${joins}
+      WHERE pr.practice_id = ? AND pr.status = 'planned' AND a.status NOT IN ('cancelled','no_show') AND a.start_time >= ? AND a.start_time < ?${w.sql}`,
+    args: [ctx.pid, `${from} 00:00`, `${to} 24:00`, ...w.args],
+  };
+}
+
+export async function productionIncome(ctx) {
+  const w = ctx.office('l.location_id');
+  const dayRows = await ctx.db.all(
+    `SELECT l.entry_date AS day,
+       SUM(CASE WHEN l.type = 'charge' THEN l.amount ELSE 0 END) AS gross,
+       SUM(CASE WHEN l.type = 'adjustment' THEN l.amount ELSE 0 END) AS adjustments,
+       SUM(CASE WHEN l.type = 'adjustment' AND ${IS_PPO} THEN l.amount ELSE 0 END) AS ppo_writeoffs,
+       -SUM(CASE WHEN l.type = 'payment' THEN l.amount ELSE 0 END) AS patient,
+       -SUM(CASE WHEN l.type = 'insurance_payment' THEN l.amount ELSE 0 END) AS insurance,
+       SUM(CASE WHEN l.type = 'refund' THEN l.amount ELSE 0 END) AS refunds
+     FROM ledger_entries l WHERE l.practice_id = ? AND l.entry_date BETWEEN ? AND ?${w.sql}
+     GROUP BY l.entry_date ORDER BY l.entry_date`, ctx.pid, ctx.from, ctx.to, ...w.args,
+  );
+  const blank = () => ({ gross: 0, ppo_writeoffs: 0, other_adjustments: 0, adjustments: 0, net: 0, patient: 0, insurance: 0, collections: 0, refunds: 0 });
+  const finish = (r) => Object.assign(r, { other_adjustments: r.adjustments - r.ppo_writeoffs, net: r.gross + r.adjustments, collections: r.patient + r.insurance, collection_pct: pct(r.patient + r.insurance, r.gross + r.adjustments) });
+  const totals = blank();
+  const running = { gross: 0, net: 0, collections: 0 };
+  const days = dayRows.map((raw) => {
+    const r = finish({ ...blank(), day: raw.day, ...Object.fromEntries(['gross', 'adjustments', 'ppo_writeoffs', 'patient', 'insurance', 'refunds'].map((k) => [k, num(raw[k])])) });
+    for (const k of ['gross', 'adjustments', 'ppo_writeoffs', 'patient', 'insurance', 'refunds']) totals[k] += r[k];
+    running.gross += r.gross;
+    running.net += r.net;
+    running.collections += r.collections;
+    return { ...r, running_gross: running.gross, running_net: running.net, running_collections: running.collections };
+  }).filter((r) => r.gross || r.adjustments || r.collections || r.refunds);
+  finish(totals);
+
+  // Providers.
+  const names = await providerNames(ctx);
+  const byProvider = new Map();
+  const row = (id) => {
+    const key = id ?? NO_PROVIDER;
+    if (!byProvider.has(key)) byProvider.set(key, { provider_id: id ?? null, provider: id ? names.get(id)?.name || 'Provider' : 'Not tied to a provider', ...blank(), scheduled: 0, month_to_date: 0 });
+    return byProvider.get(key);
+  };
+  for (const c of await chargesByProvider(ctx)) row(c.provider_id).gross += num(c.production);
+  const allocations = await allocatedByProvider(ctx);
+  const ppo = await ppoCredits(ctx, allocations.filter((a) => a.credit_type === 'adjustment').map((a) => a.credit_id));
+  for (const a of allocations) {
+    const r = row(a.unapplied ? null : a.provider_id);
+    if (a.credit_type === 'payment') r.patient += a.amount;
+    else if (a.credit_type === 'insurance_payment') r.insurance += a.amount;
+    else if (a.credit_type === 'adjustment') {
+      r.adjustments -= a.amount;
+      if (ppo.has(a.credit_id)) r.ppo_writeoffs -= a.amount;
+    }
+  }
+  // Whatever the allocation couldn't place stays visible, so the rows add up to the office total.
+  const rest = row(null);
+  for (const k of ['gross', 'adjustments', 'ppo_writeoffs', 'patient', 'insurance', 'refunds']) {
+    const placed = [...byProvider.values()].reduce((s, r) => s + r[k], 0);
+    rest[k] += totals[k] - placed;
+  }
+  for (const r of byProvider.values()) finish(r);
+
+  // The month, when the dates run through today: done so far + still planned on the books, beside the goal.
+  let projection = null;
+  if (ctx.from <= ctx.today && ctx.to >= ctx.today) {
+    const month = ctx.today.slice(0, 7);
+    const first = `${month}-01`;
+    const last = monthEnd(month);
+    const mw = join(ctx.office('l.location_id'));
+    const mtd = await ctx.db.all(
+      `SELECT l.provider_id, SUM(l.amount) AS production FROM ledger_entries l
+       WHERE l.practice_id = ? AND l.type = 'charge' AND l.entry_date BETWEEN ? AND ?${mw.sql} GROUP BY l.provider_id`, ctx.pid, first, ctx.today, ...mw.args,
+    );
+    const q = plannedSql(ctx, ctx.today, last);
+    const sched = await ctx.db.all(`SELECT a.provider_id, COUNT(DISTINCT a.id) AS visits, COALESCE(SUM(pr.fee), 0) AS scheduled ${q.sql} GROUP BY a.provider_id`, ...q.args);
+    for (const m of mtd) row(m.provider_id).month_to_date += num(m.production);
+    for (const s of sched) row(s.provider_id).scheduled += num(s.scheduled);
+    const mtdTotal = mtd.reduce((s, m) => s + num(m.production), 0);
+    const scheduled = sched.reduce((s, m) => s + num(m.scheduled), 0);
+    const goal = await monthlyProductionGoal(ctx, month);
+    const projected = mtdTotal + scheduled;
+    projection = {
+      month, from: first, to: last, scheduled_from: ctx.today, month_to_date: mtdTotal, scheduled, visits: sched.reduce((s, m) => s + num(m.visits), 0), projected,
+      goal: goal?.amount ?? null, goal_source: goal?.source ?? null, goal_pct: goal ? pct(projected, goal.amount) : null, to_goal: goal ? goal.amount - projected : null,
+    };
+  }
+  for (const r of byProvider.values()) r.projected = projection ? r.month_to_date + r.scheduled : null;
+  const providers = [...byProvider.values()]
+    .filter((r) => ['gross', 'adjustments', 'patient', 'insurance', 'refunds', 'scheduled', 'month_to_date'].some((k) => r[k]))
+    .sort((a, b) => (a.provider_id == null) - (b.provider_id == null) || b.gross - a.gross || String(a.provider).localeCompare(String(b.provider)));
+  return { from: ctx.from, to: ctx.to, location_id: ctx.locationId ?? null, totals, providers, days, projection };
+}
+
+// The entries behind a number on the Production & income screen: ledger entries for an office number, the
+// allocated part of each credit for a provider's collections or adjustments, planned procedures for "scheduled".
+// Amounts carry the sign the number shows (collections positive, adjustments negative), so they add up to it.
+export async function productionIncomeEntries(ctx, { metric, providerId = null, day = null, limit = 2000 }) {
+  if (!PI_METRICS.includes(metric)) throw new HttpError(400, `metric must be one of ${PI_METRICS.join(', ')}`);
+  const from = day || ctx.from;
+  const to = day || ctx.to;
+  if (day && (!isRealDate(day) || day < ctx.from || day > ctx.to)) throw new HttpError(400, 'day must be a date within the report');
+  const none = providerId === NO_PROVIDER;
+  if (providerId != null && !none && !(await ctx.db.get('SELECT id FROM providers WHERE id = ? AND practice_id = ?', providerId, ctx.pid))) throw new HttpError(404, 'Provider not found');
+  const month = ctx.today.slice(0, 7);
+  if (metric === 'scheduled') {
+    const q = plannedSql(ctx, ctx.today, monthEnd(month), ' JOIN patients p ON p.id = a.patient_id LEFT JOIN providers pv ON pv.id = a.provider_id');
+    const pw = providerId == null ? frag() : none ? frag(' AND a.provider_id IS NULL') : frag(' AND a.provider_id = ?', [providerId]);
+    const rows = await ctx.db.all(
+      `SELECT pr.id, substr(a.start_time, 1, 10) AS entry_date, a.id AS appointment_id, a.patient_id, ${NAME} AS patient, pr.code, pr.tooth, pr.description, pv.name AS provider, pr.fee AS amount
+       ${q.sql}${pw.sql} ORDER BY a.start_time, pr.id LIMIT ${Number(limit)}`, ...q.args, ...pw.args,
+    );
+    return { metric, kind: 'planned', rows: rows.map((r) => ({ ...r, type_label: 'Planned', status: '' })), total: rows.reduce((s, r) => s + num(r.amount), 0) };
+  }
+  const types = {
+    gross: ['charge'], month_to_date: ['charge'], ppo_writeoffs: ['adjustment'], other_adjustments: ['adjustment'], adjustments: ['adjustment'], net: ['charge', 'adjustment'],
+    patient: ['payment'], insurance: ['insurance_payment'], collections: ['payment', 'insurance_payment'], refunds: ['refund'],
+  }[metric];
+  const credit = !types.includes('charge') && metric !== 'refunds';
+  const sign = ['patient', 'insurance', 'collections'].includes(metric) ? -1 : 1;
+  const [f, t] = metric === 'month_to_date' ? [`${month}-01`, ctx.today] : [from, to];
+  const kind = metric === 'ppo_writeoffs' ? ` AND ${IS_PPO}` : metric === 'other_adjustments' ? ` AND NOT ${IS_PPO}` : '';
+  const select = `SELECT l.id, l.entry_date, l.patient_id, ${NAME} AS patient, l.type, l.description, l.adjustment_type, l.voided_at, l.reverses_id, pr.code, pr.tooth, pv.name AS provider, l.amount
+    FROM ledger_entries l JOIN patients p ON p.id = l.patient_id LEFT JOIN procedures pr ON pr.id = l.procedure_id LEFT JOIN providers pv ON pv.id = l.provider_id`;
+  const shape = (r, amount) => ({ ...r, type_label: r.adjustment_type || TYPE_LABEL[r.type], status: entryStatus(r), amount });
+  // An office number (or a provider's production): the ledger entries themselves.
+  if (providerId == null || !credit) {
+    const w = join(ctx.office('l.location_id'), providerId == null ? frag() : none ? frag(' AND l.provider_id IS NULL') : frag(' AND l.provider_id = ?', [providerId]));
+    const rows = await ctx.db.all(
+      `${select} WHERE l.practice_id = ? AND l.type IN (${types.map(() => '?').join(',')}) AND l.entry_date BETWEEN ? AND ?${kind}${w.sql} ORDER BY l.entry_date, l.id LIMIT ${Number(limit)}`,
+      ctx.pid, ...types, f, t, ...w.args,
+    );
+    const out = rows.map((r) => shape(r, sign * num(r.amount)));
+    return { metric, kind: 'ledger', rows: out, total: out.reduce((s, r) => s + r.amount, 0) };
+  }
+  // A provider's collections or adjustments: the part of each credit applied to their work (unapplied: no provider).
+  const sub = { ...ctx, from, to };
+  const want = { patient: ['payment'], insurance: ['insurance_payment'], collections: ['payment', 'insurance_payment'] }[metric] || ['adjustment'];
+  let allocs = (await allocatedByProvider(sub)).filter((a) => want.includes(a.credit_type) && (none ? a.unapplied || a.provider_id == null : a.provider_id === providerId && !a.unapplied));
+  if (metric === 'ppo_writeoffs' || metric === 'other_adjustments') {
+    const ppo = await ppoCredits(ctx, allocs.map((a) => a.credit_id));
+    allocs = allocs.filter((a) => ppo.has(a.credit_id) === (metric === 'ppo_writeoffs'));
+  }
+  const entries = new Map();
+  const ids = [...new Set(allocs.map((a) => a.credit_id))];
+  for (let i = 0; i < ids.length; i += 500) {
+    const chunk = ids.slice(i, i + 500);
+    for (const r of await ctx.db.all(`${select} WHERE l.practice_id = ? AND l.id IN (${chunk.map(() => '?').join(',')})`, ctx.pid, ...chunk)) entries.set(r.id, r);
+  }
+  const bySign = sign === -1 ? 1 : -1;
+  const out = allocs.filter((a) => entries.has(a.credit_id)).map((a) => shape({ ...entries.get(a.credit_id), applied: true, entry_amount: num(entries.get(a.credit_id).amount) }, bySign * a.amount))
+    .sort((a, b) => (a.entry_date < b.entry_date ? -1 : a.entry_date > b.entry_date ? 1 : a.id - b.id)).slice(0, limit);
+  return {
+    metric, kind: 'allocated', rows: out, total: out.reduce((s, r) => s + r.amount, 0),
+    note: none ? 'Credit not applied to any provider’s work. Debit adjustments and corrections from other dates also land on this row.' : 'The part of each payment or credit applied to this provider’s work.',
+  };
+}
+
+def({
+  id: 'production-income', name: 'Production & income', category: 'Production',
+  description: 'Gross production, write-offs, net production, collections and collection % by provider — and, run mid-month, the projected month against the goal.',
+  params: ['range', 'office'],
+  columns: [
+    col('provider', 'Provider'), money('gross', 'Gross production'), money('ppo_writeoffs', 'PPO write-offs'), money('other_adjustments', 'Other adjustments'), money('net', 'Net production'),
+    money('patient', 'Patient payments'), money('insurance', 'Insurance payments'), money('collections', 'Collections'), col('collection_pct', 'Collection %', 'pct'), money('scheduled', 'Scheduled rest of month'),
+  ],
+  async run(ctx) {
+    const r = await productionIncome(ctx);
+    const p = r.projection;
+    const $$ = (c) => `$${(c / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const note = [
+      'Write-offs and payments are credited to the provider whose work they reduced or paid for; what can’t be placed is on its own row.',
+      p ? `${p.month}: ${$$(p.month_to_date)} done so far + ${$$(p.scheduled)} still scheduled = ${$$(p.projected)} projected${p.goal != null ? ` against a goal of ${$$(p.goal)} (${p.goal_pct}%)` : ''}. Scheduled work is planned fees, not money yet.` : null,
+    ].filter(Boolean).join(' ');
+    return { rows: r.providers.map((x) => ({ ...x, scheduled: p ? x.scheduled : null })), totals: { collection_pct: r.totals.collection_pct, scheduled: p ? p.scheduled : null }, note };
+  },
+});
+
 def({
   id: 'production-by-provider', name: 'Production by provider', category: 'Production',
   description: 'How much work each provider completed (ledger charges) in the dates.',

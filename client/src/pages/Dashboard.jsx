@@ -6,6 +6,8 @@ import { useAuth } from '../auth.jsx';
 import { useLiveEvents } from '../live.js';
 import { money, fmtTime, shiftDate, practiceToday } from '../format.js';
 import { Badge } from '../components/ui.jsx';
+import OpportunityDay from '../components/opportunities/OpportunityDay.jsx';
+import { getLocationId } from '../api.js';
 
 export const FLAG_INFO = {
   new_patient: ['New patient', 'info'],
@@ -84,6 +86,7 @@ export default function Dashboard() {
         </div>
       )}
 
+      {can('clinical:read') && <div style={{ marginTop: 16 }}><OpportunityDay date={date} locationId={getLocationId()} /></div>}
       <div className="card" style={{ marginTop: 16, padding: 0 }}>
         <div className="page-header" style={{ padding: '14px 16px', marginBottom: 0 }}>
           <h2 style={{ margin: 0 }}>Patients {date === today ? 'today' : 'this day'}</h2>

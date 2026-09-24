@@ -9,6 +9,9 @@ export async function rotateKeys(db, { storage, secret }) {
       ['documents', 'storage_key', 'encrypted'],
       ['documents', 'thumb_key', 'thumb_encrypted'],
       ['unfiled_images', 'storage_key', 'encrypted'],
+      ['deposit_photos', 'storage_key', 'encrypted'],
+      ['intranet_attachments', 'storage_key', 'encrypted'],
+      ['chat_attachments', 'storage_key', 'encrypted'],
     ];
     for (const [table, keyCol, flagCol] of places) {
       for (const row of await db.all(`SELECT id, ${keyCol} AS k, ${flagCol} AS enc FROM ${table} WHERE ${keyCol} IS NOT NULL ORDER BY id`)) {

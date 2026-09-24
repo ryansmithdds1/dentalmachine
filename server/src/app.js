@@ -21,6 +21,15 @@ import insuranceRoutes from './routes/insurance.js';
 import settingsRoutes from './routes/settings.js';
 import reportRoutes from './routes/reports.js';
 import reportLibraryRoutes from './routes/reportlibrary.js';
+import productionReportRoutes from './routes/productionreport.js';
+import opportunityRoutes from './routes/opportunities.js';
+import cadenceRoutes from './routes/cadence.js';
+import recallBookRoutes, { recallVoiceWebhooks } from './routes/recallbook.js';
+import chatRoutes from './routes/chat.js';
+import chartAuditRoutes from './routes/chartaudit.js';
+import longRecordingRoutes from './routes/longrecording.js';
+import metricRoutes from './routes/metrics.js';
+import digestRoutes, { digestPublicRoutes } from './routes/digests.js';
 import engagementRoutes from './routes/engagement.js';
 import publicRoutes from './routes/public.js';
 import documentRoutes from './routes/documents.js';
@@ -67,7 +76,8 @@ import collectionRoutes from './routes/collections.js';
 import depositRoutes from './routes/deposits.js';
 import closeRoutes from './routes/close.js';
 import savedReportRoutes from './routes/savedreports.js';
-import timeclockRoutes from './routes/timeclock.js';
+import timeclockRoutes, { timeclockKioskRoutes } from './routes/timeclock.js';
+import cashDepositRoutes, { cashGuardRoutes } from './routes/cashdeposits.js';
 import inventoryRoutes from './routes/inventory.js';
 import queryBuilderRoutes from './routes/querybuilder.js';
 import orthoRoutes from './routes/ortho.js';
@@ -193,6 +203,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   app.use(smsWebhook({ db, config }));
   app.use(deliveryWebhooks({ db, config }));
   app.use(voiceWebhooks({ db, config }));
+  app.use(recallVoiceWebhooks({ db, config, messenger, secret }));
   app.use(phoneWebhooks({ db, config, messenger, storage, transcriber, fetchImpl }));
   app.use(lenderWebhooks({ db }));
   app.use(reputationPublicRoutes({ db, secret, gbp, config }));
@@ -228,6 +239,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   // Which environment this is (APP_ENV: development, demo, staging, production), so screens can say so.
   app.get('/api/health', (_req, res) => res.json({ ok: true, environment: environmentName() }));
   app.use('/api/public', statusRoutes({ db, storage, messenger }));
+  app.use('/api/public', recallBookRoutes({ db, messenger, config, secret }), digestPublicRoutes({ db, secret }));
   app.use('/api/auth', authRoutes({ db, secret, config, fetchImpl, messenger }));
   app.use('/api/public', (_req, res, next) => {
     res.set('Cache-Control', 'no-store');
@@ -256,6 +268,8 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
     res.status(202).json({ ok: true, reported: !!id });
   });
 
+  // The shared time-clock tablet signs in with its own kiosk token, not a staff session.
+  app.use('/api/kiosk', timeclockKioskRoutes({ db }));
   const api = express.Router();
   api.use(authenticate(db, secret));
   // The signed-in person — or the assistant acting for them (its requests say so) — for the audit trail.
@@ -312,13 +326,23 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(reputationRoutes({ db, config, secret, gbp }));
   api.use(onboardingRoutes({ db, messenger, payments }));
   api.use(attachmentRoutes({ db, storage, sender: attachmentSender ?? createAttachmentSender(attachmentConfig(process.env, config.ediMode), fetchImpl) }));
+  // Cash voids, refunds and same-day discounts need a manager: checked before billing handles them.
+  api.use(cashGuardRoutes({ db }));
   api.use(billingRoutes({ db, payments, config, messenger }));
+  api.use(cashDepositRoutes({ db, storage }));
   api.use(insuranceRoutes({ db }));
   api.use(settingsRoutes({ db, secret, config, messenger }));
   api.use(reportRoutes({ db }));
   api.use(reportLibraryRoutes({ db }));
+  api.use(productionReportRoutes({ db }));
+  api.use(opportunityRoutes({ db }));
+  api.use(cadenceRoutes({ db, messenger, mailer, config, secret }));
+  api.use(metricRoutes({ db }));
+  api.use(digestRoutes({ db, messenger, config, secret }));
   api.use(engagementRoutes({ db, messenger, config }));
   api.use(documentRoutes({ db, storage, config }));
+  api.use(chartAuditRoutes({ db, config }));
+  api.use(longRecordingRoutes({ db, config, storage, transcriber, fetchImpl }));
   api.use(volumeRoutes({ db, storage }));
   api.use(intranetRoutes({ db, storage }));
   api.use(paymentRoutes({ db, config, messenger, payments, mailer }));
@@ -328,6 +352,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(conversationRoutes({ db, messenger }));
   api.use(ediRoutes({ db, config, clearinghouse }));
   api.use(officeRoutes({ db }));
+  api.use(chatRoutes({ db, storage, fetchImpl }));
   api.use(ppoRoutes({ db, config }));
   api.use(frontDeskRoutes({ db, messenger }));
   api.use(casePresentationRoutes({ db, messenger, config, erx, secret }));

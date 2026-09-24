@@ -1,0 +1,89 @@
+/* Opportunity finder: the badge on a card, the visit's list, the huddle summary and the settings editor.
+   Colours come from the theme variables in styles.css, so dark mode follows. */
+
+/* Badge on an appointment card: small, quiet, clickable. */
+button.opp-badge { display: inline-flex; align-items: center; gap: 3px; min-height: 0; height: 16px; padding: 0 5px; margin-left: auto; border: none; border-radius: 99px; font-size: 10.5px; font-weight: 700; line-height: 1; letter-spacing: 0; white-space: nowrap; font-variant-numeric: tabular-nums; background: color-mix(in srgb, var(--ok) 16%, var(--panel)); color: var(--ok); box-shadow: 0 0 0 1px color-mix(in srgb, var(--ok) 30%, transparent); cursor: pointer; flex: none; }
+button.opp-badge:hover { background: var(--ok); color: var(--panel); }
+button.opp-badge:focus-visible { box-shadow: var(--ring); }
+.opp-total { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; font-weight: 650; color: var(--ok); font-variant-numeric: tabular-nums; white-space: nowrap; }
+button.opp-total { border: none; background: none; box-shadow: none; padding: 0 4px; min-height: 0; }
+button.opp-total:hover { background: var(--ok-soft); }
+
+/* The visit's list. */
+.opp-panel { margin: 12px 0; padding-top: 12px; border-top: 1px solid var(--border); }
+.opp-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 6px; }
+.opp-head h3 { display: inline-flex; align-items: center; gap: 6px; margin: 0; }
+.opp-head h3 svg { color: var(--ok); }
+.opp-head-total { font-weight: 650; color: var(--ok); font-variant-numeric: tabular-nums; font-size: 13px; }
+.opp-empty { font-size: 13px; padding: 4px 0; }
+.opp-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.opp-item { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 9px 10px; background: var(--panel); outline: none; transition: border-color 0.12s, box-shadow 0.12s; }
+.opp-item:hover { border-color: var(--border-strong); }
+.opp-item:focus-visible, .opp-item.active:focus-within { border-color: var(--primary); box-shadow: var(--ring); }
+.opp-row { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.opp-what { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; min-width: 0; }
+.opp-codes { font-size: 11.5px; color: var(--faint); font-variant-numeric: tabular-nums; }
+.opp-fee { font-weight: 650; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.opp-why { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+.opp-targets { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+button.opp-target { min-height: 22px; padding: 0 7px; font-size: 11.5px; border-radius: 99px; color: var(--muted); background: var(--subtle); box-shadow: none; text-decoration: line-through; }
+button.opp-target.on { color: var(--primary-ink); background: var(--primary-soft); border-color: color-mix(in srgb, var(--primary) 35%, var(--border)); text-decoration: none; font-weight: 600; }
+.opp-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 7px; }
+.opp-cover { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 550; }
+.opp-cover.ok { color: var(--ok); }
+.opp-cover.warn { color: var(--warn); }
+.opp-cover.bad { color: var(--danger); }
+.opp-cover.muted { color: var(--muted); }
+.opp-actions { display: inline-flex; gap: 6px; margin-left: auto; }
+.opp-added, .opp-declined { margin-top: 8px; display: flex; flex-direction: column; gap: 3px; font-size: 12.5px; }
+.opp-added-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.opp-added-row > svg { color: var(--ok); }
+.opp-added-row button.link { font-size: 12px; display: inline-flex; align-items: center; gap: 3px; }
+.opp-declined > button.link { color: var(--muted); display: inline-flex; align-items: center; gap: 2px; font-size: 12.5px; }
+
+/* Huddle summary. */
+.opp-day-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.opp-day-head h3 { display: inline-flex; align-items: center; gap: 6px; margin: 0; }
+.opp-day-head h3 svg { color: var(--ok); }
+.opp-day-total { display: flex; align-items: baseline; gap: 8px; }
+.opp-day-total strong { font-size: 22px; letter-spacing: -0.02em; color: var(--ok); font-variant-numeric: tabular-nums; }
+.opp-day-rules { display: flex; flex-wrap: wrap; gap: 5px; margin: 10px 0 4px; }
+.opp-chip { display: inline-flex; gap: 4px; align-items: center; font-size: 11.5px; padding: 2px 8px; border-radius: 99px; background: var(--subtle); color: var(--text-2); border: 1px solid var(--border); }
+.opp-chip b { font-weight: 700; }
+.opp-day-list { list-style: none; margin: 8px 0 0; padding: 0; }
+.opp-day-list > li + li { border-top: 1px solid var(--border); }
+button.opp-day-visit { width: 100%; justify-content: flex-start; gap: 10px; border: none; background: none; box-shadow: none; border-radius: 6px; padding: 7px 4px; min-height: 0; text-align: left; }
+button.opp-day-visit:hover { background: var(--hover); }
+.opp-day-time { width: 64px; flex: none; color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12.5px; }
+.opp-day-pt { font-weight: 600; flex: none; }
+.opp-day-items { flex: 1; min-width: 0; color: var(--muted); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.opp-day-panel { padding: 0 4px 10px 26px; }
+.opp-day-panel .opp-panel { border-top: none; margin-top: 0; padding-top: 4px; }
+.opp-day-links { gap: 12px; font-size: 12.5px; }
+.opp-capture { font-size: 12px; margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--border); }
+
+/* Settings editor. */
+.opp-rules-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; margin-bottom: 8px; }
+.opp-rules-head h2 { display: inline-flex; align-items: center; gap: 6px; margin: 0 0 2px; }
+.opp-rules-head p { margin: 0; max-width: 70ch; font-size: 13px; }
+.opp-rule-list { list-style: none; margin: 0; padding: 0; }
+.opp-rule-list > li { border-top: 1px solid var(--border); }
+.opp-rule { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 2px; }
+.opp-rule-list.retired .opp-rule { opacity: 0.65; }
+.opp-rule-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 13px; }
+.opp-rule-conds { display: flex; flex-wrap: wrap; gap: 4px; }
+.opp-rule-note { font-size: 12px; }
+.opp-retired-toggle { margin-top: 8px; font-size: 12.5px; }
+.opp-rule-form { padding: 12px 2px 14px; display: flex; flex-direction: column; gap: 10px; }
+.opp-form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px 12px; }
+.opp-form-grid label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); font-weight: 550; }
+.opp-form-grid label.wide { grid-column: span 2; }
+.opp-conds { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 10px; margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 4px 12px; }
+.opp-conds legend { font-size: 12px; color: var(--muted); font-weight: 600; padding: 0 4px; }
+.opp-cond { display: flex; gap: 6px; align-items: flex-start; font-size: 12.5px; }
+.opp-cond input { width: auto; margin-top: 2px; }
+
+@media (max-width: 640px) {
+  .opp-form-grid label.wide { grid-column: auto; }
+  .opp-day-items { display: none; }
+}

@@ -2124,6 +2124,940 @@ CREATE TABLE IF NOT EXISTS intranet_onboarding_steps (
   done_by INTEGER REFERENCES users(id),
   UNIQUE (onboarding_id, item_id)
 );
+-- KPI goals (metrics.js, docs/metrics.md): one per metric and scope: the whole practice ('practice'), one office
+-- ('location:3') or one provider ('provider:7'). Money in cents, percentages in tenths of a percent (905 = 90.5%),
+-- counts as counts. Money and count goals are per month (scheduled production: per day). Configuration: a goal
+-- that's taken away is deleted, and every change is audited.
+CREATE TABLE IF NOT EXISTS metric_goals (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  metric TEXT NOT NULL,
+  scope_key TEXT NOT NULL DEFAULT 'practice',
+  location_id INTEGER REFERENCES locations(id),
+  provider_id INTEGER REFERENCES providers(id),
+  value INTEGER NOT NULL,
+  updated_by INTEGER REFERENCES users(id),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (practice_id, metric, scope_key)
+);
+-- Metric emails (digests.js): who gets which digest (morning huddle, end of day, weekly, monthly), written for
+-- which audience (owner, office_manager, hygienist, billing), when (practice-local HH:MM) and for which office.
+-- Only staff of the practice. Never deleted: status active / paused / unsubscribed (the email's own link).
+CREATE TABLE IF NOT EXISTS digest_subscriptions (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  digest TEXT NOT NULL CHECK (digest IN ('huddle','end_of_day','weekly','monthly')),
+  audience TEXT NOT NULL DEFAULT 'owner' CHECK (audience IN ('owner','office_manager','hygienist','billing')),
+  send_time TEXT NOT NULL DEFAULT '07:00',
+  location_id INTEGER REFERENCES locations(id),
+  provider_id INTEGER REFERENCES providers(id),
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','paused','unsubscribed')),
+  unsubscribed_at TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (practice_id, user_id, digest)
+);
+-- Each digest that went (or tried to): one row per subscription and period ('huddle:2026-09-24', 'weekly:2026-09-14'),
+-- claimed before sending, so a restart or a second server never sends the same digest twice. The email itself
+-- is in messages (with SendGrid's delivery status). Test sends use a 'test:' period key.
+CREATE TABLE IF NOT EXISTS digest_sends (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  subscription_id INTEGER NOT NULL REFERENCES digest_subscriptions(id),
+  period_key TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'sending' CHECK (status IN ('sending','sent','failed')),
+  attempts INTEGER NOT NULL DEFAULT 1,
+  message_id INTEGER REFERENCES messages(id),
+  error TEXT,
+  ai_summary INTEGER NOT NULL DEFAULT 0,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  sent_at TEXT,
+  UNIQUE (subscription_id, period_key)
+);
+-- End-of-day values of the metrics that are a count of "right now" (unscheduled treatment, recall, claims waiting),
+-- so emails and the Metrics screen can show how they're trending. Derived data written once a day per practice
+-- (scope_key 'practice') and office ('location:3') by the metric-email job; safe to rebuild.
+CREATE TABLE IF NOT EXISTS metric_snapshots (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  snapshot_date TEXT NOT NULL,
+  scope_key TEXT NOT NULL DEFAULT 'practice',
+  metric TEXT NOT NULL,
+  value INTEGER,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (practice_id, snapshot_date, scope_key, metric)
+);
+-- Team chat and tasks (routes/chat.js, chat.js). Channels are open to everyone in the practice; direct messages
+-- and small groups only to their members. Messages are never removed: a delete sets status 'deleted' and hides
+-- the text, and every edit keeps the earlier text in chat_message_edits. A message can be about a patient
+-- (patient_id): office access rules apply and reading one is recorded like any other PHI view.
+CREATE TABLE IF NOT EXISTS chat_channels (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  kind TEXT NOT NULL DEFAULT 'channel' CHECK (kind IN ('channel','dm','group')),
+  name TEXT,
+  slug TEXT,
+  topic TEXT,
+  audience TEXT,
+  location_id INTEGER REFERENCES locations(id),
+  dm_key TEXT,
+  created_by INTEGER REFERENCES users(id),
+  archived_at TEXT,
+  archived_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (practice_id, slug),
+  UNIQUE (practice_id, dm_key)
+);
+-- Who is in a conversation, and how far they've read (last_read_id) and been emailed about (emailed_through_id).
+CREATE TABLE IF NOT EXISTS chat_members (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  channel_id INTEGER NOT NULL REFERENCES chat_channels(id),
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  last_read_id INTEGER NOT NULL DEFAULT 0,
+  emailed_through_id INTEGER NOT NULL DEFAULT 0,
+  muted INTEGER NOT NULL DEFAULT 0,
+  left_at TEXT,
+  joined_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (channel_id, user_id)
+);
+-- client_key: the sending screen's own id for the message, so a resend never posts it twice.
+CREATE TABLE IF NOT EXISTS chat_messages (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  channel_id INTEGER NOT NULL REFERENCES chat_channels(id),
+  parent_id INTEGER REFERENCES chat_messages(id),
+  user_id INTEGER REFERENCES users(id),
+  source TEXT NOT NULL DEFAULT 'human',
+  kind TEXT NOT NULL DEFAULT 'text' CHECK (kind IN ('text','gif','system')),
+  body TEXT,
+  gif TEXT,
+  patient_id INTEGER REFERENCES patients(id),
+  location_id INTEGER REFERENCES locations(id),
+  urgent INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','deleted')),
+  client_key TEXT,
+  edited_at TEXT,
+  deleted_at TEXT,
+  deleted_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (practice_id, user_id, client_key)
+);
+-- The text before and after each edit (and a patient link changed with it), oldest first.
+CREATE TABLE IF NOT EXISTS chat_message_edits (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  message_id INTEGER NOT NULL REFERENCES chat_messages(id),
+  user_id INTEGER REFERENCES users(id),
+  body_before TEXT,
+  body_after TEXT,
+  patient_before INTEGER,
+  patient_after INTEGER,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- Emoji reactions. Taking a reaction back removes its row: a reaction is not a record.
+CREATE TABLE IF NOT EXISTS chat_reactions (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  message_id INTEGER NOT NULL REFERENCES chat_messages(id),
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  emoji TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (message_id, user_id, emoji)
+);
+-- Who a message called on (@name, @front-desk, @everyone), and when they saw it.
+CREATE TABLE IF NOT EXISTS chat_mentions (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  message_id INTEGER NOT NULL REFERENCES chat_messages(id),
+  channel_id INTEGER NOT NULL REFERENCES chat_channels(id),
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  via TEXT,
+  seen_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (message_id, user_id)
+);
+-- "Got it" on an urgent message: who has seen it, and when.
+CREATE TABLE IF NOT EXISTS chat_acks (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  message_id INTEGER NOT NULL REFERENCES chat_messages(id),
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  acked_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (message_id, user_id)
+);
+-- Images and files sent in chat, stored (and encrypted) like patient documents. Uploaded first, then
+-- attached to the message that sends them (message_id stays empty until then).
+CREATE TABLE IF NOT EXISTS chat_attachments (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  message_id INTEGER REFERENCES chat_messages(id),
+  uploaded_by INTEGER REFERENCES users(id),
+  filename TEXT NOT NULL,
+  mime TEXT NOT NULL,
+  size INTEGER NOT NULL,
+  storage_key TEXT NOT NULL,
+  encrypted INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- A practice's chat choices: GIF search (off unless turned on) and the unread-digest email delay (0 = none).
+CREATE TABLE IF NOT EXISTS chat_settings (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL UNIQUE REFERENCES practices(id),
+  gifs_enabled INTEGER NOT NULL DEFAULT 0,
+  digest_minutes INTEGER NOT NULL DEFAULT 240,
+  updated_by INTEGER REFERENCES users(id),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- Recurring tasks ("every Friday: order supplies"). Each due date makes one task, once: task_occurrences is
+-- unique per series and date, so a job running twice (or on two servers) can't double it. Stopped with
+-- active = 0, never deleted.
+CREATE TABLE IF NOT EXISTS task_series (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  title TEXT NOT NULL,
+  notes TEXT,
+  assigned_to INTEGER REFERENCES users(id),
+  patient_id INTEGER REFERENCES patients(id),
+  priority TEXT NOT NULL DEFAULT 'normal' CHECK (priority IN ('low','normal','high')),
+  rule TEXT NOT NULL CHECK (rule IN ('daily','weekdays','weekly','biweekly','monthly')),
+  weekday INTEGER,
+  month_day INTEGER,
+  checklist TEXT,
+  next_due TEXT NOT NULL,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_by INTEGER REFERENCES users(id),
+  ended_at TEXT,
+  ended_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS task_occurrences (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  series_id INTEGER NOT NULL REFERENCES task_series(id),
+  due_date TEXT NOT NULL,
+  task_id INTEGER REFERENCES tasks(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (series_id, due_date)
+);
+-- A task's checklist. Ticked with who and when; an item taken off keeps its row (removed_at).
+CREATE TABLE IF NOT EXISTS task_checklist_items (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  task_id INTEGER NOT NULL REFERENCES tasks(id),
+  text TEXT NOT NULL,
+  position INTEGER NOT NULL DEFAULT 0,
+  done_at TEXT,
+  done_by INTEGER REFERENCES users(id),
+  removed_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- Time clock, schedules and payroll (TC1-TC5, routes/timeclock.js, docs/workflows/specs/TC-timeclock.md). Punches are
+-- time_punches (above). The punched times never change: manager fixes are rows in time_punch_corrections (reason, who,
+-- when) and time_punches.eff_* holds the result. Approving a pay period locks it; every payroll file is recorded.
+CREATE TABLE IF NOT EXISTS timeclock_settings (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL UNIQUE REFERENCES practices(id),
+  early_in_minutes INTEGER NOT NULL DEFAULT 7,
+  late_grace_minutes INTEGER NOT NULL DEFAULT 5,
+  early_out_minutes INTEGER NOT NULL DEFAULT 5,
+  late_out_minutes INTEGER NOT NULL DEFAULT 10,
+  outside_window TEXT NOT NULL DEFAULT 'flag' CHECK (outside_window IN ('flag','block')),
+  block_unscheduled INTEGER NOT NULL DEFAULT 0,
+  pay_period TEXT NOT NULL DEFAULT 'biweekly' CHECK (pay_period IN ('weekly','biweekly','semimonthly','monthly')),
+  period_anchor TEXT,
+  week_start_day INTEGER NOT NULL DEFAULT 0,
+  ot_weekly INTEGER NOT NULL DEFAULT 1,
+  ot_weekly_minutes INTEGER NOT NULL DEFAULT 2400,
+  ot_daily INTEGER NOT NULL DEFAULT 0,
+  ot_daily_minutes INTEGER NOT NULL DEFAULT 480,
+  dt_daily INTEGER NOT NULL DEFAULT 0,
+  dt_daily_minutes INTEGER NOT NULL DEFAULT 720,
+  seventh_day INTEGER NOT NULL DEFAULT 0,
+  rounding INTEGER NOT NULL DEFAULT 0 CHECK (rounding IN (0,5,6,15)),
+  paid_break_max_minutes INTEGER NOT NULL DEFAULT 20,
+  pto_mode TEXT NOT NULL DEFAULT 'none' CHECK (pto_mode IN ('none','per_hour','fixed')),
+  pto_per_hour REAL NOT NULL DEFAULT 0,
+  pto_fixed_minutes INTEGER NOT NULL DEFAULT 0,
+  pto_cap_minutes INTEGER NOT NULL DEFAULT 0,
+  adp_company_code TEXT,
+  paychex_client_id TEXT,
+  updated_by INTEGER REFERENCES users(id),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- Per person: on the clock or not, payroll id, pay type, hourly rate (cents; only timeclock:rates sees it), tablet PIN (hashed).
+CREATE TABLE IF NOT EXISTS timeclock_staff (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  user_id INTEGER NOT NULL UNIQUE REFERENCES users(id),
+  on_clock INTEGER NOT NULL DEFAULT 1,
+  payroll_id TEXT,
+  pay_type TEXT NOT NULL DEFAULT 'hourly' CHECK (pay_type IN ('hourly','salary')),
+  overtime_exempt INTEGER NOT NULL DEFAULT 0,
+  hourly_rate_cents INTEGER,
+  pto_eligible INTEGER NOT NULL DEFAULT 1,
+  holiday_eligible INTEGER NOT NULL DEFAULT 1,
+  pin_hash TEXT,
+  pin_set_at TEXT,
+  pin_failures INTEGER NOT NULL DEFAULT 0,
+  pin_locked_until TEXT,
+  updated_by INTEGER REFERENCES users(id),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- Shared time-clock tablets: only the token hash is kept; revoked, never deleted.
+CREATE TABLE IF NOT EXISTS timeclock_kiosks (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  location_id INTEGER REFERENCES locations(id),
+  name TEXT NOT NULL,
+  token_hash TEXT NOT NULL UNIQUE,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  last_seen_at TEXT,
+  revoked_at TEXT,
+  revoked_by INTEGER REFERENCES users(id)
+);
+-- Breaks and lunches inside a punch (short rest breaks are paid, lunches are not; see timeclock_settings).
+CREATE TABLE IF NOT EXISTS time_breaks (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  punch_id INTEGER NOT NULL REFERENCES time_punches(id),
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  kind TEXT NOT NULL DEFAULT 'break' CHECK (kind IN ('break','lunch')),
+  start_at TEXT NOT NULL,
+  start_utc TEXT,
+  end_at TEXT,
+  end_utc TEXT,
+  source TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- One row per person who is clocked in right now (scratch: removed at clock-out). The unique user_id is what
+-- stops a double click or two tablets from opening two punches.
+CREATE TABLE IF NOT EXISTS time_open_punches (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  user_id INTEGER NOT NULL UNIQUE REFERENCES users(id),
+  punch_id INTEGER NOT NULL REFERENCES time_punches(id),
+  break_id INTEGER REFERENCES time_breaks(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- Manager fixes: add a missed shift, change times or the break, or remove a punch. Append-only; reason required.
+CREATE TABLE IF NOT EXISTS time_punch_corrections (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  punch_id INTEGER NOT NULL REFERENCES time_punches(id),
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  kind TEXT NOT NULL CHECK (kind IN ('add','change','void')),
+  before_in TEXT,
+  before_out TEXT,
+  before_break INTEGER,
+  new_in TEXT,
+  new_out TEXT,
+  new_break INTEGER,
+  reason TEXT NOT NULL,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- The usual week (weekday 0 = Sunday) and per-date overrides (a different shift, a day off, or cleared = back to usual).
+CREATE TABLE IF NOT EXISTS staff_shift_templates (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  weekday INTEGER NOT NULL CHECK (weekday BETWEEN 0 AND 6),
+  start_time TEXT,
+  end_time TEXT,
+  break_minutes INTEGER NOT NULL DEFAULT 0,
+  location_id INTEGER REFERENCES locations(id),
+  active INTEGER NOT NULL DEFAULT 1,
+  updated_by INTEGER REFERENCES users(id),
+  updated_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (user_id, weekday)
+);
+CREATE TABLE IF NOT EXISTS staff_shifts (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  date TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'scheduled' CHECK (status IN ('scheduled','off','cleared')),
+  start_time TEXT,
+  end_time TEXT,
+  break_minutes INTEGER NOT NULL DEFAULT 0,
+  location_id INTEGER REFERENCES locations(id),
+  note TEXT,
+  source TEXT,
+  updated_by INTEGER REFERENCES users(id),
+  updated_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (user_id, date)
+);
+-- Time off: requests (pending, approved, denied, cancelled) and the balance as a ledger (balance = SUM(minutes);
+-- accruals +, time used -, corrections by voiding). Accrual once per person per pay period; use once per request.
+CREATE TABLE IF NOT EXISTS pto_requests (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  kind TEXT NOT NULL DEFAULT 'pto' CHECK (kind IN ('pto','unpaid')),
+  start_date TEXT NOT NULL,
+  end_date TEXT NOT NULL,
+  minutes_per_day INTEGER NOT NULL,
+  total_minutes INTEGER NOT NULL,
+  note TEXT,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','denied','cancelled')),
+  decided_by INTEGER REFERENCES users(id),
+  decided_at TEXT,
+  decision_note TEXT,
+  cancelled_by INTEGER REFERENCES users(id),
+  cancelled_at TEXT,
+  cancel_reason TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS pto_ledger (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  entry_date TEXT NOT NULL,
+  minutes INTEGER NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('accrual','used','adjustment')),
+  period_start TEXT,
+  request_id INTEGER REFERENCES pto_requests(id),
+  reason TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  voided_at TEXT,
+  voided_by INTEGER REFERENCES users(id),
+  void_reason TEXT
+);
+CREATE TABLE IF NOT EXISTS timeclock_holidays (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  date TEXT NOT NULL,
+  name TEXT NOT NULL,
+  paid_minutes INTEGER NOT NULL DEFAULT 480,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (practice_id, date)
+);
+-- A manager's approval of one person's hours for one pay period: the minutes by pay type and the day detail as
+-- approved (what the payroll file is built from). Reopening sets status unlocked with a reason; one live approval each.
+CREATE TABLE IF NOT EXISTS pay_period_approvals (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  period_start TEXT NOT NULL,
+  period_end TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'approved' CHECK (status IN ('approved','unlocked')),
+  regular_minutes INTEGER NOT NULL DEFAULT 0,
+  overtime_minutes INTEGER NOT NULL DEFAULT 0,
+  doubletime_minutes INTEGER NOT NULL DEFAULT 0,
+  pto_minutes INTEGER NOT NULL DEFAULT 0,
+  holiday_minutes INTEGER NOT NULL DEFAULT 0,
+  total_minutes INTEGER NOT NULL DEFAULT 0,
+  detail TEXT,
+  detail_hash TEXT,
+  approved_by INTEGER REFERENCES users(id),
+  approved_at TEXT,
+  unlocked_by INTEGER REFERENCES users(id),
+  unlocked_at TEXT,
+  unlock_reason TEXT
+);
+-- Every payroll file downloaded: format, period, who, when, a SHA-256 of the content, and minutes per person and type.
+CREATE TABLE IF NOT EXISTS payroll_exports (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  period_start TEXT NOT NULL,
+  period_end TEXT NOT NULL,
+  format TEXT NOT NULL CHECK (format IN ('gusto','adp','paychex','quickbooks','csv')),
+  filename TEXT,
+  content_hash TEXT NOT NULL,
+  people INTEGER NOT NULL DEFAULT 0,
+  total_minutes INTEGER NOT NULL DEFAULT 0,
+  detail TEXT,
+  partial INTEGER NOT NULL DEFAULT 0,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- Daily deposits and cash handling (DC1-DC3: deposits.js, routes/cashdeposits.js, docs/cash-handling.md).
+-- A submitted cash-and-check deposit is a deposits row (so bank matching finds it) plus its locked slip here:
+-- who prepared it, who verified it (a different person), the bag number, the cash by denomination, what the ledger
+-- said, and any difference with its reason. Never edited: a manager reopens it with a reason (the deposit is voided
+-- and kept) and a new one replaces it. The idempotency key makes a repeated submit return the first deposit.
+CREATE TABLE IF NOT EXISTS deposit_slips (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  deposit_id INTEGER NOT NULL UNIQUE REFERENCES deposits(id),
+  location_id INTEGER REFERENCES locations(id),
+  business_date TEXT NOT NULL,
+  submit_key TEXT NOT NULL,
+  stage TEXT NOT NULL DEFAULT 'submitted' CHECK (stage IN ('submitted','in_bank','reconciled','reopened')),
+  cash_total INTEGER NOT NULL DEFAULT 0,
+  check_total INTEGER NOT NULL DEFAULT 0,
+  cash_count TEXT,
+  cash_source TEXT NOT NULL DEFAULT 'counted',
+  ledger_total INTEGER NOT NULL DEFAULT 0,
+  difference INTEGER NOT NULL DEFAULT 0,
+  left_out_total INTEGER NOT NULL DEFAULT 0,
+  difference_reason TEXT,
+  bag_number TEXT,
+  prepared_by INTEGER NOT NULL REFERENCES users(id),
+  submitted_at TEXT NOT NULL DEFAULT (datetime('now')),
+  verified_by INTEGER REFERENCES users(id),
+  verified_at TEXT,
+  sod_flags TEXT,
+  bank_note TEXT,
+  bank_note_by INTEGER REFERENCES users(id),
+  bank_note_at TEXT,
+  reopened_by INTEGER REFERENCES users(id),
+  reopened_at TEXT,
+  reopen_reason TEXT,
+  replaces_deposit_id INTEGER REFERENCES deposits(id),
+  UNIQUE (practice_id, submit_key)
+);
+-- What was on the slip when it was submitted (kept when a deposit is reopened and its payments are released).
+-- Amounts in cents: payments positive, cash refunds paid out of the day's cash negative.
+CREATE TABLE IF NOT EXISTS deposit_slip_items (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  deposit_id INTEGER NOT NULL REFERENCES deposits(id),
+  ledger_entry_id INTEGER NOT NULL REFERENCES ledger_entries(id),
+  kind TEXT NOT NULL CHECK (kind IN ('cash','check','cash_refund')),
+  amount INTEGER NOT NULL,
+  check_number TEXT,
+  payer TEXT,
+  patient_id INTEGER REFERENCES patients(id),
+  entry_date TEXT,
+  taken_by INTEGER REFERENCES users(id),
+  UNIQUE (deposit_id, ledger_entry_id)
+);
+-- Photos of the stamped slip (encrypted like documents). Evidence: added, never replaced or removed.
+CREATE TABLE IF NOT EXISTS deposit_photos (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  deposit_id INTEGER NOT NULL REFERENCES deposits(id),
+  storage_key TEXT NOT NULL,
+  encrypted INTEGER NOT NULL DEFAULT 0,
+  mime TEXT NOT NULL,
+  size INTEGER NOT NULL,
+  uploaded_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- Cash drawers (one per desk) and each day's session: opened with a float, closed with a blind count (the
+-- expected amount is worked out only when the count is submitted), verified by a second person with the
+-- over/short and its reason. One session open per drawer at a time.
+CREATE TABLE IF NOT EXISTS cash_drawers (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  location_id INTEGER REFERENCES locations(id),
+  name TEXT NOT NULL,
+  default_float INTEGER NOT NULL DEFAULT 0,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (practice_id, name)
+);
+CREATE TABLE IF NOT EXISTS cash_drawer_sessions (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  drawer_id INTEGER NOT NULL REFERENCES cash_drawers(id),
+  location_id INTEGER REFERENCES locations(id),
+  business_date TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','counted','closed')),
+  opening_float INTEGER NOT NULL DEFAULT 0,
+  opened_by INTEGER NOT NULL REFERENCES users(id),
+  opened_at TEXT NOT NULL DEFAULT (datetime('now')),
+  counted_by INTEGER REFERENCES users(id),
+  counted_at TEXT,
+  count_detail TEXT,
+  counted_total INTEGER,
+  expected_total INTEGER,
+  over_short INTEGER,
+  verified_by INTEGER REFERENCES users(id),
+  verified_at TEXT,
+  verify_detail TEXT,
+  verify_total INTEGER,
+  over_short_reason TEXT,
+  float_kept INTEGER,
+  to_deposit INTEGER,
+  deposit_id INTEGER REFERENCES deposits(id),
+  closed_at TEXT
+);
+-- Numbered cash receipts: every cash payment (and cash paid out) gets the next number for its office. Numbers
+-- are never reused or skipped; a voided payment's receipt stays, marked voided.
+CREATE TABLE IF NOT EXISTS cash_receipts (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  location_id INTEGER REFERENCES locations(id),
+  office_key INTEGER NOT NULL DEFAULT 0,
+  receipt_no INTEGER NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'payment' CHECK (kind IN ('payment','payout')),
+  ledger_entry_id INTEGER NOT NULL UNIQUE REFERENCES ledger_entries(id),
+  drawer_session_id INTEGER REFERENCES cash_drawer_sessions(id),
+  patient_id INTEGER REFERENCES patients(id),
+  amount INTEGER NOT NULL,
+  taken_by INTEGER REFERENCES users(id),
+  status TEXT NOT NULL DEFAULT 'issued' CHECK (status IN ('issued','voided')),
+  voided_at TEXT,
+  voided_by INTEGER REFERENCES users(id),
+  void_reason TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (practice_id, office_key, receipt_no)
+);
+-- Cash events the owner reviews (Cash integrity report): cash voids, refunds and discounts (with the manager who
+-- approved them), a float that didn't match the last close, big over/shorts. One row per event (dedupe_key).
+CREATE TABLE IF NOT EXISTS cash_flags (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  location_id INTEGER REFERENCES locations(id),
+  kind TEXT NOT NULL,
+  dedupe_key TEXT NOT NULL,
+  user_id INTEGER REFERENCES users(id),
+  approved_by INTEGER REFERENCES users(id),
+  ledger_entry_id INTEGER REFERENCES ledger_entries(id),
+  deposit_id INTEGER REFERENCES deposits(id),
+  session_id INTEGER REFERENCES cash_drawer_sessions(id),
+  patient_id INTEGER REFERENCES patients(id),
+  amount INTEGER,
+  detail TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (practice_id, dedupe_key)
+);
+-- Per practice: business days a deposit may take to reach the bank, and the drawer over/short that is flagged.
+CREATE TABLE IF NOT EXISTS cash_settings (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL UNIQUE REFERENCES practices(id),
+  late_business_days INTEGER NOT NULL DEFAULT 3,
+  over_short_alert INTEGER NOT NULL DEFAULT 500,
+  updated_by INTEGER REFERENCES users(id),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- Chart audit (CA1-CA4, chartaudit.js). The office's tuning of the checks: JSON over the defaults in chartaudit.js.
+CREATE TABLE IF NOT EXISTS chart_audit_rules (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL UNIQUE REFERENCES practices(id),
+  settings TEXT NOT NULL,
+  updated_by INTEGER REFERENCES users(id),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- Derived rows: what each completed visit's chart is missing, recomputed nightly. One live row per visit + check +
+-- subject (updated in place); when the chart is fixed the row is marked resolved (resolved_at) and kept as history.
+CREATE TABLE IF NOT EXISTS chart_audit_findings (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  location_id INTEGER REFERENCES locations(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  appointment_id INTEGER REFERENCES appointments(id),
+  visit_key TEXT NOT NULL,
+  visit_date TEXT NOT NULL,
+  provider_id INTEGER REFERENCES providers(id),
+  note_id INTEGER REFERENCES clinical_notes(id),
+  check_code TEXT NOT NULL,
+  subject TEXT NOT NULL DEFAULT '',
+  severity TEXT NOT NULL CHECK (severity IN ('high','medium','low')),
+  risk INTEGER NOT NULL DEFAULT 0,
+  title TEXT NOT NULL,
+  detail TEXT,
+  why TEXT,
+  evidence TEXT,
+  source TEXT NOT NULL DEFAULT 'rule' CHECK (source IN ('rule','ai')),
+  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','acknowledged','resolved')),
+  first_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+  last_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+  resolved_at TEXT,
+  ack_reason TEXT,
+  ack_by INTEGER REFERENCES users(id),
+  ack_at TEXT
+);
+-- Each audit pass (nightly, run now, one visit): run_key makes the nightly pass once per practice per day.
+CREATE TABLE IF NOT EXISTS chart_audit_runs (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  run_key TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running','done','failed')),
+  visits INTEGER NOT NULL DEFAULT 0,
+  opened INTEGER NOT NULL DEFAULT 0,
+  resolved INTEGER NOT NULL DEFAULT 0,
+  ai_checked INTEGER NOT NULL DEFAULT 0,
+  error TEXT,
+  created_by INTEGER REFERENCES users(id),
+  started_at TEXT NOT NULL DEFAULT (datetime('now')),
+  finished_at TEXT,
+  UNIQUE (practice_id, run_key)
+);
+-- The AI's reading of a visit's note against its charted work, kept per note version (input_hash) so an unchanged
+-- note isn't sent again. Derived; source is always the AI.
+CREATE TABLE IF NOT EXISTS chart_audit_ai_reads (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  visit_key TEXT NOT NULL,
+  input_hash TEXT NOT NULL,
+  mismatches TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (practice_id, visit_key, input_hash)
+);
+-- "Check my chart" (CA4): every check an assistant ran on a visit before the doctor sees it (history, never edited).
+CREATE TABLE IF NOT EXISTS chart_checks (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  appointment_id INTEGER REFERENCES appointments(id),
+  visit_key TEXT NOT NULL,
+  checked_by INTEGER REFERENCES users(id),
+  problems INTEGER NOT NULL DEFAULT 0,
+  items TEXT,
+  first_pass INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- A chart the assistant marked "ready for doctor": who prepared it, when, and what was left open (with reasons).
+CREATE TABLE IF NOT EXISTS chart_ready (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  appointment_id INTEGER REFERENCES appointments(id),
+  visit_key TEXT NOT NULL,
+  prepared_by INTEGER REFERENCES users(id),
+  ready_at TEXT NOT NULL DEFAULT (datetime('now')),
+  open_items INTEGER NOT NULL DEFAULT 0,
+  acknowledged TEXT,
+  first_pass_clean INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'ready' CHECK (status IN ('ready','withdrawn')),
+  withdrawn_at TEXT,
+  withdrawn_by INTEGER REFERENCES users(id)
+);
+-- Long recordings (LR1-LR3, longrecording.js): a whole exam recorded in ~30-second chunks. The browser names the
+-- session (client_id) so a retried start doesn't make two. Audio and transcript live encrypted in storage.
+CREATE TABLE IF NOT EXISTS recording_sessions (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  location_id INTEGER REFERENCES locations(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  appointment_id INTEGER REFERENCES appointments(id),
+  provider_id INTEGER REFERENCES providers(id),
+  user_id INTEGER REFERENCES users(id),
+  client_id TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'recording' CHECK (status IN ('recording','paused','uploaded','transcribing','transcribed','failed','discarded','purged')),
+  consent INTEGER NOT NULL DEFAULT 0,
+  consent_at TEXT,
+  consent_by INTEGER REFERENCES users(id),
+  mime TEXT,
+  chunk_count INTEGER,
+  duration_ms INTEGER NOT NULL DEFAULT 0,
+  pauses TEXT,
+  transcript_key TEXT,
+  transcript_encrypted INTEGER NOT NULL DEFAULT 0,
+  transcript_lines INTEGER,
+  speakers TEXT,
+  draft TEXT,
+  note_id INTEGER REFERENCES clinical_notes(id),
+  attempts INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT,
+  next_attempt_at TEXT,
+  finished_at TEXT,
+  transcribed_at TEXT,
+  purged_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (practice_id, client_id)
+);
+CREATE TABLE IF NOT EXISTS recording_chunks (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  session_id INTEGER NOT NULL REFERENCES recording_sessions(id),
+  seq INTEGER NOT NULL,
+  start_ms INTEGER NOT NULL DEFAULT 0,
+  duration_ms INTEGER NOT NULL DEFAULT 0,
+  size INTEGER NOT NULL DEFAULT 0,
+  sha256 TEXT NOT NULL,
+  mime TEXT,
+  storage_key TEXT,
+  encrypted INTEGER NOT NULL DEFAULT 0,
+  transcript_key TEXT,
+  transcript_encrypted INTEGER NOT NULL DEFAULT 0,
+  purged_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (session_id, seq)
+);
+-- Cadence engine (cadence.js, docs/workflows/specs/RC-recall.md): a sequence of steps around an anchor date (a recall's
+-- due date; later a treatment plan's diagnosis date) that texts, emails, calls (AI or a person) and mails a patient
+-- until a stop condition (a visit booked, declined, opted out) ends it. One sequence per practice, type and subtype
+-- (recall type key, or treatment urgency). Configuration: sequences are switched off, not deleted; every edit audited.
+CREATE TABLE IF NOT EXISTS cadence_sequences (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  type TEXT NOT NULL,
+  subtype TEXT NOT NULL DEFAULT '',
+  name TEXT NOT NULL,
+  active INTEGER NOT NULL DEFAULT 1,
+  family_window_days INTEGER NOT NULL DEFAULT 30,
+  created_by INTEGER REFERENCES users(id),
+  updated_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (practice_id, type, subtype)
+);
+-- A step: offset_days from the anchor (negative = before it), how (channel), what it says (template, subject), and
+-- conditions (JSON: fallback channels, who a call task goes to). repeat_days makes the step recur (the quarterly
+-- "we miss you") up to repeat_max times. A removed step is switched off (active 0): its runs still point at it.
+CREATE TABLE IF NOT EXISTS cadence_steps (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  sequence_id INTEGER NOT NULL REFERENCES cadence_sequences(id),
+  position INTEGER NOT NULL DEFAULT 0,
+  offset_days INTEGER NOT NULL,
+  channel TEXT NOT NULL CHECK (channel IN ('text','email','ai_call','task_call','letter','postcard')),
+  template TEXT,
+  subject TEXT,
+  conditions TEXT,
+  repeat_days INTEGER,
+  repeat_max INTEGER,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- A patient on a sequence for one reason (source: the recall row, later the treatment plan) and one anchor date.
+-- Unique per source and anchor, so enrolling twice (a restart, two servers) is a no-op. Never deleted: stopped
+-- (booked, declined, opted out, recall done…) or completed; booked_* say which step brought the visit in.
+CREATE TABLE IF NOT EXISTS cadence_enrollments (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  sequence_id INTEGER NOT NULL REFERENCES cadence_sequences(id),
+  source_type TEXT NOT NULL,
+  source_id INTEGER NOT NULL,
+  anchor_date TEXT NOT NULL,
+  location_id INTEGER REFERENCES locations(id),
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','stopped','completed')),
+  stop_reason TEXT,
+  stopped_at TEXT,
+  stopped_by INTEGER REFERENCES users(id),
+  current_step INTEGER,
+  last_run_at TEXT,
+  booked_appointment_id INTEGER REFERENCES appointments(id),
+  booked_step_id INTEGER REFERENCES cadence_steps(id),
+  booked_via TEXT,
+  booked_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (sequence_id, source_type, source_id, anchor_date)
+);
+-- Each step run for an enrollment (occurrence counts a repeating step's repeats). The unique key is the claim:
+-- the job inserts the row before sending, so a restart or a second job never sends a step twice. status: claimed
+-- (sending), sent, failed, skipped (not needed: late start, grouped, unreachable), task (a call for the team, until
+-- its outcome), done. Message, call, task and outside ids (Lob) link to what went out; outcome is the call result.
+CREATE TABLE IF NOT EXISTS cadence_runs (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  enrollment_id INTEGER NOT NULL REFERENCES cadence_enrollments(id),
+  step_id INTEGER NOT NULL REFERENCES cadence_steps(id),
+  occurrence INTEGER NOT NULL DEFAULT 0,
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  due_date TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'claimed' CHECK (status IN ('claimed','sent','failed','skipped','task','done')),
+  channel TEXT,
+  fallback_from TEXT,
+  source TEXT NOT NULL DEFAULT 'automation',
+  attempts INTEGER NOT NULL DEFAULT 1,
+  message_id INTEGER REFERENCES messages(id),
+  call_id INTEGER REFERENCES calls(id),
+  task_id INTEGER REFERENCES tasks(id),
+  external_id TEXT,
+  grouped_with INTEGER REFERENCES cadence_runs(id),
+  result TEXT,
+  outcome TEXT,
+  outcome_note TEXT,
+  outcome_by INTEGER REFERENCES users(id),
+  outcome_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  finished_at TEXT,
+  UNIQUE (enrollment_id, step_id, occurrence)
+);
+-- "Don't send recall to this person": deceased, moved away, asked not to be contacted. type NULL = every cadence.
+-- Never deleted: lifting a hold sets released_at (who and when), so the history stays.
+CREATE TABLE IF NOT EXISTS cadence_holds (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  type TEXT,
+  reason TEXT NOT NULL CHECK (reason IN ('deceased','moved','no_contact','other')),
+  note TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  released_at TEXT,
+  released_by INTEGER REFERENCES users(id)
+);
+-- Self-scheduling links sent in cadence messages (RC2): which enrollments (a family's) the link books, for whom,
+-- until when. The token in the message is this row's id plus an HMAC signature; only the signature's hash is kept.
+CREATE TABLE IF NOT EXISTS cadence_links (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  recipient_id INTEGER NOT NULL REFERENCES patients(id),
+  run_id INTEGER REFERENCES cadence_runs(id),
+  enrollment_ids TEXT NOT NULL,
+  sig_hash TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  opened_at TEXT,
+  booked_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- Self-scheduled bookings from a link: one per link and request key, so a double tap or a retry books once.
+CREATE TABLE IF NOT EXISTS cadence_bookings (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  link_id INTEGER NOT NULL REFERENCES cadence_links(id),
+  request_key TEXT NOT NULL,
+  appointment_ids TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (link_id, request_key)
+);
+-- Opportunity finder (OF1-OF3, opportunities.js): the office's rules for work a patient may be due for (codes as a
+-- JSON list, whole mouth / per tooth / per quadrant, ages, months since any of the codes was last done, chart
+-- conditions as a JSON list, codes it replaces on the visit). Configuration: retired with active = 0, never
+-- deleted; every change audited. starter_key marks the starter rules so seeding them twice adds nothing.
+CREATE TABLE IF NOT EXISTS opportunity_rules (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  name TEXT NOT NULL,
+  codes TEXT NOT NULL DEFAULT '[]',
+  scope TEXT NOT NULL DEFAULT 'mouth' CHECK (scope IN ('mouth','tooth','quadrant')),
+  age_min INTEGER,
+  age_max INTEGER,
+  frequency_months INTEGER,
+  conditions TEXT NOT NULL DEFAULT '[]',
+  replaces TEXT NOT NULL DEFAULT '[]',
+  note TEXT,
+  sort INTEGER NOT NULL DEFAULT 0,
+  starter_key TEXT,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (practice_id, starter_key)
+);
+-- What happened to each opportunity on a visit (one row per visit and rule): offered (shown on the visit),
+-- accepted (added to it: procedure_ids planned or attached, replaced_ids set aside) or declined (with a reason).
+-- "Done" is read from the procedures themselves. Status changes are recorded; rows are never deleted.
+CREATE TABLE IF NOT EXISTS opportunity_events (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  location_id INTEGER REFERENCES locations(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  appointment_id INTEGER NOT NULL REFERENCES appointments(id),
+  rule_id INTEGER NOT NULL REFERENCES opportunity_rules(id),
+  status TEXT NOT NULL DEFAULT 'offered' CHECK (status IN ('offered','accepted','declined')),
+  codes TEXT,
+  fee INTEGER NOT NULL DEFAULT 0,
+  patient_cost INTEGER,
+  procedure_ids TEXT,
+  attached_ids TEXT,
+  replaced_ids TEXT,
+  reason TEXT,
+  created_by INTEGER REFERENCES users(id),
+  updated_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (appointment_id, rule_id)
+);
 `;
 
 // Columns added after the first release. SQLite has no ADD COLUMN IF NOT EXISTS, so check first.
@@ -2505,6 +3439,28 @@ const COLUMNS = [
   ['tasks', 'completed_by', 'INTEGER REFERENCES users(id)'],
   ['practices', 'late_minutes', 'INTEGER NOT NULL DEFAULT 5'],
   ['practices', 'very_late_minutes', 'INTEGER NOT NULL DEFAULT 10'],
+  ['practices', 'digest_settings', 'TEXT'],
+  ['tasks', 'chat_message_id', 'INTEGER REFERENCES chat_messages(id)'],
+  ['time_punches', 'clock_in_utc', 'TEXT'],
+  ['time_punches', 'clock_out_utc', 'TEXT'],
+  ['time_punches', 'eff_in', 'TEXT'],
+  ['time_punches', 'eff_out', 'TEXT'],
+  ['time_punches', 'eff_break', 'INTEGER'],
+  ['time_punches', 'corrected', 'INTEGER NOT NULL DEFAULT 0'],
+  ['time_punches', 'source', 'TEXT'],
+  ['time_punches', 'kiosk_id', 'INTEGER REFERENCES timeclock_kiosks(id)'],
+  ['time_punches', 'in_device', 'TEXT'],
+  ['time_punches', 'in_ip', 'TEXT'],
+  ['time_punches', 'out_device', 'TEXT'],
+  ['time_punches', 'out_ip', 'TEXT'],
+  ['time_punches', 'in_flag', 'TEXT'],
+  ['time_punches', 'in_flag_minutes', 'INTEGER'],
+  ['time_punches', 'out_flag', 'TEXT'],
+  ['time_punches', 'out_flag_minutes', 'INTEGER'],
+  ['time_punches', 'shift_start', 'TEXT'],
+  ['time_punches', 'shift_end', 'TEXT'],
+  ['practices', 'recording_retention_days', 'INTEGER NOT NULL DEFAULT 90'],
+  ['practices', 'recall_cadence', 'INTEGER NOT NULL DEFAULT 0'],
 ];
 
 // CHECK constraints widened after release: [table, constraint name on Postgres, old text, new text].

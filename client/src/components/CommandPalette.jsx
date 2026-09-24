@@ -13,13 +13,13 @@ const PAGES = [
   ['Billing & claims', '/claims'], ['Statements', '/claims?tab=statements'], ['Insurance follow-up', '/claims?tab=followup'], ['Import ERA', '/claims?tab=era'],
   ['Insurance checks (EOB)', '/claims?tab=checks'], ['Eligibility', '/claims?tab=eligibility'], ['Pre-authorizations', '/claims?tab=preauths'], ['Deposits', '/claims?tab=deposits'],
   ['Practice KPIs', '/reports'], ['Day sheet', '/reports?tab=ops'], ['Month-end close', '/reports?tab=close'], ['To-do & labs', '/office'], ['Sent in online (intake review)', '/intake'], ['Supplies', '/office?tab=supplies'],
-  ['Time clock', '/office?tab=time'], ['Finance', '/finance'], ['Settings', '/settings'], ['Help', '/help'],
+  ['Time clock', '/timeclock'], ['Recall autopilot', '/recall'], ['Chart audit', '/chart-audit'], ['Metrics', '/metrics'], ['Production & income', '/reports?tab=production'], ['Clock in or out', '/timeclock'], ['Staff schedules', '/timeclock?tab=schedule'], ['Who’s in today', '/timeclock?tab=today'], ['Approve payroll hours', '/timeclock?tab=period'], ['Payroll export', '/timeclock?tab=export'], ['Time off requests', '/timeclock?tab=pto'], ['Deposits and cash', '/deposits'], ['Cash drawer', '/deposits?tab=drawers'], ['Finance', '/finance'], ['Settings', '/settings'], ['Help', '/help'],
 ];
 
 // Things to do for a patient; typing the verb first ("book jane", "note doe", "perio 555-0100") shows just that.
 const ACTIONS = [
   { verb: /^(book|schedule)\s+/i, label: 'Book for', icon: '📅', to: (p) => `/schedule?book=${p.id}` },
-  { verb: /^(text|message|msg)\s+/i, label: 'Text', icon: '💬', to: (p) => `/messages?patient=${p.id}` },
+  { verb: /^(text|message|msg)\s+(?!@)/i, label: 'Text', icon: '💬', to: (p) => `/messages?patient=${p.id}` },
   { verb: /^(pay|payment|take payment)\s+/i, label: 'Take payment from', icon: '💳', to: (p) => `/patients/${p.id}?tab=ledger&pay=1` },
   { verb: /^(note|notes)\s+/i, label: 'Write a note for', icon: '📝', to: (p) => `/patients/${p.id}?tab=notes` },
   { verb: /^(chart)\s+/i, label: 'Chart', icon: '🦷', to: (p) => `/patients/${p.id}?tab=chart` },
