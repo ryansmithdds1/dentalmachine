@@ -653,6 +653,25 @@ TE3. **Fast, safe entry:** everything goes through one engine (typing, buttons, 
      (teeth, codes, fees, estimate) → Enter/confirm to chart, Undo afterwards; validation (tooth/surface valid for the
      code, duplicates, frequency limits warned); phases/alternatives chosen as part of the bundle when relevant.
 
+## Billing that runs itself, and never goes silent (asked for)
+Builds on payments (processor adapter, currently Stripe; terminal payments), payment plans + autopay, memberships
+billing, ortho billing, statements (text-to-pay, Lob), the patient-balance cadence from A4, Needs attention.
+BL1. **Simple setup:** one "Set up payments" step from the ledger, checkout, treatment acceptance (F4) or the portal:
+     pick a payment plan (down payment, months, day of month) or a recurring charge (membership, ortho monthly, any
+     amount), save the card/bank account (tokenized at the processor — never stored by us), patient agrees on screen
+     or by text link (signed authorization kept); one clear list of every active plan and what's next.
+BL2. **Automatic and posted:** each charge runs on its date, posts to the ledger idempotently (processor charge id),
+     sends a receipt, and reconciles with the processor's payouts (daily; mismatches become exceptions).
+BL3. **Never silent (dunning):** a declined or failed charge immediately: posts nothing, creates a Needs attention item
+     for billing, texts/emails the patient a secure "update your card" link, retries on a smart schedule (e.g. day 3,
+     day 7, day 14), pauses the plan after the last try and notifies the team with next steps (call script, send
+     statement, move to collections); expiring cards are caught a month ahead with an update-card request; disputes/
+     chargebacks and refunds are tracked and posted as reversals; every step visible on the patient's account.
+BL4. **Merchant services:** processors behind one adapter (Stripe today; others dental offices commonly use can be
+     added, e.g. Rectangle Health, Global Payments/OpenEdge, Worldpay, Square, Payrix) — surcharge/convenience-fee
+     rules by state, card-present terminals, text-to-pay and online payments through the same adapter; the owner
+     picks the processor in Settings; sandbox mode for demos and tests.
+
 ## Then: remaining workflow batches
 9. Batch 4 (32–44): new patient setup, ERA/EOB posting, prescriptions, lab cases, huddle actions, recall lists,
    pre-auths, financing, adjustments, referrals, end-of-day, review requests (fix the count bug), clock in/out.
