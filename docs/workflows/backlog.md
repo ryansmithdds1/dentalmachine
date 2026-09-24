@@ -550,6 +550,22 @@ OPT3. **A clear plan to hit goal:** "3 moves get Dr. Chen to 104% of goal": rank
 OPT4. **Rules:** never double-books against patterns/blocks, respects patient preferences and insurance frequency,
       nothing is booked or texted without a person's click (AI recommends; people approve), every action audited.
 
+## Lab case check-in, by photo and voice (asked for)
+Builds on lab cases (lab Rx, lab slips, lab portal page, outstanding lab cases report), the schedule, voice
+assistant/dictation and documents.
+LB1. **Never seat a patient without the case:** every visit that needs a lab case (crown seat, bridge, denture,
+     night guard, implant crown…) is linked to its case; the schedule card shows the case status (sent, in production,
+     due back, **arrived + checked**, problem); visits within N days whose case hasn't arrived are flagged in the
+     huddle and a to-do is created to call the lab.
+LB2. **Super simple check-in:** scan the lab slip/box or pick from "due this week"; take a photo (phone/iPad/webcam) of
+     the case and slip; a short quality checklist (right patient and tooth, matches the Rx, shade, margins/contacts
+     look right, no cracks, all parts/models present) — one tap "Looks good" or note a problem; it attaches to the
+     case and the appointment, and the card turns green.
+LB3. **By voice:** "Lab case is in for Maria Lopez — crown for number 30, shade A2, looks good" → matched to the case
+     and visit (confirm on screen with the photo), checklist filled from what was said, recorded who/when.
+LB4. **Problems handled:** a failed check notifies the doctor, drafts a note to the lab (remake/adjust) and offers to
+     move the visit; late cases and remakes are tracked per lab (turnaround and remake rate report).
+
 ## Then: remaining workflow batches
 9. Batch 4 (32–44): new patient setup, ERA/EOB posting, prescriptions, lab cases, huddle actions, recall lists,
    pre-auths, financing, adjustments, referrals, end-of-day, review requests (fix the count bug), clock in/out.
