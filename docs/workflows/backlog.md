@@ -699,6 +699,24 @@ RF3. **Clear status per patient:** a small recall panel — each type: last done
 RF4. **Office-wide view:** recall list by type/status/provider/office, % current, overdue counts, reappointment, with
      one-key actions (book, text, mark contacted) and exports; feeds recall autopilot and the capacity meter.
 
+## Referral tracker that never loses a patient (asked for)
+Builds on referrals (in/out, statuses open → scheduled → seen → report_received → closed), referral contacts, referral
+letters, documents (scanning, OCR, auto-category 'referral'), tasks and Needs attention.
+RT1. **Create in one step** from the chart/treatment plan ("refer #17 extraction to Dr. Kim, oral surgery"): specialist,
+     reason, teeth/procedures (codes), urgency (routine / soon / **critical**), x-rays and notes attached, letter sent by
+     fax/email/portal link, patient told what happens next (text with the specialist's contact).
+RT2. **Follow it to the end:** statuses with dates; nudges if not scheduled/seen by the expected time; **critical**
+     referrals re-alert the team on a schedule (e.g. every 3 days) until resolved, and show on the patient bar and huddle.
+RT3. **Closing the loop:** when the specialist's report or letter arrives (scanned, faxed or emailed in), it's matched to
+     the open referral (patient + specialist, AI-assisted for scans with a person's confirm), filed on the chart, and the
+     referral is marked complete; the dentist is notified to review it.
+RT4. **Inbound referrals:** patients referred *to* us tracked with the referring doctor, thank-you letters, and reports
+     back when treatment is done.
+RT5. **What if we did it in house:** a report of everything referred out by procedure/category (extractions, implants,
+     endo, perio surgery, ortho…) with counts and the revenue it represents at the office's fees (and after PPO
+     write-offs), per month and year — "You referred out 46 molar endos last year ≈ $58,000" — to decide what to bring
+     in house (training, equipment, an associate).
+
 ## Then: remaining workflow batches
 9. Batch 4 (32–44): new patient setup, ERA/EOB posting, prescriptions, lab cases, huddle actions, recall lists,
    pre-auths, financing, adjustments, referrals, end-of-day, review requests (fix the count bug), clock in/out.
