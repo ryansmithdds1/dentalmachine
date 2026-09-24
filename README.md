@@ -63,7 +63,7 @@ Cloud practice management software for dental offices: scheduling, patient recor
 
 ### Security and HIPAA-related safeguards
 
-Before real patient data goes in, see [docs/HIPAA-vendors.md](docs/HIPAA-vendors.md): which outside services need a Business Associate Agreement, and a go-live checklist.
+Before real patient data goes in, see [docs/HIPAA-vendors.md](docs/HIPAA-vendors.md): which outside services need a Business Associate Agreement, and a go-live checklist. The security risk analysis is in [docs/security/hipaa-risk-assessment.md](docs/security/hipaa-risk-assessment.md), and the brief for an outside penetration test in [docs/security/pentest-scope.md](docs/security/pentest-scope.md).
 - **Separate data per practice.** Every query is limited to the signed-in user's practice. Tests confirm one practice can't read another's records.
 - **Role-based access.** Roles are `admin`, `dentist`, `hygienist`, `assistant`, `front_desk` and `billing`, each with its own permissions (see `server/src/auth.js`).
 - **Audit log.** Records every view of a patient record or chart, every change, every login and every failed login, with user, time and IP.
