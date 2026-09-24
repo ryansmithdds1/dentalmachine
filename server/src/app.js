@@ -13,6 +13,8 @@ import { authenticate, HttpError, rateLimit } from './auth.js';
 import authRoutes from './routes/auth.js';
 import patientRoutes from './routes/patients.js';
 import scheduleRoutes from './routes/schedule.js';
+import productionRoutes from './routes/production.js';
+import dayTemplateRoutes from './routes/daytemplates.js';
 import clinicalRoutes from './routes/clinical.js';
 import billingRoutes from './routes/billing.js';
 import insuranceRoutes from './routes/insurance.js';
@@ -278,7 +280,10 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(prefsRoutes({ db }));
   api.use(offlineRoutes({ db, secret, app: () => app }));
   api.use(patientRoutes({ db }));
+  // Before scheduleRoutes: /schedule/production?date= is answered here (?from= requests pass through to schedule.js).
+  api.use(productionRoutes({ db }));
   api.use(scheduleRoutes({ db }));
+  api.use(dayTemplateRoutes({ db }));
   api.use(clinicalRoutes({ db }));
   api.use(chartingRoutes({ db, config, transcriber }));
   api.use(referralRoutes({ db }));

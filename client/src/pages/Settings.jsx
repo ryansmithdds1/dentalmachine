@@ -20,6 +20,7 @@ import { MembershipPlans } from '../components/Memberships.jsx';
 import MfaSetup from '../components/MfaSetup.jsx';
 import SensorTest from '../components/imaging/SensorTest.jsx';
 import BridgeSetup from '../components/imaging/BridgeSetup.jsx';
+import DayTemplates from '../components/settings/DayTemplates.jsx';
 
 const ROLES = ['admin', 'dentist', 'hygienist', 'assistant', 'front_desk', 'billing'];
 const CATEGORIES = ['diagnostic', 'preventive', 'restorative', 'endodontics', 'periodontics', 'prosthodontics', 'oral_surgery', 'orthodontics', 'implants', 'adjunctive'];
@@ -90,7 +91,7 @@ export default function Settings() {
   const admin = user.role === 'admin';
   const groups = [
     ['You', [['account', 'My account', true]]],
-    ['Practice', [['practice', 'Practice & security', admin], ['users', 'Users & roles', admin], ['locations', 'Offices', admin], ['providers', 'Providers', true], ['operatories', 'Operatories', true], ['types', 'Appointment types', true], ['import', 'Import from another system', admin]]],
+    ['Practice', [['practice', 'Practice & security', admin], ['users', 'Users & roles', admin], ['locations', 'Offices', admin], ['providers', 'Providers', true], ['operatories', 'Operatories', true], ['types', 'Appointment types', true], ['daytemplates', 'Perfect day & late patients', can('schedule:read')], ['import', 'Import from another system', admin]]],
     ['Clinical', [['templates', 'Note templates', can('clinical:write')], ['forms', 'Forms & consents', can('patients:read')], ['labs', 'Labs', can('clinical:read')], ['education', 'Patient education', can('patients:read')], ['referrals', 'Referral contacts', can('patients:read')]]],
     ['Billing', [['codes', 'Fee schedule', true], ['ppo', 'Fee schedules', can('billing:read')], ['carriers', 'Insurance carriers', can('billing:read')], ['memberships', 'Membership plans', can('billing:read')]]],
     ['Patients', [['messaging', 'Messages & reviews', admin], ['phone', 'Phone line', admin], ['checkin', 'Mobile check-in', admin], ['booking', 'Online booking links', admin], ['custom', 'Custom patient fields', admin], ['duplicates', 'Duplicate charts', admin]]],
@@ -160,6 +161,7 @@ export default function Settings() {
       {tab === 'developer' && admin && <Developer />}
       {tab === 'duplicates' && <DuplicateCharts />}
       {tab === 'imaging' && <ImagingBridges />}
+      {tab === 'daytemplates' && <DayTemplates />}
       {tab === 'assistant' && <AssistantLog />}
       {tab === 'integrations' && <Integrations />}
       {tab === 'audit' && <AuditLog />}

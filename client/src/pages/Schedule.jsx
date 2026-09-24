@@ -19,6 +19,9 @@ import CalendarGrid, { toMin, STATUS_COLORS } from '../components/calendar/Calen
 import { planStep, nextKind, postsCharges, STEP_KEYS, READY_SHORT } from '../components/calendar/flow.js';
 import { brokenLabel } from '../components/calendar/BrokenPicker.jsx';
 import OverrideBanner from '../components/calendar/OverrideBanner.jsx';
+import { useProduction, ProductionBar, summarize, KINDS, KIND_LABEL } from '../components/calendar/ProductionBar.jsx';
+import LateBanner, { useLateChime } from '../components/calendar/LateBanner.jsx';
+import { lateList, runningBehind, lateSettings } from '../components/calendar/late.js';
 
 // "Fit" sizes the grid so the whole office day fits the screen without scrolling; S/M/L are fixed sizes.
 const ZOOMS = [{ label: 'Fit', px: 0 }, { label: 'S', px: 1 }, { label: 'M', px: 1.5 }, { label: 'L', px: 2.2 }];
@@ -71,6 +74,10 @@ export default function Schedule() {
   const [zoom, setZoomState] = useState(() => Number(pref('zoom', 0)));
   // Showing one provider is remembered per person (on the server), so a hygienist's screen opens on their own day.
   const [providerPref, rememberProvider] = useRemembered('schedule.provider', '');
+  // Production for the doctors, hygiene or everyone (S5): remembered per person too ($ cycles it).
+  const [kindPref, rememberKind] = useRemembered('schedule.production_kind', 'all');
+  const prodKind = KINDS.includes(kindPref) ? kindPref : 'all';
+  const cycleKind = () => rememberKind(KINDS[(KINDS.indexOf(prodKind) + 1) % KINDS.length]);
   const setMode = (m) => { setModeState(m); savePref('mode', m); };
   const setZoom = (z) => { setZoomState(z); savePref('zoom', z); };
   // Grid step (5/10/15 min) and how the week view splits each day.
@@ -195,6 +202,17 @@ export default function Schedule() {
     const t = setInterval(() => setNowMin(nowMinutes(tz)), 30_000);
     return () => clearInterval(t);
   }, [tz]);
+  const nowStamp = `${today} ${hhmm(nowMin)}`;
+
+  // ---- Production (S5) and the day's blocks (S2): fetched for the same days, refreshed whenever the schedule's
+  // own data changes (booked, moved, completed, cancelled — here or live from another screen). ----
+  const prodData = useProduction({ date: from, days: view === 'week' ? 7 : 1, kind: prodKind, office, version: data, enabled: !!data });
+
+  // ---- Late patients and running behind (S7): the practice's thresholds; recalculated as the clock moves. ----
+  const [lateRaw, setLateRaw] = useState(null);
+  useEffect(() => { api.get('/schedule/late-settings').then(setLateRaw).catch(() => {}); }, []);
+  const lateCfg = useMemo(() => lateSettings(lateRaw || practice), [lateRaw, practice]);
+  const [lateSound, rememberLateSound] = useRemembered('schedule.late_sound', false);
 
   // ---- UI state ----
   const [selectedId, setSelectedId] = useState(null);
@@ -490,6 +508,7 @@ export default function Schedule() {
     { combo: 'p', handler: () => showBy('provider'), label: 'Providers view (one column per provider)', section: 'Schedule views' },
     { combo: 'v', handler: cycleProvider, label: 'Show one provider (press again for the next, then all)', section: 'Schedule views' },
     { combo: 'shift+v', handler: () => { setProviderFilter(''); toast('Showing all providers'); }, label: 'Show all providers', section: 'Schedule views' },
+    { combo: '$', handler: cycleKind, label: 'Production for All → Doctor → Hygiene', section: 'Schedule views', enabled: !!prodData?.money },
     { combo: 'f', handler: focusNow, label: 'Jump to the visit happening now (then ↑ ↓ ← → between visits)', section: 'Patient flow' },
     { combo: STEP_KEYS.in, handler: stepKey('in'), label: 'Check in the selected visit', section: 'Patient flow', enabled: w },
     { combo: STEP_KEYS.seat, handler: stepKey('seat'), label: 'Seat', section: 'Patient flow', enabled: w },
@@ -506,6 +525,7 @@ export default function Schedule() {
     { id: 'sched-all', label: 'Schedule: show all providers', hint: 'Shift+V', run: () => setProviderFilter('') },
     ...providers.map((p) => ({ id: `sched-only-${p.id}`, label: `Schedule: show only ${p.name}`, hint: 'V cycles providers', run: () => setProviderFilter(p.id) })),
     { id: 'sched-today', label: 'Schedule: today', hint: 'T', run: () => go({ date: today }) },
+    ...(prodData?.money ? KINDS.map((k) => ({ id: `sched-prod-${k}`, label: `Schedule: production for ${k === 'all' ? 'everyone' : KIND_LABEL[k].toLowerCase()}`, hint: '$', run: () => rememberKind(k) })) : []),
     { id: 'sched-unconfirmed', label: 'Schedule: unconfirmed visits', run: () => nav(`/followups?tab=unconfirmed${view === 'week' ? '&days=7' : `&date=${date}`}`) },
   ]);
 
@@ -601,6 +621,58 @@ export default function Schedule() {
     return cols;
   }, [data, view, mode, date, from, today, providers, operatories, providerFilter, weekSplit]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Each column's production (in its heading) and its perfect-day blocks (tinted lanes). Chairs show the blocks of
+  // the chair's usual provider; a hygienist's column shows no numbers while "Doctor" is picked, and vice versa.
+  const gridColumns = useMemo(() => {
+    // Today's columns: running behind (a patient waiting to be seated, or over time with the next one waiting).
+    const withBehind = (c) => (c.isToday ? { ...c, behind: runningBehind(appts.filter((a) => c.accepts(a)), nowStamp, lateCfg) } : c);
+    if (!prodData) return columns.map(withBehind);
+    const zero = { scheduled: 0, completed: 0, goal: 0, visits: 0 };
+    const fp = providerFilter ? Number(providerFilter) : null;
+    const liveVisits = (d, pid) => appts.filter((a) => a.provider_id === pid && a.start_time.startsWith(d) && !['cancelled', 'no_show'].includes(a.status)).length;
+    return columns.map((c) => {
+      const day = prodData.days.find((x) => x.date === c.date);
+      if (!day) return c;
+      let prod;
+      let laneProvider = null;
+      if (c.assign.provider_id) {
+        const pid = c.assign.provider_id;
+        const kindHere = providers.find((p) => p.id === pid)?.type === 'hygienist' ? 'hygiene' : 'doctor';
+        prod = prodKind !== 'all' && kindHere !== prodKind ? { off: true, kind: prodKind, visits: liveVisits(c.date, pid) } : day.providers[pid] || zero;
+        laneProvider = pid;
+      } else if ('operatory_id' in c.assign) {
+        const b = day.operatories[c.assign.operatory_id ?? 'none'];
+        prod = fp ? { ...(b?.providers?.[fp] || zero), goal: 0 } : { ...zero, ...b };
+        const usual = c.assign.operatory_id ? operatories.find((o) => o.id === c.assign.operatory_id)?.default_provider_id : null;
+        laneProvider = usual && (!fp || usual === fp) ? usual : null;
+      } else {
+        prod = fp ? day.providers[fp] || zero : day;
+        laneProvider = fp;
+      }
+      const lanes = laneProvider ? day.blocks.filter((b) => b.provider_id === laneProvider).map((b) => ({ ...b, open: nowStamp >= b.release_at })) : [];
+      return withBehind({ ...c, lanes, now: nowStamp, prod: prodData.money ? { ...prod, blocks: lanes } : null, prodTitle: view === 'week' && !c.assign.provider_id && !('operatory_id' in c.assign) ? dayName(c.date, { weekday: 'long', month: 'short', day: 'numeric' }) : c.label });
+    });
+  }, [columns, prodData, nowStamp, prodKind, providerFilter, providers, operatories, appts, view, lateCfg]);
+
+  // Everyone late today (on screen when the range includes today), longest first; a soft sound if this person wants it.
+  const lates = useMemo(() => (from <= today && to >= today
+    ? lateList(appts.filter((a) => a.start_time.startsWith(today) && (!providerFilter || a.provider_id === Number(providerFilter))), nowStamp, lateCfg)
+    : []), [appts, from, to, today, nowStamp, lateCfg, providerFilter]);
+  useLateChime(lates, !!lateSound, `${from}|${to}|${providerFilter}`);
+  const textLate = async (a) => {
+    try {
+      await api.post(`/patients/${a.patient_id}/messages`, {
+        channel: 'sms',
+        body: `Hi ${a.preferred_name || a.first_name}, it's ${practice?.name || 'your dental office'}. We have you at ${fmtTime(a.start_time)} today — are you on your way? Just reply to this text.`,
+      });
+      toast(`Texted ${a.first_name} ${a.last_name}: are you on your way?`);
+      return true;
+    } catch (err) {
+      toast(err.message, { error: true });
+      return false;
+    }
+  };
+
   const timeRange = useMemo(() => {
     let open = 24 * 60;
     let close = 0;
@@ -648,6 +720,10 @@ export default function Schedule() {
   const production = dayAppts.reduce((s, a) => s + (a.production || 0), 0);
   const goal = (data?.daily_goal || 0) * (view === 'week' ? Math.max(1, columns.length) : 1);
   const unconfirmed = dayAppts.filter((a) => a.status === 'scheduled').length;
+  // The production bar: this day (or week), for the provider shown if one is picked.
+  const prodSum = prodData?.money ? summarize(prodData.days.filter((d) => view === 'week' || d.date === date), providerFilter || null) : null;
+  const prodHeading = providerFilter ? providers.find((p) => String(p.id) === providerFilter)?.name || 'Provider'
+    : view === 'week' ? 'This week' : date === today ? 'Today' : dayName(date, { weekday: 'short', month: 'short', day: 'numeric' });
   const title = view === 'week'
     ? `${dayName(from, { month: 'short', day: 'numeric' })} – ${dayName(to, { month: 'short', day: 'numeric', year: 'numeric' })}`
     : dayName(date, { weekday: compact ? 'short' : 'long', month: compact ? 'short' : 'long', day: 'numeric', ...(narrow ? {} : { year: 'numeric' }) });
@@ -676,10 +752,12 @@ export default function Schedule() {
               {unconfirmed} unconfirmed
             </button>
           )}
-          <span className="stat-pill prod" title="Scheduled production">
-            {short(production)}{goal ? <span className="muted"> / {short(goal)}</span> : ''}
-            {goal > 0 && <span className="goal-bar" title="Scheduled production vs goal"><i style={{ width: `${Math.min(100, (production / goal) * 100)}%` }} /></span>}
-          </span>
+          {!prodSum && (
+            <span className="stat-pill prod" title="Scheduled production">
+              {short(production)}{goal ? <span className="muted"> / {short(goal)}</span> : ''}
+              {goal > 0 && <span className="goal-bar" title="Scheduled production vs goal"><i style={{ width: `${Math.min(100, (production / goal) * 100)}%` }} /></span>}
+            </span>
+          )}
           {live !== null && <span className={`live-dot${live ? ' on' : ''}`} title={live ? 'Live: changes from other screens appear instantly' : 'Reconnecting…'}>{live ? '' : 'Offline'}</span>}
           {loading && <span className="muted">Loading…</span>}
         </div>
@@ -741,6 +819,14 @@ export default function Schedule() {
         </div>
       </div>
 
+      {lates.length > 0 && (
+        <LateBanner list={lates} canText={can('patients:write')} canWrite={can('schedule:write')} sound={!!lateSound} onSound={rememberLateSound}
+          onText={textLate}
+          onOpen={(a) => { setSelectedId(a.id); makeActive(a); }}
+          onNoShow={(a) => { setSelectedId(a.id); makeActive(a); setBrokenAsk({ kind: 'no_show', n: Date.now() }); }}
+          onMove={(a) => { setPlacing(a); pickUp(a); }} />
+      )}
+      {prodSum && <ProductionBar title={prodHeading} sum={prodSum} unscheduled={prodData.unscheduled} kind={prodKind} onKind={rememberKind} now={nowStamp} />}
       {override && <OverrideBanner message={override.message} name={`${override.appt.first_name} ${override.appt.last_name}`} onAnswer={answerOverride} />}
       {carry && (() => {
         const col = columns[carry.col];
@@ -782,7 +868,7 @@ export default function Schedule() {
             </div>
           )}
           <CalendarGrid
-            columns={columns} appointments={appts} range={timeRange} pxPerMin={pxPerMin} nowMin={nowMin} step={step} colorBy={colorBy}
+            columns={gridColumns} appointments={appts} range={timeRange} pxPerMin={pxPerMin} nowMin={nowMin} step={step} colorBy={colorBy}
             onMove={onMove} onResize={onResize} readOnly={!can('schedule:write')}
             onSelectRange={onSelectRange} onOpen={(a) => { setSelectedId(a.id); makeActive(a); }} onFocusAppt={makeActive}
             onNext={w ? (a) => runStep(a, nextKind(a)) : undefined}
@@ -790,6 +876,7 @@ export default function Schedule() {
             placing={placing} onPlace={onPlace} selectedId={selectedId} scrollKey={`${view}|${from}|${zoom}`}
             carry={carry && columns[carry.col] ? { col: carry.col, s: carry.s, e: carry.s + carry.dur, id: carry.appt.id } : null}
             onPin={can('schedule:write') ? onPin : undefined}
+            now={nowStamp} late={lateCfg}
             onReorderColumn={view === 'day' && mode === 'operatory' ? (from, to) => moveChair(from.chairId, to.chairId) : undefined}
           />
           </>

@@ -1,0 +1,46 @@
+/* Late patients and running behind (S7). Red that reads in light and dark. */
+:root { --late: #dc2626; --late-soft: #fef2f2; --late-ink: #991b1b; }
+:root[data-theme='dark'] { --late: #f87171; --late-soft: rgba(248, 113, 113, 0.12); --late-ink: #fecaca; }
+
+/* The banner at the top of the schedule. */
+.late-banner { display: flex; align-items: flex-start; gap: 6px 14px; flex-wrap: wrap; margin: 0 0 8px; padding: 8px 12px; border-radius: var(--radius);
+  background: var(--late-soft); border: 1px solid color-mix(in srgb, var(--late) 35%, transparent); border-left: 4px solid var(--late); color: var(--late-ink); }
+.late-head { display: flex; align-items: center; gap: 8px; min-height: 30px; white-space: nowrap; }
+.late-head strong { font-size: 14px; }
+.late-banner.very .late-head svg { animation: late-ring 1.6s ease-in-out infinite; }
+.late-sound { color: inherit; border-color: transparent; background: transparent; }
+.late-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; flex: 1 1 520px; min-width: 0; }
+.late-list li { display: flex; align-items: center; gap: 6px 10px; flex-wrap: wrap; min-height: 30px; }
+.late-banner .late-who { color: inherit; font-size: 13.5px; }
+.late-min { font-weight: 750; font-variant-numeric: tabular-nums; padding: 1px 8px; border-radius: 99px; background: color-mix(in srgb, var(--late) 16%, transparent); font-size: 12.5px; }
+.late-list li.very .late-min { background: var(--late); color: #fff; }
+.late-when { font-size: 12.5px; }
+.late-actions { display: inline-flex; gap: 4px; margin-left: auto; flex-wrap: wrap; }
+.late-actions .small, .late-actions .btn.small { min-height: 28px; padding: 2px 9px; font-size: 12.5px; text-decoration: none; }
+.late-done { display: inline-flex; align-items: center; gap: 3px; font-size: 12.5px; font-weight: 600; color: var(--ok); padding: 0 6px; }
+.late-more { align-self: center; font-size: 12.5px; color: inherit; }
+
+/* A late visit on the schedule: a strong red outline and "Late 7 min"; very late pulses. */
+.cal-appt.late { outline: 2px solid var(--late); outline-offset: -1px; }
+.cal-appt.very-late { outline: 3px solid var(--late); outline-offset: -1px; animation: late-pulse 1.4s ease-in-out infinite; }
+.cal-late { flex: none; font-size: 10px; font-weight: 800; padding: 0 5px; border-radius: 4px; background: var(--late); color: #fff; margin-left: 2px; white-space: nowrap; font-variant-numeric: tabular-nums; letter-spacing: 0.01em; }
+@keyframes late-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--late) 55%, transparent); }
+  50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--late) 0%, transparent); }
+}
+@keyframes late-ring { 0%, 100% { transform: rotate(0); } 10%, 30% { transform: rotate(-12deg); } 20%, 40% { transform: rotate(12deg); } 50% { transform: rotate(0); } }
+@media (prefers-reduced-motion: reduce) {
+  .cal-appt.very-late { animation: none; outline-width: 4px; box-shadow: inset 0 0 0 999px color-mix(in srgb, var(--late) 10%, transparent); }
+  .late-banner.very .late-head svg { animation: none; }
+}
+
+/* Running behind, in a column's heading. */
+.cal-behind { display: inline-flex; align-items: center; gap: 4px; align-self: flex-start; font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 99px;
+  background: var(--late-soft); color: var(--late-ink); border: 1px solid color-mix(in srgb, var(--late) 35%, transparent); white-space: nowrap; }
+
+/* The current time: a bolder line with the time on it in every column. */
+.cal-now { height: 3px !important; margin-top: -1px; }
+.cal-now-bubble { position: absolute; left: 2px; z-index: 5; transform: translateY(-50%); pointer-events: none; background: #ef4444; color: #fff; font-size: 10px; font-weight: 750;
+  padding: 1px 6px; border-radius: 99px; font-variant-numeric: tabular-nums; box-shadow: 0 1px 4px rgba(239, 68, 68, 0.45); }
+
+@media print { .late-banner, .cal-now-bubble, .cal-behind { display: none; } }

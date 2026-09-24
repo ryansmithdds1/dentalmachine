@@ -1,0 +1,65 @@
+/* Settings → Perfect day templates (S2). */
+.day-templates .dt-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.day-templates .dt-top > div { flex: 1 1 360px; }
+.dt-h2 { display: flex; align-items: center; gap: 8px; margin: 0; }
+.dt-help { font-size: 13px; margin: 6px 0 12px; max-width: 72ch; }
+.dt-provider { margin-top: 16px; }
+.dt-provider h3 { display: flex; align-items: center; gap: 8px; font-size: 14px; margin: 0 0 8px; }
+.dt-provider h3 i { width: 10px; height: 10px; border-radius: 50%; }
+.dt-card { border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; background: var(--panel); }
+.dt-card + .dt-card { margin-top: 10px; }
+.dt-card-head { display: flex; align-items: center; gap: 8px 14px; flex-wrap: wrap; }
+.dt-card-head strong { font-size: 14.5px; }
+.dt-card-actions { margin-left: auto; display: inline-flex; gap: 6px; }
+.dt-weekdays { display: inline-flex; gap: 2px; }
+.dt-weekdays i { font-style: normal; width: 20px; height: 20px; border-radius: 6px; display: inline-grid; place-items: center; font-size: 10.5px; font-weight: 650; color: var(--faint); background: var(--subtle); }
+.dt-weekdays i.on { background: var(--primary); color: #fff; }
+.dt-goal { display: inline-flex; align-items: center; gap: 4px; font-size: 12.5px; font-weight: 650; color: var(--primary-ink); background: var(--primary-soft); padding: 2px 9px; border-radius: 99px; font-variant-numeric: tabular-nums; }
+.dt-goal.small { font-size: 11.5px; padding: 1px 7px; margin-left: auto; }
+.dt-release { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; }
+
+/* The day at a glance. */
+.dt-strip { position: relative; height: 30px; margin: 10px 0 6px; border-radius: 8px; background: var(--subtle); border: 1px solid var(--border); overflow: hidden; }
+.dt-strip-block { position: absolute; top: 3px; bottom: 3px; border-radius: 6px; background: color-mix(in srgb, var(--c) 22%, var(--panel)); border-left: 3px solid var(--c);
+  display: flex; align-items: center; padding: 0 6px; overflow: hidden; }
+.dt-strip-block em { font-style: normal; font-size: 11px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: color-mix(in srgb, var(--c) 60%, var(--text)); }
+.dt-strip-tick { position: absolute; bottom: 1px; font-style: normal; font-size: 9px; color: var(--faint); transform: translateX(-50%); pointer-events: none; }
+.dt-block-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.dt-block-list li { display: flex; align-items: baseline; gap: 10px; font-size: 13px; padding: 3px 0 3px 10px; border-left: 3px solid var(--c); flex-wrap: wrap; }
+.dt-time { min-width: 86px; font-variant-numeric: tabular-nums; color: var(--muted); font-size: 12.5px; }
+
+/* Editing. */
+.dt-editor { border: 1px solid var(--border-strong); border-radius: var(--radius); padding: 14px; margin-top: 12px; background: var(--subtle); display: flex; flex-direction: column; gap: 14px; }
+.dt-days { border: none; padding: 0; margin: 0; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.dt-days legend { font-size: 13px; font-weight: 600; float: left; margin-right: 10px; padding: 0; }
+.dt-money { display: flex; align-items: center; gap: 4px; }
+.dt-money > span { color: var(--muted); }
+.dt-money input { min-width: 70px; }
+.dt-blocks { display: flex; flex-direction: column; gap: 8px; align-items: stretch; }
+.dt-blocks > button { align-self: flex-start; }
+.dt-blocks-head { display: flex; align-items: baseline; gap: 10px; }
+.dt-blocks-head h3 { margin: 0; font-size: 14px; }
+.dt-block { border: 1px solid var(--border); border-left: 4px solid var(--c); border-radius: 10px; background: var(--panel); padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
+.dt-block-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.dt-block-row .dt-label { flex: 1 1 160px; font-weight: 600; }
+.dt-block-row input[type='time'] { width: 118px; }
+.dt-block-row .dt-money { width: 130px; }
+.dt-swatches { display: inline-flex; gap: 3px; }
+.dt-swatches button { width: 16px; height: 16px; min-height: 0; padding: 0; border-radius: 50%; border: 2px solid transparent; box-shadow: none; }
+.dt-swatches button.on { border-color: var(--panel); box-shadow: 0 0 0 2px var(--text); }
+.dt-types { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; font-size: 12px; }
+.dt-types > .muted:first-child { display: inline-flex; align-items: center; gap: 3px; }
+.chip.small { padding: 2px 9px; font-size: 12px; min-height: 24px; }
+.chip.small.active { color: #fff; }
+.dt-actions { gap: 8px; }
+.dt-retired { margin-top: 14px; font-size: 13px; }
+.dt-retired ul, .dt-overrides { list-style: none; padding: 0; margin: 8px 0 0; display: grid; gap: 4px; }
+.dt-retired li, .dt-overrides li { display: flex; align-items: center; gap: 10px; justify-content: space-between; padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 13px; }
+.dt-overrides li span { flex: 1; }
+@media (max-width: 760px) {
+  .dt-card-actions { margin-left: 0; width: 100%; }
+  .dt-block-row input[type='time'] { width: 100px; }
+}
+.dt-late { align-items: end; }
+.dt-late .dt-money input { width: 90px; flex: none; }
+.dt-sound { align-self: center; font-size: 13px; }

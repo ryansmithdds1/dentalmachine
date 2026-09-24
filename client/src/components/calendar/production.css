@@ -1,0 +1,97 @@
+/* Production on the schedule (S5) and perfect-day blocks (S2). Colors come from the theme tokens in
+   styles.css, so light and dark both work. */
+
+/* ---- The day's total, at the top ---- */
+.prod-bar { display: flex; align-items: center; gap: 10px 16px; flex-wrap: wrap; margin: 0 0 8px; padding: 8px 10px 8px 12px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); }
+.prod-figures { display: flex; align-items: center; gap: 6px 22px; flex: 1 1 520px; min-width: 0; border-radius: var(--radius-sm); outline: none; cursor: default; }
+.prod-figures:focus-visible { box-shadow: var(--ring); }
+.prod-icon { flex: none; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 10px; background: var(--primary-soft); color: var(--primary-ink); }
+.prod-title { display: flex; flex-direction: column; min-width: 0; line-height: 1.2; }
+.prod-title strong { font-size: 13.5px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px; }
+.prod-title span { font-size: 11.5px; color: var(--muted); white-space: nowrap; }
+.prod-fig { display: flex; flex-direction: column; gap: 1px; min-width: 0; font-variant-numeric: tabular-nums; }
+.prod-fig em { font-style: normal; font-size: 10.5px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.prod-fig strong { font-size: 16px; font-weight: 700; line-height: 1.15; color: var(--text); white-space: nowrap; letter-spacing: -0.01em; }
+.prod-fig.lead strong { font-size: 21px; }
+.prod-fig.done strong { color: var(--ok); }
+.prod-meter { display: flex; flex-direction: column; gap: 5px; flex: 1 1 160px; min-width: 130px; max-width: 360px; }
+.prod-meter-top { display: flex; align-items: baseline; gap: 8px; font-size: 12px; white-space: nowrap; }
+.prod-pct { font-size: 15px; font-weight: 750; color: var(--primary-ink); font-variant-numeric: tabular-nums; }
+.prod-pct.met { color: var(--ok); }
+.prod-pct.none { color: var(--faint); }
+.prod-side { display: flex; align-items: center; gap: 8px; margin-left: auto; flex-wrap: wrap; }
+.prod-todo { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 10px; border-radius: 999px; font-size: 12px; font-variant-numeric: tabular-nums;
+  background: var(--info-soft); color: var(--info); cursor: default; outline: none; white-space: nowrap; }
+.prod-todo .muted { color: inherit; opacity: 0.75; }
+.prod-todo:focus-visible { box-shadow: var(--ring); }
+.prod-kind button { min-height: 26px; font-size: 12.5px; padding: 0 10px; }
+
+/* The meter: completed (solid) over scheduled (tint), measured against the goal. */
+.prod-track { position: relative; display: block; height: 7px; border-radius: 99px; background: var(--grid-minor); overflow: hidden; }
+.prod-track.slim { height: 3px; }
+.prod-track i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 99px; transition: width 0.35s ease; }
+.prod-track .sched { background: color-mix(in srgb, var(--primary) 34%, transparent); }
+.prod-track .done { background: var(--primary); }
+.prod-track.met .sched { background: color-mix(in srgb, var(--ok) 40%, transparent); }
+.prod-track.met .done { background: var(--ok); }
+.prod-track .goal-mark { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--text); opacity: 0.35; }
+
+/* ---- A column's numbers, in its heading ---- */
+.col-prod { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0; border-radius: 6px; outline: none; cursor: default; font-variant-numeric: tabular-nums; }
+.col-prod:focus-visible { box-shadow: var(--ring); }
+.col-prod-nums { display: flex; align-items: baseline; gap: 6px; min-width: 0; font-size: 11.5px; white-space: nowrap; }
+.col-prod-nums strong { font-size: 12.5px; font-weight: 700; color: var(--text); }
+.col-prod-done { display: inline-flex; align-items: center; gap: 2px; color: var(--ok); font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+.col-prod-visits { margin-left: auto; color: var(--muted); font-size: 11px; }
+.col-prod.off { font-size: 11.5px; color: var(--faint); flex-direction: row; }
+.cal-col-info:has(.col-prod) .cal-col-people { align-self: flex-start; }
+
+/* ---- The breakdown shown on hover or focus ---- */
+.prod-pop { position: fixed; z-index: 75; width: 310px; max-width: calc(100vw - 24px); max-height: min(70vh, 560px); overflow: auto; background: var(--panel); color: var(--text);
+  border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow-lg); padding: 12px 14px; font-size: 12.5px; animation: pop-in 0.12s ease-out; }
+.prod-breakdown .pb-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.prod-breakdown .pb-head strong { font-size: 13.5px; }
+.pb-pct { font-size: 11.5px; font-weight: 650; padding: 2px 8px; border-radius: 99px; background: var(--primary-soft); color: var(--primary-ink); white-space: nowrap; }
+.pb-pct.met { background: var(--ok-soft); color: var(--ok); }
+.pb-totals { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 8px; border-radius: 10px; background: var(--subtle); font-variant-numeric: tabular-nums; }
+.pb-totals span { display: flex; flex-direction: column; font-weight: 700; font-size: 13px; }
+.pb-totals em { font-style: normal; font-weight: 600; font-size: 10px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
+.prod-breakdown section { margin-top: 10px; }
+.prod-breakdown h4 { margin: 0 0 4px; font-size: 10.5px; font-weight: 650; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
+.pb-row { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; padding: 3px 0; font-variant-numeric: tabular-nums; }
+.pb-row + .pb-row { border-top: 1px solid var(--border); }
+.pb-row.minor { font-size: 12px; color: var(--muted); border-top: none; padding: 1px 0 1px 10px; }
+.pb-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; }
+.pb-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-flex; align-items: center; gap: 4px; }
+.pb-num { font-weight: 700; }
+.pb-sub { flex-basis: 100%; font-size: 11px; color: var(--muted); padding-left: 14px; }
+.pb-sub:empty { display: none; }
+.pb-bar { flex-basis: 100%; height: 3px; border-radius: 99px; background: var(--grid-minor); overflow: hidden; }
+.pb-bar i { display: block; height: 100%; background: color-mix(in srgb, var(--primary) 55%, transparent); border-radius: 99px; }
+
+/* ---- Perfect-day blocks: tinted lanes behind the visits ---- */
+.cal-lane { position: absolute; left: 0; right: 0; z-index: 0; pointer-events: none;
+  background: color-mix(in srgb, var(--lane, var(--primary)) 8%, transparent);
+  border-left: 3px solid color-mix(in srgb, var(--lane, var(--primary)) 60%, transparent);
+  border-top: 1px solid color-mix(in srgb, var(--lane, var(--primary)) 28%, transparent); }
+.cal-lane.open { background: color-mix(in srgb, var(--lane, var(--primary)) 4%, transparent); border-left-style: dashed; }
+.cal-lane-tag { position: absolute; top: 3px; right: 4px; max-width: calc(100% - 10px); display: inline-flex; align-items: center; gap: 4px; padding: 1px 6px; border-radius: 6px;
+  font-size: 10px; font-weight: 650; line-height: 1.5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums;
+  color: color-mix(in srgb, var(--lane, var(--primary)) 65%, var(--text)); background: color-mix(in srgb, var(--panel) 82%, transparent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--lane, var(--primary)) 22%, transparent); }
+.cal-lane-tag svg { flex: none; }
+.cal-lane-tag .goal { font-weight: 550; opacity: 0.85; }
+
+@media (max-width: 1100px) {
+  .prod-figures { gap: 6px 14px; }
+  .prod-fig strong { font-size: 14.5px; }
+  .prod-fig.lead strong { font-size: 18px; }
+  .prod-icon { display: none; }
+}
+@media (max-width: 760px) {
+  .prod-bar { padding: 8px 10px; }
+  .prod-figures { flex-basis: 100%; flex-wrap: wrap; }
+  .prod-meter { flex-basis: 100%; max-width: none; }
+  .prod-side { margin-left: 0; width: 100%; justify-content: space-between; }
+}
+@media print { .prod-bar, .cal-lane { display: none; } }

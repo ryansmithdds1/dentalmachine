@@ -2503,6 +2503,8 @@ const COLUMNS = [
   ['insurance_plans', 'verified_source', 'TEXT'],
   // Who ticked a task off (workflow 28), next to completed_at; cleared again if it's reopened.
   ['tasks', 'completed_by', 'INTEGER REFERENCES users(id)'],
+  ['practices', 'late_minutes', 'INTEGER NOT NULL DEFAULT 5'],
+  ['practices', 'very_late_minutes', 'INTEGER NOT NULL DEFAULT 10'],
 ];
 
 // CHECK constraints widened after release: [table, constraint name on Postgres, old text, new text].

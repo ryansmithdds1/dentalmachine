@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Check, CheckCheck, DoorOpen, Armchair, Pill, TriangleAlert, Repeat } from 'lucide-react';
+import { Check, CheckCheck, DoorOpen, Armchair, Pill, TriangleAlert, Repeat, Lock, LockOpen, Hourglass } from 'lucide-react';
 import { eligibilityBadge } from '../../format.js';
 import PatientHoverCard from './PatientHoverCard.jsx';
+import { ColumnProduction, dollars } from './ProductionBar.jsx';
+import { lateness, waitLabel } from './late.js';
+import './late.css';
 import { nextKind, NEXT_LABEL, READY_LABEL, READY_SHORT } from './flow.js';
 import './workflow.css';
 
@@ -42,6 +45,9 @@ function layoutLanes(items) {
 /**
  * Time-grid calendar with pointer drag-to-move, resize, drag-to-create and tap-to-place.
  * columns: [{ key, label, sub, date, hours, isToday, accepts(appt) -> bool, blockouts: [] , assign: {date, provider_id?, operatory_id?} }]
+ * Optional per column: prod ({ scheduled, completed, goal, visits, … } shown in the heading with its breakdown, or
+ * { off, kind, visits } when the column isn't in the kind of production shown) and lanes (perfect-day blocks:
+ * { id, label, start_time, end_time, goal, scheduled, color, open }) drawn as tinted lanes behind the visits.
  */
 // "Color by status": one color per step of the visit, the same as the legend.
 export const STATUS_COLORS = { scheduled: '#64748b', confirmed: '#16a34a', checked_in: '#d97706', in_chair: '#7c3aed', completed: '#0f766e', no_show: '#dc2626', cancelled: '#94a3b8' };
@@ -49,6 +55,7 @@ export const STATUS_COLORS = { scheduled: '#64748b', confirmed: '#16a34a', check
 export default function CalendarGrid({
   columns, appointments, range, pxPerMin, nowMin, onMove, onResize, onSelectRange, onOpen, onOpenBlockout, onPin,
   placing, onPlace, selectedId, scrollKey, headerExtra, readOnly = false, step = 10, colorBy = 'type', onReorderColumn, onFocusAppt, onNext, carry = null,
+  now = null, late = null,
 }) {
   const [dragCol, setDragCol] = useState(null);
   const [overCol, setOverCol] = useState(null);
@@ -56,6 +63,9 @@ export default function CalendarGrid({
   const SNAP = step;
   const snap = (m) => Math.round(m / SNAP) * SNAP;
   const scroller = useRef(null);
+  // When someone last scrolled the grid by hand, and whether a scroll is the grid's own (keeping "now" in view).
+  const userScrolled = useRef(0);
+  const autoScrolling = useRef(false);
   const body = useRef(null);
   const [drag, setDrag] = useState(null); // { kind: 'move'|'resize'|'select', ... }
   const dragRef = useRef(null);
@@ -94,9 +104,30 @@ export default function CalendarGrid({
     const el = scroller.current;
     if (!el) return;
     const target = nowMin != null && nowMin > range.start && nowMin < range.end ? nowMin - 60 : range.open ?? range.start;
+    autoScrolling.current = true;
     el.scrollTop = Math.max(0, (target - range.start) * pxPerMin - 14);
+    setTimeout(() => { autoScrolling.current = false; }, 100);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scrollKey]);
+
+  // Today, keep the current time in view as the day goes on — unless someone scrolled in the last two minutes.
+  const showsToday = columns.some((c) => c.isToday);
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el || !showsToday || nowMin == null || nowMin < range.start || nowMin > range.end || drag || carry) return;
+    if (Date.now() - userScrolled.current < 120_000) return;
+    const y = (nowMin - range.start) * pxPerMin;
+    const head = el.querySelector('.cal-head')?.offsetHeight || 0;
+    if (y < el.scrollTop + 20 || y > el.scrollTop + el.clientHeight - head - 40) {
+      autoScrolling.current = true;
+      el.scrollTop = Math.max(0, y - (el.clientHeight - head) / 3);
+      setTimeout(() => { autoScrolling.current = false; }, 100);
+    }
+  }, [nowMin, showsToday]); // eslint-disable-line react-hooks/exhaustive-deps
+  const onScroll = () => {
+    if (!autoScrolling.current) userScrolled.current = Date.now();
+    if (hover) hoverOut();
+  };
 
   // Keep the selected appointment in view (e.g. a new 7am visit before opening time).
   useEffect(() => {
@@ -242,7 +273,7 @@ export default function CalendarGrid({
   return (
     <div className="cal">
       {hover && <PatientHoverCard appt={hover.appt} anchor={hover.anchor} />}
-      <div className="cal-scroll" ref={scroller} onScroll={hover ? hoverOut : undefined}>
+      <div className="cal-scroll" ref={scroller} onScroll={onScroll}>
         <div className="cal-head" style={{ gridTemplateColumns: `56px repeat(${columns.length}, minmax(var(--cal-col-min), 1fr))` }}>
           <div className="cal-corner">{headerExtra}</div>
           {columns.map((c) => (
@@ -258,8 +289,10 @@ export default function CalendarGrid({
                 {c.color && <span className="cal-col-avatar" style={{ background: c.color }}>{initialsOf(c.label)}</span>}
                 <span>{c.label}</span>
               </div>
+              {c.behind && <span className="cal-behind" title={c.behind.reason}><Hourglass size={11} strokeWidth={2.6} /> Running {c.behind.minutes} min behind</span>}
               <div className="cal-col-info">
-                {c.sub && <span className={`cal-col-sub${c.subClass ? ` ${c.subClass}` : ''}`}>{c.sub}</span>}
+                {c.prod ? <ColumnProduction title={c.prodTitle || c.label} prod={c.prod} now={c.now} />
+                  : c.sub && <span className={`cal-col-sub${c.subClass ? ` ${c.subClass}` : ''}`}>{c.sub}</span>}
                 {c.people?.length > 0 && (
                   <span className="cal-col-people">
                     {c.people.map((p) => <i key={p.name} style={{ background: p.color || '#64748b' }} title={p.name}>{initialsOf(p.name)}</i>)}
@@ -289,6 +322,24 @@ export default function CalendarGrid({
               return (
                 <div key={col.key} className={`cal-col${placing ? ' placing' : ''}`} onPointerDown={(e) => startSelect(e, ci)} onClick={(e) => tapColumn(e, ci)}>
                   {closed.map(([a, b]) => <div key={a} className="cal-closed" style={{ top: (a - range.start) * pxPerMin, height: (b - a) * pxPerMin }} />)}
+                  {(col.lanes || []).map((l) => {
+                    const s = Math.max(range.start, toMin(l.start_time));
+                    const e = Math.min(range.end, toMin(l.end_time));
+                    if (e <= s) return null;
+                    const h = (e - s) * pxPerMin;
+                    return (
+                      <div key={`lane-${l.id}`} className={`cal-lane${l.open ? ' open' : ''}`} aria-hidden="true" style={{ top: (s - range.start) * pxPerMin, height: h, ...(l.color ? { '--lane': l.color } : {}) }}
+                        title={`${l.label}${l.type_names?.length ? ` — kept for ${l.type_names.join(', ')}` : ''}${l.open ? ' (open to any visit now)' : ''}`}>
+                        {h >= 16 && (
+                          <span className="cal-lane-tag">
+                            {l.type_names?.length ? (l.open ? <LockOpen size={10} strokeWidth={2.5} /> : <Lock size={10} strokeWidth={2.5} />) : null}
+                            {l.label}
+                            {l.goal != null && l.goal > 0 && <span className="goal">{dollars(l.scheduled)} / {dollars(l.goal)}</span>}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
                   {col.blockouts.map((b) => {
                     const s = b.start_time.slice(0, 10) < col.date ? range.start : Math.max(range.start, toMin(b.start_time));
                     const e = b.end_time.slice(0, 10) > col.date ? range.end : Math.min(range.end, toMin(b.end_time));
@@ -301,7 +352,10 @@ export default function CalendarGrid({
                     );
                   })}
                   {col.isToday && nowMin != null && nowMin >= range.start && nowMin <= range.end && (
-                    <div className="cal-now" style={{ top: (nowMin - range.start) * pxPerMin }} />
+                    <>
+                      <div className="cal-now" style={{ top: (nowMin - range.start) * pxPerMin }} />
+                      <div className="cal-now-bubble" aria-hidden="true" style={{ top: (nowMin - range.start) * pxPerMin }}>{clock(nowMin)}</div>
+                    </>
                   )}
                   {sel && (
                     <div className="cal-selection" style={{ top: (sel[0] - range.start) * pxPerMin, height: Math.max(SNAP, sel[1] - sel[0]) * pxPerMin }}>
@@ -312,10 +366,12 @@ export default function CalendarGrid({
                     const dragging = (drag?.appt?.id === a.id && drag.active) || carry?.id === a.id;
                     const color = colorBy === 'provider' ? a.provider_color || '#64748b' : colorBy === 'status' ? STATUS_COLORS[a.status] || '#64748b' : a.type_color || a.provider_color || '#64748b';
                     const h = (e - s) * pxPerMin;
+                    // Late (S7): not checked in N minutes after the start; very late pulses.
+                    const lt = col.isToday && now ? lateness(a, now, late || undefined) : null;
                     return (
                       <div key={a.id}
                         data-appt-id={a.id}
-                        className={`cal-appt status-${a.status}${dragging ? ' dragging' : ''}${selectedId === a.id ? ' selected' : ''}${a._pending ? ' pending' : ''}`}
+                        className={`cal-appt status-${a.status}${dragging ? ' dragging' : ''}${selectedId === a.id ? ' selected' : ''}${a._pending ? ' pending' : ''}${lt ? (lt.level === 'very_late' ? ' late very-late' : ' late') : ''}`}
                         style={{ top: (s - range.start) * pxPerMin, height: Math.max(h - 2, 14), left: `calc(${(lane / lanes) * 100}% + 2px)`, width: `calc(${100 / lanes}% - 4px)`, '--c': color, '--p': a.provider_color || color }}
                         onPointerDown={(ev) => { hoverOut(); startMove(ev, a, ci, s, e); }}
                         onPointerEnter={(ev) => hoverIn(ev, a)} onPointerLeave={hoverOut}
@@ -331,7 +387,7 @@ export default function CalendarGrid({
                         }}
                         onFocus={(ev) => ev.target === ev.currentTarget && onFocusAppt?.(a)}
                         tabIndex={0} role="button"
-                        aria-label={`${a.first_name} ${a.last_name}, ${label12(s)} to ${label12(e)}, ${a.status.replace('_', ' ')}${a.status === 'in_chair' && a.ready_for ? `, ${READY_LABEL[a.ready_for]}` : ''}`}>
+                        aria-label={`${a.first_name} ${a.last_name}, ${label12(s)} to ${label12(e)}, ${a.status.replace('_', ' ')}${a.status === 'in_chair' && a.ready_for ? `, ${READY_LABEL[a.ready_for]}` : ''}${lt ? `, late ${lt.minutes} minutes` : ''}`}>
                         {a.pattern && a.pattern.includes('/') && (
                           // Assistant time (the provider is free then) hatched along the right edge.
                           <div className="cal-pattern" aria-hidden="true">
@@ -350,9 +406,10 @@ export default function CalendarGrid({
                           {col.isToday && nowMin != null && a.status === 'checked_in' && a.arrived_at && (
                             <span className={`cal-flow${nowMin - toMin(a.arrived_at.slice(11, 16)) >= 15 ? ' long' : ''}`} title="Waiting since arrival">⏱ {Math.max(0, nowMin - toMin(a.arrived_at.slice(11, 16)))}m</span>
                           )}
-                          {col.isToday && nowMin != null && ['scheduled', 'confirmed'].includes(a.status) && nowMin > s + 5 && nowMin < e && (
-                            <span className="cal-flow long" title="Not checked in yet">late</span>
-                          )}
+                          {lt ? <span className="cal-late" title={`Not checked in — ${waitLabel(lt.minutes)} after their time`}>Late {waitLabel(lt.minutes)}</span>
+                            : !now && col.isToday && nowMin != null && ['scheduled', 'confirmed'].includes(a.status) && nowMin > s + 5 && nowMin < e && (
+                              <span className="cal-flow long" title="Not checked in yet">late</span>
+                            )}
                         </div>
                         {h >= 28 && <div className="cal-appt-meta"><span className="cal-time">{clock(s)}–{clock(e)}</span> {a.type_name || a.reason || ''}</div>}
                         {h >= 44 && <div className="cal-appt-meta">{col.showProvider ? a.provider_name : a.operatory_name || a.provider_name}{a.production ? <b className="cal-prod"> ${Math.round(a.production / 100).toLocaleString()}</b> : ''}</div>}
