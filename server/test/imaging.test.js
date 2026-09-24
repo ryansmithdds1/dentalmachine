@@ -193,3 +193,43 @@ test('sensor capture: stopping from the chart ends it; workstations without a se
   const other = (await api.post('/patients', { first_name: 'Otto', last_name: 'Other', dob: '1970-01-01' })).data;
   assert.equal((await bridge('POST', `/images?filename=P${other.id}_x.png&patient_id=${other.id}&capture_id=${cap2.id}`, Buffer.from([0x89, 0x50, 0x4e, 0x47, 7]))).status, 422);
 });
+
+test('bridge self-check: --check finds a missing export folder; failed checks become a Needs attention item that clears itself', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dm-bridge-check-'));
+  try {
+    const cfg = join(dir, 'bridge-config.json');
+    const watched = join(dir, 'export');
+    mkdirSync(watched);
+    writeFileSync(cfg, JSON.stringify({ server: 'http://127.0.0.1:9', token: 'dmb_x', apps: [{ id: 'dexis', name: 'DEXIS', command: join(dir, 'no-such', 'DEXIS.exe') }], watch: [{ folder: watched }, { folder: join(dir, 'gone') }] }));
+    const run = (args) => new Promise((done) => {
+      let out = '';
+      const p = spawn(process.execPath, [agentPath, cfg, ...args]);
+      p.stdout.on('data', (d) => { out += d; });
+      p.on('exit', (code) => done({ code, out }));
+    });
+    const { code, out } = await run(['--check']);
+    assert.equal(code, 1);
+    assert.match(out, /FAIL DEXIS: program — Not found/);
+    assert.match(out, new RegExp(`OK {3}Watch folder ${watched.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&')}`));
+    assert.match(out, /FAIL Watch folder .*gone/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+
+  const { api } = await h.practice();
+  const created = (await api.post('/imaging/agents', { name: 'Op 5' })).data;
+  const hello = (body) => fetch(`${h.origin}/api/bridge/hello`, { method: 'POST', headers: { Authorization: `Bridge ${created.token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => r.json());
+  const said = await hello({ apps: [], checks: [{ name: 'Watch folder C:\\DEXIS\\Export', ok: false, note: 'Folder missing' }, { name: 'Bridge state file', ok: true }] });
+  assert.equal(said.problems.length, 1);
+  const ws = (await api.get('/imaging/agents')).data.find((a) => a.name === 'Op 5');
+  assert.equal(ws.checks.length, 2);
+  let open = (await api.get('/issues')).data.issues.filter((i) => i.kind === 'imaging_bridge');
+  assert.equal(open.length, 1);
+  assert.match(open[0].title, /Op 5: Watch folder/);
+  // Checking in again with the same problem doesn't make a second item; fixing it resolves the item.
+  await hello({ apps: [], checks: [{ name: 'Watch folder C:\\DEXIS\\Export', ok: false, note: 'Folder missing' }] });
+  assert.equal((await api.get('/issues')).data.issues.filter((i) => i.kind === 'imaging_bridge').length, 1);
+  await hello({ apps: [], checks: [{ name: 'Watch folder C:\\DEXIS\\Export', ok: true }] });
+  open = (await api.get('/issues')).data.issues.filter((i) => i.kind === 'imaging_bridge');
+  assert.equal(open.length, 0);
+});

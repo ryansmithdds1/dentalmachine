@@ -16,7 +16,7 @@ const MAX_PIECE_MS = 25_000;
 const LOUD = 0.025; // RMS level that counts as speech
 const FALLBACK_PIECE_MS = 6000; // when pauses can't be detected
 
-export default function useDictation(onPhrase, { mode = 'browser' } = {}) {
+export default function useDictation(onPhrase, { mode = 'browser', pauseMs = PAUSE_MS } = {}) {
   const server = mode === 'server' && CAN_RECORD;
   const [listening, setListening] = useState(false);
   const [interim, setInterim] = useState('');
@@ -95,7 +95,7 @@ export default function useDictation(onPhrase, { mode = 'browser' } = {}) {
         const rms = Math.sqrt(buf.reduce((s, v) => s + v * v, 0) / buf.length);
         if (rms > LOUD) { a.recorder.spoke = true; a.lastVoice = now; setInterim('Hearing you…'); }
         // A pause after speech, or a long stretch: send what was said so far.
-        if (a.recorder.spoke && ((a.lastVoice && now - a.lastVoice > PAUSE_MS) || now - a.started > MAX_PIECE_MS)) cut();
+        if (a.recorder.spoke && ((a.lastVoice && now - a.lastVoice > pauseMs) || now - a.started > MAX_PIECE_MS)) cut();
       }, 100);
     } catch (e) {
       live.current = false;
@@ -128,7 +128,7 @@ export default function useDictation(onPhrase, { mode = 'browser' } = {}) {
       }
       setInterim(`${pending.current} ${mid}`.trim());
       clearTimeout(timer.current);
-      timer.current = setTimeout(() => { setInterim(''); flushText(); }, PAUSE_MS);
+      timer.current = setTimeout(() => { setInterim(''); flushText(); }, pauseMs);
     };
     // The browser stops after a long silence; keep listening until the dentist turns it off.
     r.onend = () => { if (live.current) { try { r.start(); } catch { /* restarting */ } } else setListening(false); };

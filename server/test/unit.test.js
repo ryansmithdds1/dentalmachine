@@ -96,4 +96,10 @@ test('voice perio: numbers, homophones and commands from what the recognizer hea
     { n: 3 }, { n: 2 }, { n: 4 }, { n: 3 }, { n: 2 }, { n: 3 }, { n: 12 }, { cmd: 'next_tooth' }, { cmd: 'sup' }, { cmd: 'back' }, { cmd: 'skip' }, { cmd: 'missing' }, { cmd: 'stop' },
   ]);
   assert.deepEqual(parseSpeech('um the patient'), []);
+  // Moving around by voice, margins above the CEJ, and the whole side bleeding.
+  assert.deepEqual(parseSpeech('tooth 14 3 2 3'), [{ cmd: 'tooth', n: 14 }, { n: 3 }, { n: 2 }, { n: 3 }]);
+  assert.deepEqual(parseSpeech('go to three, lingual. 4 5'), [{ cmd: 'tooth', n: 3 }, { cmd: 'side', side: 'l' }, { n: 4 }, { n: 5 }]);
+  assert.deepEqual(parseSpeech('gingival margin minus two 1 0'), [{ cmd: 'row', row: 'gm' }, { n: -2 }, { n: 1 }, { n: 0 }]);
+  assert.deepEqual(parseSpeech('bleeding all, depths'), [{ cmd: 'bop_all' }, { cmd: 'row', row: 'pd' }]);
+  assert.deepEqual(parseSpeech('tooth 40'), [{ n: 4 }, { n: 0 }], 'not a tooth: read as numbers');
 });

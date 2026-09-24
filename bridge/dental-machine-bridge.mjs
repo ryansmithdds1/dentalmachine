@@ -5,14 +5,16 @@
 //  • "Capture from sensor" in the chart takes x-rays straight from the sensor into a mount, through a
 //    TWAIN/WIA acquire command (e.g. NAPS2's console) or the folder the sensor driver saves to.
 //    Presets for Tuxedo and Jazz sensors fill in the TWAIN details: "sensor": { "preset": "tuxedo" }.
-// Usage: node dental-machine-bridge.mjs bridge-config.json [--list-sensors]
+//  • It checks its own setup (programs, folders, sensor, uploads) and reports problems to Settings → Imaging
+//    bridges and Needs attention every 10 minutes. `--check` prints the same checks and exits.
+// Usage: node dental-machine-bridge.mjs bridge-config.json [--list-sensors | --check]
 import { spawn } from 'node:child_process';
 import { readFileSync, writeFileSync, readdirSync, statSync, existsSync, mkdirSync, renameSync, rmSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { hostname, tmpdir } from 'node:os';
 import { join, resolve, dirname, basename } from 'node:path';
 
-const VERSION = '1.2.0';
+const VERSION = '1.3.0';
 const configPath = resolve(process.argv[2] || 'bridge-config.json');
 const config = JSON.parse(readFileSync(configPath, 'utf8'));
 const server = String(config.server || '').replace(/\/$/, '');
@@ -26,6 +28,8 @@ const saveState = () => writeFileSync(statePath, JSON.stringify(state));
 const pollSeconds = Number(config.scanSeconds) || 5;
 const log = (...a) => console.log(new Date().toISOString(), ...a);
 let lastPatient = null;
+// Upload results since the last report, for the self-check.
+const uploads = { ok: 0, failed: 0, lastError: null };
 
 const call = async (method, path, body, headers = {}) => {
   const res = await fetch(`${server}/api/bridge${path}`, {
@@ -123,7 +127,7 @@ async function resolveSensor(raw) {
     if (devices && !device) log(`Sensor: no ${preset.name} among the TWAIN devices (${devices.join(', ') || 'none'}). Install the sensor's TWAIN driver, or set "device".`);
   }
   return {
-    mode: 'command', extension: 'png', timeoutSeconds: 180, ...raw, name: raw.name || (device ? `${preset.name} (${device})` : preset.name), preset: raw.preset,
+    mode: 'command', extension: 'png', timeoutSeconds: 180, ...raw, name: raw.name || (device ? `${preset.name} (${device})` : preset.name), preset: raw.preset, device: device || null,
     command: naps2, args: raw.args || ['-o', '{output}', '--noprofile', '--driver', 'twain', '--device', device || preset.name, '--force'],
   };
 }
@@ -296,6 +300,7 @@ async function scan() {
         if (out.queued) log(`${name}: couldn't tell which patient (${out.reason}) — sent to Unfiled images for the office to file`);
         else log(`${name} → patient #${out.patient_id}${out.duplicate ? ' (already in chart)' : ''}`);
         state.seen[key] = out.queued ? `unfiled:${out.id}` : out.id;
+        uploads.ok++;
         if (w.moveTo) {
           mkdirSync(w.moveTo, { recursive: true });
           renameSync(path, join(w.moveTo, name));
@@ -306,6 +311,8 @@ async function scan() {
           state.seen[key] = 'unmatched';
         } else {
           log(`${name}: upload failed (${err.message}); will retry`);
+          uploads.failed++;
+          uploads.lastError = `${name}: ${err.message}`.slice(0, 200);
           continue;
         }
       }
@@ -314,8 +321,62 @@ async function scan() {
   }
 }
 
-const hello = await call('POST', '/hello', { apps: (config.apps || []).map((a) => ({ id: a.id, name: a.name })), sensor: sensor ? { name: sensor.name || 'Sensor', mode: sensor.mode || 'command', preset: sensor.preset || null, exposure: sensor.exposure || null, pixelSize: sensor.pixelSize || null, size: sensor.size ?? null } : null, hostname: hostname(), version: VERSION });
+// ---- Self-check: is this PC set up the way bridge-config.json says? ----
+const isPath = (p) => /[\\/]/.test(String(p || ''));
+const canWrite = (dir) => {
+  try {
+    mkdirSync(dir, { recursive: true });
+    const probe = join(dir, `.dm-bridge-check-${process.pid}`);
+    writeFileSync(probe, '');
+    rmSync(probe, { force: true });
+    return true;
+  } catch {
+    return false;
+  }
+};
+function selfCheck() {
+  const checks = [];
+  const add = (name, ok, note) => checks.push({ name, ok, note: note || null });
+  for (const a of config.apps || []) {
+    if (a.command && isPath(a.command)) add(`${a.name || a.id}: program`, existsSync(a.command), existsSync(a.command) ? null : `Not found at ${a.command} — fix "command" in bridge-config.json`);
+    if (a.writeFile?.path) add(`${a.name || a.id}: bridge file folder`, canWrite(dirname(a.writeFile.path)), `Can't write to ${dirname(a.writeFile.path)}`);
+  }
+  for (const w of config.watch || []) {
+    let readable = false;
+    try { readdirSync(w.folder); readable = true; } catch { /* missing or no access */ }
+    add(`Watch folder ${w.folder}`, readable, readable ? null : "Folder missing or can't be read — check the imaging program's export setting");
+    if (readable && w.moveTo) add(`Sent folder ${w.moveTo}`, canWrite(w.moveTo), `Can't write to ${w.moveTo}`);
+  }
+  if (sensor) {
+    if (sensor.mode === 'folder') {
+      add('Sensor folder', !!sensor.folder && canWrite(sensor.folder), `Sensor folder ${sensor.folder || '(not set)'} is missing or read-only`);
+    } else {
+      const found = !isPath(sensor.command) || existsSync(sensor.command);
+      add('Sensor capture program', found, found ? null : `${sensor.command} not found — install NAPS2 (naps2.com) or fix "sensor.command"`);
+      if (sensor.preset && found) add('Sensor connected', !!sensor.device, sensor.device ? null : 'The sensor did not show up among the TWAIN devices — plug it in, install its TWAIN driver, then restart the bridge');
+    }
+  }
+  add('Bridge state file', canWrite(dirname(statePath)), `Can't save ${statePath}`);
+  if (uploads.failed) add('Uploads', uploads.ok > 0, `${uploads.failed} failed since the last check (${uploads.lastError})`);
+  return checks;
+}
+if (process.argv.includes('--check')) {
+  const checks = selfCheck();
+  for (const c of checks) console.log(`${c.ok ? 'OK  ' : 'FAIL'} ${c.name}${c.ok || !c.note ? '' : ` — ${c.note}`}`);
+  process.exit(checks.every((c) => c.ok) ? 0 : 1);
+}
+const helloBody = () => ({
+  apps: (config.apps || []).map((a) => ({ id: a.id, name: a.name })),
+  sensor: sensor ? { name: sensor.name || 'Sensor', mode: sensor.mode || 'command', preset: sensor.preset || null, exposure: sensor.exposure || null, pixelSize: sensor.pixelSize || null, size: sensor.size ?? null } : null,
+  hostname: hostname(), version: VERSION, checks: selfCheck(), uploads: { ok: uploads.ok, failed: uploads.failed },
+});
+const hello = await call('POST', '/hello', helloBody());
+for (const c of hello.problems || []) log(`Setup problem: ${c.name} — ${c.note}`);
 log(`Connected to ${hello.practice} as "${hello.workstation}". Programs: ${(config.apps || []).map((a) => a.name).join(', ') || 'none'}. Watching: ${(config.watch || []).map((w) => w.folder).join(', ') || 'nothing'}.${sensor ? ` Sensor: ${sensor.name || 'yes'}.` : ''}`);
+// Report the self-check every 10 minutes, so a moved export folder or unplugged sensor shows up in the office.
+setInterval(() => {
+  call('POST', '/hello', helloBody()).then(() => { uploads.ok = 0; uploads.failed = 0; uploads.lastError = null; }).catch((err) => log('check-in failed:', err.message));
+}, 10 * 60_000);
 setInterval(() => scan().catch((err) => log('scan failed:', err.message)), pollSeconds * 1000);
-scan().catch(() => {});
+scan().catch((err) => log('scan failed:', err.message));
 commandLoop();

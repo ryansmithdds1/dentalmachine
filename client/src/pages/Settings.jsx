@@ -1366,6 +1366,25 @@ function AssistantLog() {
   );
 }
 
+// What the bridge found when it last checked its own setup (programs, folders, sensor, uploads).
+function BridgeChecks({ agent }) {
+  const [open, setOpen] = useState(false);
+  if (!agent.checked_at) return agent.version ? <div className="muted" style={{ fontSize: 12 }}>Update the bridge for setup checks</div> : null;
+  const bad = agent.checks.filter((c) => !c.ok);
+  return (
+    <div style={{ fontSize: 12 }}>
+      <button type="button" className="link" onClick={() => setOpen(!open)} style={{ color: bad.length ? 'var(--danger)' : undefined }}>
+        {bad.length ? `${bad.length} setup problem${bad.length > 1 ? 's' : ''}` : `All ${agent.checks.length} checks passed`}
+      </button>
+      {(open || bad.length > 0) && (
+        <ul style={{ margin: '4px 0 0', paddingLeft: 16 }}>
+          {(open ? agent.checks : bad).map((c) => <li key={c.name} style={{ color: c.ok ? undefined : 'var(--danger)' }}>{c.ok ? '✓' : '✗'} {c.name}{!c.ok && c.note ? ` — ${c.note}` : ''}</li>)}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 // Workstations running the imaging bridge (opens DEXIS/Sidexis/etc. and imports captured images).
 function ImagingBridges() {
   const { practice } = useAuth();
@@ -1402,6 +1421,7 @@ function ImagingBridges() {
           <li>On that computer, install Node.js (18 or newer) and save the <button className="link" onClick={() => download('/imaging/agent-download', 'dental-machine-bridge.mjs')}>bridge program</button> next to the settings file.</li>
           <li>Edit the settings file with your imaging program&apos;s path and export folder (your imaging vendor&apos;s bridge guide lists the command-line options), then run <code>node dental-machine-bridge.mjs bridge-config.json</code> — or set it to start with Windows.</li>
           <li>For direct sensor capture (Tuxedo, Jazz or any TWAIN sensor): install the sensor&apos;s TWAIN driver and the free NAPS2 scanner app, choose the sensor below, then press <strong>Test sensor</strong>. <code>node dental-machine-bridge.mjs bridge-config.json --list-sensors</code> shows the sensors that PC can see.</li>
+          <li>Check the setup with <code>node dental-machine-bridge.mjs bridge-config.json --check</code>. While it runs, the bridge re-checks itself every 10 minutes; problems show here and in Needs attention.</li>
         </ol>
         <form className="inline" onSubmit={(e) => { e.preventDefault(); add.submit(); }} style={{ gap: 8 }}>
           <input placeholder='Workstation name, e.g. "Op 2"' value={name} onChange={(e) => setName(e.target.value)} style={{ maxWidth: 320 }} />
@@ -1429,7 +1449,10 @@ function ImagingBridges() {
               {agents?.map((a) => (
                 <tr key={a.id}>
                   <td><strong>{a.name}</strong></td>
-                  <td><span className={`live-dot${a.online ? ' on' : ''}`}>{a.online ? 'Online' : 'Offline'}</span></td>
+                  <td>
+                    <span className={`live-dot${a.online ? ' on' : ''}`}>{a.online ? 'Online' : 'Offline'}</span>
+                    <BridgeChecks agent={a} />
+                  </td>
                   <td>{a.hostname || '—'}{a.version ? <span className="muted"> · v{a.version}</span> : ''}</td>
                   <td>{a.apps.map((x) => x.name).join(', ') || <span className="muted">—</span>}</td>
                   <td>

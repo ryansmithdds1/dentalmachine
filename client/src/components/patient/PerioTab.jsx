@@ -4,7 +4,8 @@ import { useApi } from '../../hooks.js';
 import { useAuth } from '../../auth.jsx';
 import { fmtDate } from '../../format.js';
 import { ErrorBox, useSubmit } from '../ui.jsx';
-import { parseSpeech, speechSupported } from './voicePerio.js';
+import { parseSpeech } from './voicePerio.js';
+import useDictation from '../useDictation.js';
 
 const UPPER = Array.from({ length: 16 }, (_, i) => String(i + 1));
 const LOWER = Array.from({ length: 16 }, (_, i) => String(32 - i));
@@ -140,61 +141,86 @@ export default function PerioTab({ patient }) {
   };
   const toggleMarker = (t, i) => marker && setSite(t, marker, i, !get(t)[marker][i]);
 
-  // Voice charting: the browser's speech recognition hears numbers and a few commands and walks the probing path.
+  // Voice charting: numbers and a few commands walk the probing path. Heard by the office's speech service
+  // when there is one (under its BAA), else by the browser; either way it keeps listening through pauses
+  // until "stop" or the Stop button.
   const [voice, setVoice] = useState(null); // { cursor, heard }
-  const recog = useRef(null);
   const cursor = useRef(0);
   const lastSite = useRef(null);
-  const applyVoice = useRef(null);
-  applyVoice.current = (text) => {
-    const siteAt = (n) => path[n]?.split(':');
+  const rowRef = useRef(row);
+  rowRef.current = row;
+  const pathRef = useRef(path);
+  pathRef.current = path;
+  const applyVoice = (text) => {
+    const p = pathRef.current;
+    const siteAt = (n) => p[n]?.split(':');
+    const face = () => (Number(siteAt(cursor.current)?.[1] ?? 0) < 3 ? 'b' : 'l');
+    // Where a tooth's sites on one face start in the path (each tooth appears once per face).
+    const findTooth = (t, side) => p.findIndex((k) => { const [pt, pi] = k.split(':'); return pt === t && (Number(pi) < 3 ? 'b' : 'l') === side; });
+    const firstEmpty = (r) => { const n = p.findIndex((k) => { const [t, i] = k.split(':'); return (get(t)[r][i] ?? '') === ''; }); return n < 0 ? 0 : n; };
+    let r0 = rowRef.current;
     for (const tok of parseSpeech(text)) {
       const [t, i] = siteAt(cursor.current) || [];
-      if (tok.n != null) {
+      if (!tok.cmd) {
         if (!t) break;
-        const v = String(Math.min(tok.n, 15));
-        setReadings((r) => { const cur = r[t] || blank(); const list = [...cur[row]]; list[Number(i)] = v; return { ...r, [t]: { ...cur, [row]: list } }; });
+        const v = String(r0 === 'pd' ? Math.max(0, Math.min(tok.n, 15)) : Math.max(-9, Math.min(tok.n, 15)));
+        const key = r0;
+        setReadings((r) => { const cur = r[t] || blank(); const list = [...cur[key]]; list[Number(i)] = v; return { ...r, [t]: { ...cur, [key]: list } }; });
         lastSite.current = [t, Number(i)];
-        cursor.current++;
+        cursor.current = Math.min(p.length, cursor.current + 1);
       } else if (['bop', 'sup', 'plaque'].includes(tok.cmd) && lastSite.current) {
         const [lt, li] = lastSite.current;
         setReadings((r) => { const cur = r[lt] || blank(); const list = [...cur[tok.cmd]]; list[li] = true; return { ...r, [lt]: { ...cur, [tok.cmd]: list } }; });
-      } else if (tok.cmd === 'skip') cursor.current = Math.min(path.length - 1, cursor.current + 1);
+      } else if (tok.cmd === 'bop_all' && lastSite.current) {
+        // Every site on the face just charted.
+        const [lt, li] = lastSite.current;
+        const sites = li < 3 ? [0, 1, 2] : [3, 4, 5];
+        setReadings((r) => { const cur = r[lt] || blank(); const list = [...cur.bop]; for (const s2 of sites) list[s2] = true; return { ...r, [lt]: { ...cur, bop: list } }; });
+      } else if (tok.cmd === 'skip') cursor.current = Math.min(p.length - 1, cursor.current + 1);
       else if (tok.cmd === 'back') cursor.current = Math.max(0, cursor.current - 1);
       else if (tok.cmd === 'next_tooth' && t) {
         let n = cursor.current;
-        while (n < path.length && path[n].split(':')[0] === t) n++;
+        while (n < p.length && p[n].split(':')[0] === t) n++;
         cursor.current = n;
+      } else if (tok.cmd === 'tooth') {
+        const n = findTooth(String(tok.n), face());
+        const any = n < 0 ? p.findIndex((k) => k.split(':')[0] === String(tok.n)) : n;
+        if (any >= 0) cursor.current = any;
+      } else if (tok.cmd === 'side' && t) {
+        const n = findTooth(t, tok.side);
+        if (n >= 0) cursor.current = n;
+      } else if (tok.cmd === 'row' && tok.row !== r0) {
+        r0 = tok.row;
+        rowRef.current = r0;
+        setRow(r0);
+        setMarker('');
+        cursor.current = firstEmpty(r0);
       } else if (tok.cmd === 'missing' && t) put(t, { missing: true });
-      else if (tok.cmd === 'stop') { recog.current?.stop(); break; }
+      else if (tok.cmd === 'stop') { mic.stop(); setVoice(null); return; }
     }
     setVoice((v) => v && { cursor: cursor.current, heard: text });
   };
+  const { data: hearing } = useApi(can('clinical:write') ? '/dictation' : null);
+  // Short pauses: a hygienist reads a tooth's three sites and moves on.
+  const mic = useDictation(applyVoice, { mode: hearing?.mode, pauseMs: 700 });
   const startVoice = () => {
-    const Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
-    const rec = new Rec();
-    rec.lang = 'en-US';
-    rec.continuous = true;
-    rec.interimResults = false;
-    rec.onresult = (e) => { for (let k = e.resultIndex; k < e.results.length; k++) if (e.results[k].isFinal) applyVoice.current(e.results[k][0].transcript); };
-    rec.onend = () => { recog.current = null; setVoice(null); };
-    rec.onerror = (e) => { if (e.error === 'not-allowed') window.alert('Allow the microphone for this site to chart by voice.'); };
+    if (voice) return;
     // Start at the first site without a reading in the row being charted.
     const first = path.findIndex((k) => { const [t, i] = k.split(':'); return (get(t)[row][i] ?? '') === ''; });
     cursor.current = first < 0 ? 0 : first;
     lastSite.current = null;
-    recog.current = rec;
-    rec.start();
+    mic.start();
     setVoice({ cursor: cursor.current, heard: '' });
   };
-  useEffect(() => () => recog.current?.stop(), []);
+  const stopVoice = () => { mic.stop(); setVoice(null); };
+  useEffect(() => { if (voice && !mic.listening && mic.error) setVoice(null); }, [mic.listening, mic.error]); // eslint-disable-line react-hooks/exhaustive-deps
   // "Start perio" said to the assistant: begin voice charting as soon as the exam is on screen.
   const startVoiceRef = useRef(startVoice);
   startVoiceRef.current = startVoice;
   useEffect(() => {
     const begin = () => {
       try { sessionStorage.removeItem('dm_perio_voice'); } catch { /* same tab only */ }
-      if (recog.current || !speechSupported() || !can('clinical:write')) return;
+      if (!can('clinical:write')) return;
       setViewing(null);
       setTimeout(() => startVoiceRef.current(), 250);
     };
@@ -353,16 +379,19 @@ export default function PerioTab({ patient }) {
             {MARKERS.map(([k, name]) => <button key={k} className={marker === k ? 'active' : ''} onClick={() => setMarker(marker === k ? '' : k)} title={`Tap sites to mark ${name.toLowerCase()}`}>{name}</button>)}
           </div>
           <label className="checkbox"><input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} /> Auto-advance</label>
-          {speechSupported() && (voice
-            ? <button className="danger small" onClick={() => recog.current?.stop()}>■ Stop voice</button>
-            : <button className="small" onClick={startVoice} title="Say the readings; also “bleeding”, “pus”, “plaque”, “skip”, “back”, “next tooth”, “missing”, “stop”">🎤 Voice</button>)}
+          {mic.supported && (voice
+            ? <button className="danger small" onClick={stopVoice}>■ Stop voice</button>
+            : <button className="small" onClick={startVoice} title="Say the readings; also “bleeding”, “pus”, “plaque”, “tooth 14”, “lingual”, “margins”, “skip”, “back”, “next tooth”, “missing”, “stop”">🎤 Voice</button>)}
         </div>
       )}
+      {mic.error && <div className="error no-print">{mic.error}</div>}
       {voice && (
         <div className="public-notice ok no-print" style={{ marginBottom: 8 }} aria-live="polite">
           🎤 Listening — next: tooth {path[voice.cursor]?.split(':')[0] ?? '—'} {SITES[Number(path[voice.cursor]?.split(':')[1])] ?? ''} ({row === 'pd' ? 'depth' : 'gingival margin'}).
-          Say the numbers; “bleeding”, “pus” or “plaque” mark the last site; “skip”, “back”, “next tooth”, “missing”, “stop”.
+          Say the numbers; “bleeding”, “pus” or “plaque” mark the last site (“bleeding all” the whole side); “tooth 14”, “lingual”, “margins” / “depths” to move; “skip”, “back”, “next tooth”, “missing”, “stop”.
+          {mic.interim && <div className="muted" style={{ fontSize: 12 }}>{mic.interim}</div>}
           {voice.heard && <div className="muted" style={{ fontSize: 12 }}>Heard: “{voice.heard}”</div>}
+          <div className="muted" style={{ fontSize: 11 }}>{mic.server ? 'Heard by the office’s medical speech service.' : 'Heard by your browser’s speech recognition.'}</div>
         </div>
       )}
       <div className="muted" style={{ marginBottom: 8, fontSize: 12 }}>

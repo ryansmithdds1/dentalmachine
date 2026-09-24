@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { requirePermission, HttpError, rateLimit } from '../auth.js';
 import { findOr404, insert, audit, newToken, hashToken, validTooth } from '../util.js';
 import { publish } from '../events.js';
+import { raiseIssue, resolveIssue } from '../issues.js';
 import { isDicom, readDicomTags } from '../dicom.js';
 import { dicomToImage } from '../dicomimage.js';
 import { imageSize } from '../thumbnails.js';
@@ -26,7 +27,7 @@ const requireAdmin = (req, _res, next) => (req.user.role === 'admin' ? next() : 
 export default function imagingRoutes({ db, storage }) {
   const r = Router();
   const view = (a) => ({
-    id: a.id, name: a.name, hostname: a.hostname, version: a.version, apps: JSON.parse(a.apps || '[]'), sensor: a.sensor || null, sensor_info: parseJson(a.sensor_info), mm_per_px: a.mm_per_px || null, last_seen_at: a.last_seen_at, active: !!a.active,
+    id: a.id, name: a.name, hostname: a.hostname, version: a.version, apps: JSON.parse(a.apps || '[]'), sensor: a.sensor || null, sensor_info: parseJson(a.sensor_info), checks: parseJson(a.checks) || [], checked_at: a.checked_at || null, mm_per_px: a.mm_per_px || null, last_seen_at: a.last_seen_at, active: !!a.active,
     online: !!a.last_seen_at && Date.now() - Date.parse(`${a.last_seen_at.replace(' ', 'T')}Z`) < ONLINE_SECONDS * 1000,
   });
 
@@ -49,6 +50,7 @@ export default function imagingRoutes({ db, storage }) {
     const agent = await findOr404(db, 'bridge_agents', req.params.aid, req.user.practice_id, 'Workstation');
     await db.run('UPDATE bridge_agents SET active = 0 WHERE id = ?', agent.id);
     await audit(db, req, 'bridge.revoke', 'bridge_agents', agent.id);
+    await resolveIssue(db, req.user.practice_id, `bridge:${agent.id}:setup`, 'Resolved: the workstation was removed');
     res.json({ ok: true });
   });
 
@@ -246,9 +248,26 @@ export function bridgeAgentRoutes({ db, storage }) {
         pixel_um: pixelUm >= 5 && pixelUm <= 150 ? pixelUm : null, size: SENSOR_LONG_MM[s.size] ? String(s.size) : null,
       };
     }
+    // The bridge's self-check (older bridges don't send one).
+    const checks = Array.isArray(req.body?.checks)
+      ? req.body.checks.slice(0, 40).map((c) => ({ name: String(c?.name || '').slice(0, 120), ok: !!c?.ok, note: c?.note ? String(c.note).slice(0, 300) : null })).filter((c) => c.name)
+      : null;
     await db.run('UPDATE bridge_agents SET apps = ?, sensor = ?, sensor_info = ?, hostname = ?, version = ? WHERE id = ?', JSON.stringify(apps), sensor, info ? JSON.stringify(info) : null, String(req.body?.hostname || '').slice(0, 100) || null, String(req.body?.version || '').slice(0, 20) || null, req.agent.id);
+    const problems = checks ? checks.filter((c) => !c.ok) : [];
+    if (checks) {
+      await db.run("UPDATE bridge_agents SET checks = ?, checked_at = datetime('now') WHERE id = ?", JSON.stringify(checks), req.agent.id);
+      // A moved export folder or unplugged sensor means x-rays quietly stop arriving: make it a work item.
+      const key = `bridge:${req.agent.id}:setup`;
+      if (problems.length) {
+        await raiseIssue(db, {
+          practiceId: req.agent.practice_id, kind: 'imaging_bridge', key, severity: 'high', entity: 'bridge_agents', entityId: req.agent.id,
+          title: `Imaging bridge on ${req.agent.name}: ${problems.length === 1 ? problems[0].name : `${problems.length} setup problems`}`,
+          detail: problems.map((c) => `${c.name}: ${c.note || 'failed'}`).join('\n'),
+        });
+      } else await resolveIssue(db, req.agent.practice_id, key, 'Resolved automatically: the bridge\'s checks all passed');
+    }
     const practice = await db.get('SELECT name FROM practices WHERE id = ?', req.agent.practice_id);
-    res.json({ practice: practice.name, workstation: req.agent.name });
+    res.json({ practice: practice.name, workstation: req.agent.name, problems });
   });
 
   // Long poll: waits up to ~25 s for work so launches feel instant without hammering the server.

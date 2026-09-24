@@ -2021,6 +2021,9 @@ const COLUMNS = [
   ['appointments', 'video_url', 'TEXT'],
   ['ledger_entries', 'ortho_case_id', 'INTEGER REFERENCES ortho_cases(id)'],
   ['bridge_agents', 'sensor', 'TEXT'],
+  // The bridge's own self-check (programs, folders, sensor, uploads) from its last check-in.
+  ['bridge_agents', 'checks', 'TEXT'],
+  ['bridge_agents', 'checked_at', 'TEXT'],
   ['claims', 'remarks', 'TEXT'],
   ['booking_requests', 'referral_source', 'TEXT'],
   ['patients', 'family_relationship', 'TEXT'],
