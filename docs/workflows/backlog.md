@@ -360,6 +360,92 @@ D4. **Notes on documents:** notes and comments on each document (who, when; kept
 D5. **Office documents too:** non-patient documents (contracts, licences, policies, vendor invoices) with the same
     tools, tied into the office intranet.
 
+## Patient preferences and personal connection (asked for)
+PP1. **Preferences on the chart:** a customizable list (comfort: pillow behind the neck, blanket, headphones, prefers
+     no nitrous, likes to be told each step; scheduling: mornings only, text not call; the office adds its own), each
+     markable **urgent**; urgent ones show as an icon on the schedule card, in the patient bar and when the patient is
+     seated, so the team can't miss them.
+PP2. **Personal connection notes:** a quick "Personal" note (went to Disneyland, new dog, daughter's wedding) that shows
+     every time the chart opens and on the seated card; adding a new one keeps the history as a timeline (who, when),
+     so the team can pick up the conversation next visit.
+
+## Recurring checklists by position (asked for, big feature)
+Builds on tasks (workflow 28), task_series/recurring tasks from team chat, the time clock (who's on shift) and the
+intranet (SOP links).
+RCL1. **Owner-built checklists per role/position** (front desk, hygiene, assisting, sterilization, office manager):
+      daily, weekly, monthly, quarterly and annual items (e.g. "spore test weekly", "check AED monthly", "OSHA training
+      annually", "run end-of-day"), assigned to a position, a person or whoever is on shift, with due times.
+RCL2. **Fully featured items:** required evidence (photo, file, a number such as a temperature or a pass/fail result),
+      notes, sign-off, and a link to the SOP; critical items (spore test, emergency kit, autoclave log) marked
+      critical: a failed result or a missed due time raises a big flag and notifies the owner/office manager
+      instantly (in-app, chat, text), stays open until resolved with a documented action.
+RCL3. **Owner dashboard:** today/this week by position and person, done/late/missed, streaks and trends, the evidence
+      behind each item (e.g. spore-test photos for an inspection), exportable compliance log.
+
+## Phones: every call saved, linked and coached (asked for, big feature)
+Builds on the phone system (call log, recordings/transcripts, screen pop, AI receptionist, call tracking).
+PH1. **Every call saved and linked:** all calls recorded (with the required disclosure), transcribed, and linked to the
+     patient automatically by number (family-aware), or attached in one click; searchable by patient, staff, date,
+     topic; playback and transcript from the chart.
+PH2. **Phone protocols:** the office defines its phone philosophy and scripts (general, new patient, emergency,
+     scheduling, billing): the key steps (greeting, name, offer an appointment, ask for referrals, close with a time…).
+PH3. **Each call scored against the protocol** (AI reads the transcript, labelled as AI, with the quoted moments it
+     used), per call and per person; answer rate and speed, missed and abandoned calls, new-patient calls converted to
+     bookings; a team leaderboard and coaching view; owners can listen and add their own rating.
+PH4. **Why patients didn't book:** from calls that ended without an appointment, the reason (cost, time, insurance,
+     just shopping, wants to think…) collected and counted over time, to understand and meet patients' needs.
+PH5. **Upset caller alert:** sentiment detection during/after a call; an upset patient instantly flags and notifies the
+     owner/office manager with the patient, the moment and a link to listen.
+PH6. **The call screen that books while you talk:** when a call rings, the patient's account opens with a simple panel
+     of the next available times for what they likely need (recall due, planned treatment, emergency); as the caller
+     speaks, live transcription picks up requests ("Thursday afternoon", "with Dr. Chen") and the panel filters to
+     match instantly; one click books. As close to real time as the phone provider allows.
+
+## Reviews with a feedback screen, and team shout-outs (asked for)
+Builds on reputation (review requests, Google Business Profile sync) and surveys.
+RV1. **Send from anywhere:** a "Request review" button/command on the chart, checkout, schedule and patient bar; text
+     (or email) with a link; not more than once per N months per patient; automatic after checkout if the office wants.
+RV2. **Screened routing:** the patient first rates the visit; happy patients are invited to post on Google (and other
+     sites the office picks); less-than-happy patients are asked what went wrong and that goes privately to the owner
+     and office manager as feedback, with a follow-up task. (Compliance note: Google's policy discourages "review
+     gating"; offer the Google link to everyone but lead with the private feedback path when the rating is low — the
+     office chooses, and the default follows the platform's current policy.)
+RV3. **Team shout-outs:** names of team members mentioned in reviews and feedback are matched to staff and counted
+     (points, a leaderboard, optional rewards), with the quote.
+
+## Marketing ROI, end to end (asked for)
+MK1. Every lead and new patient tied to a source and campaign (UTM from the website/online booking, call tracking
+     numbers, referral source, promo codes, campaigns sent from the app), with the first touch and last touch kept.
+MK2. Follow each patient's lifetime value from that source: production, collections, visits, treatment accepted — by
+     campaign, channel and month; cost per campaign entered (or pulled from ad platforms later) → cost per new
+     patient, ROI and payback time; one clear marketing dashboard and a report in the library.
+
+## Insurance verification center (asked for, high priority)
+Builds on eligibility checks (270/271, batch), benefit breakdowns, insurance card read, employer plans/groups.
+IV1. **Its own area:** every upcoming patient's status at a glance — eligibility verified (date, how), full breakdown
+     verified (date), what's missing — with clear badges on the schedule and chart.
+IV2. **As automatic as possible:** eligibility runs ahead of every visit (days before + morning of); full breakdowns
+     fetched electronically where the payer supports it, else AI-read from portal/fax documents with a person's
+     confirmation; results applied to the plan (frequencies, percentages, maximums, waiting periods, history).
+IV3. **Update the whole group at once:** a benefit change verified for one patient updates every patient on the same
+     employer group/plan (with a record of who verified and when), so the team never re-verifies the same plan twice.
+IV4. **Exceptions only:** inactive coverage, missing subscriber info, plan changes, maximums nearly used — a short
+     worklist with one-key actions (text the patient for new insurance, call the payer script).
+
+## Doctor's notes to the front desk on the schedule (asked for)
+DN1. A clean, good-looking way for the dentist to leave instructions on the schedule: a note bubble on a visit ("book a
+     crown here next", "needs 90 minutes"), or on an empty slot ("I have time here — fit in an emergency or a quick
+     filling"), with who/when; the front desk sees it instantly (live update + chime), acknowledges it, and it turns
+     into a booking or a task; also from the chair via voice or the phone.
+
+## Diagnosis totals and conversion by provider (asked for, high priority)
+DX1. **Running diagnosed totals:** for each doctor and hygienist, treatment diagnosed today, this week and this month
+     (from exams), next to goals, always visible to the doctor (dashboard + a chip on the schedule).
+DX2. **Conversion funnel by exam type:** for new patient exams, recall/periodic exams and emergency/limited exams — per
+     provider: number of exams, $ diagnosed, $ presented, $ accepted, $ scheduled, $ completed, with conversion %
+     at each step and time to schedule; drill-down to patients; comparison between doctors and over time; in the
+     metrics emails and report library. One definition, documented in docs/metrics.md.
+
 ## Then: remaining workflow batches
 9. Batch 4 (32–44): new patient setup, ERA/EOB posting, prescriptions, lab cases, huddle actions, recall lists,
    pre-auths, financing, adjustments, referrals, end-of-day, review requests (fix the count bug), clock in/out.
