@@ -26,6 +26,7 @@ import verificationRoutes from './routes/verification.js';
 import feeScheduleRoutes from './routes/feeschedules.js';
 import marketingRoutes from './routes/marketing.js';
 import bonusRoutes from './routes/bonus.js';
+import benchmarkRoutes from './routes/benchmarks.js';
 import cardRoutes from './routes/cards.js';
 import doctorNoteRoutes from './routes/doctornotes.js';
 import officeMoveRoutes from './routes/officemoves.js';
@@ -334,6 +335,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(productionRoutes({ db }));
   api.use(scheduleRoutes({ db }));
   api.use(recallFreqRoutes({ db }));
+  api.use(benchmarkRoutes({ db, secret }));
   api.use(cardRoutes({ db }));
   api.use(doctorNoteRoutes({ db }));
   api.use(officeMoveRoutes({ db, messenger, config }));

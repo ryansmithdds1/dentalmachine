@@ -24,6 +24,7 @@ import BridgeSetup from '../components/imaging/BridgeSetup.jsx';
 import DayTemplates from '../components/settings/DayTemplates.jsx';
 import FeeScheduleManager from '../components/settings/FeeScheduleManager.jsx';
 import BonusSettings from '../components/bonus/BonusSettings.jsx';
+import BenchmarkSettings from '../components/settings/BenchmarkSettings.jsx';
 import ScheduleCardSettings from '../components/cards/ScheduleCardSettings.jsx';
 import OpportunityRules from '../components/opportunities/OpportunityRules.jsx';
 import Digests from '../components/settings/Digests.jsx';
@@ -69,6 +70,7 @@ const RESOURCES = {
 // What each section contains, so the search box finds "lock date" or "two-factor" as well as section names.
 // Fields of the simple list sections (providers, carriers…) are added from their definitions.
 const KEYWORDS = {
+  benchmarks: 'benchmarks leaderboard compare other practices percentile peer group anonymous share opt in',
   bonus: 'team bonus incentive spiff collections goal scorecard payroll clawback',
   cards: 'appointment cards card layout customize fields age production preferences urgent flag strikes moved by us doctor notes labels',
   chartshortcuts: 'chart shortcuts quick buttons hotkeys alt aliases bundles crown implant new patient srp bridge denture night guard sealants treatment entry voice',
@@ -109,7 +111,7 @@ export default function Settings() {
     ['Practice', [['practice', 'Practice & security', admin], ['users', 'Users & roles', admin], ['locations', 'Offices', admin], ['providers', 'Providers', true], ['operatories', 'Operatories', true], ['types', 'Appointment types', true], ['daytemplates', 'Perfect day & late patients', can('schedule:read')], ['cards', 'Appointment cards', can('schedule:read')], ['bonus', 'Team bonus', admin || can('bonus:manage')], ['import', 'Import from another system', admin]]],
     ['Clinical', [['templates', 'Note templates', can('clinical:write')], ['forms', 'Forms & consents', can('patients:read')], ['labs', 'Labs', can('clinical:read')], ['education', 'Patient education', can('patients:read')], ['referrals', 'Referral contacts', can('patients:read')], ['opportunities', 'Opportunities', can('clinical:read')], ['chartshortcuts', 'Chart shortcuts & bundles', can('clinical:read')]]],
     ['Billing', [['codes', 'Fee schedule', true], ['ppo', 'Fee schedules', can('billing:read')], ['fees', 'Fee updates & history', can('billing:read')], ['carriers', 'Insurance carriers', can('billing:read')], ['memberships', 'Membership plans', can('billing:read')]]],
-    ['Patients', [['messaging', 'Messages & reviews', admin], ['digests', 'Metric emails', admin], ['phone', 'Phone line', admin], ['checkin', 'Mobile check-in', admin], ['journeys', 'Patient journeys', can('patients:read')], ['booking', 'Online booking links', admin], ['custom', 'Custom patient fields', admin], ['duplicates', 'Duplicate charts', admin]]],
+    ['Patients', [['messaging', 'Messages & reviews', admin], ['digests', 'Metric emails', admin], ['benchmarks', 'Benchmarks', admin], ['phone', 'Phone line', admin], ['checkin', 'Mobile check-in', admin], ['journeys', 'Patient journeys', can('patients:read')], ['booking', 'Online booking links', admin], ['custom', 'Custom patient fields', admin], ['duplicates', 'Duplicate charts', admin]]],
     ['Connections', [['integrations', 'Integrations', admin], ['imaging', 'Imaging bridges', admin], ['assistant', 'Assistant', admin], ['developer', 'API & webhooks', admin], ['activity', 'Connection activity', admin]]],
     ['Compliance', [['audit', 'Audit log', admin], ['backups', 'Backups', admin]]],
   ].map(([g, items]) => [g, items.filter((t) => t[2])]).filter(([, items]) => items.length);
@@ -182,6 +184,7 @@ export default function Settings() {
       {tab === 'daytemplates' && <DayTemplates />}
       {tab === 'opportunities' && <OpportunityRules />}
       {tab === 'digests' && <Digests />}
+      {tab === 'benchmarks' && <BenchmarkSettings />}
       {tab === 'journeys' && <JourneySettings />}
       {tab === 'chartshortcuts' && <ChartShortcuts />}
       {tab === 'assistant' && <AssistantLog />}

@@ -19,6 +19,7 @@ import { diagnosisFunnel } from './diagnosis.js';
 import { renderEmail } from './email/layout.js';
 import { sendStaffEmail } from './email/send.js';
 import { shortName } from './email/templates.js';
+import { benchmarkDigestBlocks } from './benchmarkdigest.js';
 
 export const DIGESTS = {
   huddle: { label: 'Morning huddle', time: '07:00', when: 'Each morning the office is open' },
@@ -367,6 +368,10 @@ export async function buildDigest(db, o) {
   // Diagnosis totals and the conversion funnel for the people who act on them (not the billing team's email).
   if (['owner', 'office_manager', 'hygienist'].includes(o.audience) && o.digest !== 'huddle') {
     blocks.push(...await diagnosisBlocks(db, { practiceId: o.practiceId, digest: o.digest, date: range.to, from: range.from, to: range.to, ...scope, appUrl: o.appUrl }));
+  }
+  // Benchmarks (BM4): how each provider compares with practices like this one, when the owner has joined.
+  if (o.digest === 'monthly' && ['owner', 'hygienist'].includes(o.audience)) {
+    blocks.push(...await benchmarkDigestBlocks(db, { practiceId: o.practiceId, providerId: scope.providerId, appUrl: o.appUrl }));
   }
 
   if (areas.length) {

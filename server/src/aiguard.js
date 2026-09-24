@@ -43,6 +43,8 @@ export const HIGH_RISK = [
   ['POST', /^\/fees\/(increases|changes\/\d+\/(approve|cancel))$/, 'fee changes'],
   ['PUT', /^\/fees\/changes\/\d+$/, 'fee changes'],
   ['PUT', /^\/(fee-schedules|procedure-codes)\/\d+$/, 'fee changes'],
+  ['POST', /^\/benchmarks\/(join|leave|send-now)$/, 'sharing practice numbers outside the practice'],
+  ['PUT', /^\/benchmarks\/providers\/\d+\/name$/, 'showing a provider’s name to other practices'],
   ['POST', /^\/bonus\/(plans(\/\d+\/status)?|periods\/(approve|\d+\/reopen))$/, 'bonus plans and approving bonuses'],
   ['PUT', /^\/bonus\/(settings|plans\/\d+)$/, 'bonus plans and approving bonuses'],
   ['PATCH', /^\/ai-findings\/\d+$/, 'charting or dismissing an AI x-ray finding (a diagnosis)'],

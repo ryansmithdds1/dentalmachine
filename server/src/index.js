@@ -24,6 +24,7 @@ import { runMissedCallCheck } from './phonecoach.js';
 import { runMarketingJobs } from './marketing.js';
 import { runFeeSchedules } from './feeimport.js';
 import { runSecondLook } from './xrayai.js';
+import { createBenchmarkClient, runBenchmarkSends } from './benchmarks.js';
 import { runScheduledReports } from './savedreports.js';
 import { runSurveys } from './surveys.js';
 import { runOrthoBilling } from './ortho.js';
@@ -271,6 +272,15 @@ if (process.env.XRAY_SECOND_LOOK !== 'off') {
     .catch(jobFailed('X-ray AI second look'));
   setInterval(run, 60 * 60 * 1000).unref();
   setTimeout(run, 110_000).unref();
+}
+// Benchmarks (BM5): each joined practice's monthly aggregates, once a night after 1am practice time (checked hourly).
+if (process.env.BENCHMARK_SENDS !== 'off') {
+  const benchmarkClient = createBenchmarkClient({ db });
+  const run = () => runExclusive('benchmarks', 30 * 60 * 1000, () => runBenchmarkSends(db, { client: benchmarkClient, secret }))
+    .then((n) => n && log.info(`Benchmarks: ${n} practice(s) sent`))
+    .catch(jobFailed('Benchmark sends'));
+  setInterval(run, 60 * 60 * 1000).unref();
+  setTimeout(run, 100_000).unref();
 }
 // Payment-plan late fees: an installment still unpaid after the plan's grace days gets its fee once.
 if (process.env.PLAN_LATE_FEES !== 'off') {

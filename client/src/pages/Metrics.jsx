@@ -8,6 +8,7 @@ import { money, fmtDate, fmtDateTime, label as labelize } from '../format.js';
 import { useCommands } from '../shortcuts.js';
 import { ErrorBox } from '../components/ui.jsx';
 import DiagnosisConversion from '../components/metrics/DiagnosisConversion.jsx';
+import Benchmarks from '../components/metrics/Benchmarks.jsx';
 import './metrics.css';
 
 // Reports → Metrics: every KPI from the one shared definition (server/src/metrics.js, docs/metrics.md), with its
@@ -202,7 +203,7 @@ export default function Metrics() {
     if (filters.location_id) q.set('location_id', filters.location_id);
     return q.toString();
   }, [period, params, filters.provider_id, filters.location_id]);
-  const tab = params.get('tab') === 'diagnosis' ? 'diagnosis' : 'numbers';
+  const tab = ['diagnosis', 'benchmarks'].includes(params.get('tab')) ? params.get('tab') : 'numbers';
   const { data, error, reload } = useApi(tab === 'numbers' ? `/metrics?${query}` : null);
   const open = params.get('metric');
   const set = (patch) => {
@@ -214,6 +215,7 @@ export default function Metrics() {
   useCommands([
     ...PERIODS.map(([k, l]) => ({ id: `metrics-${k}`, label: `Metrics: ${l}`, hint: 'Practice numbers', run: () => set({ tab: '', period: k, from: '', to: '' }) })),
     { id: 'metrics-diagnosis', label: 'Metrics: Diagnosis & conversion', hint: 'Treatment diagnosed at exams, and how much gets done', run: () => set({ tab: 'diagnosis', metric: '' }) },
+    { id: 'metrics-benchmarks', label: 'Metrics: Benchmarks', hint: 'How you compare with practices like yours', run: () => set({ tab: 'benchmarks', metric: '' }) },
   ]);
   const canSetGoal = user?.role === 'admin';
   const current = open ? byKey.get(open) : null;
@@ -224,7 +226,7 @@ export default function Metrics() {
         <div>
           <h1 style={{ margin: 0 }}>Practice metrics</h1>
           <div className="muted" style={{ fontSize: 13 }}>
-            {tab === 'diagnosis' ? 'Treatment diagnosed at exams, and how much of it gets done' : data ? `${fmtDate(data.from)}${data.to !== data.from ? ` – ${fmtDate(data.to)}` : ''} · compared with ${fmtDate(data.previous.from)}${data.previous.to !== data.previous.from ? ` – ${fmtDate(data.previous.to)}` : ''} and last year` : 'Loading…'}
+            {tab === 'benchmarks' ? 'How your numbers compare with practices like yours (opt-in, anonymous)' : tab === 'diagnosis' ? 'Treatment diagnosed at exams, and how much of it gets done' : data ? `${fmtDate(data.from)}${data.to !== data.from ? ` – ${fmtDate(data.to)}` : ''} · compared with ${fmtDate(data.previous.from)}${data.previous.to !== data.previous.from ? ` – ${fmtDate(data.previous.to)}` : ''} and last year` : 'Loading…'}
           </div>
         </div>
         <div className="mx-filters">
@@ -250,8 +252,9 @@ export default function Metrics() {
       <div className="mx-seg" role="tablist" aria-label="Metrics view" style={{ alignSelf: 'flex-start' }}>
         <button type="button" role="tab" aria-selected={tab === 'numbers'} className={tab === 'numbers' ? 'active' : ''} onClick={() => set({ tab: '' })}>Practice numbers</button>
         <button type="button" role="tab" aria-selected={tab === 'diagnosis'} className={tab === 'diagnosis' ? 'active' : ''} onClick={() => set({ tab: 'diagnosis', metric: '' })}>Diagnosis &amp; conversion</button>
+        <button type="button" role="tab" aria-selected={tab === 'benchmarks'} className={tab === 'benchmarks' ? 'active' : ''} onClick={() => set({ tab: 'benchmarks', metric: '' })}>Benchmarks</button>
       </div>
-      {tab === 'diagnosis' ? <DiagnosisConversion /> : (<>
+      {tab === 'benchmarks' ? <Benchmarks /> : tab === 'diagnosis' ? <DiagnosisConversion /> : (<>
       <ErrorBox error={error} />
 
       {data?.areas?.length > 0 && (

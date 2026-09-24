@@ -4950,6 +4950,72 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_bonus_approval_once ON bonus_approvals(pla
 CREATE INDEX IF NOT EXISTS idx_bonus_approvals_payroll ON bonus_approvals(practice_id, payroll_period_start, status);
 CREATE INDEX IF NOT EXISTS idx_bonus_lines_user ON bonus_payout_lines(practice_id, user_id);
 CREATE INDEX IF NOT EXISTS idx_bonus_versions_plan ON bonus_plan_versions(plan_id, effective_from);
+-- Benchmarks across practices (BM1-BM5; benchmarks.js). Off by default: the owner joins, and can leave at any time.
+-- The participant id and keys are random (the service never learns the practice's name); the signing key is sealed
+-- with the app secret. last_results is the latest answer from the service (derived; the monthly email reads it).
+CREATE TABLE IF NOT EXISTS bm_settings (
+  practice_id INTEGER PRIMARY KEY REFERENCES practices(id),
+  status TEXT NOT NULL DEFAULT 'off' CHECK (status IN ('off','joined','leaving','left')),
+  participant_id TEXT,
+  practice_key TEXT,
+  practice_code TEXT,
+  public_key TEXT,
+  signing_secret TEXT,
+  practice_type TEXT NOT NULL DEFAULT 'general',
+  founded_year INTEGER,
+  share_labor INTEGER NOT NULL DEFAULT 0,
+  terms_version TEXT,
+  joined_at TEXT,
+  joined_by INTEGER REFERENCES users(id),
+  left_at TEXT,
+  left_by INTEGER REFERENCES users(id),
+  last_sent_at TEXT,
+  last_results TEXT,
+  last_results_month TEXT,
+  last_results_at TEXT,
+  updated_by INTEGER REFERENCES users(id),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- Per provider: the random key and "Dr. #4821" code sent instead of their name, and whether the doctor chose to be
+-- named (only the doctor can turn that on; they or an administrator can turn it off).
+CREATE TABLE IF NOT EXISTS bm_providers (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  provider_id INTEGER NOT NULL UNIQUE REFERENCES providers(id),
+  provider_key TEXT NOT NULL,
+  anon_code TEXT NOT NULL,
+  show_name INTEGER NOT NULL DEFAULT 0,
+  display_name TEXT,
+  name_set_by INTEGER REFERENCES users(id),
+  name_set_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- Everything that left the building for the benchmark service: the exact signed text, when, why, and what came back
+-- (receipt, rows accepted: reconciled against rows sent). Kept so the owner can see exactly what was shared. Never
+-- edited after it finishes, never deleted. The nightly send is claimed once per practice-local day.
+CREATE TABLE IF NOT EXISTS bm_sends (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  kind TEXT NOT NULL CHECK (kind IN ('join','submit','leave')),
+  cause TEXT NOT NULL DEFAULT 'nightly' CHECK (cause IN ('nightly','manual','join','leave')),
+  send_date TEXT,
+  months TEXT,
+  rows INTEGER NOT NULL DEFAULT 0,
+  payload TEXT NOT NULL,
+  payload_sha256 TEXT NOT NULL,
+  destination TEXT,
+  status TEXT NOT NULL DEFAULT 'sending' CHECK (status IN ('sending','sent','failed')),
+  http_status INTEGER,
+  receipt TEXT,
+  accepted_rows INTEGER,
+  error TEXT,
+  source TEXT NOT NULL DEFAULT 'automation',
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  finished_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_bm_sends_practice ON bm_sends(practice_id, created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_bm_sends_nightly ON bm_sends(practice_id, send_date) WHERE cause = 'nightly' AND status != 'failed';
 `;
 
 // Columns added after the first release. SQLite has no ADD COLUMN IF NOT EXISTS, so check first.
