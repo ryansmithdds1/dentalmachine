@@ -1963,6 +1963,167 @@ CREATE TABLE IF NOT EXISTS day_template_dates (
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE (provider_id, date)
 );
+-- Office intranet (I1–I3, intranet.js): quick links, SOP/wiki pages with full version history, announcements
+-- and new-hire onboarding checklists. location_ids / roles are JSON lists limiting who sees an item (NULL =
+-- everyone). Nothing here is hard deleted: items are archived (status = 'archived', archived_at).
+-- Quick links to the websites the team uses (insurance portals, labs, supplies, payroll). starter_key marks
+-- one added from the suggested list, so adding it twice brings back the same row.
+CREATE TABLE IF NOT EXISTS intranet_links (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  title TEXT NOT NULL,
+  url TEXT NOT NULL,
+  category TEXT NOT NULL DEFAULT 'other' CHECK (category IN ('insurance','labs','supplies','payroll','other')),
+  icon TEXT,
+  location_ids TEXT,
+  roles TEXT,
+  sort INTEGER NOT NULL DEFAULT 0,
+  pinned INTEGER NOT NULL DEFAULT 0,
+  starter_key TEXT,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','archived')),
+  archived_at TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (practice_id, starter_key)
+);
+-- Sections of the office manual ("Front desk", "Clinical", "Emergencies").
+CREATE TABLE IF NOT EXISTS intranet_sections (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  name TEXT NOT NULL,
+  description TEXT,
+  sort INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','archived')),
+  archived_at TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- A page (SOP, checklist, how-to). body is Markdown and always equals the newest intranet_page_versions row;
+-- version is that row's number. ack_version: the version people must read and acknowledge (NULL = no
+-- sign-off asked). review_every_days / review_due: when someone should check it's still right.
+CREATE TABLE IF NOT EXISTS intranet_pages (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  section_id INTEGER REFERENCES intranet_sections(id),
+  title TEXT NOT NULL,
+  body TEXT NOT NULL DEFAULT '',
+  version INTEGER NOT NULL DEFAULT 1,
+  template_key TEXT,
+  location_ids TEXT,
+  roles TEXT,
+  ack_version INTEGER,
+  review_every_days INTEGER,
+  review_due TEXT,
+  last_reviewed_at TEXT,
+  last_reviewed_by INTEGER REFERENCES users(id),
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','archived')),
+  archived_at TEXT,
+  created_by INTEGER REFERENCES users(id),
+  updated_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (practice_id, template_key)
+);
+-- Every save of a page, never changed or removed. Restoring an old version adds a new row (restored_from).
+CREATE TABLE IF NOT EXISTS intranet_page_versions (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  page_id INTEGER NOT NULL REFERENCES intranet_pages(id),
+  version INTEGER NOT NULL,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL DEFAULT '',
+  change_note TEXT,
+  restored_from INTEGER,
+  source TEXT NOT NULL DEFAULT 'human',
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (page_id, version)
+);
+-- Images and files on a page, stored like patient documents (encrypted, under the practice's folder).
+CREATE TABLE IF NOT EXISTS intranet_attachments (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  page_id INTEGER NOT NULL REFERENCES intranet_pages(id),
+  filename TEXT NOT NULL,
+  mime TEXT NOT NULL,
+  size INTEGER NOT NULL,
+  storage_key TEXT NOT NULL,
+  encrypted INTEGER NOT NULL DEFAULT 0,
+  uploaded_by INTEGER REFERENCES users(id),
+  archived_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- Office announcements, pinned at the top of the intranet home until they expire or are archived.
+CREATE TABLE IF NOT EXISTS intranet_announcements (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  title TEXT NOT NULL,
+  body TEXT,
+  pinned INTEGER NOT NULL DEFAULT 1,
+  requires_ack INTEGER NOT NULL DEFAULT 0,
+  location_ids TEXT,
+  roles TEXT,
+  expires_on TEXT,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','archived')),
+  archived_at TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- "Read and acknowledged": one row per person per page version (or announcement). Never removed.
+CREATE TABLE IF NOT EXISTS intranet_acks (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  kind TEXT NOT NULL CHECK (kind IN ('page','announcement')),
+  item_id INTEGER NOT NULL,
+  version INTEGER NOT NULL DEFAULT 1,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  acknowledged_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (kind, item_id, version, user_id)
+);
+-- New-hire onboarding: a checklist (items can link to an SOP page) and the people it's given to.
+CREATE TABLE IF NOT EXISTS intranet_checklists (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  title TEXT NOT NULL,
+  description TEXT,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','archived')),
+  archived_at TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS intranet_checklist_items (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  checklist_id INTEGER NOT NULL REFERENCES intranet_checklists(id),
+  title TEXT NOT NULL,
+  page_id INTEGER REFERENCES intranet_pages(id),
+  sort INTEGER NOT NULL DEFAULT 0,
+  archived_at TEXT
+);
+CREATE TABLE IF NOT EXISTS intranet_onboardings (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  checklist_id INTEGER NOT NULL REFERENCES intranet_checklists(id),
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  due_on TEXT,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','completed','cancelled')),
+  assigned_by INTEGER REFERENCES users(id),
+  completed_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- One row per ticked item; unticking clears done_at (recorded in the audit log), the row stays.
+CREATE TABLE IF NOT EXISTS intranet_onboarding_steps (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  onboarding_id INTEGER NOT NULL REFERENCES intranet_onboardings(id),
+  item_id INTEGER NOT NULL REFERENCES intranet_checklist_items(id),
+  done_at TEXT,
+  done_by INTEGER REFERENCES users(id),
+  UNIQUE (onboarding_id, item_id)
+);
 `;
 
 // Columns added after the first release. SQLite has no ADD COLUMN IF NOT EXISTS, so check first.

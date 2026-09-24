@@ -66,6 +66,8 @@ export const PERMISSION_CATALOG = {
   'billing:read': 'See ledgers and claims', 'billing:write': 'Take payments, adjust, send claims',
   'reports:read': 'See all practice reports', 'reports:own': 'See their own production',
   'timeclock:manage': 'See and fix everyone’s timesheets, export payroll',
+  'timeclock:rates': 'See and set staff pay rates and labor cost',
+  'intranet:manage': 'Edit the office intranet: links, office manual, announcements and onboarding',
   'finance:read': 'See bank activity, costs and profit', 'finance:write': 'Sort bank lines and match deposits',
 };
 

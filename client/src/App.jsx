@@ -8,6 +8,7 @@ import Toasts from './components/Toasts.jsx';
 import PatientBar from './components/PatientBar.jsx';
 import { ActivePatientProvider } from './activePatient.jsx';
 import CommandPalette from './components/CommandPalette.jsx';
+import IntranetCommands from './components/intranet/IntranetCommands.jsx';
 import Assistant from './components/assistant/Assistant.jsx';
 import CallPop from './components/CallPop.jsx';
 import KeyboardHelp from './components/KeyboardHelp.jsx';
@@ -20,7 +21,7 @@ import { pendingCount } from './offline/index.js';
 import { ClockButton } from './components/TimeClock.jsx';
 import { useLiveEvents } from './live.js';
 import MfaSetup from './components/MfaSetup.jsx';
-import { Sun, CalendarDays, Users, MessageSquare, Inbox as InboxIcon, PhoneCall, Megaphone, Receipt, ListChecks, ChartColumn, Landmark, Settings as SettingsIcon, Search, PanelLeftClose, PanelLeftOpen, LogOut, Keyboard, Monitor, Moon, Sparkles, Phone, Building2, Star, HelpCircle, AlertTriangle } from 'lucide-react';
+import { Sun, CalendarDays, Users, MessageSquare, Inbox as InboxIcon, PhoneCall, Megaphone, Receipt, ListChecks, ChartColumn, Landmark, Settings as SettingsIcon, Search, PanelLeftClose, PanelLeftOpen, LogOut, Keyboard, Monitor, Moon, Sparkles, Phone, Building2, Star, HelpCircle, AlertTriangle, BookOpen } from 'lucide-react';
 import { getThemePref, setThemePref, watchTheme } from './theme.js';
 
 // Pages load on demand so the first screen appears quickly.
@@ -34,6 +35,7 @@ const Finance = lazy(() => import('./pages/Finance.jsx'));
 const Ask = lazy(() => import('./pages/Ask.jsx'));
 const Calls = lazy(() => import('./pages/Calls.jsx'));
 const Group = lazy(() => import('./pages/Group.jsx'));
+const Intranet = lazy(() => import('./pages/Intranet.jsx'));
 const Reputation = lazy(() => import('./pages/Reputation.jsx'));
 const Campaigns = lazy(() => import('./pages/Campaigns.jsx'));
 const UnsubscribePage = lazy(() => import('./pages/public/UnsubscribePage.jsx'));
@@ -227,6 +229,7 @@ function StaffApp() {
     ['/reputation', Star, 'Reviews', can('patients:read')],
     ['/claims', Receipt, 'Billing', can('billing:read')],
     ['/office', ListChecks, 'To-do & labs', true],
+    ['/intranet', BookOpen, 'Intranet', true],
     ['/reports', ChartColumn, 'Reports', can('reports:read')],
     ['/ask', Sparkles, 'Ask your data', can('reports:read')],
     ['/finance', Landmark, 'Finance', can('finance:read')],
@@ -344,6 +347,7 @@ function Shell({ nav }) {
     <div className={`app${railOpen ? ' rail-open' : ''}`}>
       <a href="#main" className="skip-link">Skip to content</a>
       <CommandPalette />
+      <IntranetCommands />
       <KeyboardHelp />
       <Toasts />
       <Assistant />
@@ -412,6 +416,7 @@ function Shell({ nav }) {
             <Route path="/reputation" element={<Reputation />} />
             <Route path="/help" element={<Help />} />
             <Route path="/settings" element={<Settings />} />
+            <Route path="/intranet/*" element={<Intranet />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Suspense>
