@@ -582,6 +582,32 @@ LB5. **Special materials and parts, not just lab cases (asked for):** a visit ca
      inventory module (stock reserved if on the shelf, reorder if not), shown on the schedule card with the lab status
      in one "ready / not ready" badge, flagged in the huddle days ahead, checked in by photo/voice like lab cases.
      Templates per procedure (e.g. implant placement → fixture + healing abutment + graft) prefill what's needed.
+## X-ray AI as a second set of eyes (asked for)
+Builds on the AI x-ray findings framework (provider adapters for Pearl/Overjet, overlay on the viewer).
+XR1. **Use FDA-cleared detection, not a home-grown model:** finish/verify the Pearl (Second Opinion) and Overjet adapters
+     and add VideaHealth; findings (caries by surface, calculus, periapical radiolucency, bone level, margin
+     discrepancies, existing restorations) shown as a toggleable overlay with confidence, clearly labelled "AI
+     suggestion — the dentist decides". A general-purpose AI model is not validated for this and is not used to
+     detect disease.
+XR2. **Don't miss things:** each AI finding is compared with the chart — "AI saw possible caries on #19 D; not charted"
+     — as a short review list for the dentist (accept → chart it with the finding linked as the reason, or dismiss
+     with one tap); pre-appointment "second look" on today's patients' new x-rays; all accept/dismiss recorded (rule
+     10), never charted automatically.
+XR3. **Patient education:** the overlay (with the dentist's accepted findings only) can be shown on the chair screen
+     to explain treatment, and feeds the treatment presentation.
+
+## Exams today and the production they predict (asked for; business view)
+EX1. The business view and huddle show today's exams by type: new patient, recall/periodic, emergency/limited, perio
+     (from the codes on today's visits), vs a daily target per type.
+EX2. **Value of an exam, learned from the practice's own history:** for each exam type (and provider), the average
+     production diagnosed and actually completed within 3, 6 and 12 months after the exam (from the diagnosis &
+     conversion funnel, DX) — e.g. "a new patient exam is worth $1,840 over 12 months; recall $610; emergency $1,120".
+     The owner can override with their own values.
+EX3. **Enough exams to support production:** today's (and this week's/month's) exams × value = the future production
+     they're likely to generate, compared with the production goal for the coming months — "This month's exams
+     support about $96k of the $110k goal: add ~9 new patient exams or ~25 recall exams"; trends in metrics and the
+     monthly email.
+
 ## Then: remaining workflow batches
 9. Batch 4 (32–44): new patient setup, ERA/EOB posting, prescriptions, lab cases, huddle actions, recall lists,
    pre-auths, financing, adjustments, referrals, end-of-day, review requests (fix the count bug), clock in/out.
