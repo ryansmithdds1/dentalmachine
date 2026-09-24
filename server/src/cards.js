@@ -237,14 +237,14 @@ export function reassignText({ patient, practice, visit, toName }) {
 // Everything a card can show. `line` items are what the card showed before layouts existed; the default layout
 // reproduces it exactly. Keys the client doesn't know are refused so a typo can't save a broken layout.
 export const CARD_ITEMS = [
-  'medical_alert', 'name', 'preferred_name', 'age', 'birthday', 'new_patient', 'confirmation', 'ready', 'asap', 'recurring', 'insurance', 'readiness',
+  'medical_alert', 'name', 'preferred_name', 'age', 'birthday', 'new_patient', 'confirmation', 'no_show_risk', 'ready', 'asap', 'recurring', 'insurance', 'readiness',
   'opportunity', 'wait', 'late', 'urgent_prefs', 'strikes', 'doctor_note', 'forms', 'labels', 'time', 'visit_type', 'provider', 'production',
   'balance', 'procedures', 'notes', 'personal',
 ];
 export const DEFAULT_LAYOUT = {
   version: 1,
   lines: [
-    ['medical_alert', 'name', 'urgent_prefs', 'strikes', 'doctor_note', 'confirmation', 'ready', 'asap', 'recurring', 'insurance', 'readiness', 'opportunity', 'wait', 'late'],
+    ['medical_alert', 'name', 'urgent_prefs', 'strikes', 'doctor_note', 'confirmation', 'no_show_risk', 'ready', 'asap', 'recurring', 'insurance', 'readiness', 'opportunity', 'wait', 'late'],
     ['time', 'visit_type', 'personal'],
     ['provider', 'production'],
     ['procedures'],

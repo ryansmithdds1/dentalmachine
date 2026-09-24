@@ -28,6 +28,8 @@
 // The engine is pure (generate/solve take a plain `day` object) so it can be tested without a database; loadDay
 // gathers the rows. Times are practice-local wall-clock strings ('YYYY-MM-DD HH:MM'); inside, minutes of the day.
 import { scheduleProduction, loadTemplates, planDays, blocksOn, kindOf, addDays } from './production.js';
+import { noShowRisks } from './predict/noshow.js';
+import { forScreen } from './predict/index.js';
 import { providerHoursOn } from './hours.js';
 import { typeDuration } from './patterns.js';
 import { practiceNow, isRealDate, friendlyDateTime } from './util.js';
@@ -96,7 +98,7 @@ export const workKind = (proc, providerType = null) => (providerType ? kindOf(pr
 //   asap: [{ appointment_id, patient, provider_id, kind, minutes, fee, collectible, from_time, type_id }],
 //   waitlist: [{ waitlist_id, patient, provider_id, days, times, minutes, fee, collectible, reason }],
 //   recallDue: [{ recall_id, patient, kind, minutes, fee, collectible, type_id, name, due_date, blocked }],
-//   risk: { [patient_id]: { no_shows, late_cancels, visits, completed } },
+//   noShow: { [appointment_id]: { probability, percent, level: 'high'|'some'|'low', reasons, confidence } } (predict/noshow.js),
 // }
 
 const live = (v) => !INACTIVE.includes(v.status);
@@ -425,25 +427,20 @@ export function shortenOpportunities(day) {
   return out;
 }
 
-// (f) No-show risk: missed and late-cancelled visits in the last two years, a first visit, not confirmed yet.
-export function riskOf(h = {}, visit = {}) {
-  const score = (h.no_shows || 0) * 2 + (h.late_cancels || 0) + (!h.completed ? 1 : 0) + (visit.confirmed ? -3 : 0);
-  const why = [];
-  if (h.no_shows) why.push(`${h.no_shows} missed ${h.no_shows === 1 ? 'visit' : 'visits'}`);
-  if (h.late_cancels) why.push(`${h.late_cancels} cancelled ${h.late_cancels === 1 ? 'visit' : 'visits'}`);
-  if (!h.completed) why.push('first visit');
-  return { level: score >= 3 ? 'high' : score >= 2 ? 'medium' : 'low', score, why: why.join(' · ') };
-}
+// (f) No-show risk: the predicted chance each unconfirmed visit is missed or cancelled late (predict/noshow.js — the
+// patient's own record, how far ahead it was booked, the day and time, the visit type, a balance owed, against the
+// office's usual rate). 'high' and 'some' are set from the probability there; 'low' isn't suggested.
 export function confirmOpportunities(day) {
   const out = [];
   for (const v of day.visits) {
     if (!['scheduled'].includes(v.status) || v.confirmed || v.s < day.nowMin || v.here === false) continue;
-    const r = riskOf(day.risk?.[v.patient.id], v);
-    if (r.level === 'low') continue;
+    const r = day.noShow?.[v.id];
+    if (!r || r.level === 'low' || !r.level) continue;
     out.push(base(day, {
       key: `conf:${v.id}`, kind: 'confirm', patient: { id: v.patient.id, name: shortName(v.patient) }, appointment_id: v.id, provider_id: v.provider_id,
-      visit: { id: v.id, start: v.s, end: v.e }, fee: 0, collectible: 0, at_risk: v.fee, minutes: 0, risk: r.level,
-      title: `Double-confirm ${shortName(v.patient)} (${clock(v.s)})`, detail: `${r.level === 'high' ? 'High' : 'Some'} no-show risk: ${r.why || 'not confirmed'}${v.fee ? ` · ${dollars(v.fee)} booked` : ''}`,
+      visit: { id: v.id, start: v.s, end: v.e }, fee: 0, collectible: 0, at_risk: v.fee, minutes: 0, risk: r.level, probability: r.probability,
+      title: `Double-confirm ${shortName(v.patient)} (${clock(v.s)})`,
+      detail: `No-show risk ${r.percent}%${r.reasons?.length ? ` — ${r.reasons.join(', ')}` : ''}${v.fee ? ` · ${dollars(v.fee)} booked` : ''}`,
       action: { type: 'confirm', appointment_id: v.id },
     }));
   }
@@ -840,21 +837,12 @@ export async function loadDay(db, user, { date, locationId = null, withFinder = 
     }
   }
 
-  // No-show history of today's patients (last two years).
-  const risk = {};
-  if (todayPts.length) {
-    const since = `${addDays(date, -730)} 00:00`;
-    for (const r of await db.all(
-      `SELECT patient_id, SUM(CASE WHEN status = 'no_show' THEN 1 ELSE 0 END) AS no_shows,
-         SUM(CASE WHEN status = 'cancelled' AND broken_reason IS NOT NULL AND broken_reason != 'office' THEN 1 ELSE 0 END) AS late_cancels,
-         SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed, COUNT(*) AS visits
-       FROM appointments WHERE practice_id = ? AND patient_id IN (${IN(todayPts)}) AND start_time >= ? AND start_time < ? GROUP BY patient_id`, pid, ...todayPts, since, `${date} 00:00`,
-    )) risk[r.patient_id] = { no_shows: Number(r.no_shows) || 0, late_cancels: Number(r.late_cancels) || 0, completed: Number(r.completed) || 0, visits: Number(r.visits) || 0 };
-  }
+  // The predicted no-show risk of today's visits (one batch for the day).
+  const noShow = Object.fromEntries([...(await noShowRisks(db, pid, apptRows, { now }))].map(([id, r]) => [id, forScreen(r)]));
 
   return {
     date, now, nowMin, practice: { id: pid, name: practice.name, timezone: practice.timezone, optimizer_ai: !!practice.optimizer_ai },
-    providers, chairs, visits, busy, blockouts, kept, types, planned, finder, family, asap, waitlist, recallDue, risk,
+    providers, chairs, visits, busy, blockouts, kept, types, planned, finder, family, asap, waitlist, recallDue, noShow,
   };
 }
 

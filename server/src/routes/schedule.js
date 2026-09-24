@@ -15,6 +15,7 @@ import { appointmentScope, checkOffice, canSeePatient } from '../officeaccess.js
 import { checkDayBlocks } from '../production.js';
 import { recordOfficeMove, officeReasonFrom } from '../cards.js';
 import { linkNoteBookings } from './doctornotes.js';
+import { withNoShowRisk } from '../predict/noshow.js';
 
 export const STATUSES = ['scheduled', 'confirmed', 'checked_in', 'in_chair', 'completed', 'cancelled', 'no_show'];
 export const INACTIVE = "('cancelled','no_show')";
@@ -445,6 +446,7 @@ export default function scheduleRoutes({ db }) {
     const row = await db.get(`${SELECT} WHERE a.id = ? AND a.practice_id = ?`, Number(req.params.id), req.user.practice_id);
     if (!row) throw new HttpError(404, 'Appointment not found');
     await withEligibility(db, [row]);
+    await withNoShowRisk(db, req.user.practice_id, [row]);
     row.procedures = await db.all('SELECT * FROM procedures WHERE appointment_id = ? ORDER BY id', row.id);
     if (row.series_id) row.series = await seriesInfo(row);
     res.json(row);
@@ -826,6 +828,8 @@ export default function scheduleRoutes({ db }) {
       pid, `${from} 00:00`, `${to} 24:00`, ...(location ? [location.id] : []), ...scope.args,
     );
     await withEligibility(db, appointments);
+    // Each upcoming visit's no-show risk (one set of queries for the whole range; it informs, never acts).
+    await withNoShowRisk(db, pid, appointments);
     const blockouts = await db.all(
       `SELECT * FROM blockouts WHERE practice_id = ? AND start_time < ? AND end_time > ?${location ? ' AND (operatory_id IS NULL OR operatory_id IN (SELECT id FROM operatories WHERE location_id = ?))' : ''} ORDER BY start_time`,
       pid, `${to} 24:00`, `${from} 00:00`, ...(location ? [location.id] : []),

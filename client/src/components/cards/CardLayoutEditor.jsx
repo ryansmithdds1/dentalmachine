@@ -12,7 +12,7 @@ import './cards.css';
 // whole office (administrators) or just for me. Opened from the schedule (the cards button in its corner) and from
 // Settings → Schedule → Appointment cards. Keyboard: Tab to an item, ← → to move it along its line, ↑ ↓ between
 // lines, Delete to take it off.
-const ICONISH = new Set(['medical_alert', 'name', 'preferred_name', 'age', 'birthday', 'new_patient', 'confirmation', 'ready', 'asap', 'recurring', 'insurance', 'readiness', 'opportunity', 'wait', 'late', 'urgent_prefs', 'strikes', 'doctor_note', 'forms', 'labels']);
+const ICONISH = new Set(['medical_alert', 'name', 'preferred_name', 'age', 'birthday', 'new_patient', 'confirmation', 'no_show_risk', 'ready', 'asap', 'recurring', 'insurance', 'readiness', 'opportunity', 'wait', 'late', 'urgent_prefs', 'strikes', 'doctor_note', 'forms', 'labels']);
 const clone = (l) => JSON.parse(JSON.stringify(l));
 const COLORS = ['#dc2626', '#d97706', '#16a34a', '#0d9488', '#2563eb', '#7c3aed', '#db2777', '#64748b'];
 
@@ -21,6 +21,7 @@ const SAMPLE = (minutes) => ({
   end_time: `2030-06-14 ${String(9 + Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`, type_name: minutes > 30 ? 'Crown prep' : 'Recheck',
   provider_name: 'Dr. Ann Lee', operatory_name: 'Op 2', production: minutes > 30 ? 135000 : 0, procedure_summary: minutes > 30 ? 'D2740 #30, D0220' : '', medical_alerts: 'Latex allergy',
   eligibility: { status: 'active', checked_at: new Date().toISOString() }, notes: 'Prefers the window chair', asap: 0, type_color: '#2563eb', provider_color: '#0d9488',
+  no_show_risk: { percent: 34, level: 'some', reasons: ['2 missed visits in the past year'] },
 });
 const SAMPLE_X = (layout) => ({
   prefs: [{ label: 'Blanket', urgent: true }, { label: 'Headphones / music', urgent: false }], strikes: { count: 1, list: [{ happened_on: '2030-05-02', kind: 'move', reason_label: 'Provider sick' }] },

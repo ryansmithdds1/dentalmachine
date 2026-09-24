@@ -10,6 +10,7 @@ import OpportunityPanel from '../opportunities/OpportunityPanel.jsx';
 import VisitExtras from '../cards/VisitExtras.jsx';
 import { useConnection } from '../cards/cardData.js';
 import { loadCard } from './PatientHoverCard.jsx';
+import { NoShowChip } from '../predict/RiskChip.jsx';
 import { useShortcuts } from '../../shortcuts.js';
 import { Stethoscope, ShieldCheck, UserRound, Wallet, FileText, ScanLine, Pin } from 'lucide-react';
 
@@ -176,6 +177,12 @@ export default function AppointmentDrawer({ appt: a, can, onClose, onStatus, onS
           <dt>Reason</dt><dd>{a.reason || '—'}</dd>
           {a.procedure_summary && (<><dt>Procedures</dt><dd>{a.procedure_summary}</dd></>)}
           <dt>Production</dt><dd>{money(a.production || 0)}</dd>
+          {a.no_show_risk && active && (
+            <>
+              <dt>No-show risk</dt>
+              <dd className="drawer-noshow"><NoShowChip risk={a.no_show_risk} withReasons /></dd>
+            </>
+          )}
           <dt>Confirmation</dt>
           <dd>
             {a.confirmed_at ? `Confirmed ${CONFIRMED_VIA[a.confirmed_via] || ''} ${fmtDateTime(a.confirmed_at.replace('T', ' '))}` : a.confirmed_via === 'left_message' ? 'Left a message' : a.reminder_sent_at ? `Reminder sent ${fmtDateTime(a.reminder_sent_at)}` : 'Not reminded yet'}

@@ -813,12 +813,12 @@ export default function Schedule() {
             const n = view === 'day' && mode === 'operatory' ? dayAppts.filter((a) => chairLayout.hidden.includes(a.operatory_id) && !['cancelled', 'no_show'].includes(a.status)).length : 0;
             return n > 0 ? <button className="stat-pill warn hidden-chairs" onClick={() => setChairLayout({ ...chairLayout, hidden: [] })} title="Some chairs are hidden on this computer — show them all"><EyeOff size={13} /> {n} in hidden chairs</button> : null;
           })()}
-          <span className="stat-pill">{dayAppts.length} appts</span>
           {unconfirmed > 0 && (
             <button className="stat-pill warn unconfirmed-link" onClick={() => nav(`/followups?tab=unconfirmed${view === 'week' ? '&days=7' : `&date=${date}`}`)} title="Open the list to confirm them or text a reminder">
               {unconfirmed} unconfirmed
             </button>
           )}
+          <span className="stat-pill">{dayAppts.length} appts</span>
           {!prodSum && (
             <span className="stat-pill prod" title="Scheduled production">
               {short(production)}{goal ? <span className="muted"> / {short(goal)}</span> : ''}

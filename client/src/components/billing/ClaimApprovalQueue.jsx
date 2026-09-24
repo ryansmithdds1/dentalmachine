@@ -8,6 +8,7 @@ import { ErrorBox } from '../ui.jsx';
 import { useShortcuts } from '../../shortcuts.js';
 import { toast } from '../../toast.js';
 import { describeResponses } from '../ClaimEdi.jsx';
+import { DenialChip } from '../predict/RiskChip.jsx';
 import '../../pages/monthly.css';
 
 // Billing → Ready to approve (workflow 24, docs/workflows/specs/24-claims.md). Claims for finished work are prepared
@@ -170,7 +171,7 @@ function GroupRows({ g, current, w, busy, skipping, onPick, onApprove, onChanged
         <td>{g.carrier_name}{g.priority !== 'primary' && <span className="muted"> ({g.priority})</span>}</td>
         <td>{codes}</td>
         <td>{fmtDate(g.first_service)}</td>
-        <td>{g.status === 'ready' ? <span className="badge ok">Ready</span> : <span className="badge warn">Needs a fix</span>}</td>
+        <td>{g.status === 'ready' ? <span className="badge ok">Ready</span> : <span className="badge warn">Needs a fix</span>}{g.denial?.claim && <> <DenialChip denial={g.denial.claim} /></>}</td>
         <td className="num">{money(g.total_fee)}</td>
         <td className="num">{money(g.est_insurance)}</td>
         <td className="no-print" style={{ whiteSpace: 'nowrap' }}>
@@ -248,6 +249,7 @@ function GroupDetail({ g, w, busy, onApprove, onChanged }) {
         </ul>
       )}
       {g.notes.length > 0 && <div className="muted" style={{ fontSize: 12 }}>Worth knowing: {g.notes.join(' · ')}</div>}
+      {g.denial?.claim && <DenialLines denial={g.denial} />}
       {w && needsFile && (
         <div className="inline" style={{ flexWrap: 'wrap', gap: 6 }}>
           {suggestions.length ? suggestions.map((s) => (
@@ -341,6 +343,22 @@ function PrepSetting({ enabled, onChange }) {
       <ErrorBox error={err} />
       <label className="checkbox"><input type="checkbox" checked={enabled} onChange={(e) => flip(e.target.checked)} /> Prepare claims for approval automatically</label>
       <div style={{ fontSize: 12 }}>Claims are only prepared and checked; a person always approves before anything is sent.</div>
+    </div>
+  );
+}
+
+// The chance the payer denies it, with the reasons, per line when there's more than one (a prediction from this
+// office's history and the checks above — it doesn't hold or change the claim).
+function DenialLines({ denial }) {
+  const lines = denial.lines.filter((l) => l.reasons?.length);
+  return (
+    <div className="denial-lines" style={{ fontSize: 13 }}>
+      <DenialChip denial={denial.claim} withReasons />
+      {denial.lines.length > 1 && lines.length > 0 && (
+        <ul className="risk-lines">
+          {lines.map((l) => <li key={l.procedure_id}>{l.code}{l.tooth ? ` #${l.tooth}` : ''}: {l.percent}% — {l.reasons.join(', ')}</li>)}
+        </ul>
+      )}
     </div>
   );
 }

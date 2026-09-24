@@ -12,6 +12,7 @@ import { estimateCoverage } from './benefits.js';
 import { attachmentHints } from './attachments.js';
 import { scrubWork } from './scrubber.js';
 import { suggestAttachments } from './routes/attachments.js';
+import { denialFor, narrativeOf } from './predict/denial.js';
 
 // Older unbilled work is past most payers' filing limits: the month-end packet's business, not this list's.
 export const PREP_LOOKBACK_DAYS = 365;
@@ -146,6 +147,9 @@ async function checkGroup(db, g, { practice, claimProblems }) {
   for (const r of risks.filter((x) => x.level === 'deny')) fixes.push({ kind: 'risk', hard: false, message: `${r.code}${r.tooth ? ` #${r.tooth}` : ''}: ${r.message}` });
   for (const r of risks.filter((x) => x.level === 'warn' && x.fix !== 'narrative')) notes.push(`${r.code}${r.tooth ? ` #${r.tooth}` : ''}: ${r.message}`);
 
+  // The chance the payer denies it, from this office's history with this payer and these codes plus the checks above
+  // (predict/denial.js). It informs the person approving; it never holds or changes a claim by itself.
+  const denial = await denialFor(db, practice.id, { carrierId: carrier.id, carrierName: carrier.name, items, risks, hasNarrative: narrativeOf(prepared, null) });
   const est = await estimateCoverage(db, { ...policy, carrier_name: carrier.name }, items);
   return {
     key: g.key, patient_id: g.patient_id, patient_name: `${patient.first_name} ${patient.last_name}`, patient_insurance_id: policy.id,
@@ -156,7 +160,7 @@ async function checkGroup(db, g, { practice, claimProblems }) {
     total_fee: items.reduce((t, i) => t + i.fee, 0), est_insurance: est.total_insurance,
     status: fixes.length ? 'needs_fix' : 'ready', fixes, can_override: fixes.length > 0 && fixes.every((f) => !f.hard), notes,
     attachments: prepared.map((a) => ({ id: a.id, report_type: a.report_type, document_id: a.document_id, filename: a.filename, narrative: a.narrative })),
-    suggestions,
+    suggestions, denial,
   };
 }
 

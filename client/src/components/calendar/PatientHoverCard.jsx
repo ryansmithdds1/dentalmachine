@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { TriangleAlert, Pill, Pin, Phone, ShieldCheck, ShieldAlert, ShieldQuestion, CalendarClock, History, ClipboardList, CircleSlash } from 'lucide-react';
 import { api } from '../../api.js';
 import { money, age, fmtDate, fmtDateTime } from '../../format.js';
+import { reasonsText } from '../predict/RiskChip.jsx';
 
 // Cards are kept for a minute, so moving between visits is instant but a balance paid at checkout shows.
 const cache = new Map();
@@ -72,6 +73,7 @@ export default function PatientHoverCard({ appt, anchor }) {
             {card.last_visit && <div><dt><History size={13} /></dt><dd>Last seen {fmtDate(card.last_visit.start_time)} <span className="muted">· {card.last_visit.reason || 'visit'}</span></dd></div>}
             {card.next_visit && <div><dt><CalendarClock size={13} /></dt><dd>Next {fmtDateTime(card.next_visit.start_time)} <span className="muted">· {card.next_visit.reason || 'visit'}</span></dd></div>}
             {card.unscheduled?.count > 0 && <div><dt><ClipboardList size={13} /></dt><dd>{card.unscheduled.count} planned, not scheduled <span className="muted">· {money(card.unscheduled.amount)}</span></dd></div>}
+            {appt.no_show_risk && (() => { const r = appt.no_show_risk; const tone = r.level === 'high' ? 'hc-bad' : r.level === 'some' ? 'hc-warn' : ''; return <div data-noshow-risk={r.percent}><dt><CircleSlash size={13} className={tone} /></dt><dd><b className={tone}>No-show risk {r.percent}%</b>{reasonsText(r) && <span className="muted"> · {reasonsText(r)}</span>}</dd></div>; })()}
             {card.missed_2y > 0 && <div><dt><CircleSlash size={13} className="hc-bad" /></dt><dd>{card.missed_2y} missed visit{card.missed_2y === 1 ? '' : 's'} in 2 years</dd></div>}
           </dl>
         </>

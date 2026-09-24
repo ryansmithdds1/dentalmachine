@@ -1,4 +1,4 @@
-import { Check, CheckCheck, DoorOpen, Armchair, Pill, TriangleAlert, Repeat, Cake, Star, HandHeart, CalendarX2, MessageSquareText, MessageCircleHeart } from 'lucide-react';
+import { Check, CheckCheck, DoorOpen, Armchair, Pill, TriangleAlert, Repeat, Cake, Star, HandHeart, CalendarX2, MessageSquareText, MessageCircleHeart, CircleSlash } from 'lucide-react';
 import { eligibilityBadge, money } from '../../format.js';
 import { READY_LABEL, READY_SHORT } from '../calendar/flow.js';
 import { waitLabel } from '../calendar/late.js';
@@ -7,6 +7,7 @@ import ReadinessBadge from '../readiness/ReadinessBadge.jsx';
 import { PaperworkBadgeFor } from '../consents/PaperworkBadge.jsx';
 import { strikeLabel, strikeTitle } from './cardData.js';
 import './cards.css';
+import '../predict/predict.css';
 
 // The face of an appointment card, drawn from a layout (S6): lines of items, in order. The default layout is
 // exactly the card as it was before layouts existed (the new PP1/S8/DN1 marks only appear when there's something
@@ -14,7 +15,7 @@ import './cards.css';
 export const DEFAULT_LAYOUT = {
   version: 1,
   lines: [
-    ['medical_alert', 'name', 'urgent_prefs', 'strikes', 'doctor_note', 'confirmation', 'ready', 'asap', 'recurring', 'insurance', 'readiness', 'opportunity', 'wait', 'late'],
+    ['medical_alert', 'name', 'urgent_prefs', 'strikes', 'doctor_note', 'confirmation', 'no_show_risk', 'ready', 'asap', 'recurring', 'insurance', 'readiness', 'opportunity', 'wait', 'late'],
     ['time', 'visit_type', 'personal'],
     ['provider', 'production'],
     ['procedures'],
@@ -37,6 +38,7 @@ export const ITEMS = {
   balance: ['Balance due', 'What the account owes (people who can see billing)'],
   insurance: ['Insurance / eligibility', 'Verified, inactive or not checked'],
   confirmation: ['Confirmation status', 'Confirmed, checked in, in the chair, done'],
+  no_show_risk: ['No-show risk', 'The predicted chance they miss it, when it’s higher than usual'],
   medical_alert: ['Medical alert', 'Medical alerts and premedication'],
   forms: ['Forms & consents', 'Paperwork done or still to do'],
   readiness: ['Readiness', 'Lab case and parts ready'],
@@ -83,6 +85,12 @@ const DRAW = {
   birthday: ({ a, col }) => (a.dob && a.dob.slice(5, 10) === col.date.slice(5, 10) ? <Cake className="cc-cake" size={12} strokeWidth={2.4} aria-label="Birthday today" /> : null),
   new_patient: ({ x }) => (x?.new_patient ? <Star className="cc-star" size={12} strokeWidth={2.4} aria-label="New patient" /> : null),
   confirmation: ({ a }) => { if (!STATUS_ICON[a.status]) return null; const [Icon, text] = STATUS_ICON[a.status]; return <span className={`cal-status s-${a.status}`} title={text}><Icon size={11} strokeWidth={3} /></span>; },
+  // Only when it's higher than usual (the server's level); the hover card and visit panel always show the number.
+  no_show_risk: ({ a }) => (a.no_show_risk && a.no_show_risk.level !== 'low' ? (
+    <span className={`cc-risk ${a.no_show_risk.level}`} data-noshow-risk={a.no_show_risk.percent}
+      title={`No-show risk ${a.no_show_risk.percent}%${a.no_show_risk.reasons?.length ? ` — ${a.no_show_risk.reasons.join(', ')}` : ''}`}
+      aria-label={`No-show risk ${a.no_show_risk.percent}%`}><CircleSlash size={10} strokeWidth={2.6} />{a.no_show_risk.percent}%</span>
+  ) : null),
   ready: ({ a }) => (a.status === 'in_chair' && a.ready_for ? <span className={`cal-ready r-${a.ready_for}`} title={READY_LABEL[a.ready_for]}>{READY_SHORT[a.ready_for]}</span> : null),
   asap: ({ a }) => (a.asap ? <span className="cal-asap" title="Wants an earlier time">ASAP</span> : null),
   recurring: ({ a }) => (a.series_id ? <Repeat className="cal-repeat" size={11} strokeWidth={2.5} aria-label="Recurring visit" /> : null),

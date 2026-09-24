@@ -1132,6 +1132,10 @@ kbd { display: inline-block; min-width: 20px; padding: 1px 6px; border: 1px soli
 }
 .sched-stats { container-type: inline-size; }
 @container (max-width: 100px) { .stat-pill, .live-dot { display: none; } }
+/* The unconfirmed count is the pill people act on: the stats keep room for it, and the provider filter gives
+   way first (it would otherwise squeeze every pill out on a laptop-width screen). */
+.sched-stats { min-width: 128px; }
+.sched-controls select { max-width: 150px; text-overflow: ellipsis; }
 
 /* Today: every summary card on one row on a desktop screen; calmer flags */
 .grid-4 { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }

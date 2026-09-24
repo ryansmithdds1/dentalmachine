@@ -5,6 +5,7 @@ import { findOr404, audit, insert, recorded, practiceNow, isRealDate } from '../
 import { structured, aiClient } from '../ai.js';
 import { PdfDoc } from '../pdf.js';
 import { scrubClaim } from '../scrubber.js';
+import { claimDenial } from '../predict/denial.js';
 import { chartContext } from './scribe.js';
 
 // Getting claims paid the first time: the denial-risk check, and narratives and appeal letters drafted by
@@ -99,7 +100,8 @@ export default function claimAiRoutes({ db, config }) {
 
   r.get('/claims/:cid/scrub', requirePermission('billing:read'), async (req, res) => {
     const claim = await findOr404(db, 'claims', req.params.cid, req.user.practice_id, 'Claim');
-    res.json({ risks: await scrubClaim(db, claim.id) });
+    const risks = await scrubClaim(db, claim.id);
+    res.json({ risks, denial: await claimDenial(db, claim.id, risks) });
   });
 
   r.post('/claims/:cid/narrative', requirePermission('billing:write'), async (req, res) => {

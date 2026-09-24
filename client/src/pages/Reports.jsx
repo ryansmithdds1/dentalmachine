@@ -12,6 +12,7 @@ import SavedReports from '../components/SavedReports.jsx';
 import ReportBuilder from '../components/ReportBuilder.jsx';
 import ReportLibrary from '../components/ReportLibrary.jsx';
 import ProductionReport from '../components/ProductionReport.jsx';
+import PredictionAccuracy from '../components/predict/PredictionAccuracy.jsx';
 import { useCommands } from '../shortcuts.js';
 import { api, downloadCsv, dollars, getLocationId } from '../api.js';
 import { MoreRows } from '../components/ui.jsx';
@@ -25,6 +26,7 @@ export default function Reports() {
   const { data: library, error: libraryError } = useApi('/report-library');
   useCommands([
     { id: 'report-production-screen', label: 'Production & income (one screen)', hint: 'Reports', run: () => setParams({ tab: 'production' }) },
+    { id: 'report-prediction-accuracy', label: 'Prediction accuracy (no-shows, denials)', hint: 'Reports', run: () => setParams({ tab: 'predictions' }) },
     ...(library?.reports || []).map((r) => ({ id: `report-${r.id}`, label: `Report: ${r.name}`, hint: `Report library · ${r.category}`, run: () => setParams({ tab: 'library', report: r.id }) })),
   ]);
   // Reached by a typed or bookmarked address without the reports permission: say so once, instead of a dozen
@@ -45,10 +47,11 @@ export default function Reports() {
         <button className={tab === 'plans' ? 'active' : ''} onClick={() => setParams({ tab: 'plans' })}>Treatment plans</button>
         <button className={tab === 'close' ? 'active' : ''} onClick={() => setParams({ tab: 'close' })}>Close</button>
         <button className={tab === 'reconcile' ? 'active' : ''} onClick={() => setParams({ tab: 'reconcile' })}>Reconciliation</button>
+        <button className={tab === 'predictions' ? 'active' : ''} onClick={() => setParams({ tab: 'predictions' })}>Prediction accuracy</button>
         <button className={tab === 'saved' ? 'active' : ''} onClick={() => setParams({ tab: 'saved' })}>Saved & scheduled</button>
         <button className={tab === 'builder' ? 'active' : ''} onClick={() => setParams({ tab: 'builder' })}>Report builder</button>
       </div>
-      {tab === 'kpis' ? <Analytics /> : tab === 'library' ? <ReportLibrary catalog={library} error={libraryError} /> : tab === 'production' ? <ProductionReport /> : tab === 'hygiene' ? <HygieneReport /> : tab === 'plans' ? <PlanReport /> : tab === 'close' ? <CloseBooks /> : tab === 'reconcile' ? <Reconciliation /> : tab === 'saved' ? <SavedReports /> : tab === 'builder' ? <ReportBuilder /> : tab === 'referrals' ? <ReferralReport /> : tab === 'memberships' ? <MembershipReport /> : tab === 'reviews' ? <ReviewReport /> : <Operational />}
+      {tab === 'kpis' ? <Analytics /> : tab === 'library' ? <ReportLibrary catalog={library} error={libraryError} /> : tab === 'production' ? <ProductionReport /> : tab === 'hygiene' ? <HygieneReport /> : tab === 'plans' ? <PlanReport /> : tab === 'close' ? <CloseBooks /> : tab === 'reconcile' ? <Reconciliation /> : tab === 'predictions' ? <PredictionAccuracy /> : tab === 'saved' ? <SavedReports /> : tab === 'builder' ? <ReportBuilder /> : tab === 'referrals' ? <ReferralReport /> : tab === 'memberships' ? <MembershipReport /> : tab === 'reviews' ? <ReviewReport /> : <Operational />}
     </>
   );
 }

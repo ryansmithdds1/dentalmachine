@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import { harness } from './helpers.js';
 import {
   procMinutes, canPlace, openGaps, goalGaps, treatmentOpportunities, finderOpportunities, familyOpportunities, fillOpportunities,
-  shortenOpportunities, confirmOpportunities, riskOf, generate, solve, optimizeDay, uses, OPTIMIZER_SCHEMA, OPTIMIZER_COLUMNS, huddlePlan,
+  shortenOpportunities, confirmOpportunities, generate, solve, optimizeDay, uses, OPTIMIZER_SCHEMA, OPTIMIZER_COLUMNS, huddlePlan,
 } from '../src/optimizer.js';
 import { aiInput, explainPlan, cleanAnswer } from '../src/ai/optimizerExplain.js';
 import optimizerRoutes from '../src/routes/optimizer.js';
@@ -30,7 +30,7 @@ function mkDay(extra = {}) {
       { id: 2, name: 'Hal RDH', type: 'hygienist', kind: 'hygiene', hours: [[H(8), H(17)]], goal: 150000, scheduled: 100000 },
     ],
     chairs: [{ id: 11, name: 'Op 1', default_provider_id: 1, is_hygiene: 0 }, { id: 12, name: 'Hyg 1', default_provider_id: 2, is_hygiene: 1 }, { id: 13, name: 'Op 3', default_provider_id: null, is_hygiene: 0 }],
-    visits: [], busy: [], blockouts: [], kept: [], types: {}, planned: [], finder: [], family: [], asap: [], waitlist: [], recallDue: [], risk: {},
+    visits: [], busy: [], blockouts: [], kept: [], types: {}, planned: [], finder: [], family: [], asap: [], waitlist: [], recallDue: [], noShow: {},
     ...extra,
   };
 }
@@ -221,16 +221,23 @@ describe('the engine (pure)', () => {
     assert.equal(o.fee, 0, 'nothing to put there: frees the time, adds nothing yet');
   });
 
-  test('(f) no-show risk: missed visits and a first visit, not confirmed → double-confirm; confirmed visits are left alone', () => {
-    assert.equal(riskOf({ no_shows: 2, completed: 3 }, {}).level, 'high');
-    assert.equal(riskOf({ no_shows: 0, completed: 0 }, {}).level, 'low');
-    assert.equal(riskOf({ no_shows: 1, completed: 0 }, {}).level, 'high');
-    assert.equal(riskOf({ no_shows: 2, completed: 3 }, { confirmed: true }).level, 'low');
+  test('(f) no-show risk: the predicted probability drives double-confirm; low risk and confirmed visits are left alone', () => {
     const v = visit({ patient: pt(90), status: 'scheduled', confirmed: false, fee: 45000 });
-    const [o] = confirmOpportunities(mkDay({ visits: [v, visit({ patient: pt(91), status: 'confirmed' })], risk: { 90: { no_shows: 2, late_cancels: 1, completed: 4 } } }));
+    const calm = visit({ patient: pt(92), status: 'scheduled', confirmed: false });
+    const noShow = {
+      [v.id]: { probability: 0.41, percent: 41, level: 'high', reasons: ['2 missed visits in the past year', 'not confirmed yet'], confidence: 'high' },
+      [calm.id]: { probability: 0.04, percent: 4, level: 'low', reasons: [], confidence: 'high' },
+    };
+    const opps = confirmOpportunities(mkDay({ visits: [v, calm, visit({ patient: pt(91), status: 'confirmed' })], noShow }));
+    assert.equal(opps.length, 1, 'only the risky, unconfirmed visit');
+    const [o] = opps;
     assert.equal(o.kind, 'confirm');
     assert.equal(o.at_risk, 45000);
-    assert.match(o.detail, /High no-show risk: 2 missed visits · 1 cancelled visit · \$450 booked/);
+    assert.equal(o.risk, 'high');
+    assert.equal(o.probability, 0.41);
+    assert.match(o.detail, /^No-show risk 41% — 2 missed visits in the past year, not confirmed yet · \$450 booked/);
+    // No prediction (e.g. the visit is in the past) → no suggestion.
+    assert.equal(confirmOpportunities(mkDay({ visits: [v] })).length, 0);
   });
 
   test('OPT3: the plan reaches goal with the fewest moves and never puts two things in one place', () => {

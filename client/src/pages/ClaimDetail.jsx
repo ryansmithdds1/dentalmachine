@@ -9,6 +9,7 @@ import { Badge, ErrorBox, Modal, useSubmit } from '../components/ui.jsx';
 import { useShortcuts, isMac } from '../shortcuts.js';
 import { undoable, toast } from '../toast.js';
 import './claimdetail.css';
+import { DenialChip } from '../components/predict/RiskChip.jsx';
 
 export default function ClaimDetail() {
   const { id } = useParams();
@@ -188,8 +189,19 @@ function ClaimChecks({ id, status, version }) {
   // Only for claims still to send (the last answer is kept while the claim moves on).
   if (!data || !['draft', 'denied'].includes(status)) return null;
   const risks = data.risks || [];
-  const warn = data.warnings?.length || risks.length ? (
+  const denial = data.denial;
+  const warn = data.warnings?.length || risks.length || denial?.claim ? (
     <div className="public-notice" style={{ marginBottom: 12 }}>
+      {denial?.claim && (
+        <div className="claim-denial" style={{ marginBottom: 6 }}>
+          <DenialChip denial={denial.claim} withReasons />
+          {denial.lines.length > 1 && (
+            <ul className="risk-lines">
+              {denial.lines.map((l) => <li key={l.procedure_id}>{l.code}{l.tooth ? ` #${l.tooth}` : ''}: {l.percent}%{l.reasons?.length ? ` — ${l.reasons.join(', ')}` : ''}</li>)}
+            </ul>
+          )}
+        </div>
+      )}
       {risks.length > 0 && (
         <>
           <strong>Denial risks:</strong>

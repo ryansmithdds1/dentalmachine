@@ -6166,6 +6166,8 @@ CREATE INDEX IF NOT EXISTS idx_bonus_versions_plan ON bonus_plan_versions(plan_i
 -- policy's claims (Ready to approve, estimates), and the family deductible looks up a plan's subscribers.
 CREATE INDEX IF NOT EXISTS idx_claims_policy ON claims(patient_insurance_id, status);
 CREATE INDEX IF NOT EXISTS idx_policy_plan_sub ON patient_insurance(plan_id, subscriber_id);
+-- Denial predictions (predict/denial.js) ask whether each answered claim went with a narrative.
+CREATE INDEX IF NOT EXISTS idx_claim_attachments_claim ON claim_attachments(claim_id);
 `;
 
 // ---------------------------------------------------------------------------

@@ -17,6 +17,7 @@ import FinDesk from './FinDesk.jsx';
 import { sendPreauth } from '../preauthSend.js';
 import StaffCompare from './StaffCompare.jsx';
 import FinOptionsSettings from '../FinOptionsSettings.jsx';
+import { DenialChip, denialLevel } from '../predict/RiskChip.jsx';
 import './treatment.css';
 import './finoptions.css';
 
@@ -265,6 +266,12 @@ function PlanTable({ plan, quote, codes, canEdit, act, withUndo, onBook, canBook
     act(() => api.put(`/treatment-plans/${plan.id}/phase-order`, { order: list }));
   };
   const showEst = !!plan.estimate;
+  // How likely the payer is to deny each planned procedure (this office's history with the payer and code, plus the
+  // same checks a claim gets) — shown where it's worth a look, so the plan can carry a narrative or a pre-auth.
+  const { can } = useAuth();
+  const plannedIds = procs.filter((p) => p.status === 'planned').map((p) => p.id).join(',');
+  const { data: denial } = useApi(showEst && plan.estimate.policy && plannedIds && can('billing:read') ? `/predict/denial?patient_id=${plan.patient_id}&procedure_ids=${plannedIds}` : null, [plannedIds]);
+  const risk = Object.fromEntries((denial?.lines || []).filter((l) => denialLevel(l.probability) !== 'low').map((l) => [l.procedure_id, l]));
   const cols = showEst ? (plan.estimate.total_write_off > 0 ? 10 : 9) : 7;
   const multiYear = (quote?.years?.length || 0) > 1;
   const dragProps = (p) => (canEdit && p.status === 'planned' ? {
@@ -335,7 +342,7 @@ function PlanTable({ plan, quote, codes, canEdit, act, withUndo, onBook, canBook
                       />
                     ) : money(p.fee)}
                   </td>
-                  {showEst && <>{plan.estimate.total_write_off > 0 && <td className="num muted">{est[p.id]?.write_off ? `−${money(est[p.id].write_off)}` : '—'}</td>}<td className="num">{est[p.id] ? money(est[p.id].insurance) : '—'}{est[p.id]?.notes?.length ? <div className="est-note" title={est[p.id].notes.join('\n')}>{est[p.id].notes.join(' · ')}</div> : null}</td><td className="num">{est[p.id] ? money(est[p.id].patient) : '—'}</td></>}
+                  {showEst && <>{plan.estimate.total_write_off > 0 && <td className="num muted">{est[p.id]?.write_off ? `−${money(est[p.id].write_off)}` : '—'}</td>}<td className="num">{est[p.id] ? money(est[p.id].insurance) : '—'}{est[p.id]?.notes?.length ? <div className="est-note" title={est[p.id].notes.join('\n')}>{est[p.id].notes.join(' · ')}</div> : null}{risk[p.id] && <div className="est-note"><DenialChip denial={risk[p.id]} /></div>}</td><td className="num">{est[p.id] ? money(est[p.id].patient) : '—'}</td></>}
                   <td style={{ whiteSpace: 'nowrap' }}>
                     {canEdit && p.status === 'planned' && (
                       <div className="row-actions">

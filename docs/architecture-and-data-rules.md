@@ -97,6 +97,10 @@ into open times, requests, moving/cancelling a caller's own visit and messages �
 High-risk changes the assistant makes (money, claims, completing procedures, signing, prescriptions, merges,
 insurance, removals) are refused unless the person approved them on screen (`aiguard.js`); `requireHuman()`
 guards the same functions for AI that isn't a request. AI findings carry a short reason (`xray_findings.note`).
+Predictions (no-show risk per visit, denial risk per claim line — `server/src/predict/`, `docs/predictions.md`) are
+worked out when read, from the practice's own history, and are never stored on or acted on by themselves: they carry
+a probability, a confidence and plain-language reasons, and go through one adapter (built-in model by default; a
+vendor behind it falls back to the built-in model and raises a Needs attention item).
 
 ## Reconciliation, migrations, backups
 - Reports → Reconciliation compares card processor vs ledger, insurance checks vs postings, claims created →

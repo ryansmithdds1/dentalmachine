@@ -1,0 +1,15 @@
+/* Prediction chips (no-show and denial risk). Theme tokens only, so light and dark both read well. */
+.risk-chip { display: inline-flex; align-items: center; gap: 4px; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 600; line-height: 1.5; white-space: nowrap; background: var(--subtle); color: var(--text-2); }
+.risk-chip.high { background: var(--danger-soft); color: var(--danger); }
+.risk-chip.some { background: var(--warn-soft); color: var(--warn); }
+.risk-chip.low { background: var(--subtle); color: var(--text-2); }
+.risk-chip .risk-conf { font-weight: 400; opacity: 0.8; }
+.risk-why { color: var(--text-2); font-size: 12px; }
+/* On a schedule card: small, one line. */
+.cc-risk { display: inline-flex; align-items: center; gap: 2px; font-size: 10px; font-weight: 700; padding: 0 4px; border-radius: 4px; background: var(--warn-soft); color: var(--warn); }
+.cc-risk.high { background: var(--danger-soft); color: var(--danger); }
+.risk-lines { margin: 2px 0 0; padding-left: 18px; font-size: 12px; color: var(--text-2); }
+.accuracy-table td.num, .accuracy-table th.num { text-align: right; }
+.accuracy-bar { position: relative; height: 8px; min-width: 80px; background: var(--subtle); border-radius: 4px; overflow: hidden; }
+.accuracy-bar i { position: absolute; top: 0; bottom: 0; left: 0; background: var(--info); opacity: 0.35; }
+.accuracy-bar b { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--text); }

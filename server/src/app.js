@@ -88,6 +88,8 @@ import statusRoutes from './routes/status.js';
 import onboardingRoutes from './routes/onboarding.js';
 import { createGoogleBusiness } from './reviews.js';
 import { createXrayAi, registerXrayAi } from './xrayai.js';
+import { createPredictor, registerPredictor } from './predict/index.js';
+import predictRoutes from './routes/predict.js';
 import { registerFill } from './fill.js';
 import { createPlaid } from './finance/plaid.js';
 import { createQuickBooks } from './finance/quickbooks.js';
@@ -205,6 +207,8 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   qbo ??= createQuickBooks({ config, fetchImpl });
   xrayAi ??= createXrayAi({ config, fetchImpl });
   registerXrayAi(db, { storage, xrayAi });
+  // No-show and denial predictions: the built-in model, or a vendor behind the same adapter (predict/index.js).
+  registerPredictor(overrides.predictor || createPredictor({ db, config, fetchImpl }));
   registerFill(db, messenger);
   transcriber ??= createTranscriber({ config, fetchImpl });
   gbp ??= createGoogleBusiness({ config, fetchImpl });
@@ -393,6 +397,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(productionReportRoutes({ db }));
   api.use(opportunityRoutes({ db }));
   api.use(optimizerRoutes({ db, config, messenger, app: () => app }));
+  api.use(predictRoutes({ db }));
   api.use(labCheckinRoutes({ db, storage, config, messenger, transcriber }));
   api.use(cadenceRoutes({ db, messenger, mailer, config, secret }));
   api.use(txFollowRoutes({ db, messenger, mailer, config, storage }));
