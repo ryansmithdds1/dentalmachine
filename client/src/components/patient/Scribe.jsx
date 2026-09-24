@@ -9,6 +9,14 @@ import { ErrorBox } from '../ui.jsx';
 // the conversation and the chart become a draft note with the work it describes. Review, tick what to add
 // to the chart, and save (and sign). The conversation itself isn't kept.
 const SR = typeof window !== 'undefined' ? window.SpeechRecognition || window.webkitSpeechRecognition : null;
+// Recognizer errors that restarting won't fix (found by e2e/chaos/speech.test.mjs): stop and say why.
+const FATAL = {
+  'not-allowed': 'Allow the microphone for this site to use the scribe.',
+  'service-not-allowed': 'Allow the microphone for this site to use the scribe.',
+  'audio-capture': 'No microphone was found — plug one in (or check it isn’t muted) and try again, or type what was said.',
+  network: 'The browser’s speech recognition couldn’t reach its service — check the connection and try again, or type what was said.',
+  'language-not-supported': 'This browser can’t recognise English speech — type what was said.',
+};
 const clock = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
 export default function Scribe({ patient, onSaved }) {
@@ -32,7 +40,15 @@ export default function Scribe({ patient, onSaved }) {
     const t = setInterval(() => setSeconds((s) => s + 1), 1000);
     return () => clearInterval(t);
   }, [phase]);
-  useEffect(() => () => { live.current = false; rec.current?.stop(); }, []);
+  useEffect(() => () => { live.current = false; try { rec.current?.abort(); } catch { /* gone */ } }, []);
+  // Stops the recognizer and makes sure it lets go: some browsers ignore stop() and keep hearing.
+  const hush = () => {
+    live.current = false;
+    const r = rec.current;
+    rec.current = null;
+    try { r?.stop(); } catch { /* already stopped */ }
+    setTimeout(() => { try { r?.abort(); } catch { /* gone */ } }, 1000);
+  };
 
   const listen = () => {
     if (!SR) return;
@@ -40,7 +56,11 @@ export default function Scribe({ patient, onSaved }) {
     r.continuous = true;
     r.interimResults = true;
     r.lang = 'en-US';
+    let restarts = 0;
+    const current = () => rec.current === r && live.current; // not one we've stopped that keeps talking
     r.onresult = (e) => {
+      if (!current()) return;
+      restarts = 0;
       let fin = '';
       let mid = '';
       for (let i = e.resultIndex; i < e.results.length; i++) {
@@ -51,19 +71,24 @@ export default function Scribe({ patient, onSaved }) {
       setInterim(mid);
     };
     // The browser stops listening after a pause; keep going until the visit is done.
-    r.onend = () => { if (live.current) { try { r.start(); } catch { /* already restarting */ } } };
-    r.onerror = (e) => { if (e.error === 'not-allowed') { live.current = false; setError(new Error('Allow the microphone for this site to use the scribe.')); setPhase('idle'); } };
+    // Something that stops it for good: say why and leave what was heard to be finished by typing.
+    const fail = (message) => { hush(); setInterim(''); setError(new Error(message)); setPhase('paused'); };
+    r.onend = () => {
+      if (!current()) return;
+      if (++restarts > 3) return fail('The microphone keeps stopping — try again, or type what was said.');
+      try { r.start(); } catch { /* already restarting */ }
+    };
+    r.onerror = (e) => { if (current() && FATAL[e.error]) fail(FATAL[e.error]); };
     rec.current = r;
     live.current = true;
     r.start();
   };
   const start = () => { setError(null); setDraft(null); setFinalText(''); setSeconds(0); setPhase('recording'); listen(); };
-  const pause = () => { live.current = false; rec.current?.stop(); setPhase('paused'); };
+  const pause = () => { hush(); setPhase('paused'); };
   const resume = () => { setPhase('recording'); listen(); };
 
   const write = async () => {
-    live.current = false;
-    rec.current?.stop();
+    hush();
     setPhase('writing');
     setError(null);
     try {
@@ -136,7 +161,7 @@ export default function Scribe({ patient, onSaved }) {
             {SR && phase === 'recording' && <button onClick={pause}>Pause</button>}
             {SR && phase === 'paused' && <button onClick={resume}>Resume</button>}
             <button className="primary" disabled={`${finalText}${interim}`.trim().length < 20} onClick={write}>Write note</button>
-            <button className="link" onClick={() => { live.current = false; rec.current?.stop(); setPhase('idle'); setFinalText(''); }}>Discard</button>
+            <button className="link" onClick={() => { hush(); setPhase('idle'); setFinalText(''); }}>Discard</button>
           </div>
         </>
       )}

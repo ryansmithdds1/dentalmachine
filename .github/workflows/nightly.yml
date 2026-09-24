@@ -1,0 +1,39 @@
+# Nightly bug hunt against fresh, seeded local servers (never the live site): the every-screen sweep, the
+# misbehaving-browser (chaos) tests and one end-to-end journey per role. Screenshots, the sweep report and
+# Playwright traces are uploaded when something fails. See docs/testing.md.
+name: Nightly
+on:
+  schedule:
+    - cron: '23 8 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  nightly:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [sweep, chaos, journeys]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build
+      - run: npm run e2e:${{ matrix.suite }}
+        env:
+          E2E_SHOTS: nightly-${{ matrix.suite }}
+          # The nightly sweep also clicks through every tab in every theme and size.
+          SWEEP_DEEP: ${{ matrix.suite == 'sweep' && 'all' || '' }}
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: nightly-${{ matrix.suite }}
+          path: nightly-${{ matrix.suite }}

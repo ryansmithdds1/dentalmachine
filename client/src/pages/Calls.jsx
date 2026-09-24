@@ -54,7 +54,8 @@ export default function Calls() {
       )}
       <div className="inline" style={{ margin: '12px 0', gap: 8, flexWrap: 'wrap' }}>
         <div className="tabs" style={{ margin: 0 }}>
-          {[['', 'All'], ['missed', 'Missed'], ['follow_up', 'Needs follow-up'], ['no_book', 'Didn’t book'], ['sources', 'Sources']].map(([k, l]) => <button key={k} className={filter === k ? 'active' : ''} onClick={() => setFilter(k)}>{l}</button>)}
+          {/* Sources and "didn't book" are reports (reports:read on the server): offered only to those who can open them (e2e sweep). */}
+          {[['', 'All'], ['missed', 'Missed'], ['follow_up', 'Needs follow-up'], ...(can('reports:read') || can('phones:coach') ? [['no_book', 'Didn’t book']] : []), ...(can('reports:read') ? [['sources', 'Sources']] : [])].map(([k, l]) => <button key={k} className={filter === k ? 'active' : ''} onClick={() => setFilter(k)}>{l}</button>)}
         </div>
         <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search calls (a word said, a topic)" aria-label="Search calls" style={{ maxWidth: 260 }} />
         {can('patients:read') && <Link to="/phones" className="small">Coaching and missed calls →</Link>}
@@ -125,7 +126,8 @@ function CallDetail({ id, canWrite, onClose }) {
 
 // Call tracking: calls, new callers and the patients they became, by marketing source.
 function Sources({ days }) {
-  const { data } = useApi(`/calls/sources?days=${days}`);
+  const { data, error } = useApi(`/calls/sources?days=${days}`);
+  if (error) return <ErrorBox error={error} />; // e.g. no reports permission: say so, not "Loading…" for ever (e2e sweep)
   if (!data) return <div className="empty">Loading…</div>;
   const m = (c) => (c == null ? '—' : `$${Math.round(c / 100).toLocaleString()}`);
   return (

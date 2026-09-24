@@ -18,6 +18,10 @@ const TABS = [['team', 'Team', Trophy], ['missed', 'Missed calls', PhoneMissed],
 const n = (v, suffix = '') => (v == null ? '—' : `${v}${suffix}`);
 
 export default function Phones() {
+  const { can } = useAuth();
+  // "Why they didn't book" is for coaches and people with the reports permission (the server says the same);
+  // don't offer a tab that only answers "missing permission" (found by the e2e sweep).
+  const tabs = TABS.filter(([k]) => k !== 'no_book' || can('phones:coach') || can('reports:read'));
   const [tab, setTab] = useState('team');
   const [days, setDays] = useState(30);
   const to = todayLocal();
@@ -32,7 +36,7 @@ export default function Phones() {
       </div>
       <div className="inline" style={{ margin: '12px 0', gap: 8 }}>
         <div className="tabs" style={{ margin: 0 }} role="tablist">
-          {TABS.map(([k, l, Icon]) => <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'active' : ''} onClick={() => setTab(k)}><Icon size={14} /> {l}</button>)}
+          {tabs.map(([k, l, Icon]) => <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'active' : ''} onClick={() => setTab(k)}><Icon size={14} /> {l}</button>)}
         </div>
         {['team', 'missed', 'no_book'].includes(tab) && (
           <select value={days} onChange={(e) => setDays(Number(e.target.value))} aria-label="Period"><option value={7}>7 days</option><option value={30}>30 days</option><option value={90}>90 days</option></select>
@@ -140,7 +144,8 @@ function Missed({ from, to }) {
           <p className="muted" style={{ fontSize: 12 }}>Whoever took the call; otherwise the people who answer phones and were clocked in (or scheduled) then.</p>
           <table><thead><tr><th>Position / person</th><th className="num">Rang</th><th className="num">Missed</th><th className="num">%</th></tr></thead>
             <tbody>
-              {data.by_position.map((p) => <tr key={p.position}><td><strong>{p.position.replace('_', ' ')}</strong></td><td className="num">{p.rang}</td><td className="num">{p.missed}</td><td className="num">{n(p.missed_pct, '%')}</td></tr>)}
+              {/* by_position comes only with the coaching view; others with reports:read get the rest (found by the e2e sweep). */}
+              {(data.by_position || []).map((p) => <tr key={p.position}><td><strong>{p.position.replace('_', ' ')}</strong></td><td className="num">{p.rang}</td><td className="num">{p.missed}</td><td className="num">{n(p.missed_pct, '%')}</td></tr>)}
               {(data.people || []).map((p) => <tr key={p.user_id}><td>{p.name}</td><td className="num">{p.rang}</td><td className="num">{p.missed}</td><td className="num">{p.rang ? n(Math.round((1000 * p.missed) / p.rang) / 10, '%') : '—'}</td></tr>)}
               {data.unattributed?.rang ? <tr><td className="muted">Nobody on shift</td><td className="num">{data.unattributed.rang}</td><td className="num">{data.unattributed.missed}</td><td className="num">{n(data.unattributed.missed_pct, '%')}</td></tr> : null}
             </tbody></table>

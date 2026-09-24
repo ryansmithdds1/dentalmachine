@@ -1,0 +1,50 @@
+# Post-deploy smoke test: after every successful deployment (the Vercel GitHub integration posts a
+# deployment_status event), every 3 hours against the live site, or on demand with any URL.
+# READ-ONLY: it only signs in and looks; every other write is blocked in the browser (e2e/smoke/live.test.mjs).
+name: Post-deploy smoke
+on:
+  deployment_status:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: Site to check (read-only)
+        required: true
+        default: https://dentalmachine-server.vercel.app
+  schedule:
+    - cron: '17 */3 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: smoke-${{ github.event.deployment_status.environment_url || inputs.url || 'live' }}
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    # Only deployments that finished; a pending or failed one has nothing to check yet.
+    if: github.event_name != 'deployment_status' || github.event.deployment_status.state == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # Passed through the environment (never pasted into a script) so a URL can't inject shell.
+      SMOKE_URL: ${{ github.event.deployment_status.environment_url || github.event.deployment_status.target_url || inputs.url || 'https://dentalmachine-server.vercel.app' }}
+      # Preview deployments behind Vercel Deployment Protection: Project → Settings → Deployment Protection →
+      # Protection Bypass for Automation, saved as this repository secret. Not needed for the public site.
+      SMOKE_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+      E2E_SHOTS: smoke-screenshots
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Smoke test ${{ env.SMOKE_URL }}
+        run: node --test e2e/smoke/live.test.mjs
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: smoke-screenshots
+          path: smoke-screenshots

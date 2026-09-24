@@ -115,6 +115,7 @@ export default function LabCheckin() {
     return () => clearTimeout(t);
   }, [dictation.listening, spoken]); // eslint-disable-line react-hooks/exhaustive-deps
   const talk = (on) => (on ? (setHeard(null), dictation.start()) : dictation.stop());
+  const holdBy = useRef(null); // 'pointer' or 'key': what is holding "Hold to talk" down
 
   // ---- The slip's QR code (camera where the browser can read codes; a USB scanner types into the box) ----
   const lookup = async (value) => {
@@ -240,8 +241,13 @@ export default function LabCheckin() {
             <button type="button" onClick={() => setScan((x) => !x)} aria-pressed={scan}><ScanQrCode size={16} /> Scan slip</button>
             {writer && dictation.supported && (
               <button type="button" className={`lbc-talk${dictation.listening ? ' on' : ''}`} aria-pressed={dictation.listening}
-                onPointerDown={(e) => { e.preventDefault(); talk(true); }} onPointerUp={() => talk(false)} onPointerLeave={() => dictation.listening && talk(false)}
-                onKeyDown={(e) => { if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) { e.preventDefault(); talk(true); } }} onKeyUp={(e) => { if (e.key === ' ' || e.key === 'Enter') talk(false); }}
+                // The label grows to "Listening… let go when done", which can move the button out from under a
+                // mouse that is holding it; capturing the pointer keeps "let go" meaning let go (found by
+                // e2e/chaos/speech.test.mjs), and a hold from the keyboard isn't ended by where the mouse is.
+                onPointerDown={(e) => { e.preventDefault(); e.currentTarget.setPointerCapture?.(e.pointerId); holdBy.current = 'pointer'; talk(true); }}
+                onPointerUp={() => { holdBy.current = null; talk(false); }} onPointerCancel={() => { holdBy.current = null; talk(false); }}
+                onPointerLeave={() => holdBy.current === 'pointer' && dictation.listening && talk(false)}
+                onKeyDown={(e) => { if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) { e.preventDefault(); holdBy.current = 'key'; talk(true); } }} onKeyUp={(e) => { if (e.key === ' ' || e.key === 'Enter') { holdBy.current = null; talk(false); } }}
                 title="Hold and say: “Lab case is in for Maria Lopez, crown number 30, shade A2, looks good”">
                 <Mic size={16} /> {dictation.listening ? 'Listening… let go when done' : 'Hold to talk'}
               </button>

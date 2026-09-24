@@ -18,6 +18,7 @@ import { MoreRows } from '../components/ui.jsx';
 import { ProviderSelect, CsvButton, PrintButton } from '../components/ReportControls.jsx';
 
 export default function Reports() {
+  const { can } = useAuth();
   const [params, setParams] = useSearchParams();
   const tab = params.get('tab') || 'kpis';
   // The report library's catalog; its reports can also be opened by name from the command bar (Ctrl K).
@@ -26,6 +27,9 @@ export default function Reports() {
     { id: 'report-production-screen', label: 'Production & income (one screen)', hint: 'Reports', run: () => setParams({ tab: 'production' }) },
     ...(library?.reports || []).map((r) => ({ id: `report-${r.id}`, label: `Report: ${r.name}`, hint: `Report library · ${r.category}`, run: () => setParams({ tab: 'library', report: r.id }) })),
   ]);
+  // Reached by a typed or bookmarked address without the reports permission: say so once, instead of a dozen
+  // tabs that each wait for ever on a refused request (found by the e2e sweep).
+  if (!can('reports:read')) return <><div className="page-header"><h1>Reports</h1></div><div className="card muted">Reports need the reports permission — ask an administrator.</div></>;
   return (
     <>
       <div className="page-header"><h1>Reports</h1></div>

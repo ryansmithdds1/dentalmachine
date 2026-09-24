@@ -14,13 +14,15 @@ const STEPS = [
 const TIMEZONES = ['America/New_York', 'America/Chicago', 'America/Denver', 'America/Phoenix', 'America/Los_Angeles', 'America/Anchorage', 'Pacific/Honolulu'];
 
 export default function Setup() {
-  const { data: s, reload } = useApi('/setup');
-  const { data: practice, reload: reloadPractice } = useApi('/practice');
+  const { data: s, error: loadError, reload } = useApi('/setup');
+  const { data: practice, error: practiceError, reload: reloadPractice } = useApi('/practice');
   const { refresh } = useAuth();
   const navigate = useNavigate();
   const [step, setStep] = useState(0);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
+  // Setup is for administrators; anyone else who lands here (a bookmark, a typed address) is told why, not left on "Loading…".
+  if (loadError || practiceError) return <ErrorBox error={loadError || practiceError} />;
   if (!s || !practice) return <div className="empty">Loading…</div>;
   const key = STEPS[step][0];
   const run = async (fn, next = true) => {

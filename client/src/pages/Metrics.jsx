@@ -230,7 +230,7 @@ export default function Metrics() {
         <div>
           <h1 style={{ margin: 0 }}>Practice metrics</h1>
           <div className="muted" style={{ fontSize: 13 }}>
-            {tab === 'benchmarks' ? 'How your numbers compare with practices like yours (opt-in, anonymous)' : tab === 'diagnosis' ? 'Treatment diagnosed at exams, and how much of it gets done' : data ? `${fmtDate(data.from)}${data.to !== data.from ? ` – ${fmtDate(data.to)}` : ''} · compared with ${fmtDate(data.previous.from)}${data.previous.to !== data.previous.from ? ` – ${fmtDate(data.previous.to)}` : ''} and last year` : 'Loading…'}
+            {tab === 'benchmarks' ? 'How your numbers compare with practices like yours (opt-in, anonymous)' : tab === 'diagnosis' ? 'Treatment diagnosed at exams, and how much of it gets done' : data ? `${fmtDate(data.from)}${data.to !== data.from ? ` – ${fmtDate(data.to)}` : ''} · compared with ${fmtDate(data.previous.from)}${data.previous.to !== data.previous.from ? ` – ${fmtDate(data.previous.to)}` : ''} and last year` : error ? '' : 'Loading…'}
           </div>
         </div>
         <div className="mx-filters">

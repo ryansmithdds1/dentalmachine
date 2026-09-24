@@ -57,3 +57,27 @@ jobs:
         with:
           name: e2e-screenshots
           path: e2e-screenshots
+
+  # Every screen, as every demo role, light and dark, desktop / tablet / phone: fails on crashes, console
+  # errors, failed requests, sideways scrolling, "undefined"/"NaN" on screen and endless "Loading…".
+  # See docs/testing.md; the allowlist of known-acceptable cases is at the top of e2e/sweep/sweep.test.mjs.
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build
+      - run: npm run e2e:sweep
+        env:
+          E2E_SHOTS: sweep-screenshots
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: sweep-screenshots
+          path: sweep-screenshots

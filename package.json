@@ -19,7 +19,11 @@
     "e2e": "node --test e2e/*.test.mjs e2e/workflows/*.test.mjs",
     "loadtest": "npm run loadtest --workspace server --",
     "lint": "eslint .",
-    "e2e:workflows": "node --test e2e/workflows/*.test.mjs"
+    "e2e:workflows": "node --test e2e/workflows/*.test.mjs",
+    "e2e:sweep": "node --test e2e/sweep/sweep.test.mjs",
+    "e2e:chaos": "node --test --test-concurrency=2 e2e/chaos/*.test.mjs",
+    "e2e:journeys": "node --test --test-concurrency=2 e2e/journeys/*.test.mjs",
+    "smoke": "node e2e/smoke/live.test.mjs"
   },
   "type": "module",
   "engines": {

@@ -19,13 +19,16 @@ const STARTERS = {
 
 // Campaigns and patient surveys.
 export default function Campaigns() {
+  const { can } = useAuth();
   const [params, setParams] = useSearchParams();
-  const tab = params.get('tab') === 'surveys' ? 'surveys' : 'campaigns';
+  // Survey results are a report (reports:read on the server): the tab is for those who can open it (e2e sweep).
+  const surveys = can('reports:read');
+  const tab = params.get('tab') === 'surveys' && surveys ? 'surveys' : 'campaigns';
   return (
     <>
       <div className="tabs" style={{ marginBottom: 12 }}>
         <button className={tab === 'campaigns' ? 'active' : ''} onClick={() => setParams({})}>Campaigns</button>
-        <button className={tab === 'surveys' ? 'active' : ''} onClick={() => setParams({ tab: 'surveys' })}>Surveys</button>
+        {surveys && <button className={tab === 'surveys' ? 'active' : ''} onClick={() => setParams({ tab: 'surveys' })}>Surveys</button>}
       </div>
       {tab === 'surveys' ? <Surveys /> : <CampaignList />}
     </>

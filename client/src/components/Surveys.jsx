@@ -11,11 +11,12 @@ const TYPE_LABEL = { nps: 'Recommend us (0–10)', rating: 'Stars (1–5)', yesn
 // Campaigns → Surveys: short patient surveys with an NPS score, sent after visits or to recent patients.
 export default function Surveys() {
   const { user, can } = useAuth();
-  const { data, reload } = useApi('/surveys');
+  const { data, error: loadError, reload } = useApi('/surveys');
   const [editing, setEditing] = useState(null);
   const [results, setResults] = useState(null);
   const [err, setErr] = useState(null);
   const [note, setNote] = useState(null);
+  if (loadError) return <ErrorBox error={loadError} />; // e.g. no permission: say so, not "Loading…" for ever (e2e sweep)
   if (!data) return <div className="card">Loading…</div>;
   const admin = user.role === 'admin';
   const send = async (s) => {

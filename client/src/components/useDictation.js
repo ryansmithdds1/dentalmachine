@@ -15,6 +15,17 @@ const PAUSE_MS = 1300;
 const MAX_PIECE_MS = 25_000;
 const LOUD = 0.025; // RMS level that counts as speech
 const FALLBACK_PIECE_MS = 6000; // when pauses can't be detected
+// Recognizer errors that restarting won't fix: stop and say why, instead of restarting for ever while the
+// button still says "Listening". (Found by e2e/chaos/speech.test.mjs.)
+const FATAL = {
+  'not-allowed': 'Allow the microphone for this site to dictate.',
+  'service-not-allowed': 'Allow the microphone for this site to dictate.',
+  'audio-capture': 'No microphone was found — plug one in (or check it isn’t muted) and try again, or type instead.',
+  network: 'The browser’s speech recognition couldn’t reach its service — check the connection and try again, or type instead.',
+  'language-not-supported': 'This browser can’t recognise English speech — type instead.',
+};
+const MIC_WAIT_MS = 10_000; // a permission prompt nobody answers, or a microphone that never starts
+const MAX_RESTARTS = 3; // the recognizer ending again and again without hearing anything
 
 export default function useDictation(onPhrase, { mode = 'browser', pauseMs = PAUSE_MS } = {}) {
   const server = mode === 'server' && CAN_RECORD;
@@ -27,6 +38,8 @@ export default function useDictation(onPhrase, { mode = 'browser', pauseMs = PAU
   // Browser mode
   const rec = useRef(null);
   const pending = useRef('');
+  const heardMid = useRef(''); // words on screen not yet final: kept when the person presses Stop
+  const restarts = useRef(0);
   const timer = useRef(null);
   // Server mode
   const audio = useRef(null); // { stream, ctx, analyser, recorder, chunks, spoke, lastVoice, started, tick }
@@ -66,9 +79,15 @@ export default function useDictation(onPhrase, { mode = 'browser', pauseMs = PAU
     a.recorder.stop();
     if (live.current) newRecorder();
   };
+  const starting = useRef(false);
   const startServer = async () => {
+    starting.current = true;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+      const ask = navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+      const stream = await Promise.race([ask, new Promise((_, no) => setTimeout(() => {
+        ask.then((late) => late.getTracks().forEach((t) => t.stop()), () => {}); // arrives after we gave up: let it go
+        no(new Error('it didn’t answer — check the browser’s microphone permission'));
+      }, MIC_WAIT_MS))]);
       const ctx = new (window.AudioContext || window.webkitAudioContext)();
       // Browsers hold audio analysis until a click; if it won't run, pieces are cut on a timer instead.
       await ctx.resume().catch(() => { /* stays suspended */ });
@@ -101,6 +120,8 @@ export default function useDictation(onPhrase, { mode = 'browser', pauseMs = PAU
       live.current = false;
       setListening(false);
       setError(e?.name === 'NotAllowedError' ? 'Allow the microphone for this site to dictate.' : `The microphone couldn’t start (${e.message}).`);
+    } finally {
+      starting.current = false;
     }
   };
   const stopServer = () => {
@@ -120,25 +141,39 @@ export default function useDictation(onPhrase, { mode = 'browser', pauseMs = PAU
     r.continuous = true;
     r.interimResults = true;
     r.lang = 'en-US';
+    restarts.current = 0;
+    // Only the recognizer that is listening now counts: one that was told to stop may keep hearing (some
+    // browsers ignore stop()), and what it hears after Stop must not land in the chart.
+    const current = () => rec.current === r && live.current;
     r.onresult = (e) => {
+      if (!current()) return;
+      restarts.current = 0;
       let mid = '';
       for (let i = e.resultIndex; i < e.results.length; i++) {
         if (e.results[i].isFinal) pending.current += ` ${e.results[i][0].transcript}`;
         else mid += e.results[i][0].transcript;
       }
+      heardMid.current = mid;
       setInterim(`${pending.current} ${mid}`.trim());
       clearTimeout(timer.current);
       timer.current = setTimeout(() => { setInterim(''); flushText(); }, pauseMs);
     };
     // The browser stops after a long silence; keep listening until the dentist turns it off.
-    r.onend = () => { if (live.current) { try { r.start(); } catch { /* restarting */ } } else setListening(false); };
-    r.onerror = (e) => {
-      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
-        live.current = false;
-        setListening(false);
-        setError('Allow the microphone for this site to dictate.');
-      }
+    const fail = (message) => {
+      live.current = false;
+      rec.current = null;
+      try { r.abort(); } catch { /* already gone */ }
+      flushText();
+      setListening(false);
+      setInterim('');
+      setError(message);
     };
+    r.onend = () => {
+      if (!current()) return;
+      if (++restarts.current > MAX_RESTARTS) return fail('The microphone keeps stopping — try again, or type instead.');
+      try { r.start(); } catch { /* restarting */ }
+    };
+    r.onerror = (e) => { if (current() && FATAL[e.error]) fail(FATAL[e.error]); };
     rec.current = r;
     live.current = true;
     r.start();
@@ -147,7 +182,7 @@ export default function useDictation(onPhrase, { mode = 'browser', pauseMs = PAU
 
   const supported = server || !!SR;
   const start = () => {
-    if (!supported || live.current) return;
+    if (!supported || live.current || starting.current) return;
     setError(null);
     if (server) startServer();
     else startBrowser();
@@ -156,13 +191,20 @@ export default function useDictation(onPhrase, { mode = 'browser', pauseMs = PAU
     if (server) stopServer();
     else {
       live.current = false;
-      rec.current?.stop();
+      const r = rec.current;
+      rec.current = null;
+      // What was on screen when Stop was pressed is what they said; anything heard after it is ignored.
+      if (heardMid.current) pending.current += ` ${heardMid.current}`;
+      heardMid.current = '';
+      try { r?.stop(); } catch { /* already stopped */ }
+      // A browser that doesn't end after stop() is cancelled, so the microphone is let go.
+      setTimeout(() => { try { r?.abort(); } catch { /* already gone */ } }, 1000);
       flushText();
     }
     setListening(false);
     setInterim('');
   };
-  useEffect(() => () => { live.current = false; clearTimeout(timer.current); rec.current?.stop(); stopServer(); }, []);
+  useEffect(() => () => { live.current = false; clearTimeout(timer.current); try { rec.current?.abort(); } catch { /* gone */ } stopServer(); }, []);
 
   return { supported, server, listening, interim, error, start, stop, toggle: () => (live.current ? stop() : start()) };
 }

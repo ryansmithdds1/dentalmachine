@@ -12,6 +12,9 @@ import { useThumb } from './thumbs.js';
 
 const CAM_KEY = 'dm_camera';
 const TRIGGER_KEY = 'dm_camera_trigger';
+// A permission prompt nobody answers, or a camera another program holds, never answers at all: after this
+// long say so instead of "Starting the camera…" for ever (found by e2e/chaos/media.test.mjs).
+const CAMERA_WAIT_MS = 10_000;
 const read = (k, d) => { try { return localStorage.getItem(k) || d; } catch { return d; } };
 const write = (k, v) => { try { localStorage.setItem(k, v); } catch { /* per-computer convenience */ } };
 
@@ -41,7 +44,11 @@ export default function IntraoralCamera({ patient, photoMount, onCaptured }) {
     let cancelled = false;
     (async () => {
       try {
-        const s = await navigator.mediaDevices.getUserMedia({ video: { ...(deviceId ? { deviceId: { exact: deviceId } } : {}), width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false });
+        const ask = navigator.mediaDevices.getUserMedia({ video: { ...(deviceId ? { deviceId: { exact: deviceId } } : {}), width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false });
+        const s = await Promise.race([ask, new Promise((_, no) => setTimeout(() => {
+          ask.then((late) => late.getTracks().forEach((t) => t.stop()), () => {}); // arrives after we gave up: let it go
+          no(Object.assign(new Error('The camera didn’t start — answer the browser’s camera prompt, and check the camera is plugged in and not open in another program'), { name: 'TimeoutError' }));
+        }, CAMERA_WAIT_MS))]);
         if (cancelled) { s.getTracks().forEach((t) => t.stop()); return; }
         stream.current?.getTracks().forEach((t) => t.stop());
         stream.current = s;
