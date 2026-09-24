@@ -683,6 +683,22 @@ BL5. **Pass-through and custom fees (owner's choice):** an option to pass card p
      audited). Fees post as their own ledger lines (reversible, never hidden inside a procedure fee) and show
      clearly to the patient before they agree.
 
+## Recall types and frequencies, dialed in (asked for)
+Builds on recall_types (key, name, interval, codes, appointment type), recalls per patient, recall autopilot (cadence),
+opportunity finder frequencies and insurance frequency limits.
+RF1. **Every recall type by its codes:** prophy/adult cleaning (D1110), child prophy (D1120), perio maintenance (D4910),
+     exam (D0120/D0150), bitewings (D0272/D0274), FMX or pano (D0210/D0330), fluoride (D1206/D1208), plus office-defined
+     types (ortho check, implant maintenance, sleep appliance check); default intervals, per-patient overrides (e.g.
+     perio 3 or 4 months) with a reason, and an age rule (child/adult switches automatically).
+RF2. **Kept current automatically:** completing any of a type's codes resets its due date (from the date of service);
+     switching a patient to perio maintenance retires the prophy recall; x-rays taken elsewhere can be entered with
+     a date; nothing is ever duplicated (one recall per patient per type).
+RF3. **Clear status per patient:** a small recall panel — each type: last done, due, status (current / due soon / due /
+     overdue / scheduled with the date), and **insurance-eligible date** from the plan's frequency limits (e.g. "BWX due
+     Mar 3 · insurance pays after Apr 12"); what's due is bundled into the next hygiene visit automatically when booking.
+RF4. **Office-wide view:** recall list by type/status/provider/office, % current, overdue counts, reappointment, with
+     one-key actions (book, text, mark contacted) and exports; feeds recall autopilot and the capacity meter.
+
 ## Then: remaining workflow batches
 9. Batch 4 (32–44): new patient setup, ERA/EOB posting, prescriptions, lab cases, huddle actions, recall lists,
    pre-auths, financing, adjustments, referrals, end-of-day, review requests (fix the count bug), clock in/out.
