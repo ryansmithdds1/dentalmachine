@@ -1,0 +1,105 @@
+/* Money workflows (#11 complete today's work, #12 take a payment, #16 next hygiene visit, #17 why this balance,
+   #18 estimate). Uses the app's colour tokens so light and dark themes both work. */
+
+/* An inline panel instead of a modal (or a modal inside a modal). */
+.inline-panel {
+  border: 1px solid var(--primary);
+  border-radius: var(--radius);
+  background: var(--panel);
+  box-shadow: var(--ring);
+  padding: 14px 16px;
+  margin-bottom: 16px;
+}
+.inline-panel > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.inline-panel > header h3 { margin: 0; }
+.inline-panel .hint { font-size: 12px; color: var(--muted); }
+
+/* #11 */
+.proc-bulk {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 4px 0 8px;
+}
+.proc-confirm {
+  border: 1px solid var(--warn);
+  background: var(--warn-soft);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  margin-bottom: 10px;
+}
+.proc-confirm ul { margin: 6px 0; padding-left: 18px; font-size: 13px; }
+.proc-confirm .form-actions { justify-content: flex-start; margin-top: 8px; }
+.proc-done {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  border-radius: var(--radius-sm);
+  background: var(--ok-soft);
+  color: var(--ok);
+  padding: 8px 12px;
+  margin-bottom: 10px;
+  font-size: 13px;
+}
+.proc-check { width: auto; margin: 0; }
+.uncomplete-form {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+.uncomplete-form input { font-size: 12px; padding: 3px 6px; min-width: 180px; flex: 1; }
+
+/* #16 */
+.slot-picks {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 8px 0;
+}
+.slot-picks button { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.25; }
+.slot-picks button small { font-weight: 400; opacity: 0.8; }
+
+/* #17 */
+.why-balance { padding: 0; }
+.why-balance > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 14px 16px 6px;
+}
+.why-balance > header h2 { margin: 0; }
+.why-balance .why-summary { padding: 0 16px 10px; color: var(--text-2); }
+.why-visit { border-top: 1px solid var(--border); padding: 10px 16px; }
+.why-visit h4 { margin: 0 0 4px; display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; font-size: 14px; }
+.why-visit p { margin: 0; font-size: 13px; color: var(--text-2); }
+.why-visit ul { margin: 4px 0 0; padding-left: 18px; font-size: 12px; color: var(--muted); }
+.why-owes { font-weight: 600; white-space: nowrap; }
+.why-owes.due { color: var(--danger); }
+.why-owes.clear { color: var(--ok); }
+
+/* #18 */
+.chart-entry .preview .est {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  background: var(--info-soft);
+  color: var(--info);
+}
+
+@media print {
+  .why-balance .no-print { display: none; }
+}

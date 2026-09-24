@@ -7,12 +7,16 @@ import { allocate } from '../allocation.js';
 import { accountAging } from '../aging.js';
 import { portalKey } from './portal.js';
 import { receiptData, receiptPdf, sendReceipt } from '../receipts.js';
+import nextSlotRoutes from './nextslots.js';
 
 export const PAYMENT_METHODS = ['cash', 'check', 'credit_card', 'debit_card', 'ach', 'care_credit', 'financing', 'other'];
 
 export default function billingRoutes({ db, payments = { enabled: false }, config = {}, messenger = null }) {
   const r = Router();
   const patientOr404 = async (req) => await findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient');
+  // Suggested times for the next visit (checkout's "Book recall"). Lives in its own module; mounted here so
+  // app.js doesn't need to change.
+  r.use(nextSlotRoutes({ db }));
 
   r.get('/patients/:id/ledger', requirePermission('billing:read'), async (req, res) => {
     const patient = await patientOr404(req);
@@ -36,6 +40,79 @@ export default function billingRoutes({ db, payments = { enabled: false }, confi
     res.json({
       entries, balance: running, pending_insurance: pending.insurance, pending_write_off: pending.write_off, patient_portion: running - pending.total, lock_date: lock,
       unapplied_credit: unapplied.reduce((s, u) => s + u.amount, 0),
+    });
+  });
+
+  // "Why do I owe this?" — the balance explained visit by visit, worked out from the ledger every time (never a
+  // stored balance): what each visit charged, what insurance paid or wrote off, what's still waiting on
+  // insurance, what the patient paid, and what's left. The parts always add up to the ledger balance.
+  r.get('/patients/:id/balance-explained', requirePermission('billing:read'), async (req, res) => {
+    const patient = await patientOr404(req);
+    const pid = req.user.practice_id;
+    const entries = await db.all('SELECT * FROM ledger_entries WHERE patient_id = ? AND practice_id = ? ORDER BY entry_date, id', patient.id, pid);
+    const balance = entries.reduce((s, e) => s + e.amount, 0);
+    const claimLines = await db.all(
+      `SELECT ci.claim_id, ci.procedure_id, ci.paid_amount, ci.adjusted_amount, ci.estimated_amount, ci.write_off, c.status
+       FROM claim_items ci JOIN claims c ON c.id = ci.claim_id WHERE c.patient_id = ? AND c.practice_id = ?`, patient.id, pid,
+    );
+    const { allocations, unapplied, open_charges: openCharges } = allocate(entries, claimLines);
+    const open = new Map(openCharges.map((c) => [c.id, c.open]));
+    // Still expected from insurance on each procedure: its open claims' estimates less what's been paid, and the
+    // in-network write-off not posted yet (the same rule as the ledger's "Pending insurance").
+    const pendingBy = new Map();
+    for (const l of claimLines) {
+      if (!['draft', 'submitted', 'partially_paid'].includes(l.status)) continue;
+      const p = pendingBy.get(l.procedure_id) || { insurance: 0, write_off: 0 };
+      p.insurance += Math.max(0, (l.estimated_amount || 0) - (l.paid_amount || 0));
+      if (['draft', 'submitted'].includes(l.status)) p.write_off += l.write_off || 0;
+      pendingBy.set(l.procedure_id, p);
+    }
+    const kindOf = (a) => {
+      const credit = entries.find((e) => e.id === a.credit_id);
+      if (credit.type === 'insurance_payment') return 'insurance_paid';
+      if (credit.type === 'payment') return 'patient_paid';
+      return credit.claim_id ? 'write_off' : 'adjusted';
+    };
+    const procIds = [...new Set(entries.map((e) => e.procedure_id).filter(Boolean))];
+    const procs = new Map((procIds.length ? await db.all(
+      `SELECT pr.id, pr.code, pr.tooth, pr.surfaces, pr.area, pr.description, pr.appointment_id, a.start_time, a.reason, pv.name AS provider_name
+       FROM procedures pr LEFT JOIN appointments a ON a.id = pr.appointment_id LEFT JOIN providers pv ON pv.id = COALESCE(a.provider_id, pr.provider_id)
+       WHERE pr.practice_id = ? AND pr.id IN (${procIds.map(() => '?').join(',')})`, pid, ...procIds,
+    ) : []).map((p) => [p.id, p]));
+    const visits = new Map();
+    for (const c of entries.filter((e) => e.amount > 0 && e.type !== 'refund' && !e.voided_at && !e.reverses_id)) {
+      const pr = c.procedure_id ? procs.get(c.procedure_id) : null;
+      const key = pr?.appointment_id ? `a${pr.appointment_id}` : `d${c.entry_date}`;
+      if (!visits.has(key)) {
+        visits.set(key, {
+          key, appointment_id: pr?.appointment_id ?? null, date: pr?.start_time ? pr.start_time.slice(0, 10) : c.entry_date,
+          reason: pr?.reason || null, provider_name: pr?.provider_name || null, lines: [],
+        });
+      }
+      const got = { insurance_paid: 0, write_off: 0, patient_paid: 0, adjusted: 0 };
+      for (const a of allocations.filter((x) => x.charge_id === c.id)) got[kindOf(a)] += a.amount;
+      const left = open.get(c.id) || 0;
+      const pend = pr ? pendingBy.get(pr.id) : null;
+      const waiting = Math.min(left, (pend?.insurance || 0) + (pend?.write_off || 0));
+      visits.get(key).lines.push({
+        ledger_entry_id: c.id, procedure_id: c.procedure_id ?? null, type: c.type, code: pr?.code ?? null, tooth: pr?.tooth ?? null,
+        description: pr ? `${pr.description}${pr.tooth ? ` #${pr.tooth}` : ''}${pr.surfaces ? ` ${pr.surfaces}` : ''}` : c.description,
+        charged: c.amount, ...got, open: left, waiting_on_insurance: waiting, patient_owes: left - waiting,
+      });
+    }
+    const sum = (list, k) => list.reduce((s, x) => s + x[k], 0);
+    const out = [...visits.values()].map((v) => ({
+      ...v,
+      totals: Object.fromEntries(['charged', 'insurance_paid', 'write_off', 'adjusted', 'patient_paid', 'open', 'waiting_on_insurance', 'patient_owes'].map((k) => [k, sum(v.lines, k)])),
+    })).sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+    const credit = unapplied.reduce((s, u) => s + u.amount, 0);
+    // Anything the visits and credit don't explain (e.g. a refund larger than the credit it came from) is shown,
+    // not hidden, so the parts always add up to the balance.
+    const other = balance - (sum(out.map((v) => v.totals), 'open') - credit);
+    const pending = await pendingInsurance(db, pid, patient.id);
+    res.json({
+      balance, pending_insurance: pending.insurance, pending_write_off: pending.write_off, patient_portion: balance - pending.total,
+      unapplied_credit: credit, other, visits: out,
     });
   });
 

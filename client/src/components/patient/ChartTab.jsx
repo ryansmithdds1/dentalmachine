@@ -5,6 +5,7 @@ import { useAuth } from '../../auth.jsx';
 import { money, fmtDate, label, age, toCents, fromCents, practiceToday } from '../../format.js';
 import { Mic } from 'lucide-react';
 import ChartEntry from './ChartEntry.jsx';
+import CompleteWork, { UncompleteForm, useTodaysWork } from './CompleteWork.jsx';
 import { undoable } from '../../toast.js';
 import Odontogram, { STATUS_COLORS, CONDITION_COLORS, codeArea, surfacesFor, QUADRANT_LABELS, baseTooth } from '../Odontogram.jsx';
 import NoteComposer from '../NoteComposer.jsx';
@@ -31,7 +32,10 @@ export default function ChartTab({ patient, onChange }) {
   const [modal, setModal] = useState(null);
   const [noteFor, setNoteFor] = useState(null);
   const [err, setErr] = useState(null);
+  const [picked, setPicked] = useState(() => new Set());
+  const [undoFor, setUndoFor] = useState(null);
   const write = can('clinical:write') && !asOf;
+  const todays = useTodaysWork(patient, data?.procedures, practice?.timezone);
 
   const refresh = () => { reload(); reloadPlans(); onChange?.(); };
   const act = async (fn) => {
@@ -147,11 +151,32 @@ export default function ChartTab({ patient, onChange }) {
           </div>
           <div>
             <h3>Procedures</h3>
+            {write && (
+              <CompleteWork
+                patient={patient} procedures={data.procedures} todays={todays} picked={picked}
+                onDone={(ids, provider) => { setPicked(new Set()); refresh(); if (ids.length) setModal({ kind: 'offer-note', ids, provider }); }}
+              />
+            )}
+            {modal?.kind === 'offer-note' && (
+              <div className="proc-done" role="status">
+                Completed {modal.ids.length} procedure{modal.ids.length > 1 ? 's' : ''}; charges posted.
+                <button className="small" onClick={() => setModal({ kind: 'note', ids: modal.ids, provider: modal.provider })}>Write the note</button>
+                <button className="small" onClick={() => setModal(null)}>Dismiss</button>
+              </div>
+            )}
             <table>
               <tbody>
                 {procs.map((p) => (
                   <tr key={p.id}>
-                    <td>{p.code}</td>
+                    <td>
+                      {write && p.status === 'planned' && (
+                        <input
+                          type="checkbox" className="proc-check" aria-label={`Select ${p.code}${p.tooth ? ` #${p.tooth}` : ''} to complete`} checked={picked.has(p.id)}
+                          onChange={() => setPicked((s) => { const n = new Set(s); if (n.has(p.id)) n.delete(p.id); else n.add(p.id); return n; })}
+                        />
+                      )}
+                    </td>
+                    <td>{p.code}{todays.visit && p.status === 'planned' && p.appointment_id === todays.visit.id ? <div className="muted" style={{ fontSize: 11 }}>today</div> : null}</td>
                     <td>
                       {p.description}
                       <div className="muted">
@@ -184,15 +209,15 @@ export default function ChartTab({ patient, onChange }) {
                           {p.status === 'completed' && (
                             <>
                               <button className="small" onClick={() => setModal({ kind: 'note', ids: [p.id], provider: p.provider_id })}>Note</button>
-                              {can('billing:write') && (
-                                <button className="small" title="Charted in error? Reverses the charge and puts it back to planned" onClick={() => {
-                                  const reason = window.prompt(`Undo completion of ${p.code} ${p.tooth ? `#${p.tooth}` : ''}? The charge is reversed on the ledger.\n\nReason:`);
-                                  if (reason?.trim()) act(() => api.post(`/procedures/${p.id}/uncomplete`, { reason }));
-                                }}>Undo</button>
+                              {can('billing:write') && undoFor !== p.id && (
+                                <button className="small" title="Charted in error? Reverses the charge and puts it back to planned" onClick={() => setUndoFor(p.id)}>Undo</button>
                               )}
                             </>
                           )}
                         </div>
+                      )}
+                      {write && undoFor === p.id && (
+                        <UncompleteForm proc={p} onCancel={() => setUndoFor(null)} onDone={() => { setUndoFor(null); refresh(); }} />
                       )}
                     </td>
                   </tr>

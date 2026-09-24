@@ -1,9 +1,12 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Keyboard } from 'lucide-react';
 import { api } from '../../api.js';
 import { undoable } from '../../toast.js';
 import { useShortcuts } from '../../shortcuts.js';
 import { parseShorthand, describe } from './chartShorthand.js';
+import { useAuth } from '../../auth.jsx';
+import { money } from '../../format.js';
+import './moneyflows.css';
 
 // Chart by typing: "30 MO caries", "14 D2740", "2-4 sealant plan", "19 rct done". With a tooth selected on the
 // drawing, the number can be left out ("MO caries"). Enter charts it all at once; Undo takes it back.
@@ -23,6 +26,26 @@ export default function ChartEntry({ patient, tooth, onDone }) {
     if (first.error && tooth && /tooth number/.test(first.error)) return attempt(`${tooth} ${text}`);
     return first;
   }, [text, tooth]);
+
+  // #18: what the typed work would cost the patient, with their insurance. Read-only (nothing is charted until
+  // Enter), debounced while typing, and only for people who can see billing.
+  const { can } = useAuth();
+  const [estimate, setEstimate] = useState(null);
+  const work = (parsed.items || []).filter((it) => it.type === 'procedure' && it.code);
+  const workKey = JSON.stringify(work.map((it) => [it.code, it.tooth, it.surfaces]));
+  useEffect(() => {
+    setEstimate(null);
+    if (!work.length || !can('billing:read')) return undefined;
+    let live = true;
+    const t = setTimeout(() => {
+      api.post(`/patients/${patient.id}/estimate`, { items: work.map((it) => ({ code: it.code, tooth: it.tooth || null, surfaces: it.surfaces || null })) })
+        .then((est) => { if (live) setEstimate(est); })
+        // A preview only: if it can't be priced (say, a code this office doesn't use), charting still works
+        // and the server says why on Enter.
+        .catch(() => { if (live) setEstimate(null); });
+    }, 300);
+    return () => { live = false; clearTimeout(t); };
+  }, [workKey, patient.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Any digit (or E) on the chart starts an entry, so charting never needs the mouse.
   useShortcuts([
@@ -91,6 +114,11 @@ export default function ChartEntry({ patient, tooth, onDone }) {
           {err ? <span className="bad">{err}</span>
             : parsed.error ? <span className="bad">{parsed.error}</span>
               : parsed.items.map((it, i) => <span key={i} className="chip">{describe(it)}</span>)}
+          {!err && !parsed.error && estimate && (
+            <span className="est" title={`Fee ${money(estimate.total_fee)}${estimate.total_write_off ? ` · write-off ${money(estimate.total_write_off)}` : ''}${estimate.items.flatMap((i) => i.notes || []).length ? ` · ${estimate.items.flatMap((i) => i.notes || []).join('; ')}` : ''}`}>
+              Est. patient {money(estimate.total_patient)}{estimate.policy ? ` · ${estimate.policy.carrier_name} ${money(estimate.total_insurance)}` : ' · no insurance'}
+            </span>
+          )}
         </div>
       )}
     </form>

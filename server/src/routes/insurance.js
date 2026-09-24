@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import { requirePermission, HttpError } from '../auth.js';
 import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, toCents, practiceNow, mapSeq, publicPractice, validTooth, paged, pageArgs, recorded, isRealDate } from '../util.js';
-import { estimateCoverage, postClaimPayment, benefitYear, deductibleMet, reverseEntry, createClaim, checkPostingDate } from '../services.js';
+import { estimateCoverage, postClaimPayment, benefitYear, deductibleMet, reverseEntry, createClaim, checkPostingDate, primaryPolicy } from '../services.js';
+import { officeFee } from '../fees.js';
 import { savePolicy, validatePlan, syncPlan, PLAN_BENEFITS, DEFAULT_FREQUENCIES, planFor } from '../benefits.js';
 
 const POLICY_FIELDS = [
@@ -517,19 +518,46 @@ export default function insuranceRoutes({ db }) {
     res.json(await db.get(`${CLAIM_SELECT} WHERE c.id = ?`, claim.id));
   });
 
-  // Pre-treatment estimate for arbitrary procedures (used by the treatment planner).
+  // What would this cost the patient? Read-only: nothing is charted, charged or stored.
+  // procedure_ids: work already on the chart; items: [{ code, tooth, surfaces }] for work not charted yet (the
+  // chart-by-typing preview, "14 D2740"). The patient's primary policy is used unless patient_insurance_id is
+  // given (null prices it with no insurance).
   r.post('/patients/:id/estimate', requirePermission('billing:read'), async (req, res) => {
     const patient = await findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient');
-    const policyId = req.body?.patient_insurance_id;
-    const policy = policyId
-      ? await db.get('SELECT pi.*, c.name AS carrier_name FROM patient_insurance pi JOIN insurance_carriers c ON c.id = pi.carrier_id WHERE pi.id = ? AND pi.practice_id = ? AND pi.patient_id = ?', Number(policyId), req.user.practice_id, patient.id)
-      : null;
-    const procs = await mapSeq((req.body?.procedure_ids || []), async (id) => {
-      const p = await findOr404(db, 'procedures', id, req.user.practice_id, 'Procedure');
+    const pid = req.user.practice_id;
+    const body = req.body || {};
+    const policyId = body.patient_insurance_id;
+    const policy = policyId === null ? null
+      : policyId !== undefined
+        ? await db.get('SELECT pi.*, c.name AS carrier_name FROM patient_insurance pi JOIN insurance_carriers c ON c.id = pi.carrier_id WHERE pi.id = ? AND pi.practice_id = ? AND pi.patient_id = ?', Number(policyId), pid, patient.id)
+        : await primaryPolicy(db, pid, patient.id);
+    if (policyId != null && !policy) throw new HttpError(404, 'Insurance policy not found');
+    const ids = Array.isArray(body.procedure_ids) ? body.procedure_ids : [];
+    const items = Array.isArray(body.items) ? body.items : [];
+    if (ids.length + items.length > 50) throw new HttpError(400, 'Estimate up to 50 procedures at a time');
+    const procs = await mapSeq(ids, async (id) => {
+      const p = await findOr404(db, 'procedures', id, pid, 'Procedure');
       if (p.patient_id !== patient.id) throw new HttpError(400, `Procedure ${p.id} belongs to another patient`);
       return p;
     });
-    res.json(await estimateCoverage(db, policy, procs));
+    // Work not charted yet: priced the way charting it would price it (the patient's, else the office's fee schedule).
+    const hypothetical = await mapSeq(items, async (it, i) => {
+      const code = await db.get('SELECT * FROM procedure_codes WHERE practice_id = ? AND code = ?', pid, String(it?.code || '').trim().toUpperCase());
+      if (!code) throw new HttpError(400, `Unknown procedure code ${String(it?.code || '').slice(0, 10) || '(blank)'}`);
+      const tooth = it.tooth == null || it.tooth === '' ? null : String(it.tooth).toUpperCase();
+      if (tooth && !validTooth(tooth)) throw new HttpError(400, 'tooth must be 1-32, A-T, or a supernumerary tooth (51-82, AS-TS)');
+      const surfaces = it.surfaces ? String(it.surfaces).toUpperCase() : null;
+      if (surfaces && !/^[MODBFLI]{1,5}$/.test(surfaces)) throw new HttpError(400, 'surfaces must be letters from M, O, D, B, F, L, I');
+      return {
+        id: null, preview: i, practice_id: pid, patient_id: patient.id, code: code.code, description: code.description, category: code.category,
+        tooth, surfaces, fee: await officeFee(db, pid, code, { patientId: patient.id, locationId: req.location_id }), status: 'planned',
+      };
+    });
+    const out = await estimateCoverage(db, policy, [...procs, ...hypothetical]);
+    // Name each line, so a preview can show it without looking the code up again.
+    const all = [...procs, ...hypothetical];
+    out.items = out.items.map((it, i) => ({ ...it, code: all[i].code, description: all[i].description, tooth: all[i].tooth ?? null }));
+    res.json(out);
   });
 
   return r;

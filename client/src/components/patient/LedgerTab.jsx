@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { api, openFile } from '../../api.js';
 import { useApi } from '../../hooks.js';
@@ -8,6 +8,11 @@ import { ErrorBox, Modal, useSubmit } from '../ui.jsx';
 import PaymentPlans from './PaymentPlans.jsx';
 import Financing from './Financing.jsx';
 import { ReaderPay, useReaders } from '../CardReader.jsx';
+import { useRemembered } from '../../prefs.js';
+import { useShortcut } from '../../shortcuts.js';
+import BalanceWhy from './BalanceWhy.jsx';
+import { useLastMethod, methodToPost } from './lastMethod.js';
+import './moneyflows.css';
 
 const KINDS = { Charges: ['charge'], 'Patient payments': ['payment'], 'Insurance payments': ['insurance_payment'], Adjustments: ['adjustment'], Refunds: ['refund'] };
 const METHODS = ['credit_card', 'debit_card', 'cash', 'check', 'ach', 'care_credit', 'other'];
@@ -22,6 +27,10 @@ export default function LedgerTab({ patient, onChange }) {
   const [kind, setKind] = useState('');
   const [prov, setProv] = useState('');
   const [hideVoided, setHideVoided] = useState(false);
+  // "Why this balance" shows unless this person hid it last time; W toggles it.
+  const [showWhy, rememberWhy] = useRemembered('ledger.why', true);
+  const [version, setVersion] = useState(0);
+  useShortcut('w', () => rememberWhy(!showWhy), { label: 'Show or hide why this balance', section: 'Ledger' });
   // ?pay=1 (from quick search "Take payment…") opens the payment form.
   const [params, setParams] = useSearchParams();
   useEffect(() => {
@@ -31,7 +40,7 @@ export default function LedgerTab({ patient, onChange }) {
     next.delete('pay');
     setParams(next, { replace: true });
   }, [params, setParams]);
-  const done = () => { setModal(null); reload(); onChange?.(); };
+  const done = () => { setModal(null); reload(); setVersion((v) => v + 1); onChange?.(); };
   if (!data) return <div className="empty">Loading…</div>;
   const providers = [...new Map(data.entries.filter((e) => e.provider_id).map((e) => [e.provider_id, e.provider_name])).entries()];
   const shown = data.entries.filter((e) => (!kind || KINDS[kind].includes(e.type)) && (!prov || String(e.provider_id) === prov) && !(hideVoided && (e.voided_at || e.reverses_id)));
@@ -50,6 +59,16 @@ export default function LedgerTab({ patient, onChange }) {
           : <div className="card stat"><div className="label">Est. patient portion</div><div className="value" style={{ color: data.patient_portion > 0 ? 'var(--danger)' : undefined }}>{money(data.patient_portion)}</div></div>}
         {data.unapplied_credit > 0 && <div className="card stat"><div className="label">Unapplied credit</div><div className="value">{money(data.unapplied_credit)}</div><div className="muted" style={{ fontSize: 12 }}>paid ahead — applies to the next charges</div></div>}
       </div>
+      {/* Taking a payment happens right here, not in a dialog: the amount is ready to type and Enter posts. */}
+      {modal === 'payment' && (
+        <section className="inline-panel" aria-label="Take payment">
+          <header><h3>Take payment</h3><button className="small" onClick={() => setModal(null)}>Cancel</button></header>
+          <PaymentForm patient={patient} balance={data.patient_portion} lockDate={data.lock_date} onDone={done} onCancel={() => setModal(null)} />
+        </section>
+      )}
+      {showWhy
+        ? (data.balance !== 0 || data.entries.length > 0) && <BalanceWhy patient={patient} version={`${version}-${data.balance}-${data.entries.length}`} onClose={() => rememberWhy(false)} />
+        : <div className="no-print" style={{ marginBottom: 12 }}><button className="small" onClick={() => rememberWhy(true)} title="W">Why this balance?</button></div>}
       <div className="card" style={{ padding: 0 }}>
         <div className="page-header" style={{ padding: '14px 16px', marginBottom: 0 }}>
           <h2 style={{ margin: 0 }}>Ledger</h2>
@@ -115,7 +134,6 @@ export default function LedgerTab({ patient, onChange }) {
           {data.entries.length > 0 && !shown.length && <div className="empty">No entries match.</div>}
         </div>
       </div>
-      {modal === 'payment' && <Modal title="Take payment" onClose={() => setModal(null)}><PaymentForm patient={patient} balance={data.patient_portion} lockDate={data.lock_date} onDone={done} /></Modal>}
       <PaymentPlans patient={patient} onChange={reload} />
       <Financing patient={patient} canWrite={can('billing:write')} onChange={reload} />
       {payRequests?.length > 0 && (
@@ -206,29 +224,47 @@ function DateField({ value, onChange, lockDate }) {
   return <label>Date<input type="date" value={value} max={today} min={lockDate ? new Date(Date.parse(`${lockDate}T12:00:00Z`) + 86400_000).toISOString().slice(0, 10) : undefined} onChange={(e) => onChange(e.target.value)} placeholder="Today" /></label>;
 }
 
-function PaymentForm({ patient, balance, lockDate, onDone }) {
+function PaymentForm({ patient, balance, lockDate, onDone, onCancel }) {
   const { data: plans } = useApi(`/patients/${patient.id}/payment-plans`);
   const active = (plans || []).filter((p) => p.status === 'active');
-  const [form, setForm] = useState({ amount: balance > 0 ? (balance / 100).toFixed(2) : '', method: 'credit_card', reference: '', payment_plan_id: '', entry_date: '', receipt: patient.email && patient.email_opt_in ? 'email' : '' });
+  const [lastMethod, rememberMethod] = useLastMethod(METHODS);
+  const [form, setForm] = useState({ amount: balance > 0 ? (balance / 100).toFixed(2) : '', method: lastMethod, reference: '', payment_plan_id: '', entry_date: '', receipt: patient.email && patient.email_opt_in ? 'email' : '' });
+  // Remembered defaults arrive a moment after the form opens; use them unless a method was already picked.
+  const picked = useRef(false);
+  useEffect(() => { if (!picked.current) setForm((f) => ({ ...f, method: lastMethod })); }, [lastMethod]);
+  const posting = useRef(false);
   const { submit, busy, error } = useSubmit(async () => {
+    // One post per press, however fast Enter is hit (the Idempotency-Key covers retries of the same request).
+    if (posting.current) return;
+    posting.current = true;
+    try {
+      await post();
+    } finally {
+      posting.current = false;
+    }
+  });
+  const post = async () => {
     const receiptTab = form.receipt === 'print' ? window.open('', '_blank') : null;
     try {
-      const out = await api.post(`/patients/${patient.id}/payments`, { ...form, receipt: ['email', 'sms'].includes(form.receipt) ? form.receipt : null, entry_date: form.entry_date || undefined, amount: toCents(form.amount), payment_plan_id: form.payment_plan_id ? Number(form.payment_plan_id) : null });
+      const method = await methodToPost(METHODS, form, picked.current);
+      const out = await api.post(`/patients/${patient.id}/payments`, { ...form, method, receipt: ['email', 'sms'].includes(form.receipt) ? form.receipt : null, entry_date: form.entry_date || undefined, amount: toCents(form.amount), payment_plan_id: form.payment_plan_id ? Number(form.payment_plan_id) : null });
+      rememberMethod(method);
       if (receiptTab) await openFile(`/payments/${out.entry.id}/receipt.pdf`, receiptTab);
     } catch (e) {
       receiptTab?.close();
       throw e;
     }
     onDone();
-  });
+  };
   return (
-    <form onSubmit={(e) => { e.preventDefault(); submit(); }}>
+    <form onSubmit={(e) => { e.preventDefault(); submit(); }} onKeyDown={(e) => { if (e.key === 'Escape' && onCancel) { e.stopPropagation(); onCancel(); } }}>
       <ErrorBox error={error} />
+      <fieldset disabled={busy} style={{ border: 0, padding: 0, margin: 0 }}>
       <div className="form-grid">
-        <label>Amount ($)<input type="number" step="0.01" min="0.01" required value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} /></label>
+        <label>Amount ($)<input type="number" step="0.01" min="0.01" required autoFocus onFocus={(e) => e.target.select()} aria-label="Payment amount" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} /></label>
         <label>
           Method
-          <select value={form.method} onChange={(e) => setForm({ ...form, method: e.target.value })}>
+          <select value={form.method} onChange={(e) => { picked.current = true; setForm({ ...form, method: e.target.value }); }}>
             {METHODS.map((m) => <option key={m} value={m}>{label(m)}</option>)}
           </select>
         </label>
@@ -256,7 +292,11 @@ function PaymentForm({ patient, balance, lockDate, onDone }) {
           </label>
         )}
       </div>
-      <div className="form-actions"><button className="primary" disabled={busy}>Post payment</button></div>
+      </fieldset>
+      <div className="form-actions">
+        <span className="hint muted" style={{ marginRight: 'auto', fontSize: 12 }}>Enter posts {form.amount ? money(toCents(form.amount)) : 'the payment'} by {label(form.method).toLowerCase()}</span>
+        <button className="primary" disabled={busy}>Post payment</button>
+      </div>
     </form>
   );
 }

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api.js';
 import { useApi } from '../hooks.js';
@@ -7,6 +7,9 @@ import { money, fmtDate, fmtTime, label, toCents, practiceToday } from '../forma
 import { Badge, ErrorBox, Modal, useSubmit } from '../components/ui.jsx';
 import AppointmentForm from '../components/AppointmentForm.jsx';
 import { ReaderPay, useReaders } from '../components/CardReader.jsx';
+import NextVisitPicker from '../components/NextVisitPicker.jsx';
+import { useLastMethod, methodToPost } from '../components/patient/lastMethod.js';
+import '../components/patient/moneyflows.css';
 
 const METHODS = ['credit_card', 'debit_card', 'cash', 'check', 'care_credit', 'ach', 'other'];
 
@@ -18,6 +21,7 @@ export default function Checkout() {
   const { data: co, reload, error: loadErr } = useApi(`/appointments/${id}/checkout`);
   const [err, setErr] = useState(null);
   const [booking, setBooking] = useState(null);
+  const [picking, setPicking] = useState(false);
   const [note, setNote] = useState(null);
   const act = async (fn, msg) => {
     setErr(null);
@@ -107,9 +111,21 @@ export default function Checkout() {
           {co.unscheduled.length > 0 && (
             <p style={{ fontSize: 14 }}>Still to schedule: {co.unscheduled.map((p) => `${p.code}${p.tooth ? ` #${p.tooth}` : ''}`).join(', ')} ({money(co.unscheduled.reduce((s, p) => s + p.fee, 0))})</p>
           )}
+          {can('schedule:write') && recall && picking && (
+            <NextVisitPicker
+              patientId={a.patient_id} recall={recall} onCancel={() => setPicking(false)}
+              onBooked={(appt, provider) => { setPicking(false); setNote(`Booked ${recall.type_name.toLowerCase()} for ${fmtDate(appt.start_time.slice(0, 10))} at ${fmtTime(appt.start_time)} with ${provider.name}.`); reload(); }}
+              // Another time: the full form, starting from the suggestion (the type sets the length).
+              onOther={(slot, provider) => {
+                setPicking(false);
+                const date = slot?.start_time.slice(0, 10) || (recall.due_date > practiceToday(practice?.timezone) ? recall.due_date : practiceToday(practice?.timezone));
+                setBooking({ date, time: slot?.start_time.slice(11, 16), provider_id: provider?.id, operatory_id: slot?.operatory_id || undefined, appointment_type_id: recall.appointment_type_id, reason: recall.type_name });
+              }}
+            />
+          )}
           {can('schedule:write') && (
             <div className="form-actions" style={{ justifyContent: 'flex-start' }}>
-              {recall && <button className="primary" onClick={() => setBooking({ date: recall.due_date > practiceToday(practice?.timezone) ? recall.due_date : practiceToday(practice?.timezone), appointment_type_id: recall.appointment_type_id, reason: recall.type_name })}>Book {recall.type_name.toLowerCase()} recall</button>}
+              {recall && !picking && <button className="primary" onClick={() => setPicking(true)}>Book {recall.type_name.toLowerCase()} recall</button>}
               {co.unscheduled.length > 0 && <button onClick={() => setBooking({ date: practiceToday(practice?.timezone), procedure_ids: co.unscheduled.map((p) => p.id), reason: 'Treatment' })}>Book remaining treatment</button>}
               <button onClick={() => setBooking({ date: practiceToday(practice?.timezone) })}>Book another visit</button>
             </div>
@@ -134,30 +150,45 @@ export default function Checkout() {
   );
 }
 
+// Collect at checkout: the amount is ready to type (the suggested patient portion), the method is the one this
+// person used last, and Enter posts. The card reader opens in place, not as a second dialog.
 function CollectForm({ patient, patientId, suggested, onDone }) {
-  const [form, setForm] = useState({ amount: suggested > 0 ? (suggested / 100).toFixed(2) : '', method: 'credit_card', reference: '' });
+  const [lastMethod, rememberMethod] = useLastMethod(METHODS);
+  const [form, setForm] = useState({ amount: suggested > 0 ? (suggested / 100).toFixed(2) : '', method: lastMethod, reference: '' });
+  const picked = useRef(false);
+  useEffect(() => { if (!picked.current) setForm((f) => ({ ...f, method: lastMethod })); }, [lastMethod]);
   const terminal = useReaders();
   const [onReader, setOnReader] = useState(false);
   const { data: contact } = useApi(onReader ? `/patients/${patientId}` : null); // email and phone for the receipt
+  const posting = useRef(false);
   const { submit, busy, error } = useSubmit(async () => {
-    const amount = toCents(form.amount);
-    await api.post(`/patients/${patientId}/payments`, { amount, method: form.method, reference: form.reference || null });
-    onDone(amount);
+    if (posting.current) return; // one post per press; the Idempotency-Key covers retries
+    posting.current = true;
+    try {
+      const amount = toCents(form.amount);
+      const method = await methodToPost(METHODS, form, picked.current);
+      await api.post(`/patients/${patientId}/payments`, { amount, method, reference: form.reference || null });
+      rememberMethod(method);
+      onDone(amount);
+    } finally {
+      posting.current = false;
+    }
   });
   return (
     <>
     <form className="inline" style={{ flexWrap: 'wrap', gap: 8, alignItems: 'flex-end' }} onSubmit={(e) => { e.preventDefault(); submit(); }}>
       <ErrorBox error={error} />
-      <label>Amount ($)<input type="number" step="0.01" min="0.01" required value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} style={{ width: 120 }} /></label>
-      <label>Method<select value={form.method} onChange={(e) => setForm({ ...form, method: e.target.value })}>{METHODS.map((m) => <option key={m} value={m}>{label(m)}</option>)}</select></label>
-      <label>Reference<input value={form.reference} onChange={(e) => setForm({ ...form, reference: e.target.value })} placeholder="last 4, check #" style={{ width: 140 }} /></label>
+      <label>Amount ($)<input type="number" step="0.01" min="0.01" required autoFocus onFocus={(e) => e.target.select()} aria-label="Payment amount" disabled={busy} value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} style={{ width: 120 }} /></label>
+      <label>Method<select value={form.method} disabled={busy} onChange={(e) => { picked.current = true; setForm({ ...form, method: e.target.value }); }}>{METHODS.map((m) => <option key={m} value={m}>{label(m)}</option>)}</select></label>
+      <label>Reference<input value={form.reference} disabled={busy} onChange={(e) => setForm({ ...form, reference: e.target.value })} placeholder="last 4, check #" style={{ width: 140 }} /></label>
       <button className="primary" disabled={busy}>Post payment</button>
-      {terminal.readers.length > 0 && patient && <button type="button" onClick={() => setOnReader(true)}>Card reader…</button>}
+      {terminal.readers.length > 0 && patient && <button type="button" onClick={() => setOnReader(!onReader)}>{onReader ? 'Close card reader' : 'Card reader…'}</button>}
     </form>
     {onReader && (
-      <Modal title="Card reader payment" onClose={() => setOnReader(false)}>
+      <div className="inline-panel" style={{ marginTop: 10 }} aria-label="Card reader payment">
+        <header><h3>Card reader payment</h3><button className="small" onClick={() => setOnReader(false)}>Cancel</button></header>
         {contact && <ReaderPay patient={contact} amount={toCents(form.amount || 0)} readers={terminal.readers} testMode={terminal.test_mode} onDone={(p) => { setOnReader(false); onDone(p.amount); }} />}
-      </Modal>
+      </div>
     )}
     </>
   );
