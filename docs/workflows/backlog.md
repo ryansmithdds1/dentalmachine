@@ -446,6 +446,31 @@ DX2. **Conversion funnel by exam type:** for new patient exams, recall/periodic 
      at each step and time to schedule; drill-down to patients; comparison between doctors and over time; in the
      metrics emails and report library. One definition, documented in docs/metrics.md.
 
+## Capacity meter: when to add a hygiene day or doctor time (asked for)
+CAP1. For each provider type (doctor, hygiene) and office: how far out the first opening is for each visit kind (new
+      patient exam, emergency, recall/hygiene, treatment of each length), % booked for the next 2/4/8 weeks, open
+      production blocks, and demand (recalls coming due, unscheduled treatment in hours, ASAP list, online requests).
+CAP2. A customizable meter with the office's own targets (e.g. new patients within 7 days, emergencies same/next day,
+      hygiene within 3 weeks, treatment within 2 weeks) — green/amber/red — and plain recommendations: "Hygiene is
+      booked 5 weeks out and 140 recall hours are due in the next month: add a hygiene day (about 8 more visits a
+      week)"; "Dr. Chen's treatment is 4 weeks out: extend Thursday to 6 pm or open a Friday". Trends over time, in
+      the huddle/metrics emails.
+
+## Phone answering: missed-call patterns (asked for; part of phone coaching)
+PH7. Total calls, answered, missed and missed-call % by day, hour of day and day of week (heatmap), by line and by the
+     person/position that should have answered (from who was on shift and ring groups), abandoned-in-queue and
+     voicemail, callbacks made and how fast; alerts when missed % goes over a target; in the phone leaderboard.
+
+## Fee schedules: updates, increases and PPO imports (asked for)
+FS1. **Office fee increases made easy:** raise all fees (or a category/code list) by a %, rounded the way the office
+     wants, preview old vs new, and apply now or **schedule** for a date (e.g. January 1) so nobody forgets.
+FS2. **PPO fee schedule updates by AI:** upload the payer's PDF/spreadsheet (or schedule a recurring import from a
+     folder/email); AI reads codes and fees into a draft; a person reviews differences vs the current schedule (new,
+     changed, missing codes) and approves; effective date respected.
+FS3. **History kept:** every version of every fee schedule is kept (hidden by default, viewable and comparable any
+     time), with who changed it, when and why, and "last updated" shown on each schedule; estimates and claims always
+     use the version effective on the date of service; reports compare write-offs by version.
+
 ## Then: remaining workflow batches
 9. Batch 4 (32–44): new patient setup, ERA/EOB posting, prescriptions, lab cases, huddle actions, recall lists,
    pre-auths, financing, adjustments, referrals, end-of-day, review requests (fix the count bug), clock in/out.
