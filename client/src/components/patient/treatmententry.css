@@ -32,3 +32,9 @@
 @media (max-width: 700px) {
   .te-editor .te-item { grid-template-columns: 1fr 1fr; }
 }
+/* "Say treatment" reads as a labelled button; while listening it shows a pulsing red dot, not a crossed-out mic. */
+.chart-entry .te-mic { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.chart-entry .te-mic.live { background: color-mix(in srgb, var(--danger) 10%, transparent); }
+.chart-entry .te-rec { width: 8px; height: 8px; border-radius: 50%; background: var(--danger); animation: te-pulse 1.1s ease-in-out infinite; }
+@keyframes te-pulse { 50% { opacity: 0.3; } }
+@media (prefers-reduced-motion: reduce) { .chart-entry .te-rec { animation: none; } }

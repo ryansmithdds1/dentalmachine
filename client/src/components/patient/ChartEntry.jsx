@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Keyboard, Mic, MicOff, AlertTriangle } from 'lucide-react';
+import { Keyboard, Mic, AlertTriangle } from 'lucide-react';
 import { api } from '../../api.js';
 import { undoable, toast } from '../../toast.js';
 import { useShortcuts } from '../../shortcuts.js';
@@ -179,13 +179,14 @@ export default function ChartEntry({ patient, tooth, onDone, setup, lookups, cha
         }}
       />
       {mic.supported && (
-        <button type="button" className={`small te-mic${mic.listening ? ' live' : ''}`} onClick={() => mic.toggle()} title={mic.listening ? 'Stop listening' : 'Say it: “crown bundle on 14 with buildup, chart it”'} aria-label={mic.listening ? 'Stop listening' : 'Chart by voice'}>
-          {mic.listening ? <MicOff size={14} aria-hidden /> : <Mic size={14} aria-hidden />}
+        <button type="button" className={`small te-mic${mic.listening ? ' live' : ''}`} onClick={() => mic.toggle()} title={mic.listening ? 'Stop listening' : 'Add treatment by voice: “crown bundle on 14 with buildup, chart it”'} aria-label={mic.listening ? 'Stop listening' : 'Add treatment by voice'}>
+          {mic.listening ? <><span className="te-rec" aria-hidden /> Listening… tap to stop</> : <><Mic size={14} aria-hidden /> Say treatment</>}
         </button>
       )}
       <button className="small primary" disabled={busy || !!parsed.error || (!parsed.items?.length && !parsed.options) || (current && !current.ok)}>{parsed.options ? 'Compare' : 'Chart'}</button>
-      {(text.trim() || err || mic.interim) && (
+      {(text.trim() || err || mic.interim || mic.listening) && (
         <div className="preview" role="status">
+          {mic.listening && !mic.interim && !text.trim() && <span className="muted">Say the tooth and the treatment, e.g. “14 crown with buildup” or “30 MO composite”. Say “chart it” to add it, or tap Chart.</span>}
           {mic.interim && <span className="muted">“{mic.interim}”</span>}
           {err ? <span className="bad">{err}</span>
             : parsed.error ? <span className="bad">{parsed.error}</span>
