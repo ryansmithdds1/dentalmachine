@@ -46,7 +46,7 @@ const TABLES = {
   mounts: 'image_mounts', 'lab-cases': 'lab_cases', insurance: 'patient_insurance', 'booking-requests': 'booking_requests', waitlist: 'waitlist',
   tasks: 'tasks', prescriptions: 'prescriptions', 'payment-methods': 'payment_methods', 'patient-forms': 'patient_forms',
   'insurance-updates': 'insurance_updates', conditions: 'tooth_conditions', eligibility: 'eligibility_checks', 'terminal-payments': 'terminal_payments',
-  calls: 'calls', 'ai-findings': 'xray_findings', deposits: 'deposits',
+  calls: 'calls', 'ai-findings': 'xray_findings', deposits: 'deposits', 'fin-agreements': 'fin_agreements',
 };
 
 // Reports that can be held to the person's offices (see reports.js); every other report covers the whole

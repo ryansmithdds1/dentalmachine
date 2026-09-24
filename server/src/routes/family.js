@@ -85,7 +85,8 @@ export async function planStatus(db, plan, today) {
     if (s.due_date <= today) dueToDate = cumulative;
   }
   const next = schedule.find((s) => s.paid < s.amount);
-  const fees = await db.all('SELECT installment, amount, created_at FROM payment_plan_late_fees WHERE plan_id = ? ORDER BY installment', plan.id);
+  // Only fees that were charged (a ledger entry behind them); a claim that posted nothing isn't a fee.
+  const fees = await db.all('SELECT installment, amount, created_at FROM payment_plan_late_fees WHERE plan_id = ? AND ledger_entry_id IS NOT NULL ORDER BY installment', plan.id);
   for (const f of fees) { const s = schedule.find((x) => x.n === f.installment); if (s) s.late_fee = f.amount; }
   return {
     ...plan,

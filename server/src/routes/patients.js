@@ -230,11 +230,28 @@ export default function patientRoutes({ db }) {
           leftBehind.push(rc.id);
         }
       }
+      // Journey choices are one row per patient: when both charts have one, the kept chart takes the stricter
+      // "no celebrations" and VIP from either (never a newsletter opt-in it didn't give), and the duplicate's
+      // row stays on its archived chart.
+      const prefs = await db.get('SELECT * FROM journey_prefs WHERE patient_id = ?', from.id);
+      const mine = prefs && (await db.get('SELECT * FROM journey_prefs WHERE patient_id = ?', keep.id));
+      if (mine && ((prefs.no_celebrations && !mine.no_celebrations) || (prefs.vip && !mine.vip))) {
+        await recorded(db, 'journey_prefs', mine.id, () => db.run('UPDATE journey_prefs SET no_celebrations = ?, vip = ? WHERE id = ?',
+          mine.no_celebrations || prefs.no_celebrations ? 1 : 0, mine.vip || prefs.vip ? 1 : 0, mine.id));
+      }
+      // Rows that are unique per patient stay on the duplicate when the kept chart already has the same one.
+      const unique = {
+        'journey_prefs.patient_id': ' AND NOT EXISTS (SELECT 1 FROM journey_prefs x WHERE x.patient_id = ?)',
+        'journey_moments.patient_id': ' AND NOT EXISTS (SELECT 1 FROM journey_moments x WHERE x.patient_id = ? AND x.practice_id = journey_moments.practice_id AND x.kind = journey_moments.kind AND x.source_key = journey_moments.source_key)',
+        'journey_referrals.referred_patient_id': ' AND NOT EXISTS (SELECT 1 FROM journey_referrals x WHERE x.referred_patient_id = ? AND x.practice_id = journey_referrals.practice_id)',
+        'journey_broadcast_recipients.patient_id': ' AND NOT EXISTS (SELECT 1 FROM journey_broadcast_recipients x WHERE x.patient_id = ? AND x.broadcast_id = journey_broadcast_recipients.broadcast_id)',
+      };
       for (const [table, cols] of schemaInfo()) {
         for (const c of cols) {
           if (c.ref !== 'patients') continue;
-          const skip = table === 'recalls' && leftBehind.length ? ` AND id NOT IN (${leftBehind.map(() => '?').join(',')})` : '';
-          const r0 = await db.run(`UPDATE ${table} SET ${c.name} = ? WHERE ${c.name} = ?${skip}`, keep.id, from.id, ...(skip ? leftBehind : []));
+          const skip = table === 'recalls' && leftBehind.length ? ` AND id NOT IN (${leftBehind.map(() => '?').join(',')})` : unique[`${table}.${c.name}`] || '';
+          const skipArgs = table === 'recalls' && leftBehind.length ? leftBehind : unique[`${table}.${c.name}`] ? [keep.id] : [];
+          const r0 = await db.run(`UPDATE ${table} SET ${c.name} = ? WHERE ${c.name} = ?${skip}`, keep.id, from.id, ...skipArgs);
           if (r0.changes) moved[`${table}.${c.name}`] = r0.changes;
         }
       }

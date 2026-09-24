@@ -309,10 +309,13 @@ export async function stageRemittance(db, practiceId, { source, lines, trace, pa
       continue;
     }
     base.line_id = lineId;
-    if (verdict.kind === 'denied' && g.claim && ['submitted', 'partially_paid'].includes(g.claim.status) && row.paid === 0) {
-      const reason = verdict.codes.map((c) => { const w = reasonWords([c])[0]; return `${c}${w.text ? ` ${w.text}` : ''}`; }).join(', ') || 'Denied by payer';
+    // An ERA is the payer's own file, so its denial moves the claim on arrival. A paper EOB is only an AI
+    // read of a page: its denial stays a 'denied' row on the worklist and is applied (as that person's) when
+    // someone approves it — "Looks right — post" or their decision on the line (see applyPaperDenial).
+    if (source === 'era' && verdict.kind === 'denied' && g.claim && ['submitted', 'partially_paid'].includes(g.claim.status) && row.paid === 0) {
+      const reason = denialReason(verdict.codes);
       await recorded(db, 'claims', g.claim.id, () => db.run("UPDATE claims SET status = 'denied', denial_reason = ?, payer_claim_number = COALESCE(?, payer_claim_number) WHERE id = ? AND status IN ('submitted','partially_paid')", reason.slice(0, 300), row.payer_claim_number, g.claim.id));
-      await claimEvent(db, g.claim, source === 'era' ? '835' : 'eob', 'denied', `Denied: ${reason}`);
+      await claimEvent(db, g.claim, '835', 'denied', `Denied: ${reason}`);
     } else if (verdict.kind === 'review' && verdict.codes.some((c) => c.endsWith('-18')) && g.claim) {
       await claimEvent(db, g.claim, source === 'era' ? '835' : 'eob', 'request', `Payer says duplicate claim — check before resending`);
     }
@@ -334,6 +337,30 @@ export async function stageRemittance(db, practiceId, { source, lines, trace, pa
   details.sort((a, b) => a.order - b.order);
   for (const d of details) delete d.order;
   return details;
+}
+
+const denialReason = (codes) => codes.map((c) => { const w = reasonWords([c])[0]; return `${c}${w.text ? ` ${w.text}` : ''}`; }).join(', ') || 'Denied by payer';
+
+// A paper EOB's denial, applied when a person approves the AI's read: the claim moves to denied as that
+// person's change (recorded before/after, audited with the AI read as the source of the reason). Does
+// nothing for other rows, or when the claim has already moved on (a second approval is a no-op).
+export async function applyPaperDenial(db, req, line) {
+  if (line.source !== 'paper' || line.kind !== 'denied' || line.paid !== 0 || !line.claim_id) return false;
+  const claim = await db.get('SELECT * FROM claims WHERE id = ? AND practice_id = ?', line.claim_id, line.practice_id);
+  if (!claim || !['submitted', 'partially_paid'].includes(claim.status)) return false;
+  requireHuman('denying a claim from a paper EOB');
+  const reason = denialReason(JSON.parse(line.reason_codes || '[]'));
+  const moved = await recorded(db, 'claims', claim.id, () => db.run(
+    "UPDATE claims SET status = 'denied', denial_reason = ?, payer_claim_number = COALESCE(?, payer_claim_number) WHERE id = ? AND status IN ('submitted','partially_paid')",
+    reason.slice(0, 300), line.payer_claim_number, claim.id,
+  ));
+  if (!moved.changes) return false;
+  const after = await db.get('SELECT status, denial_reason FROM claims WHERE id = ?', claim.id);
+  await claimEvent(db, claim, 'eob', 'denied', `Denied: ${reason} (paper EOB read by AI, approved by ${req.user.name || 'staff'})`);
+  await audit(db, req, 'eob.paper_denial', 'claims', claim.id, { remit_line: line.id, paper_eob_id: line.paper_eob_id, read_by: 'AI', approved_by: req.user.name || null }, {
+    before: { status: claim.status, denial_reason: claim.denial_reason }, after, patientId: claim.patient_id, reason: `Paper EOB read by AI: ${reason}`.slice(0, 500),
+  });
+  return true;
 }
 
 // A problem with the check itself (not one claim): provider-level adjustments (interest, recoupments) or a
@@ -428,6 +455,9 @@ export async function resolveLine(db, req, line, action, { note = null, claimId 
   const task = (title, notes) => insert(db, 'tasks', {
     practice_id: pid, patient_id: line.patient_id, title: title.slice(0, 200), notes, priority: 'high', due_date: null, created_by: req.user.id,
   });
+  // A person acting on a paper EOB's denial (bill the patient, resend, appeal) confirms the AI's read of it:
+  // the claim is denied now, as theirs. "Nothing to do" leaves the claim as it was (the read may be wrong).
+  if (['bill_patient', 'resend', 'appeal'].includes(action)) await applyPaperDenial(db, req, line);
   const claim = line.claim_id ? await db.get('SELECT * FROM claims WHERE id = ? AND practice_id = ?', line.claim_id, pid) : null;
   switch (action) {
     case 'post': {

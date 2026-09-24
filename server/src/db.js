@@ -5227,6 +5227,151 @@ CREATE TABLE IF NOT EXISTS bm_sends (
 );
 CREATE INDEX IF NOT EXISTS idx_bm_sends_practice ON bm_sends(practice_id, created_at);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_bm_sends_nightly ON bm_sends(practice_id, send_date) WHERE cause = 'nightly' AND status != 'failed';
+-- Patient journeys (PX, journeys.js): each journey's switch, channel, wording and options per practice.
+-- enabled_since keeps a journey switched on today from reaching back to visits booked before it. (These tables
+-- were first created at runtime by journeys.js; here they are part of the schema, so patient merge moves their
+-- rows to the kept chart and backups include them.)
+CREATE TABLE IF NOT EXISTS journey_settings (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  key TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 0,
+  channel TEXT,
+  template TEXT,
+  subject TEXT,
+  options TEXT,
+  enabled_since TEXT,
+  updated_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (practice_id, key)
+);
+-- What the welcome says about the office: parking, what to bring, what to expect, the doctor's photo.
+CREATE TABLE IF NOT EXISTS journey_profile (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL UNIQUE REFERENCES practices(id),
+  parking TEXT,
+  what_to_bring TEXT,
+  what_to_expect TEXT,
+  team_note TEXT,
+  doctor_photo TEXT,
+  updated_by INTEGER REFERENCES users(id),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- Per-patient choices: the newsletter (opt-in), VIP (mailed birthday card), no celebrations at all.
+CREATE TABLE IF NOT EXISTS journey_prefs (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL UNIQUE REFERENCES patients(id),
+  newsletter INTEGER NOT NULL DEFAULT 0,
+  newsletter_at TEXT,
+  vip INTEGER NOT NULL DEFAULT 0,
+  no_celebrations INTEGER NOT NULL DEFAULT 0,
+  updated_by INTEGER REFERENCES users(id),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- Links in journey messages (the welcome page): only the token's hash is kept.
+CREATE TABLE IF NOT EXISTS journey_links (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  enrollment_id INTEGER REFERENCES cadence_enrollments(id),
+  appointment_id INTEGER REFERENCES appointments(id),
+  purpose TEXT NOT NULL,
+  token_hash TEXT NOT NULL UNIQUE,
+  expires_at TEXT NOT NULL,
+  opened_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- Post-op check-ins sent by text, and the patient's answer (1 good / 2 some pain / 3 need to talk).
+CREATE TABLE IF NOT EXISTS journey_checkins (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  enrollment_id INTEGER NOT NULL UNIQUE REFERENCES cadence_enrollments(id),
+  provider_id INTEGER REFERENCES providers(id),
+  visit_date TEXT NOT NULL,
+  phone TEXT NOT NULL,
+  message_id INTEGER REFERENCES messages(id),
+  reply INTEGER,
+  reply_text TEXT,
+  replied_at TEXT,
+  task_id INTEGER REFERENCES tasks(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- Moments for the team: milestones (braces off, first cavity-free checkup), life events read from notes, a hard
+-- last visit, a comment for the owner. One per (patient, kind, source); suggested until done or dismissed.
+CREATE TABLE IF NOT EXISTS journey_moments (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  kind TEXT NOT NULL CHECK (kind IN ('braces_off','cavity_free','life_event','hard_visit','comment')),
+  source_key TEXT NOT NULL,
+  detail TEXT,
+  detected_on TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'suggested' CHECK (status IN ('suggested','done','dismissed')),
+  task_id INTEGER REFERENCES tasks(id),
+  done_by INTEGER REFERENCES users(id),
+  done_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (practice_id, patient_id, kind, source_key)
+);
+-- A patient who referred a friend (the friend is the new patient).
+CREATE TABLE IF NOT EXISTS journey_referrals (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  referrer_patient_id INTEGER NOT NULL REFERENCES patients(id),
+  referred_patient_id INTEGER NOT NULL REFERENCES patients(id),
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (practice_id, referred_patient_id)
+);
+-- Handwritten cards (and gift cards) for the team: one per reason; sent when its task is ticked.
+CREATE TABLE IF NOT EXISTS journey_cards (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  reason TEXT NOT NULL,
+  reason_key TEXT NOT NULL,
+  task_id INTEGER REFERENCES tasks(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (practice_id, reason_key)
+);
+-- Holiday cards and newsletters: written by the office, sent once to a snapshot of recipients.
+CREATE TABLE IF NOT EXISTS journey_broadcasts (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  kind TEXT NOT NULL CHECK (kind IN ('holiday','newsletter')),
+  title TEXT NOT NULL,
+  subject TEXT,
+  body TEXT NOT NULL,
+  channel TEXT NOT NULL CHECK (channel IN ('email','postcard')),
+  status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','sending','sent','cancelled')),
+  recipients INTEGER NOT NULL DEFAULT 0,
+  sent INTEGER NOT NULL DEFAULT 0,
+  failed INTEGER NOT NULL DEFAULT 0,
+  created_by INTEGER REFERENCES users(id),
+  sent_by INTEGER REFERENCES users(id),
+  started_at TEXT,
+  finished_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS journey_broadcast_recipients (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  broadcast_id INTEGER NOT NULL REFERENCES journey_broadcasts(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','sent','failed','skipped')),
+  token_hash TEXT,
+  message_id INTEGER REFERENCES messages(id),
+  external_id TEXT,
+  result TEXT,
+  sent_at TEXT,
+  UNIQUE (broadcast_id, patient_id)
+);
+CREATE INDEX IF NOT EXISTS idx_journey_checkins_phone ON journey_checkins(practice_id, phone);
+CREATE INDEX IF NOT EXISTS idx_journey_moments_status ON journey_moments(practice_id, status);
+CREATE INDEX IF NOT EXISTS idx_journey_bcr_status ON journey_broadcast_recipients(broadcast_id, status);
 `;
 
 // Columns added after the first release. SQLite has no ADD COLUMN IF NOT EXISTS, so check first.
@@ -5810,6 +5955,9 @@ const COLUMNS = [
   ['tooth_conditions', 'xray_finding_id', 'INTEGER REFERENCES xray_findings(id)'],
   ['documents', 'ai_engine', 'TEXT'],
   ['documents', 'ai_vendor_ref', 'TEXT'],
+  // Billing autopilot: how many times staff resumed a paused dunning. It is part of the retry's idempotency key,
+  // so a retry after a resume never reuses a key the processor already declined.
+  ['billing_dunning', 'resumes', 'INTEGER NOT NULL DEFAULT 0'],
 ];
 
 // CHECK constraints widened after release: [table, constraint name on Postgres, old text, new text].

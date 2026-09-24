@@ -1,8 +1,9 @@
 import { Router } from 'express';
 import { requirePermission, HttpError } from '../auth.js';
 import { requireHuman } from '../aiguard.js';
-import { findOr404, insert, audit, update } from '../util.js';
+import { findOr404, insert, audit, update, recorded } from '../util.js';
 import { isManager } from '../deposits.js';
+import { canSeePatient } from '../officeaccess.js';
 import {
   setAppUrl, billingSettings, saveBillingSettings, passThroughFor, passThroughInfo, practiceState, surchargeCap, STATE_RULES, BRAND_MAX_BPS, PROCESSORS,
   activeList, accountActivity, setupPreview, startSetup, finishSetup, linkByToken, linkExpired, cardFromLink, sendUpdateCardLink, replaceCard, retryNow,
@@ -29,8 +30,15 @@ export default function billingAutoRoutes({ db, payments, messenger, config = {}
   setAppUrl(config.appUrl);
   const r = Router();
   const pid = (req) => req.user.practice_id;
+  // A record about a patient at another office answers 404 to someone limited to some offices (officeaccess.js
+  // covers /patients/:id… and other /<segment>/:id paths; these nested /billing/… ones are checked here).
+  const visibleOr404 = async (req, table, id, label) => {
+    const row = await findOr404(db, table, id, pid(req), label);
+    if (!(await canSeePatient(db, req.user, table === 'patients' ? row.id : row.patient_id))) throw new HttpError(404, `${label} not found`);
+    return row;
+  };
   const guarantorOf = async (req, id) => {
-    const p = await findOr404(db, 'patients', id, pid(req), 'Patient');
+    const p = await visibleOr404(req, 'patients', id, 'Patient');
     return p.guarantor_id ? db.get('SELECT * FROM patients WHERE id = ?', p.guarantor_id) : p;
   };
 
@@ -59,7 +67,7 @@ export default function billingAutoRoutes({ db, payments, messenger, config = {}
     res.status(out.replay ? 200 : 201).json(out);
   });
   r.get('/billing/authorizations/:aid', requirePermission('billing:read'), async (req, res) => {
-    const a = await findOr404(db, 'billing_authorizations', req.params.aid, pid(req), 'Authorization');
+    const a = await visibleOr404(req, 'billing_authorizations', req.params.aid, 'Authorization');
     await audit(db, req, 'billing.authorization_view', 'billing_authorizations', a.id, null, { patientId: a.patient_id });
     res.json({ ...a, setup: JSON.parse(a.setup) });
   });
@@ -67,7 +75,7 @@ export default function billingAutoRoutes({ db, payments, messenger, config = {}
   // the plan / recurring charge (what's owed stays owed).
   r.post('/billing/authorizations/:aid/revoke', requirePermission('billing:write'), async (req, res) => {
     requireHuman('stopping automatic payments');
-    const a = await findOr404(db, 'billing_authorizations', req.params.aid, pid(req), 'Authorization');
+    const a = await visibleOr404(req, 'billing_authorizations', req.params.aid, 'Authorization');
     const reason = String(req.body?.reason || '').trim();
     if (!reason) throw new HttpError(400, 'Say why automatic payments are stopping');
     const { changes } = await db.run("UPDATE billing_authorizations SET status = 'revoked', revoked_at = datetime('now'), revoked_by = ?, revoke_reason = ? WHERE id = ? AND status IN ('pending','signed')", req.user.id, reason.slice(0, 300), a.id);
@@ -86,7 +94,7 @@ export default function billingAutoRoutes({ db, payments, messenger, config = {}
   // ---- Recurring charges ----
   r.post('/billing/recurring/:rid/charge-now', requirePermission('billing:write'), async (req, res) => {
     requireHuman('charging a card');
-    const rc = await findOr404(db, 'recurring_charges', req.params.rid, pid(req), 'Recurring payment');
+    const rc = await visibleOr404(req, 'recurring_charges', req.params.rid, 'Recurring payment');
     if (rc.status !== 'active') throw new HttpError(409, rc.status === 'paused' ? 'Automatic payments are paused — update the card or resume first' : 'That recurring payment has ended');
     const result = await retryNow(db, payments, messenger, 'recurring', rc.id);
     if (!result) throw new HttpError(409, 'Nothing could be charged right now');
@@ -105,7 +113,7 @@ export default function billingAutoRoutes({ db, payments, messenger, config = {}
     res.json(rows.map((d) => ({ ...d, label: SOURCES[d.source_type]?.label, patient: `${d.first_name} ${d.last_name}`, card: d.last4 ? `${d.brand || 'card'} •••• ${d.last4}` : null })));
   });
   const dunningOr404 = async (req) => {
-    const d = await findOr404(db, 'billing_dunning', req.params.did, pid(req), 'Declined payment');
+    const d = await visibleOr404(req, 'billing_dunning', req.params.did, 'Declined payment');
     if (!d.live_key) throw new HttpError(409, 'That one is already closed');
     return d;
   };
@@ -130,10 +138,18 @@ export default function billingAutoRoutes({ db, payments, messenger, config = {}
     requireHuman('resuming automatic payments');
     const d = await dunningOr404(req);
     const today = await todayFor(db, d.practice_id);
-    await db.run("UPDATE billing_dunning SET status = 'retrying', failures = 1, first_failed_on = ?, next_retry_on = ?, paused_at = NULL, team_notified_at = NULL WHERE id = ?", today, today, d.id);
+    // A new round of retries. `resumes` goes into the retry's idempotency key (billingauto.js), so the retry
+    // after a resume is a new charge attempt, not a replay of one the processor already declined; the earlier
+    // attempts stay in billing_attempts under their own keys.
+    await recorded(db, 'billing_dunning', d.id, () => db.run(
+      "UPDATE billing_dunning SET status = 'retrying', failures = 1, resumes = resumes + 1, first_failed_on = ?, next_retry_on = ?, paused_at = NULL, team_notified_at = NULL WHERE id = ?", today, today, d.id,
+    ));
     if (d.source_type === 'payment_plan') await update(db, 'payment_plans', d.source_id, pid(req), { autopay_paused: 0 });
     if (d.source_type === 'recurring') await update(db, 'recurring_charges', d.source_id, pid(req), { status: 'active' });
-    await audit(db, req, 'billing.dunning_resume', 'billing_dunning', d.id, null, { patientId: d.patient_id });
+    const after = await db.get('SELECT status, failures, resumes, next_retry_on FROM billing_dunning WHERE id = ?', d.id);
+    await audit(db, req, 'billing.dunning_resume', 'billing_dunning', d.id, null, {
+      patientId: d.patient_id, before: { status: d.status, failures: d.failures, resumes: d.resumes, next_retry_on: d.next_retry_on }, after,
+    });
     res.json(await db.get('SELECT * FROM billing_dunning WHERE id = ?', d.id));
   });
   // Stop retrying (statement instead, collections, the patient paid another way): needs a note.
@@ -145,8 +161,8 @@ export default function billingAutoRoutes({ db, payments, messenger, config = {}
   // Staff choose another card on file for everything that used the declined (or expiring) one.
   r.post('/billing/replace-card', requirePermission('billing:write'), async (req, res) => {
     requireHuman('changing the card for automatic payments');
-    const oldM = await findOr404(db, 'payment_methods', req.body?.old_method_id, pid(req), 'Card');
-    const newM = await findOr404(db, 'payment_methods', req.body?.new_method_id, pid(req), 'Card');
+    const oldM = await visibleOr404(req, 'payment_methods', req.body?.old_method_id, 'Card');
+    const newM = await visibleOr404(req, 'payment_methods', req.body?.new_method_id, 'Card');
     if (newM.removed_at || newM.patient_id !== oldM.patient_id) throw new HttpError(400, 'Choose another card on file for the same account');
     const changed = await replaceCard(db, { practiceId: pid(req), patientId: oldM.patient_id, oldMethodId: oldM.id, newMethodId: newM.id, today: await todayFor(db, pid(req)), userId: req.user.id });
     const retried = [];
@@ -256,7 +272,7 @@ export default function billingAutoRoutes({ db, payments, messenger, config = {}
     requireHuman('adding a fee to an account');
     const fee = await findOr404(db, 'billing_fees', req.params.fid, pid(req), 'Fee');
     if (fee.applies === 'automatic' && fee.occasion !== 'manual') throw new HttpError(409, 'That fee is added automatically when it applies');
-    const patient = await findOr404(db, 'patients', req.body?.patient_id, pid(req), 'Patient');
+    const patient = await visibleOr404(req, 'patients', req.body?.patient_id, 'Patient');
     const note = String(req.body?.note || '').trim().slice(0, 120) || null;
     const key = req.body?.occasion_key ? `manual:${String(req.body.occasion_key).slice(0, 80)}` : `manual:${req.get('Idempotency-Key') || Date.now()}`;
     const charge = await applyFee(db, fee, { patientId: patient.id, sourceKey: key, userId: req.user.id, note });
@@ -273,7 +289,7 @@ export default function billingAutoRoutes({ db, payments, messenger, config = {}
   });
   r.post('/billing/fee-charges/:cid/waive', requirePermission('billing:write'), async (req, res) => {
     managerOnly(req, 'Waiving a fee');
-    const charge = await findOr404(db, 'billing_fee_charges', req.params.cid, pid(req), 'Fee');
+    const charge = await visibleOr404(req, 'billing_fee_charges', req.params.cid, 'Fee');
     const reversal = await waiveFee(db, req, charge, req.body?.reason);
     res.json({ ok: true, reversal_entry_id: reversal });
   });

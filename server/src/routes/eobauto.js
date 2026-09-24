@@ -4,12 +4,12 @@ import { requirePermission, HttpError } from '../auth.js';
 import { findOr404, audit, insert, practiceNow } from '../util.js';
 import {
   getSettings, saveSettings, worklist, resolveLine, postReady, postGroup, preview, stageRemittance, stageCheckLevel, paperLine, claimContext,
-  raiseImportIssue, settleImportIssue, ACTIONS, KINDS, reasonWords,
+  raiseImportIssue, settleImportIssue, ACTIONS, KINDS, reasonWords, applyPaperDenial,
 } from '../eobauto.js';
 import { billForToken, markOpened, payPage, accountPortion } from '../autobill.js';
 import { reconciliation } from '../eobrecon.js';
 import { readEob } from './insuranceai.js';
-import { restricted } from '../officeaccess.js';
+import { restricted, canSeePatient, patientScope } from '../officeaccess.js';
 import { portalKey } from './portal.js';
 import { publish } from '../events.js';
 
@@ -35,6 +35,12 @@ const aiBlock = (mime, data) => (mime === 'application/pdf'
 export default function eobAutopilotRoutes({ db, config, storage, mailer, clearinghouse }) {
   const r = Router();
   const locs = (req) => (restricted(req.user) ? req.user.location_ids.map(Number) : null);
+  // A remittance line about a patient at another office answers 404 to someone limited to some offices.
+  const lineOr404 = async (req) => {
+    const line = await findOr404(db, 'remit_lines', req.params.id, req.user.practice_id, 'Remittance line');
+    if (!(await canSeePatient(db, req.user, line.patient_id))) throw new HttpError(404, 'Remittance line not found');
+    return line;
+  };
 
   r.get('/eob-autopilot', requirePermission('billing:read'), async (req, res) => {
     const pid = req.user.practice_id;
@@ -47,13 +53,15 @@ export default function eobAutopilotRoutes({ db, config, storage, mailer, cleari
   });
 
   r.get('/eob-autopilot/lines/:id', requirePermission('billing:read'), async (req, res) => {
-    const line = await findOr404(db, 'remit_lines', req.params.id, req.user.practice_id, 'Remittance line');
+    const line = await lineOr404(req);
     const claim = line.claim_id ? await db.get('SELECT id, status, total_fee, paid_amount, patient_id, primary_claim_id, denial_reason FROM claims WHERE id = ?', line.claim_id) : null;
     // Open claims this line could belong to (for "match"): same billed amount first.
+    // (Only patients this person may see: someone limited to some offices gets their offices' claims.)
+    const scope = patientScope(req.user, 'p');
     const candidates = line.claim_id ? [] : await db.all(
       `SELECT c.id, c.total_fee, c.submitted_at, p.first_name, p.last_name FROM claims c JOIN patients p ON p.id = c.patient_id
-       WHERE c.practice_id = ? AND c.status IN ('submitted','partially_paid','denied') ORDER BY CASE WHEN c.total_fee = ? THEN 0 ELSE 1 END, c.submitted_at DESC LIMIT 15`,
-      req.user.practice_id, line.billed,
+       WHERE c.practice_id = ? AND c.status IN ('submitted','partially_paid','denied')${scope.sql} ORDER BY CASE WHEN c.total_fee = ? THEN 0 ELSE 1 END, c.submitted_at DESC LIMIT 15`,
+      req.user.practice_id, ...scope.args, line.billed,
     );
     res.json({
       ...line, services: JSON.parse(line.services || '[]'), reasons: reasonWords(JSON.parse(line.reason_codes || '[]')), claim, candidates,
@@ -63,8 +71,12 @@ export default function eobAutopilotRoutes({ db, config, storage, mailer, cleari
 
   // A person's decision on one line: post, bill the patient, resend, appeal, refund, match, reverse, dismiss.
   r.post('/eob-autopilot/lines/:id/:action', requirePermission('billing:write'), async (req, res) => {
-    const line = await findOr404(db, 'remit_lines', req.params.id, req.user.practice_id, 'Remittance line');
+    const line = await lineOr404(req);
     if (!ACTIONS[req.params.action] || req.params.action === 'send_secondary') throw new HttpError(404, 'Unknown action');
+    if (req.params.action === 'match' && req.body?.claim_id != null) {
+      const target = await db.get('SELECT patient_id FROM claims WHERE id = ? AND practice_id = ?', Number(req.body.claim_id), req.user.practice_id);
+      if (target && !(await canSeePatient(db, req.user, target.patient_id))) throw new HttpError(404, 'Claim not found');
+    }
     const out = await resolveLine(db, req, line, req.params.action, { note: req.body?.note, claimId: req.body?.claim_id });
     res.json({ line: out, ...(await worklist(db, req.user.practice_id, { locationIds: locs(req) })) });
   });
@@ -178,12 +190,17 @@ export default function eobAutopilotRoutes({ db, config, storage, mailer, cleari
     // Posted today (the books' date); the check keeps the date printed on it.
     const date = (await practiceNow(db, pid)).slice(0, 10);
     const ready = await db.all("SELECT * FROM remit_lines WHERE paper_eob_id = ? AND state = 'ready' ORDER BY id", p.id);
+    // The check is recorded for what's printed on it (what the bank deposits), not just the clean lines: the
+    // exceptions post to the same check later, so reconciliation matches the bank. Without a printed total,
+    // the sum of every claim line on the EOB.
+    const claimLines = Number((await db.get('SELECT COALESCE(SUM(paid), 0) AS n FROM remit_lines WHERE paper_eob_id = ? AND line_no >= 0', p.id)).n);
+    const checkAmount = p.total_paid || claimLines;
     const result = await db.tx(async () => {
       const flipped = await db.run("UPDATE paper_eobs SET status = 'posted', approved_by = ?, approved_at = datetime('now') WHERE id = ? AND status = 'read'", req.user.id, p.id);
       if (!flipped.changes) return null;
       const checkId = await insert(db, 'insurance_checks', {
         practice_id: pid, carrier_id: p.carrier_id, payer_name: p.payer_name, check_number: p.check_number, check_date: p.check_date || date,
-        amount: ready.reduce((s, l) => s + l.paid, 0), method: p.method === 'eft' ? 'eft' : 'check', provider_adjustments: p.provider_adjustments, created_by: req.user.id,
+        amount: checkAmount, method: p.method === 'eft' ? 'eft' : 'check', provider_adjustments: p.provider_adjustments, created_by: req.user.id,
       });
       await db.run('UPDATE paper_eobs SET insurance_check_id = ? WHERE id = ?', checkId, p.id);
       await db.run('UPDATE remit_lines SET insurance_check_id = ? WHERE paper_eob_id = ?', checkId, p.id);
@@ -192,11 +209,17 @@ export default function eobAutopilotRoutes({ db, config, storage, mailer, cleari
         await postGroup(db, [l.id], { userId: req.user.id, req, date, method: p.method === 'eft' ? 'eft' : 'check' });
         posted++;
       }
-      return { checkId, posted };
+      // The person approved the whole read, so its denials apply now, as theirs (never at upload). The rows
+      // stay on the worklist for the next step (resend, appeal, bill the patient).
+      let denied = 0;
+      for (const l of await db.all("SELECT * FROM remit_lines WHERE paper_eob_id = ? AND state = 'exception' AND kind = 'denied' ORDER BY id", p.id)) {
+        if (await applyPaperDenial(db, req, l)) denied++;
+      }
+      return { checkId, posted, denied };
     });
     if (!result) return res.json(await paperView(p.id, { already: true }));
     // The approval is the person's: the AI only read the page.
-    await audit(db, req, 'eob.paper_post', 'paper_eobs', p.id, { posted: result.posted, insurance_check_id: result.checkId, read_by: 'AI', approved_by: req.user.name });
+    await audit(db, req, 'eob.paper_post', 'paper_eobs', p.id, { posted: result.posted, denied: result.denied || undefined, insurance_check_id: result.checkId, read_by: 'AI', approved_by: req.user.name });
     const left = Number((await db.get("SELECT COUNT(*) AS n FROM remit_lines WHERE paper_eob_id = ? AND state = 'exception'", p.id)).n);
     await raiseImportIssue(db, pid, { key: `eob:${p.id}`, entity: 'paper_eobs', entityId: p.id, title: `Paper EOB ${p.check_number || `#${p.id}`} from ${p.payer_name || 'the payer'}`, count: left });
     await settleImportIssue(db, { practice_id: pid, paper_eob_id: p.id });

@@ -500,7 +500,7 @@ export async function retryOrtho(db, payments, messenger, caseId) {
   if (!method) return null;
   const practice = await db.get('SELECT name FROM practices WHERE id = ?', c.practice_id);
   const out = await trackedCharge(db, payments, {
-    method, amount, description: `${practice.name} — orthodontic payment (retry)`, idempotencyKey: `ortho-retry-${c.id}-${d?.id ?? 0}-${d?.failures ?? 0}-${method.id}`,
+    method, amount, description: `${practice.name} — orthodontic payment (retry)`, idempotencyKey: `ortho-retry-${c.id}-${d?.id ?? 0}-${d?.failures ?? 0}${d?.resumes ? `-r${d.resumes}` : ''}-${method.id}`,
     metadata: { ortho_case_id: c.id, patient_id: c.patient_id },
   }, { practiceId: c.practice_id, patientId: c.patient_id, sourceType: 'ortho_case', sourceId: c.id });
   if (out.ambiguous) return { case_id: c.id, pending: true };
@@ -585,7 +585,7 @@ async function chargeRecurring(db, payments, messenger, r, today) {
   const d = await openDunning(db, 'recurring', r.id);
   const practice = await db.get('SELECT name FROM practices WHERE id = ?', r.practice_id);
   const out = await trackedCharge(db, payments, {
-    method, amount, description: `${practice.name} — ${r.description}`, idempotencyKey: `recurring-${r.id}-${r.charges_made}-${d?.failures ?? 0}-${method.id}`,
+    method, amount, description: `${practice.name} — ${r.description}`, idempotencyKey: `recurring-${r.id}-${r.charges_made}-${d?.failures ?? 0}${d?.resumes ? `-r${d.resumes}` : ''}-${method.id}`,
     metadata: { recurring_charge_id: r.id, patient_id: r.patient_id },
   }, { practiceId: r.practice_id, patientId: r.patient_id, sourceType: 'recurring', sourceId: r.id });
   if (out.ambiguous) {
@@ -739,13 +739,22 @@ export async function runAutoFees(db, practiceId) {
         if (s.due_date < since || addDays(s.due_date, fee.grace_days) >= today || s.paid >= s.amount || s.late_fee) continue;
         const amount = feeAmount(fee, s.amount - s.paid);
         if (amount <= 0) continue;
-        const claimed = await db.run('INSERT INTO payment_plan_late_fees (plan_id, installment, amount) VALUES (?, ?, ?) ON CONFLICT (plan_id, installment) DO NOTHING', plan.id, s.n, amount);
-        if (!claimed.changes) continue;
-        const c = await applyFee(db, fee, { patientId: plan.patient_id, sourceKey: `plan:${plan.id}:${s.n}`, basis: s.amount - s.paid, date: today, note: `payment plan installment ${s.n} due ${s.due_date}` });
-        if (c) {
+        // Claim the installment and post the fee together: the claim row stays only when a fee really posted.
+        const posted = await db.tx(async () => {
+          const claimed = await db.run('INSERT INTO payment_plan_late_fees (plan_id, installment, amount) VALUES (?, ?, ?) ON CONFLICT (plan_id, installment) DO NOTHING', plan.id, s.n, amount);
+          if (!claimed.changes) return false;
+          const c = await applyFee(db, fee, { patientId: plan.patient_id, sourceKey: `plan:${plan.id}:${s.n}`, basis: s.amount - s.paid, date: today, note: `payment plan installment ${s.n} due ${s.due_date}` });
+          if (!c) {
+            // Nothing posted (the fee's yearly limit, or it came to $0): release the claim. It is a derived
+            // claim row, not a record of money — the ledger and billing_fee_charges hold the real fee — so a
+            // hard delete is safe, and the plan screen never shows a fee that wasn't charged.
+            await db.run('DELETE FROM payment_plan_late_fees WHERE plan_id = ? AND installment = ? AND ledger_entry_id IS NULL', plan.id, s.n);
+            return false;
+          }
           await db.run('UPDATE payment_plan_late_fees SET ledger_entry_id = ? WHERE plan_id = ? AND installment = ?', c.ledger_entry_id, plan.id, s.n);
-          out.late++;
-        }
+          return true;
+        });
+        if (posted) out.late++;
       }
     }
   }

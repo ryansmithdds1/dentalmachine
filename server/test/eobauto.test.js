@@ -522,3 +522,77 @@ test('preview: what auto-posting would have done over the last 30 days, compared
   assert.deepEqual([p.would_post, p.would_post_amount, p.exceptions, p.matched_team], [1, 15000, 1, 1]);
   assert.deepEqual(p.by_kind, { denied: 1 });
 });
+
+test('W9: an AI read of a paper EOB never denies a claim on its own; the person who approves it does', async () => {
+  const ctx = await setup({ settings: { billing: true, min_balance: 500, wait_days: 0, paper_days: 10 } });
+  const a = await claimFor(ctx, ['D2392']);
+  const b = await claimFor(ctx, ['D2392']);
+  const dos = (await h.db.get('SELECT substr(MIN(pr.completed_at), 1, 10) AS d FROM claim_items ci JOIN procedures pr ON pr.id = ci.procedure_id WHERE ci.claim_id = ?', a.id)).d;
+  await h.db.run('UPDATE claims SET payer_claim_number = ? WHERE id = ?', 'PX-A', a.id);
+  await h.db.run('UPDATE claims SET payer_claim_number = ? WHERE id = ?', 'PX-C', b.id);
+  const denial = (pcn) => ({
+    payer_name: 'Delta Dental', check_number: '0', check_date: dos, total_paid: 0, method: 'check',
+    claims: [{ patient_name: 'DOE, JANE', payer_claim_number: pcn, date_of_service: dos, paid: 0, denied: true, patient_responsibility: 0, lines: [{ code: 'D2392', tooth: '30', billed: 235, paid: 0, write_off: 0, patient_resp: 0 }] }],
+  });
+  const events = async (id) => h.db.all("SELECT source, status FROM claim_events WHERE claim_id = ? AND status = 'denied'", id);
+
+  reply = denial('PX-A');
+  const up = await upload(ctx, jpeg('deny-a'));
+  assert.equal(up.status, 201, JSON.stringify(up.data));
+  assert.deepEqual(up.data.lines.map((l) => [l.state, l.kind]), [['exception', 'denied']], 'the denial waits on the worklist');
+  assert.equal((await ctx.api.get(`/claims/${a.id}`)).data.status, 'submitted', 'nobody approved anything: the claim is as it was');
+  assert.deepEqual(await events(a.id), []);
+  assert.equal(await h.db.get("SELECT id FROM audit_log WHERE entity = 'claims' AND entity_id = ? AND action LIKE 'eob.%'", a.id), undefined);
+  await runEobAutopilot(h.db, { practiceIds: [ctx.pid], appUrl: 'https://app.example.com' });
+  assert.equal((await h.db.get('SELECT COUNT(*) AS n FROM balance_bills WHERE patient_id = ?', ctx.patient.id)).n, 0, 'the patient isn’t billed on an unapproved read');
+
+  // "Looks right — post": the person approves the read, and the denial is theirs.
+  const ok = await ctx.api.post(`/eob-autopilot/paper/${up.data.id}/post`);
+  assert.equal(ok.status, 200, JSON.stringify(ok.data));
+  const claimA = (await ctx.api.get(`/claims/${a.id}`)).data;
+  assert.equal(claimA.status, 'denied');
+  assert.deepEqual(await events(a.id), [{ source: 'eob', status: 'denied' }]);
+  const trail = await h.db.get("SELECT * FROM audit_log WHERE action = 'eob.paper_denial' AND entity_id = ?", a.id);
+  assert.equal(trail.source, 'human');
+  assert.match(trail.reason, /Paper EOB read by AI/);
+  assert.match(trail.details, /"read_by":"AI"/);
+  assert.match(trail.changes, /"status":\["submitted","denied"\]/);
+  assert.ok((await work(ctx)).items.some((i) => i.claim_id === a.id && i.kind === 'denied'), 'the denied row stays for the next step');
+
+  // Or the person's decision on the line (appeal, resend, bill the patient) — "nothing to do" leaves the claim.
+  reply = denial('PX-C');
+  const up2 = await upload(ctx, jpeg('deny-c'));
+  const line = up2.data.lines[0];
+  assert.equal((await ctx.api.get(`/claims/${b.id}`)).data.status, 'submitted');
+  const appeal = await ctx.api.post(`/eob-autopilot/lines/${line.id}/appeal`, {});
+  assert.equal(appeal.status, 200, JSON.stringify(appeal.data));
+  assert.equal((await ctx.api.get(`/claims/${b.id}`)).data.status, 'denied');
+  assert.equal((await events(b.id)).length, 1);
+  assert.equal((await h.db.get("SELECT source FROM audit_log WHERE action = 'eob.paper_denial' AND entity_id = ?", b.id)).source, 'human');
+});
+
+test('W9: a paper EOB’s check is recorded for its printed total, so it reconciles once the exceptions post', async () => {
+  const ctx = await setup();
+  const a = await claimFor(ctx, ['D2392']);
+  const b = await claimFor(ctx, ['D0274']);
+  const dos = (await h.db.get('SELECT substr(MIN(pr.completed_at), 1, 10) AS d FROM claim_items ci JOIN procedures pr ON pr.id = ci.procedure_id WHERE ci.claim_id = ?', a.id)).d;
+  await h.db.run('UPDATE claims SET payer_claim_number = ? WHERE id = ?', 'PX-B2', b.id);
+  reply = {
+    payer_name: 'Delta Dental', check_number: '88124', check_date: dos, total_paid: 200, method: 'check',
+    claims: [
+      { patient_name: 'DOE, JANE', date_of_service: dos, paid: 150, patient_responsibility: 35, lines: [{ code: 'D2392', tooth: '30', billed: 235, paid: 150, write_off: 50, patient_resp: 35 }] },
+      { patient_name: 'DOE, JANE', payer_claim_number: 'PX-B2', date_of_service: dos, paid: 50, patient_responsibility: 10, lines: [{ code: 'D0274', billed: 70, paid: 50, write_off: 0, patient_resp: 10 }] },
+    ],
+  };
+  const up = await upload(ctx, jpeg('check'));
+  assert.equal(up.status, 201, JSON.stringify(up.data));
+  assert.deepEqual([up.data.clean, up.data.exceptions], [1, 1]);
+  assert.equal((await ctx.api.post(`/eob-autopilot/paper/${up.data.id}/post`)).status, 200);
+  const chk = await h.db.get('SELECT * FROM insurance_checks WHERE practice_id = ?', ctx.pid);
+  assert.equal(chk.amount, 20000, 'the check is what the bank deposits, not just the clean lines');
+  const ex = await h.db.get("SELECT * FROM remit_lines WHERE paper_eob_id = ? AND state = 'exception' AND line_no >= 0", up.data.id);
+  assert.equal((await ctx.api.post(`/eob-autopilot/lines/${ex.id}/post`, {})).status, 200);
+  const { reconcileInsuranceChecks } = await import('../src/reconcile.js');
+  const rec = await reconcileInsuranceChecks(h.db, ctx.pid, '2000-01-01', '2100-01-01');
+  assert.deepEqual(rec.differences, [], 'the check and what was posted to it agree');
+});
