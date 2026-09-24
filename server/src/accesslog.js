@@ -3,6 +3,8 @@
 // audit themselves (chart, patient, document files) aren't repeated here. The same person re-reading the
 // same thing within a minute is one entry, so screens that refresh don't flood the log.
 import { audit } from './util.js';
+import { raiseIssue } from './issues.js';
+import { log, scrubMessage } from './monitoring.js';
 
 const RULES = [
   [/^\/patients\/(\d+)\/(card|notes|perio|treatment-plans|prescriptions|ledger|statement|documents|mounts|insurance|insurance-updates|procedures|vitals|forms|history-review|ortho|referrals|payment-methods|payment-plans|payment-requests|eligibility|family|note-draft|followups|membership|unclaimed-procedures|conversation|consents\/suggest)$/, 'patients', (m) => `patient.${m[2].replace(/\//g, '_')}.view`],
@@ -42,7 +44,15 @@ export function readAudit(db) {
       const m = path.match(re);
       const id = m[1] && /^\d+$/.test(m[1]) ? Number(m[1]) : req.portal ? req.portal.patient.id : null;
       const details = req.api ? { api_key_id: req.api.key_id } : req.portal ? { portal_patient_id: req.portal.patient.id } : null;
-      audit(db, { ip: req.ip, user: who }, action(m), entity, id, details).catch(() => {});
+      // A read that can't be logged isn't silent (rule 12): it's logged and one Needs attention item per practice
+      // says the access log has gaps. (The page itself still loads; the read already happened.)
+      audit(db, { ip: req.ip, user: who }, action(m), entity, id, details).catch((err) => {
+        log.error('Access log write failed', { entity, action: action(m), error: scrubMessage(err.message) });
+        raiseIssue(db, {
+          practiceId: who.practice_id, kind: 'records', key: 'access-log-write', severity: 'high',
+          title: 'Some record views weren’t written to the access log', detail: 'Check the database; the HIPAA access log has gaps until this is fixed.',
+        }).catch((e) => log.error('Access log issue could not be raised', { error: e.message }));
+      });
     });
     next();
   };

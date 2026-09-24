@@ -474,17 +474,21 @@ export async function remindExpiringDocuments(db, practiceId) {
   for (const d of due) {
     const owner = d.uploaded_by ? await db.get('SELECT id FROM users WHERE id = ? AND active = 1', d.uploaded_by) : null;
     const soon = d.expires_on <= new Date(Date.parse(today) + 14 * 86400_000).toISOString().slice(0, 10);
-    await db.tx(async () => {
-      const again = await db.get('SELECT expiry_task_id FROM documents WHERE id = ?', d.id);
-      if (again.expiry_task_id) return;
+    const taskId = await db.tx(async () => {
+      // Lock the row first (a no-op update: Postgres holds the row until commit and re-checks the condition) so
+      // two runs at once — the hourly job and someone opening the list — can't both make a to-do.
+      const claimed = await db.run('UPDATE documents SET expiry_task_id = NULL WHERE id = ? AND expiry_task_id IS NULL', d.id);
+      if (!claimed.changes) return null;
       const t = await insert(db, 'tasks', {
         practice_id: practiceId, assigned_to: owner?.id ?? null, priority: soon ? 'high' : 'normal',
         due_date: new Date(Math.max(Date.parse(today), Date.parse(d.expires_on) - 30 * 86400_000)).toISOString().slice(0, 10),
         title: `${d.expires_on < today ? 'Expired' : 'Expires'} ${d.expires_on}: renew ${CATEGORY_LABELS[d.category]?.toLowerCase() || 'document'} “${d.filename}”`.slice(0, 200),
         notes: `Open: /documents?doc=${d.id}`,
       });
-      await db.run('UPDATE documents SET expiry_task_id = ? WHERE id = ? AND expiry_task_id IS NULL', t, d.id);
+      await db.run('UPDATE documents SET expiry_task_id = ? WHERE id = ?', t, d.id);
+      return t;
     });
+    if (taskId) await audit(db, null, 'document.expiry_reminder', 'documents', d.id, { task_id: taskId, expires_on: d.expires_on });
   }
   return due.length;
 }

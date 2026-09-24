@@ -79,15 +79,20 @@ const RELEASE = "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call
 // When each background job last ran on this server, and how it went (for the status page).
 const lastRuns = new Map();
 export const jobRuns = () => [...lastRuns.entries()].map(([name, r]) => ({ name, ...r }));
+// Told how each run went (index.js wires jobhealth.js here: failures become Needs attention items). It must not throw.
+let reportRun = null;
+export const onJobRun = (fn) => { reportRun = fn; };
 const track = async (name, fn) => {
   const started = new Date().toISOString();
   try {
     // Everything a job changes is attributed to it in the audit log.
     const out = await withActor({ source: 'automation', actor: `Job: ${name}`, userId: null }, fn);
     lastRuns.set(name, { started, finished: new Date().toISOString(), ok: true });
+    await reportRun?.(name, true);
     return out;
   } catch (err) {
     lastRuns.set(name, { started, finished: new Date().toISOString(), ok: false });
+    await reportRun?.(name, false);
     throw err;
   }
 };

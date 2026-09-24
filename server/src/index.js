@@ -7,7 +7,9 @@ import { runFillOffers } from './fill.js';
 import { runReviewSync } from './routes/reputation.js';
 import { purgeIdempotencyKeys } from './idempotency.js';
 import { purgeIntegrationLog } from './issues.js';
-import { initCluster, runExclusive } from './cluster.js';
+import { initCluster, runExclusive, onJobRun } from './cluster.js';
+import { jobReporter } from './jobhealth.js';
+import { runAutoWatch } from './autowatch.js';
 import { pollClearinghouse } from './clearinghouse.js';
 import { runRecallSequences } from './recalls.js';
 import { runAutopay } from './payments.js';
@@ -73,6 +75,9 @@ const jobFailed = (name) => (err) => {
   log.error(`${name} failed:`, err);
   app.locals.reporter.capture(err, { tags: { job: name } });
 };
+// A job that breaks also becomes a Needs attention item for each practice's administrator, closed by the next
+// run that works (jobhealth.js) — not only a log line.
+onJobRun(jobReporter(db));
 process.on('unhandledRejection', (err) => {
   log.error('Unhandled promise rejection:', err instanceof Error ? err : new Error(String(err)));
   app.locals.reporter.capture(err instanceof Error ? err : new Error(String(err)), { tags: { source: 'unhandledRejection' } });
@@ -322,6 +327,14 @@ if (process.env.FINANCE_SYNC !== 'off') {
     .catch(jobFailed('Finance sync'));
   setInterval(run, 4 * 60 * 60 * 1000).unref();
   setTimeout(run, 70_000).unref();
+}
+// Automation pass (W8): forgotten clock-outs, yesterday's loose ends (unbilled work, unsent claims, open visits,
+// undeposited checks), unanswered pre-auths, old credit balances and expiring office documents become Needs
+// attention items only when something is waiting; they resolve themselves once it's done. Read-only. Hourly.
+if (process.env.AUTO_WATCH !== 'off') {
+  const run = () => runExclusive('auto-watch', 30 * 60 * 1000, () => runAutoWatch(db)).catch(jobFailed('Automation pass'));
+  setInterval(run, 60 * 60 * 1000).unref();
+  setTimeout(run, 160_000).unref();
 }
 // Answers kept for repeated requests are dropped after a day.
 {

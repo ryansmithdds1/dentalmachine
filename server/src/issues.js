@@ -10,6 +10,7 @@ import { publish } from './events.js';
 export const ISSUE_KINDS = {
   claim: 'Claims', era: 'Insurance payments', eligibility: 'Eligibility', payment: 'Card payments', message: 'Texts and email',
   import: 'Data import', imaging: 'Imaging', ai: 'AI', integration: 'Connections', sync: 'Bank, books and reviews', schedule: 'Scheduling', records: 'Records', phones: 'Phones',
+  jobs: 'Background work',
 };
 export const ROLES = { billing: 'Billing', front_desk: 'Front desk', clinical: 'Clinical', admin: 'Administrator' };
 
