@@ -489,6 +489,26 @@ PM4. **Know what's not profitable:** reports by procedure, provider, payer (PPO)
      hour, the least profitable procedures under each PPO, and "what if" (raise a fee, drop a plan, change a lab):
      so the dentist can see in real time what actually pays and what doesn't.
 
+## The business of today: labor vs production, live (asked for, dig deep)
+Builds on the time clock (punches, shifts, pay rates in cents — timeclock:rates), production (server/src/production.js),
+contribution margin (PM), the schedule, finance overhead and metrics. Owner/manager only (money + pay).
+BD1. **Today's P&L strip (owner toggle on the schedule and a "Today" business page):** scheduled production, completed
+     so far, expected collections (after PPO write-offs), direct costs (lab, supplies), labor cost so far and projected
+     for the day (from who is clocked in and scheduled shifts × pay rates, incl. overtime), labor % of production and of
+     collections vs target (e.g. 25–30%), overhead per hour, and projected contribution/profit for the day — updating
+     live as people clock in/out and visits complete.
+BD2. **Productive vs idle time on the schedule:** a staff lane per person (from shifts and punches) under the chair
+     columns, shaded by what they're doing: in a visit (their chair/provider has a patient), assisting, admin, on break,
+     idle/unassigned time (clocked in with nothing scheduled); per person: hours paid, hours productive, productivity %,
+     production supported per labor hour; idle gaps highlighted (with suggestions: fill from the ASAP list, send
+     someone home early, move lunch).
+BD3. **Staffing vs demand:** people scheduled per chair/hour vs visits booked (overstaffed/understaffed hours), clocked in
+     early/late and overtime risk for today; recommendations ("2 assistants for 1 doctor chair from 2–4 pm").
+BD4. **Daily, weekly, monthly trends:** labor %, production per labor hour, productivity % by person/role, idle hours
+     and cost, overtime cost — in metrics (one definition each, docs/metrics.md), the end-of-day email and the
+     capacity meter; drill-down to the shifts and visits behind every number. Pay details visible only with
+     timeclock:rates; staff never see each other's pay.
+
 ## Then: remaining workflow batches
 9. Batch 4 (32–44): new patient setup, ERA/EOB posting, prescriptions, lab cases, huddle actions, recall lists,
    pre-auths, financing, adjustments, referrals, end-of-day, review requests (fix the count bug), clock in/out.
