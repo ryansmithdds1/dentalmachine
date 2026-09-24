@@ -133,6 +133,32 @@ F5. **Office settings with guardrails:** discount limits, which options show, le
     max months — set by the owner; the numbers shown to the patient are stored exactly as presented (with the
     fee schedule and estimate version) so the agreement can always be reproduced.
 
+## Online scheduling that beats the others (asked for, high priority)
+Builds on the booking widget (public booking requests), public availability, provider patterns/blocks, the recall
+self-booking link (RC2) and intake forms. Parity target: Open Dental Web Sched (new patient, recall, ASAP, existing
+patient), NexHealth, LocalMed, Zocdoc, Weave, Dentrix Ascend/Curve online booking — then better.
+OS1. **On the practice website in minutes:** a script/iframe embed and a hosted page (practice-branded, fast,
+     mobile-first, accessible), a "Book online" button for Google Business Profile ("Reserve with Google" where
+     available) and social links; UTM/source tracking so the office sees which channel booked.
+OS2. **The visit types patients actually need:** new patient exam, emergency / tooth pain (same-day slots the office
+     holds back, a few triage questions: pain level, swelling, trauma → urgent flag), hygiene/cleaning for existing
+     patients (matched to their recall and hygienist), consults (implant, ortho, Invisalign, cosmetic), each with the
+     right length, provider(s), offices and pre-visit questions; patients choose office → reason → time → details.
+OS3. **Straight into the software, no double entry:** real-time availability from the schedule (patterns, blocks,
+     buffers, provider hours — never a slot that isn't really free), the appointment is created directly (or held as
+     "requested" if the office prefers approval per type), existing patients matched safely (name + DOB + phone,
+     never merged automatically; possible duplicates flagged), new patients created with insurance captured (card
+     photo, read and verified in the background), card on file / deposit option for new patients and no-show-prone
+     slots, intake forms sent right after booking.
+OS4. **The front desk is never blindsided:** an instant alert (in-app toast + sound, chat post to the front desk
+     channel, optional text) with who booked, what for, when, new/existing, insurance status and anything that needs
+     a person (urgent emergency, possible duplicate, insurance not verified); an "Online bookings" list for the day;
+     the card shows an "Booked online" badge.
+OS5. **Better than the others:** family booking in one go (back-to-back), waitlist/ASAP opt-in with instant offers
+     when a slot opens, reschedule/cancel from the confirmation link, smart slot ordering that fills gaps and protects
+     production blocks, language (English/Spanish), confirmation + calendar invite, conversion analytics (visits, drop
+     off by step, bookings, $ scheduled) and A/B-safe copy. No PHI in analytics; spam/bot protection; rate limits.
+
 ## Recall on autopilot (asked for, high priority)
 Builds on recall types/due dates, reminders, texting/email, the AI voice calls used for confirmations, online
 booking and the ASAP list. Shares one "cadence engine" with treatment follow-up (TF).
