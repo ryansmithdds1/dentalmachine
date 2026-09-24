@@ -1,0 +1,27 @@
+/* Perio chart: anatomical teeth with gum line and pockets to scale, depth heat map, markers. */
+.perio-tooth2 { display: block; width: 100%; height: 124px; overflow: visible; filter: drop-shadow(0 1px 1px rgba(15, 23, 42, 0.12)); }
+.pt2-cej { stroke: var(--tooth-line); stroke-width: 0.8; stroke-dasharray: 2 2; opacity: 0.7; }
+.pt2-pocket { fill: #ef4444; fill-opacity: 0.16; }
+.pt2-pocket.watch { fill: #f59e0b; fill-opacity: 0.3; }
+.pt2-pocket.deep { fill: #dc2626; fill-opacity: 0.38; }
+.pt2-gm { fill: none; stroke: #2563eb; stroke-width: 2.4; stroke-linejoin: round; stroke-linecap: round; }
+.pt2-pd { fill: none; stroke: #dc2626; stroke-width: 2.4; stroke-linejoin: round; stroke-linecap: round; }
+.pt2-prev { fill: none; stroke: var(--muted); stroke-width: 1.2; stroke-dasharray: 3 2; opacity: 0.8; }
+.pt2-bleed { fill: #dc2626; stroke: #fff; stroke-width: 0.8; }
+.pt2-sup { fill: #eab308; stroke: #fff; stroke-width: 0.8; }
+.pt2-plaque { fill: #2563eb; stroke: #fff; stroke-width: 0.8; }
+.pt2-furc { fill: #7c3aed; stroke: #7c3aed; stroke-width: 1.2; }
+.pt2-mob { font: 700 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace; fill: #7c3aed; }
+
+.perio-card .perio-table { border-collapse: separate; border-spacing: 0; }
+.perio-card .perio-numbers th { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.perio-card .perio-site { position: relative; border-radius: 5px; transition: background-color 0.12s ease, box-shadow 0.12s ease; }
+.perio-card .perio-site.h4 { background: color-mix(in srgb, #f59e0b 22%, transparent); color: #b45309; }
+.perio-card .perio-site.h5 { background: color-mix(in srgb, #ef4444 20%, transparent); color: #b91c1c; }
+.perio-card .perio-site.h7 { background: #dc2626; color: #fff; border-color: #dc2626; }
+.perio-card .perio-site.bop { background-image: linear-gradient(225deg, #dc2626 0 5px, transparent 5px); }
+.perio-card .perio-site.sup { background-image: linear-gradient(135deg, #eab308 0 5px, transparent 5px); }
+.perio-card .perio-site.bop.sup { background-image: linear-gradient(225deg, #dc2626 0 5px, transparent 5px), linear-gradient(135deg, #eab308 0 5px, transparent 5px); }
+.perio-card input.perio-site:focus { box-shadow: 0 0 0 2px var(--primary), 0 0 12px color-mix(in srgb, var(--primary) 40%, transparent); }
+.perio-card .perio-chart-row td { background: transparent !important; }
+@media print { .perio-tooth2 { height: 70px; } }

@@ -5,7 +5,11 @@ import { useAuth } from '../../auth.jsx';
 import { fmtDate } from '../../format.js';
 import { ErrorBox, useSubmit } from '../ui.jsx';
 import { parseSpeech } from './voicePerio.js';
+import { crownPath, rootsFor, toothWidth, NECK, ChartDefs } from '../Odontogram.jsx';
+import { toothClass } from '../teeth.js';
+import './perio.css';
 import useDictation from '../useDictation.js';
+import { useShortcuts } from '../../shortcuts.js';
 
 const UPPER = Array.from({ length: 16 }, (_, i) => String(i + 1));
 const LOWER = Array.from({ length: 16 }, (_, i) => String(32 - i));
@@ -46,31 +50,50 @@ function probingPath(missing) {
 
 const MARKERS = [['bop', 'Bleeding', 'var(--danger)'], ['sup', 'Suppuration', '#ca8a04'], ['plaque', 'Plaque', '#2563eb']];
 
-// One tooth's side as a picture: crown toward the tooth numbers, the gum line (blue) and the bottom of each
-// pocket (red) drawn from the CEJ at 3 units per mm, with the pocket shaded. Deep pockets show at a glance.
-const MM = 3;
-function PerioTooth({ tooth, sites, v, rootsUp }) {
-  const molar = MOLARS.has(tooth);
-  const xs = [14, 30, 46];
-  const val = (list, i) => (list[i] === '' || list[i] == null || list[i] === '-' ? null : Number(list[i]));
+// One side of a tooth as the clinician sees it: the real tooth shape, the CEJ (dashed), the gum line (blue), the
+// bottom of each pocket (red) and the pocket between them shaded, all to scale (3.2 units per mm). Bleeding,
+// pus and plaque are dots where they were found; furcation shows between the roots; the last exam's pocket
+// bottoms show as a faint line so change stands out.
+const MM = 3.2;
+function PerioTooth({ tooth, sites, v, rootsUp, before }) {
+  const cls = toothClass(tooth);
+  const w = toothWidth(tooth);
+  const crown = crownPath(cls, w);
+  const { roots } = rootsFor(tooth, w);
+  const xs = [0.12, 0.5, 0.88].map((f) => f * w);
+  const val = (list, i) => (list?.[i] === '' || list?.[i] == null || list?.[i] === '-' ? null : Number(list[i]));
   const gm = sites.map((i) => val(v.gm, i) ?? 0);
   const pd = sites.map((i) => val(v.pd, i));
   const has = pd.some((d) => d != null);
-  const gy = gm.map((g) => 20 + g * MM);
-  const py = pd.map((d, k) => gy[k] + (d ?? 0) * MM);
+  const my = gm.map((g) => NECK - g * MM);
+  const py = pd.map((d, k) => my[k] - (d ?? 0) * MM);
+  const prevPd = before ? sites.map((i) => val(before.pd, i)) : null;
+  const prevY = prevPd?.some((d) => d != null) ? prevPd.map((d, k) => NECK - (val(before.gm, sites[k]) ?? 0) * MM - (d ?? 0) * MM) : null;
   const deep = pd.some((d) => d >= 5) ? 'deep' : pd.some((d) => d === 4) ? 'watch' : '';
-  const roots = molar ? 'M12 20 C12 44 16 66 21 69 C25 66 27 46 28 28 L32 28 C33 46 35 66 39 69 C44 66 48 44 48 20' : 'M17 20 C17 44 24 68 30 70 C36 68 43 44 43 20';
+  const line = (ys) => xs.map((x, k) => `${k ? 'L' : 'M'}${x.toFixed(1)} ${ys[k].toFixed(1)}`).join(' ');
+  const furc = MOLARS.has(tooth) ? Number(v.furc?.[sites[1]] || 0) : 0;
   return (
-    <svg className="perio-tooth" viewBox="0 0 60 72" preserveAspectRatio="none" aria-hidden="true">
-      <g transform={rootsUp ? 'translate(0 72) scale(1 -1)' : undefined}>
-        <path d={roots} className="pt-root" />
-        <path d="M9 20 C8 12 9 4 16 2 L44 2 C51 4 52 12 51 20 Z" className="pt-crown" />
-        <line x1="6" x2="54" y1="20" y2="20" className="pt-cej" />
-        {has && <polygon className={`pt-pocket ${deep}`} points={[...xs.map((x, k) => `${x},${gy[k]}`), ...[...xs].reverse().map((x, k) => `${x},${py[2 - k]}`)].join(' ')} />}
-        {has && <polyline className="pt-gm" points={xs.map((x, k) => `${x},${gy[k]}`).join(' ')} />}
-        {has && <polyline className="pt-pd" points={xs.map((x, k) => `${x},${py[k]}`).join(' ')} />}
-        {sites.map((i, k) => v.bop[i] && <circle key={i} cx={xs[k]} cy={py[k]} r="2.6" className="pt-bleed" />)}
+    <svg className="perio-tooth2" viewBox={`-4 -4 ${w + 8} 118`} preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+      <g transform={rootsUp ? undefined : 'translate(0 110) scale(1 -1)'}>
+        {roots.map((r, k) => <path key={k} d={r.d} fill={r.back ? 'url(#dm-root-back)' : 'url(#dm-root)'} stroke="var(--tooth-line)" strokeWidth="0.8" />)}
+        <path d={crown} fill="url(#dm-enamel)" stroke="var(--tooth-line)" strokeWidth="0.9" />
+        <line x1={-3} x2={w + 3} y1={NECK} y2={NECK} className="pt2-cej" />
+        {has && <polygon points={[...xs.map((x, k) => `${x},${my[k]}`), ...xs.map((x, k) => `${x},${py[k]}`).reverse()].join(' ')} className={`pt2-pocket ${deep}`} />}
+        {prevY && <path d={line(prevY)} className="pt2-prev" />}
+        {has && <path d={line(my)} className="pt2-gm" />}
+        {has && <path d={line(py)} className="pt2-pd" />}
+        {furc > 0 && (
+          <path d={`M${w / 2 - 5} ${NECK - 8} L${w / 2 + 5} ${NECK - 8} L${w / 2} ${NECK - 16} Z`} className="pt2-furc" style={{ fillOpacity: furc >= 3 ? 1 : furc === 2 ? 0.5 : 0 }} />
+        )}
+        {sites.map((i, k) => (
+          <g key={i}>
+            {v.bop?.[i] && <circle cx={xs[k]} cy={py[k]} r="3.2" className="pt2-bleed" />}
+            {v.sup?.[i] && <circle cx={xs[k]} cy={py[k] - 5} r="2.4" className="pt2-sup" />}
+            {v.plaque?.[i] && <circle cx={xs[k]} cy={NECK + 10} r="2.4" className="pt2-plaque" />}
+          </g>
+        ))}
       </g>
+      {Number(v.mob) > 0 && <text x={w - 1} y={rootsUp ? 110 : 6} className="pt2-mob" textAnchor="end">M{v.mob}</text>}
     </svg>
   );
 }
@@ -111,8 +134,41 @@ export default function PerioTab({ patient }) {
     const at = path.indexOf(`${t}:${i}`);
     if (at >= 0 && at < path.length - 1) focus(path[at + 1]);
   };
+  // Bleeding, pus and plaque by key, for the site just probed (as the probe comes out): B, U, P; Shift for the
+  // whole side of that tooth. G and D jump between the gingival margin and depth rows.
+  const lastTyped = useRef(null);
+  const markLast = (kind, all, fallback) => {
+    const [t, i] = lastTyped.current || fallback || [];
+    if (!t) return;
+    const v = get(t);
+    const list = [...v[kind]];
+    if (all) { for (const k of i < 3 ? [0, 1, 2] : [3, 4, 5]) list[k] = true; } else list[i] = !list[i];
+    put(t, { [kind]: list });
+  };
+  const MARK_KEYS = { b: 'bop', u: 'sup', p: 'plaque' };
+  useShortcuts(editable ? [
+    { combo: 'b', handler: () => markLast('bop', false), label: 'Bleeding on the site just probed', section: 'Perio' },
+    { combo: 'shift+b', handler: () => markLast('bop', true), label: 'Bleeding on that whole side of the tooth', section: 'Perio' },
+    { combo: 'u', handler: () => markLast('sup', false), label: 'Suppuration (pus) on the site just probed', section: 'Perio' },
+    { combo: 'p', handler: () => markLast('plaque', false), label: 'Plaque on the site just probed', section: 'Perio' },
+  ] : []);
   // Digits advance to the next site. A 1 waits a moment for a second digit (10-15mm).
   const onKey = (t, i, key) => (e) => {
+    const letter = e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey ? e.key.toLowerCase() : '';
+    if (MARK_KEYS[letter]) {
+      e.preventDefault();
+      // Shift (or a capital, e.g. with Caps Lock) marks the whole side.
+      markLast(MARK_KEYS[letter], e.shiftKey || e.key !== letter, [t, i]);
+      return;
+    }
+    if (letter === 'g' || letter === 'd') {
+      e.preventDefault();
+      const r = letter === 'g' ? 'gm' : 'pd';
+      setRow(r);
+      refs.current[`${r}:${t}:${i}`]?.focus();
+      return;
+    }
+    if (/^\d$/.test(e.key)) lastTyped.current = [t, Number(i)];
     if (!/^\d$/.test(e.key)) {
       if ((e.key === ' ' || e.key === 'Enter') && auto) { e.preventDefault(); advance(t, i); }
       return;
@@ -285,14 +341,17 @@ export default function PerioTab({ patient }) {
     const prev = compare && key === 'pd' ? compare.readings[t]?.pd?.[i] : null;
     const change = prev != null && d !== '' ? Number(d) - prev : 0;
     const style = {
-      color, background: key === 'pd' && v.bop[i] ? 'var(--danger-soft)' : undefined,
       boxShadow: change >= 2 ? 'inset 0 -2px 0 var(--danger)' : change <= -2 ? 'inset 0 -2px 0 var(--ok)' : undefined,
     };
+    // Depths as a heat map (4 amber, 5-6 red, 7+ solid red); bleeding as a red corner.
+    const n = Number(d);
+    const heat = key === 'pd' && d !== '' ? (n >= 7 ? ' h7' : n >= 5 ? ' h5' : n === 4 ? ' h4' : '') : '';
+    const cls = `perio-site${heat}${key === 'pd' && v.bop[i] ? ' bop' : ''}${key === 'pd' && v.sup[i] ? ' sup' : ''}`;
     const title = `#${t} ${SITES[i]}${prev != null ? ` · was ${prev}mm on ${fmtDate(compare.exam_date)}` : ''}`;
-    if (!editable) return <span key={i} className="perio-site" style={style} title={title}>{d === '' ? '·' : d}</span>;
+    if (!editable) return <span key={i} className={cls} style={style} title={title}>{d === '' ? '·' : d}</span>;
     return (
       <input
-        key={i} ref={(el) => { refs.current[`${key}:${t}:${i}`] = el; }} className={`perio-site${voice && key === row && path[voice.cursor] === `${t}:${i}` ? ' voice-next' : ''}`} value={d} readOnly={!!marker} inputMode="numeric" title={title}
+        key={i} ref={(el) => { refs.current[`${key}:${t}:${i}`] = el; }} className={`${cls}${voice && key === row && path[voice.cursor] === `${t}:${i}` ? ' voice-next' : ''}`} value={d} readOnly={!!marker} inputMode="numeric" title={title}
         onKeyDown={onKey(t, i, key)}
         onChange={(e) => {
           const raw = e.target.value.trim();
@@ -325,7 +384,7 @@ export default function PerioTab({ patient }) {
         const c = cal(get(t).pd[i], get(t).gm[i]);
         return <span key={i} className="perio-site calc" style={{ color: c >= 5 ? 'var(--danger)' : undefined }}>{c ?? '·'}</span>;
       })],
-      ['Chart', (t) => <PerioTooth tooth={t} sites={siteOrder(t, from)} v={get(t)} rootsUp={upper ? from === 0 : from === 3} />],
+      ['Chart', (t) => <PerioTooth tooth={t} sites={siteOrder(t, from)} v={get(t)} before={compare?.readings?.[t]} rootsUp={upper ? from === 0 : from === 3} />],
     ].filter(Boolean);
     // Rows run outer→inner above the tooth numbers and inner→outer below; the upper arch has facial on top,
     // the lower arch lingual on top.
@@ -408,6 +467,7 @@ export default function PerioTab({ patient }) {
         {editable ? ' Type a digit per site (it moves on); pick a marker and tap sites to toggle it.' : ''}
       </div>
       <div className="table-wrap">
+        <ChartDefs />
         {renderArch(UPPER, true)}
         <div style={{ height: 14 }} />
         {renderArch(LOWER, false)}

@@ -31,6 +31,10 @@ const SECTIONS = [
     [['1', '0–5'], 'Perio: two quick digits for 10–15 mm', 'then'],
     [['-'], 'Perio: gingival margin above the CEJ (overgrowth)'],
     [['Space', 'Enter'], 'Perio: move on to the next site'],
+    [['B', 'U', 'P'], 'Perio: bleeding, pus or plaque on the site just probed (Shift+B: the whole side)'],
+    [['G', 'D'], 'Perio: switch to gingival margins or depths (in a perio box)'],
+    [['E', '0–9'], 'Chart: type a finding, e.g. 30 MO caries, 14 D2740, 2-4 sealant plan'],
+    [['←', '→', '↑', '↓'], 'Chart: move between teeth'],
   ]],
   ['Messages & settings', [
     [['Enter'], 'Send a text reply (Shift+Enter for a new line)'],

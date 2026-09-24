@@ -95,9 +95,9 @@ const SIDE_H = 112;
 const TOP_H = 46;
 const GAP = 6;
 const H = SIDE_H + GAP + TOP_H;
-const NECK = 64;
+export const NECK = 64;
 
-function crownPath(cls, w) {
+export function crownPath(cls, w) {
   const x = (f) => (f * w).toFixed(1);
   if (cls === 'molar') return `M${x(0.1)} ${NECK} C0 76 ${x(0.01)} 96 ${x(0.12)} 103 Q${x(0.27)} 110 ${x(0.41)} 103 Q${x(0.5)} 99 ${x(0.59)} 103 Q${x(0.73)} 110 ${x(0.88)} 103 C${x(0.99)} 96 ${w} 76 ${x(0.9)} ${NECK} Z`;
   if (cls === 'premolar') return `M${x(0.16)} ${NECK} C${x(0.02)} 76 ${x(0.03)} 94 ${x(0.18)} 102 Q${x(0.5)} 112 ${x(0.82)} 102 C${x(0.97)} 94 ${x(0.98)} 76 ${x(0.84)} ${NECK} Z`;
@@ -106,7 +106,7 @@ function crownPath(cls, w) {
 }
 
 // Root outlines, back to front, and the line of each canal (for root canals and posts).
-function rootsFor(tooth, w) {
+export function rootsFor(tooth, w) {
   const cls = toothClass(tooth);
   const upper = isUpper(tooth);
   const shorten = isPrimary(tooth) ? 0.62 : 1;
@@ -276,7 +276,7 @@ function ToothSvg({ tooth, state, uid }) {
 }
 
 // Shared gradients for every tooth on the page (enamel, root, metal, shine), themed through CSS variables.
-function ChartDefs() {
+export function ChartDefs() {
   return (
     <svg width="0" height="0" style={{ position: 'absolute' }} aria-hidden="true">
       <defs>
