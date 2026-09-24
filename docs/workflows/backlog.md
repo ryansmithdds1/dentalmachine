@@ -31,6 +31,12 @@ S2. **Perfect day / block scheduling:** named day templates per provider (e.g. "
     until a release time (e.g. 24 h before, then open to anything); the day's scheduled vs goal production shows live.
 S3. **Walkouts on the schedule:** one key from a visit (or a batch for the day) to print or text/email the walkout
     (what was done today, paid, insurance pending, next visit); auto-send after checkout if the practice turns it on.
+S5. **Production on the schedule (asked for, high priority):** each chair/provider column header shows its scheduled
+    production for the day (and completed so far), not just the visit count; the day's total production (scheduled,
+    completed, goal and % of goal) always visible at the top; a Doctor / Hygiene / All toggle that splits the totals and
+    column numbers by provider type (with per-provider goals), remembered per user; the week view shows each day's
+    total; numbers update live as visits are booked, moved, completed or cancelled; hover shows the breakdown
+    (by provider, by procedure category, unscheduled treatment still to book).
 S4. **More ideas:** short-call/ASAP list matched to a gap (length, provider, type); "next available" that respects
     blocks and patterns; buffer and sterilisation time per chair; colour by type/provider/status toggle; utilisation
     heatmap by chair and hour; unscheduled-treatment and due-recall patients suggested for each open gap; drag a
