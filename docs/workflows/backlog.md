@@ -628,6 +628,22 @@ BM5. **Plumbing:** a separate benchmark service receives only the nightly aggreg
      over TLS, logged in Connection activity), with the practice able to see exactly what was sent and to leave at any
      time (its rows removed from future benchmarks). Terms/BAA language reviewed before launch.
 
+## Treatment entry: shortcuts, custom buttons and bundles (asked for, big deal)
+Builds on chart-by-typing (chartShorthand.js: "30 MO caries", "14 D2740", "2-4 sealant plan"), the most-used codes
+row, voice charting (voice assistant + dictation) and treatment plans/phases.
+TE1. **Bundles:** named packages of procedures entered in one step, with tooth/surface rules and options — e.g. "Crown"
+     (crown + optional buildup + optional post), "Implant" (fixture + abutment + implant crown, as phases), "New patient"
+     (comp exam + FMX + prophy), "SRP 4 quads", "Bridge 3–5" (retainers + pontic from the range), "Denture upper",
+     "Night guard"; fees and insurance estimate for the whole bundle; office bundles plus each dentist's own; starter
+     set to adapt.
+TE2. **Custom shortcuts everywhere:** customizable quick buttons on the chart (office and per user, ordered, colored,
+     with icons), keyboard hotkeys for them (e.g. Alt+1…9) and typed aliases for chart-by-typing ("bu" = buildup,
+     "cr" = crown, "imp" = implant bundle, "np" = new patient bundle); the same aliases work by voice ("crown bundle on
+     14 with buildup, plan it"); a small editor with a live preview and a cheat sheet in the ? help.
+TE3. **Fast, safe entry:** everything goes through one engine (typing, buttons, bundles, voice) → the same preview
+     (teeth, codes, fees, estimate) → Enter/confirm to chart, Undo afterwards; validation (tooth/surface valid for the
+     code, duplicates, frequency limits warned); phases/alternatives chosen as part of the bundle when relevant.
+
 ## Then: remaining workflow batches
 9. Batch 4 (32–44): new patient setup, ERA/EOB posting, prescriptions, lab cases, huddle actions, recall lists,
    pre-auths, financing, adjustments, referrals, end-of-day, review requests (fix the count bug), clock in/out.
