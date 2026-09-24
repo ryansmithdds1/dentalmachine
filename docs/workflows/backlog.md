@@ -37,6 +37,13 @@ S5. **Production on the schedule (asked for, high priority):** each chair/provid
     column numbers by provider type (with per-provider goals), remembered per user; the week view shows each day's
     total; numbers update live as visits are booked, moved, completed or cancelled; hover shows the breakdown
     (by provider, by procedure category, unscheduled treatment still to book).
+S6. **Customize what each appointment card shows (asked for):** an easy editor (Settings → Schedule, or right on the
+    schedule: "Customize cards") to pick and order the lines on the face of an appointment — name, preferred name,
+    age, birthday cake on their birthday, visit type, procedures/codes and teeth, scheduled production, balance due,
+    insurance/eligibility status, confirmation status, medical alert icon, new patient star, forms/consent done,
+    notes, provider/assistant, time, custom labels/flags the office defines — with a live preview; separate layouts
+    for short and long visits (what shows when space is tight), color by type/provider/status, and saved per
+    practice with an optional personal override per user.
 S4. **More ideas:** short-call/ASAP list matched to a gap (length, provider, type); "next available" that respects
     blocks and patterns; buffer and sterilisation time per chair; colour by type/provider/status toggle; utilisation
     heatmap by chair and hour; unscheduled-treatment and due-recall patients suggested for each open gap; drag a
