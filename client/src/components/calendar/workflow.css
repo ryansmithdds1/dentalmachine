@@ -36,3 +36,29 @@
 /* The schedule's "N unconfirmed" goes to the list (workflow 13). */
 button.stat-pill.unconfirmed-link { cursor: pointer; font-size: inherit; min-height: 0; }
 button.stat-pill.unconfirmed-link:hover { text-decoration: underline; }
+
+/* The visit panel's quick way to the patient: six big buttons with their number keys (1–6), and the few facts the
+   front desk looks for first — coverage, balance, the office's alert. */
+.drawer-head > div:first-child { flex: 1; min-width: 0; }
+.drawer-name { color: inherit; text-decoration: none; border-bottom: 1px dashed transparent; }
+.drawer-name:hover, .drawer-name:focus-visible { color: var(--primary-ink, var(--primary)); border-bottom-color: currentColor; }
+.drawer-jumps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-top: 10px; }
+.drawer-jump { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; min-height: 54px; padding: 6px 4px;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--subtle); color: var(--text); text-decoration: none; font-size: 12.5px; font-weight: 600; line-height: 1.1; }
+.drawer-jump svg { color: var(--primary); }
+.drawer-jump:hover { background: var(--hover); border-color: var(--border-strong); }
+.drawer-jump:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+.drawer-jump kbd { position: absolute; top: 3px; right: 4px; font-size: 10px; padding: 0 4px; line-height: 14px; border: 1px solid var(--border); border-radius: 4px;
+  background: var(--panel); color: var(--muted); font-family: inherit; }
+.drawer-facts { display: flex; flex-wrap: wrap; gap: 4px 6px; margin-top: 8px; font-size: 12px; }
+.drawer-facts .fact { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; padding: 2px 8px; border-radius: 99px; background: var(--subtle); border: 1px solid var(--border);
+  color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.drawer-facts .fact.owed b { color: var(--danger); }
+.drawer-facts .fact.bad { background: var(--danger-soft); color: var(--danger); border-color: transparent; }
+.drawer-facts .fact.warn { color: var(--warn); }
+.drawer-facts .fact.office { background: var(--warn-soft); color: var(--text); border-color: transparent; }
+.drawer-facts .fact .cal-elig { font-size: 10px; }
+:root[data-theme='dark'] .drawer-facts .cal-elig.ok { background: rgba(74, 222, 128, 0.16); color: var(--ok); }
+:root[data-theme='dark'] .drawer-facts .cal-elig.warn { background: rgba(251, 191, 36, 0.16); color: var(--warn); }
+:root[data-theme='dark'] .drawer-facts .cal-elig.bad { background: rgba(251, 146, 60, 0.16); color: var(--danger); }
+@media (max-width: 760px) { .drawer-jump { min-height: 48px; } }

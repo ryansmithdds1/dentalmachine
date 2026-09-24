@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Lock, LockOpen, Hourglass, LayoutGrid, UserX } from 'lucide-react';
+import { Lock, LockOpen, Hourglass, LayoutGrid, UserX, X } from 'lucide-react';
 import PatientHoverCard from './PatientHoverCard.jsx';
 import { ColumnProduction, dollars } from './ProductionBar.jsx';
 import { lateness } from './late.js';
@@ -366,7 +366,12 @@ export default function CalendarGrid({
                 {c.color && <span className="cal-col-avatar" style={{ background: c.color }}>{initialsOf(c.label)}</span>}
                 <span>{c.label}</span>
               </div>
-              {c.behind && <span className="cal-behind" title={c.behind.reason}><Hourglass size={11} strokeWidth={2.6} /> Running {c.behind.minutes} min behind</span>}
+              {c.behind && (
+                <span className="cal-behind" title={c.behind.reason}>
+                  <Hourglass size={11} strokeWidth={2.6} /> Running {c.behind.minutes} min behind
+                  {c.onHideBehind && <button type="button" className="behind-hide" draggable={false} onClick={(e) => { e.stopPropagation(); c.onHideBehind(); }} aria-label={`Hide “running behind” for ${c.label}`} title="Hide for today — it comes back if another patient is held up"><X size={10} strokeWidth={3} /></button>}
+                </span>
+              )}
               <div className="cal-col-info">
                 {c.prod ? <ColumnProduction title={c.prodTitle || c.label} prod={c.prod} now={c.now} />
                   : c.sub && <span className={`cal-col-sub${c.subClass ? ` ${c.subClass}` : ''}`}>{c.sub}</span>}

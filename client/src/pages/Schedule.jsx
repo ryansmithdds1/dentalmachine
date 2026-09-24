@@ -11,7 +11,7 @@ import { useAuth } from '../auth.jsx';
 import { useLiveEvents } from '../live.js';
 import { money, fmtTime, shiftDate, practiceToday, label } from '../format.js';
 import { Modal } from '../components/ui.jsx';
-import { ChevronLeft, ChevronRight, CalendarDays, Plus, Ban, SlidersHorizontal, Printer, Hourglass, Pin, X, ArrowUp, ArrowDown, EyeOff } from 'lucide-react';
+import { ChevronLeft, ChevronRight, CalendarDays, Plus, Ban, SlidersHorizontal, Printer, Hourglass, Pin, X, ArrowUp, ArrowDown, EyeOff, BellOff } from 'lucide-react';
 import AppointmentForm from '../components/AppointmentForm.jsx';
 import BlockoutForm from '../components/calendar/BlockoutForm.jsx';
 import AppointmentDrawer from '../components/calendar/AppointmentDrawer.jsx';
@@ -22,6 +22,7 @@ import OverrideBanner from '../components/calendar/OverrideBanner.jsx';
 import { useProduction, ProductionBar, summarize, KINDS, KIND_LABEL } from '../components/calendar/ProductionBar.jsx';
 import LateBanner, { useLateChime } from '../components/calendar/LateBanner.jsx';
 import { lateList, runningBehind, lateSettings } from '../components/calendar/late.js';
+import { useHiddenNotices } from '../components/calendar/notices.js';
 import { useDayOpportunities, OpportunityTotal } from '../components/opportunities/OpportunityBadge.jsx';
 import { useDayReadiness } from '../components/readiness/ReadinessBadge.jsx';
 import { OptimizerLauncher, FillLauncher, openFill } from '../components/optimizer/OptimizerPanel.jsx';
@@ -221,6 +222,9 @@ export default function Schedule() {
   useEffect(() => { api.get('/schedule/late-settings').then(setLateRaw).catch(() => {}); }, []);
   const lateCfg = useMemo(() => lateSettings(lateRaw || practice), [lateRaw, practice]);
   const [lateSound, rememberLateSound] = useRemembered('schedule.late_sound', false);
+  // Notices this person hid for today (✕ on the late list or a chair's "running behind"); they come back when
+  // something new happens. Only hides them on this screen: nothing about the visits changes.
+  const notices = useHiddenNotices(user?.id, today);
 
   // ---- UI state ----
   const [selectedId, setSelectedId] = useState(null);
@@ -283,6 +287,16 @@ export default function Schedule() {
     if (showAsap) api.get('/asap').then(setAsap).catch(() => {});
   }, [showAsap, data]);
   const selected = data?.appointments.find((a) => a.id === selectedId) || asap.find((a) => a.id === selectedId) || null;
+  // Coming back (browser Back) from a patient opened in the visit panel: the same day and view come from the URL,
+  // and ?appt= reopens the visit it was left on.
+  useEffect(() => {
+    const id = Number(params.get('appt'));
+    if (!id) return;
+    setSelectedId(id);
+    const next = new URLSearchParams(params);
+    next.delete('appt');
+    setParams(next, { replace: true });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---- Mutations (optimistic, with undo) ----
   const replaceAppt = (updated) => setData((d) => d && ({ ...d, appointments: d.appointments.map((a) => (a.id === updated.id ? updated : a)) }));
@@ -381,6 +395,20 @@ export default function Schedule() {
   // history shows both). Cancelling keeps its own confirmation in the drawer.
   const { setActive } = useActivePatient();
   const makeActive = useCallback((a) => a?.patient_id && setActive({ id: a.patient_id, first_name: a.first_name, last_name: a.last_name, preferred_name: a.preferred_name, dob: a.dob }), [setActive]);
+  // Whichever way a visit is opened (click, keys, the late list, the ASAP list, just booked), its patient becomes
+  // the active one, so they stay in context on the next screen.
+  useEffect(() => { if (selected) makeActive(selected); }, [selected?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Leaving the schedule from the visit panel (a patient tab, checkout): first note the day, view and visit in
+  // this page's address, so Back lands on the same schedule with the panel open again.
+  const leaveTo = (a, path) => {
+    makeActive(a);
+    const here = new URLSearchParams(params);
+    here.set('date', date);
+    here.set('view', view);
+    here.set('appt', String(a.id));
+    setParams(here, { replace: true });
+    nav(path);
+  };
   const [focusComplete, setFocusComplete] = useState(0);
   // Opportunity finder: what each visit today is eligible for (G opens the list for the selected visit).
   const [focusOpps, setFocusOpps] = useState(0);
@@ -645,7 +673,15 @@ export default function Schedule() {
   // the chair's usual provider; a hygienist's column shows no numbers while "Doctor" is picked, and vice versa.
   const gridColumns = useMemo(() => {
     // Today's columns: running behind (a patient waiting to be seated, or over time with the next one waiting).
-    const withBehind = (c) => (c.isToday ? { ...c, behind: runningBehind(appts.filter((a) => c.accepts(a)), nowStamp, lateCfg) } : c);
+    // A person can hide one for today (✕); it comes back when a different patient is held up there.
+    const withBehind = (c) => {
+      if (!c.isToday) return c;
+      const b = runningBehind(appts.filter((a) => c.accepts(a)), nowStamp, lateCfg);
+      if (!b) return { ...c, behind: null };
+      const key = `behind:${c.key}`;
+      const parts = [`${b.appt.id}:${b.kind}`];
+      return notices.isHidden(key, parts) ? { ...c, behind: null, behindHidden: true } : { ...c, behind: b, onHideBehind: () => notices.hide(key, parts) };
+    };
     if (!prodData) return columns.map(withBehind);
     const zero = { scheduled: 0, completed: 0, goal: 0, visits: 0 };
     const fp = providerFilter ? Number(providerFilter) : null;
@@ -672,13 +708,22 @@ export default function Schedule() {
       const lanes = laneProvider ? day.blocks.filter((b) => b.provider_id === laneProvider).map((b) => ({ ...b, open: nowStamp >= b.release_at })) : [];
       return withBehind({ ...c, lanes, now: nowStamp, prod: prodData.money ? { ...prod, blocks: lanes } : null, prodTitle: view === 'week' && !c.assign.provider_id && !('operatory_id' in c.assign) ? dayName(c.date, { weekday: 'long', month: 'short', day: 'numeric' }) : c.label });
     });
-  }, [columns, prodData, nowStamp, prodKind, providerFilter, providers, operatories, appts, view, lateCfg]);
+  }, [columns, prodData, nowStamp, prodKind, providerFilter, providers, operatories, appts, view, lateCfg, notices.items]);
 
   // Everyone late today (on screen when the range includes today), longest first; a soft sound if this person wants it.
   const lates = useMemo(() => (from <= today && to >= today
     ? lateList(appts.filter((a) => a.start_time.startsWith(today) && (!providerFilter || a.provider_id === Number(providerFilter))), nowStamp, lateCfg)
     : []), [appts, from, to, today, nowStamp, lateCfg, providerFilter]);
   useLateChime(lates, !!lateSound, `${from}|${to}|${providerFilter}`);
+  // Hidden until someone new is late or someone already late becomes very late.
+  const lateParts = lates.map((x) => `${x.appt.id}:${x.late.level}`);
+  const lateHidden = lates.length > 0 && notices.isHidden('late', lateParts);
+  const hiddenNotices = (lateHidden ? 1 : 0) + gridColumns.filter((c) => c.behindHidden).length;
+  const hiddenChip = hiddenNotices > 0 ? (
+    <button className="stat-pill notices-hidden" onClick={notices.showAll} title="Show the notices you hid today">
+      <BellOff size={13} aria-hidden="true" /> {hiddenNotices} hidden
+    </button>
+  ) : null;
   const textLate = async (a) => {
     try {
       await api.post(`/patients/${a.patient_id}/messages`, {
@@ -763,6 +808,7 @@ export default function Schedule() {
           <input ref={dateInput} type="date" value={date} onChange={(e) => e.target.value && go({ date: e.target.value })} aria-label="Go to date" tabIndex={-1} />
         </button>
         <div className="sched-stats">
+          {!narrow && hiddenChip}
           {(() => {
             const n = view === 'day' && mode === 'operatory' ? dayAppts.filter((a) => chairLayout.hidden.includes(a.operatory_id) && !['cancelled', 'no_show'].includes(a.status)).length : 0;
             return n > 0 ? <button className="stat-pill warn hidden-chairs" onClick={() => setChairLayout({ ...chairLayout, hidden: [] })} title="Some chairs are hidden on this computer — show them all"><EyeOff size={13} /> {n} in hidden chairs</button> : null;
@@ -844,8 +890,10 @@ export default function Schedule() {
         </div>
       </div>
 
-      {lates.length > 0 && (
-        <LateBanner list={lates} canText={can('patients:write')} canWrite={can('schedule:write')} sound={!!lateSound} onSound={rememberLateSound}
+      {/* On a phone the stats row is clipped: the chip sits where the notices were. */}
+      {narrow && hiddenChip && <div className="notices-hidden-row">{hiddenChip}</div>}
+      {lates.length > 0 && !lateHidden && (
+        <LateBanner onHide={() => notices.hide('late', lateParts)} list={lates} canText={can('patients:write')} canWrite={can('schedule:write')} sound={!!lateSound} onSound={rememberLateSound}
           onText={textLate}
           onOpen={(a) => { setSelectedId(a.id); makeActive(a); }}
           onNoShow={(a) => { setSelectedId(a.id); makeActive(a); setBrokenAsk({ kind: 'no_show', n: Date.now() }); }}
@@ -954,8 +1002,8 @@ export default function Schedule() {
           onStep={(kind) => runStep(selected, kind)} focusComplete={focusComplete}
           brokenAsk={brokenAsk} onBroken={(kind, choice) => breakVisit(selected, kind, choice)}
           onEdit={() => setModal({ type: 'edit', appt: selected })}
-          onCheckout={() => nav(`/checkout/${selected.id}`)}
-          onChart={() => nav(`/patients/${selected.patient_id}`)}
+          onCheckout={() => leaveTo(selected, `/checkout/${selected.id}`)}
+          onPatient={(tab) => leaveTo(selected, `/patients/${selected.patient_id}${tab ? `?tab=${tab}` : ''}`)}
           onMove={() => {
             // Tap a new time, or move it with the arrow keys and Enter.
             setPlacing(selected);
@@ -1007,6 +1055,8 @@ function Agenda({ from, to, appts, blockouts, providerFilter, onOpen, onFocusApp
   const days = [];
   for (let d = from; d <= to; d = shiftDate(d, 1)) days.push(d);
   const shown = appts.filter((a) => !providerFilter || a.provider_id === Number(providerFilter));
+  // Keyboard focus makes the patient active as you arrow through; a tap doesn't (opening the visit does): the patient
+  // bar appearing mid-tap would shift the list under the finger and the tap would land on something else.
   return (
     <div className="agenda">
       {days.map((d) => {
@@ -1021,7 +1071,7 @@ function Agenda({ from, to, appts, blockouts, providerFilter, onOpen, onFocusApp
             {items.map(({ a, b }) => (b ? (
               <div key={`b${b.id}`} className="agenda-block">{fmtTime(b.start_time)}–{fmtTime(b.end_time)} · {b.reason}</div>
             ) : (
-              <button key={a.id} data-appt-id={a.id} className={`agenda-item status-${a.status}`} style={{ '--c': a.type_color || a.provider_color }} onClick={() => onOpen(a)} onFocus={() => onFocusAppt(a)}>
+              <button key={a.id} data-appt-id={a.id} className={`agenda-item status-${a.status}`} style={{ '--c': a.type_color || a.provider_color }} onClick={() => onOpen(a)} onFocus={(e) => e.target.matches(':focus-visible') && onFocusAppt(a)}>
                 <div className="agenda-time"><strong>{fmtTime(a.start_time)}</strong><span className="muted">{fmtTime(a.end_time)}</span></div>
                 <div className="agenda-body">
                   <strong>{a.premed_required ? '💊 ' : ''}{a.medical_alerts ? '⚠ ' : ''}{a.first_name} {a.last_name}</strong>

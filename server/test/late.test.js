@@ -42,6 +42,7 @@ test('running behind: checked in and not seated after N minutes; in the chair pa
   const w = runningBehind([waiting], `${D} 09:07`, S);
   assert.equal(w.minutes, 7);
   assert.match(w.reason, /checked in and not seated for 7 min/);
+  assert.equal(w.kind, 'waiting', 'the kind lets a hidden notice come back when a different hold-up starts');
   // Arrived late: counted from when they arrived.
   assert.equal(runningBehind([{ ...waiting, arrived_at: `${D} 09:20` }], `${D} 09:22`, S), null);
 
@@ -52,6 +53,8 @@ test('running behind: checked in and not seated after N minutes; in the chair pa
   const b = runningBehind([over, next], `${D} 11:12`, S);
   assert.equal(b.minutes, 12, 'the worst of: 12 over time, next waited 12 − 5');
   assert.match(b.reason, /12 min past their end time/);
+  assert.equal(b.kind, 'over');
+  assert.equal(b.appt.id, 2);
   // Over time but nobody waiting: not behind.
   assert.equal(runningBehind([over, visit(4, '13:00', '14:00')], `${D} 11:30`, S), null);
   // The next one is due (not checked in yet) also counts as waiting.

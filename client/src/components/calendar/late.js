@@ -43,23 +43,23 @@ export function lateList(appts, now, settings = LATE_DEFAULTS) {
 //   - a patient checked in but not seated after `lateAfter` minutes past their time (or arrival, if they came late);
 //   - a patient still in the chair past the visit's end while the next patient in the column is waiting
 //     (checked in, or due already).
-// Returns null or { minutes, reason, appt } for the worst one.
+// Returns null or { minutes, reason, kind ('waiting' | 'over'), appt } for the worst one.
 export function runningBehind(columnAppts, now, { lateAfter } = LATE_DEFAULTS) {
   if (!now) return null;
   const today = columnAppts.filter((a) => a.start_time.slice(0, 10) === now.slice(0, 10)).sort((a, b) => a.start_time.localeCompare(b.start_time));
   let worst = null;
-  const consider = (minutes, reason, appt) => { if (!worst || minutes > worst.minutes) worst = { minutes, reason, appt }; };
+  const consider = (minutes, reason, appt, kind) => { if (!worst || minutes > worst.minutes) worst = { minutes, reason, kind, appt }; };
   for (const a of today) {
     if (a.status === 'checked_in') {
       const since = a.arrived_at && a.arrived_at > a.start_time ? a.arrived_at : a.start_time;
       const waited = minutesBetween(since, now);
-      if (waited >= lateAfter) consider(waited, `${a.first_name} ${a.last_name} checked in and not seated for ${waited} min`, a);
+      if (waited >= lateAfter) consider(waited, `${a.first_name} ${a.last_name} checked in and not seated for ${waited} min`, a, 'waiting');
     }
     if (a.status === 'in_chair' && now > a.end_time) {
       const next = today.find((b) => b.id !== a.id && b.start_time >= a.start_time && (b.status === 'checked_in' || (WAITING.includes(b.status) && b.start_time <= now)));
       if (next) {
         const over = minutesBetween(a.end_time, now);
-        if (over >= 1) consider(over, `${a.first_name} ${a.last_name} is ${over} min past their end time and ${next.first_name} ${next.last_name} is waiting`, a);
+        if (over >= 1) consider(over, `${a.first_name} ${a.last_name} is ${over} min past their end time and ${next.first_name} ${next.last_name} is waiting`, a, 'over');
       }
     }
   }

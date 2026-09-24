@@ -43,3 +43,13 @@ The calculations are pure functions in `client/src/components/calendar/late.js` 
 - `e2e/workflows/S5-S2-production.test.mjs` (S7): outline and "Late N min" on the card, text from the list in one
   click (message sent), very late after changing the practice's numbers, "Running N min behind" on the chair, the
   now-line bubble.
+
+## Hiding a notice for today
+The late list and a chair's "Running N min behind" each have an ✕ (1 action). It hides that notice for this person,
+for today, on this computer (`localStorage`, per user; `client/src/components/calendar/notices.js`) — nothing about the
+visits, messages or Needs attention changes. It comes back by itself when something new happens: someone else becomes
+late, someone already late becomes very late, or a different patient holds up that chair. Hidden notices collapse into
+an "N hidden" chip in the schedule's stats (above the list on a phone); one click shows them all again. A new day
+starts with nothing hidden. Medical alerts and premedication in the visit panel can't be hidden.
+Acceptance: `e2e/workflows/schedule-drawer.test.mjs` (hide in 1 click, still hidden after a reload, back when someone
+new is late, the chip restores it, running behind counts in the chip, dark mode and phone width).

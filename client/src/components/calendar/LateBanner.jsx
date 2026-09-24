@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { AlarmClock, MessageSquareText, Phone, UserX, Move, Bell, BellOff, Check } from 'lucide-react';
+import { AlarmClock, MessageSquareText, Phone, UserX, Move, Bell, BellOff, Check, X } from 'lucide-react';
 import { fmtTime } from '../../format.js';
 import { waitLabel } from './late.js';
 import './late.css';
@@ -7,7 +7,8 @@ import './late.css';
 // "3 patients late" at the top of the schedule (S7), with what to do about each one in one click: text them,
 // call them, mark a no-show (the reason picker opens), or move the visit. Visible to everyone on the schedule;
 // the actions show for people allowed to take them. The optional soft sound is each person's own choice.
-export default function LateBanner({ list, canText, canWrite, onText, onNoShow, onMove, onOpen, sound, onSound }) {
+// ✕ (onHide) hides it for this person until someone else becomes late or very late (see notices.js).
+export default function LateBanner({ list, canText, canWrite, onText, onNoShow, onMove, onOpen, sound, onSound, onHide }) {
   const [open, setOpen] = useState(false);
   const [texted, setTexted] = useState({});
   const [busy, setBusy] = useState(null);
@@ -31,6 +32,12 @@ export default function LateBanner({ list, canText, canWrite, onText, onNoShow, 
           {sound ? <Bell size={15} /> : <BellOff size={15} />}
         </button>
       </div>
+      {onHide && (
+        <button type="button" className="icon-btn small notice-hide" onClick={onHide} aria-label="Hide the late list"
+          title="Hide for today — it comes back if someone else is late or gets later. Nothing is changed for the patients.">
+          <X size={15} />
+        </button>
+      )}
       <ul className="late-list">
         {shown.map(({ appt: a, late }) => (
           <li key={a.id} className={late.level === 'very_late' ? 'very' : ''}>

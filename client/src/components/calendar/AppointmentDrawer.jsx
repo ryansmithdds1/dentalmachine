@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../../api.js';
 import { fmtTime, fmtDateTime, fmtUtcDateTime, money, eligibilityBadge } from '../../format.js';
-import { Link } from 'react-router-dom';
 import { useAuth } from '../../auth.jsx';
 import { Badge } from '../ui.jsx';
 import { nextKind, NEXT_LABEL, READY_LABEL, STEP_KEYS, postsCharges } from './flow.js';
@@ -10,15 +9,29 @@ import './workflow.css';
 import OpportunityPanel from '../opportunities/OpportunityPanel.jsx';
 import VisitExtras from '../cards/VisitExtras.jsx';
 import { useConnection } from '../cards/cardData.js';
+import { loadCard } from './PatientHoverCard.jsx';
+import { useShortcuts } from '../../shortcuts.js';
+import { Stethoscope, ShieldCheck, UserRound, Wallet, FileText, ScanLine, Pin } from 'lucide-react';
 
 // Side panel for one appointment: keeps the calendar visible while the front desk works.
 const CONFIRM = [['phone', 'By phone'], ['text', 'By text'], ['email', 'By email'], ['in_person', 'In person']];
 export const CONFIRMED_VIA = { phone: 'by phone', text: 'by text', email: 'by email', in_person: 'in person', portal: 'in the portal', left_message: '' };
 
+// One key or one click from a visit to the patient (the tab ids of PatientDetail). The numbers stay the same for
+// everyone, so muscle memory holds; a button someone can't use is simply not there.
+export const JUMPS = [
+  { n: '1', tab: 'chart', label: 'Chart', icon: Stethoscope, perm: 'clinical:read' },
+  { n: '2', tab: 'insurance', label: 'Insurance', icon: ShieldCheck },
+  { n: '3', tab: 'overview', label: 'Profile', icon: UserRound },
+  { n: '4', tab: 'ledger', label: 'Balance', icon: Wallet, perm: 'billing:read' },
+  { n: '5', tab: 'notes', label: 'Notes', icon: FileText, perm: 'clinical:read' },
+  { n: '6', tab: 'documents', label: 'X-rays', icon: ScanLine, perm: 'clinical:read' },
+];
+
 // Minutes between two practice-local 'YYYY-MM-DD HH:MM' times.
 const mins = (a, b) => (a && b ? Math.round((Date.parse(`${b.replace(' ', 'T')}Z`) - Date.parse(`${a.replace(' ', 'T')}Z`)) / 60000) : null);
 
-export default function AppointmentDrawer({ appt: a, can, onClose, onStatus, onStep, focusComplete = 0, brokenAsk = null, onBroken, onEdit, onChart, onMove, onPin, onToggleAsap, onReminder, onCheckout, focusOpportunities = 0, onOpportunitiesChanged }) {
+export default function AppointmentDrawer({ appt: a, can, onClose, onStatus, onStep, focusComplete = 0, brokenAsk = null, onBroken, onEdit, onPatient, onMove, onPin, onToggleAsap, onReminder, onCheckout, focusOpportunities = 0, onOpportunitiesChanged }) {
   useEffect(() => {
     const onKey = (e) => e.key === 'Escape' && onClose();
     window.addEventListener('keydown', onKey);
@@ -51,13 +64,54 @@ export default function AppointmentDrawer({ appt: a, can, onClose, onStatus, onS
   const [moveWarn, setMoveWarn] = useState(false);
   useEffect(() => setMoveWarn(false), [a.id]);
   const askMove = () => (conn?.strike_warning && !moveWarn ? setMoveWarn(true) : onMove());
+  // The same small card the schedule's hover shows (cached for a minute, shared): balance, insurance, alerts.
+  const [card, setCard] = useState(null);
+  useEffect(() => {
+    let live = true;
+    setCard(null);
+    loadCard(a.patient_id).then((c) => live && setCard(c)).catch(() => {});
+    return () => { live = false; };
+  }, [a.patient_id]);
+  const jumps = onPatient ? JUMPS.filter((j) => !j.perm || can(j.perm)) : [];
+  // 1–6 while the panel is open — not while the cancel / no-show reasons are up (their numbers pick a reason).
+  useShortcuts(jumps.map((j) => ({ combo: j.n, handler: () => onPatient(j.tab), label: `Open the patient’s ${j.label === 'X-rays' ? 'x-rays and documents' : j.label.toLowerCase()}`, section: 'Visit panel', enabled: !asking })));
+  const elig = a.eligibility ? eligibilityBadge(a.eligibility) : null;
+  const owed = card?.balance != null ? card.balance : null;
+  const plainClick = (e) => e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey;
 
   return (
     <aside className="drawer" role="dialog" aria-label={`${a.first_name} ${a.last_name}`}>
       <div className="drawer-head" style={{ borderTopColor: a.type_color || a.provider_color }}>
         <div>
-          <h2 style={{ margin: 0 }}>{a.first_name} {a.last_name}</h2>
+          <h2 style={{ margin: 0 }}>
+            {onPatient ? (
+              <a className="drawer-name" href={`/patients/${a.patient_id}?tab=overview`} title="Open their profile (3)"
+                onClick={(e) => { if (plainClick(e)) { e.preventDefault(); onPatient('overview'); } }}>{a.first_name} {a.last_name}</a>
+            ) : <>{a.first_name} {a.last_name}</>}
+          </h2>
           <div className="muted">{date} · {fmtTime(a.start_time)}–{fmtTime(a.end_time)}</div>
+          {jumps.length > 0 && (
+            <nav className="drawer-jumps" aria-label="Open the patient">
+              {jumps.map((j) => (
+                <a key={j.n} href={`/patients/${a.patient_id}?tab=${j.tab}`} className="drawer-jump" title={`${j.label} (${j.n})`}
+                  onClick={(e) => { if (plainClick(e)) { e.preventDefault(); onPatient(j.tab); } }}>
+                  <j.icon size={18} aria-hidden="true" />
+                  <span>{j.label}</span>
+                  <kbd>{j.n}</kbd>
+                </a>
+              ))}
+            </nav>
+          )}
+          {/* At a glance: coverage, what they owe, and the office's notes about them (the red medical ones stay below). */}
+          {(elig || owed != null || card?.insurance === null || card?.office_alert || card?.allergies) && (
+            <div className="drawer-facts">
+              {elig ? <span className={`fact ${elig.tone}`} title={elig.text}><span className={`cal-elig ${elig.tone}`}>{elig.icon}</span> {elig.text}</span>
+                : card?.insurance === null ? <span className="fact">Self-pay</span> : null}
+              {owed != null && <span className={`fact${owed > 0 ? ' owed' : ''}`}>Balance <b>{money(owed)}</b></span>}
+              {card?.allergies && <span className="fact bad">Allergy: {card.allergies}</span>}
+              {card?.office_alert && <span className="fact office" title={card.office_alert}><Pin size={12} aria-hidden="true" /> {card.office_alert}</span>}
+            </div>
+          )}
           {next && (
             <div className="drawer-next">
               {next === 'out' && charges ? completeWithProcedures : (
@@ -122,7 +176,6 @@ export default function AppointmentDrawer({ appt: a, can, onClose, onStatus, onS
           <dt>Reason</dt><dd>{a.reason || '—'}</dd>
           {a.procedure_summary && (<><dt>Procedures</dt><dd>{a.procedure_summary}</dd></>)}
           <dt>Production</dt><dd>{money(a.production || 0)}</dd>
-          {a.eligibility && (() => { const b = eligibilityBadge(a.eligibility); return (<><dt>Insurance</dt><dd><span className={`cal-elig ${b.tone}`}>{b.icon}</span> {b.text} · <Link to={`/patients/${a.patient_id}?tab=insurance`}>{a.eligibility.status === 'active' ? 'details' : 'verify'}</Link></dd></>); })()}
           <dt>Confirmation</dt>
           <dd>
             {a.confirmed_at ? `Confirmed ${CONFIRMED_VIA[a.confirmed_via] || ''} ${fmtDateTime(a.confirmed_at.replace('T', ' '))}` : a.confirmed_via === 'left_message' ? 'Left a message' : a.reminder_sent_at ? `Reminder sent ${fmtDateTime(a.reminder_sent_at)}` : 'Not reminded yet'}
@@ -141,7 +194,6 @@ export default function AppointmentDrawer({ appt: a, can, onClose, onStatus, onS
         </dl>
         {can('clinical:read') && <OpportunityPanel appointmentId={a.id} canAdd={can('clinical:write') && !['cancelled', 'no_show'].includes(a.status)} autoFocus={focusOpportunities} onChanged={onOpportunitiesChanged} />}
         <div className="drawer-actions">
-          <button onClick={onChart}>Open chart</button>
           {w && active && <button onClick={askMove}>Move…</button>}
           {w && active && onPin && <button onClick={onPin} title="Park it on the pinboard, then place it on any day">Pin</button>}
           {w && active && <button onClick={onEdit}>Edit</button>}
