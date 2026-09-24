@@ -1,0 +1,4 @@
+/* Note composer (workflow 7). Kept here rather than in styles.css so the notes screen owns its look. */
+.note-open-warning { margin-top: 6px; padding: 4px 8px; border-radius: var(--radius-sm, 6px); font-size: 12px; background: var(--warn-soft); color: var(--warn); }
+.note-composer .form-actions kbd { margin-left: 6px; }
+.note-composer .form-actions button.primary kbd { opacity: 0.8; }

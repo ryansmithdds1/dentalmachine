@@ -47,8 +47,13 @@ export async function completeProcedure(db, user, procedure, { providerId, appoi
   requireHuman('completing procedures');
   if (procedure.status === 'completed') throw new HttpError(409, 'Procedure already completed');
   if (procedure.status === 'cancelled') throw new HttpError(409, 'Cancelled procedures cannot be completed');
-  const provider = providerId ?? procedure.provider_id;
-  if (!provider) throw new HttpError(400, 'A provider is required to complete a procedure');
+  // Who did it, when nobody said: the signed-in dentist or hygienist, else the provider of the patient's visit
+  // today, else the patient's own dentist. Asked for only when none of those is known.
+  const provider = providerId ?? procedure.provider_id
+    ?? (user?.id ? (await db.get('SELECT MIN(id) AS id FROM providers WHERE user_id = ? AND practice_id = ? AND active = 1', user.id, procedure.practice_id))?.id : null)
+    ?? (await db.get("SELECT provider_id FROM appointments WHERE practice_id = ? AND patient_id = ? AND substr(start_time, 1, 10) = substr(?, 1, 10) AND status NOT IN ('cancelled','no_show') ORDER BY start_time LIMIT 1", procedure.practice_id, procedure.patient_id, await practiceNow(db, procedure.practice_id)))?.provider_id
+    ?? (await db.get('SELECT primary_provider_id FROM patients WHERE id = ?', procedure.patient_id))?.primary_provider_id;
+  if (!provider) throw new HttpError(400, 'Choose who did this procedure: this patient has no dentist on file and no visit today');
   // The practice's local time: its date is the date of service on claims (an evening visit is still that day).
   const now = await practiceNow(db, procedure.practice_id);
   const today = now.slice(0, 10);

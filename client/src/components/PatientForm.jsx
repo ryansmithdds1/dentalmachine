@@ -11,8 +11,13 @@ const EMPTY = {
   phone_home: '', phone_work: '', preferred_contact: '', language: '', primary_hygienist_id: '', fee_schedule_id: '', location_id: '',
 };
 
-export default function PatientForm({ patient, onSaved, onCancel }) {
-  const [form, setForm] = useState(() => ({ ...EMPTY, ...Object.fromEntries(Object.entries(patient || {}).filter(([k]) => k in EMPTY).map(([k, v]) => [k, v ?? ''])) }));
+// `defaults` prefills a new patient with what's already known (a caller's number, a name typed in search).
+export default function PatientForm({ patient, defaults, onSaved, onCancel }) {
+  const [form, setForm] = useState(() => ({
+    ...EMPTY,
+    ...Object.fromEntries(Object.entries(defaults || {}).filter(([k, v]) => k in EMPTY && v != null)),
+    ...Object.fromEntries(Object.entries(patient || {}).filter(([k]) => k in EMPTY).map(([k, v]) => [k, v ?? ''])),
+  }));
   const providers = useLookup('/providers?active=true');
   const officeFees = useLookup('/fee-schedules').filter((f) => f.kind === 'office');
   const offices = useLookup('/locations');

@@ -2,6 +2,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { Check, CheckCheck, DoorOpen, Armchair, Pill, TriangleAlert, Repeat } from 'lucide-react';
 import { eligibilityBadge } from '../../format.js';
 import PatientHoverCard from './PatientHoverCard.jsx';
+import { nextKind, NEXT_LABEL, READY_LABEL, READY_SHORT } from './flow.js';
+import './workflow.css';
 
 export const toMin = (t) => Number(t.slice(-5, -3)) * 60 + Number(t.slice(-2));
 export const fmtMin = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
@@ -46,7 +48,7 @@ export const STATUS_COLORS = { scheduled: '#64748b', confirmed: '#16a34a', check
 
 export default function CalendarGrid({
   columns, appointments, range, pxPerMin, nowMin, onMove, onResize, onSelectRange, onOpen, onOpenBlockout, onPin,
-  placing, onPlace, selectedId, scrollKey, headerExtra, readOnly = false, step = 10, colorBy = 'type', onReorderColumn,
+  placing, onPlace, selectedId, scrollKey, headerExtra, readOnly = false, step = 10, colorBy = 'type', onReorderColumn, onFocusAppt, onNext,
 }) {
   const [dragCol, setDragCol] = useState(null);
   const [overCol, setOverCol] = useState(null);
@@ -213,6 +215,25 @@ export default function CalendarGrid({
     appointments.filter((a) => col.accepts(a)).map((a) => ({ appt: a, s: toMin(a.start_time), e: toMin(a.end_time) })),
   )), [columns, appointments]);
 
+  // Arrow keys on a focused visit move to the next one: ↑/↓ in the same column, ←/→ to the nearest in time in
+  // the next column that has any. They never change the day while a visit has focus.
+  const moveFocus = (ev, ci, a) => {
+    ev.preventDefault();
+    const list = perColumn[ci];
+    const i = list.findIndex((x) => x.appt.id === a.id);
+    let to = null;
+    if (ev.key === 'ArrowDown') to = list[i + 1]?.appt;
+    else if (ev.key === 'ArrowUp') to = list[i - 1]?.appt;
+    else {
+      const dir = ev.key === 'ArrowRight' ? 1 : -1;
+      const at = toMin(a.start_time);
+      for (let c = ci + dir; c >= 0 && c < perColumn.length && !to; c += dir) {
+        to = perColumn[c].reduce((best, x) => (!best || Math.abs(x.s - at) < Math.abs(best.s - at) ? x : best), null)?.appt;
+      }
+    }
+    if (to) body.current?.querySelector(`[data-appt-id="${to.id}"]`)?.focus();
+  };
+
   return (
     <div className="cal">
       {hover && <PatientHoverCard appt={hover.appt} anchor={hover.anchor} />}
@@ -298,9 +319,14 @@ export default function CalendarGrid({
                           if (suppressClick.current) suppressClick.current = false;
                           else onOpen(a);
                         }}
-                        onKeyDown={(ev) => ev.key === 'Enter' && onOpen(a)}
+                        onKeyDown={(ev) => {
+                          if (ev.target !== ev.currentTarget) return;
+                          if (ev.key === 'Enter') onOpen(a);
+                          else if (ev.key.startsWith('Arrow') && !ev.altKey && !ev.ctrlKey && !ev.metaKey) moveFocus(ev, ci, a);
+                        }}
+                        onFocus={(ev) => ev.target === ev.currentTarget && onFocusAppt?.(a)}
                         tabIndex={0} role="button"
-                        aria-label={`${a.first_name} ${a.last_name}, ${label12(s)} to ${label12(e)}, ${a.status}`}>
+                        aria-label={`${a.first_name} ${a.last_name}, ${label12(s)} to ${label12(e)}, ${a.status.replace('_', ' ')}${a.status === 'in_chair' && a.ready_for ? `, ${READY_LABEL[a.ready_for]}` : ''}`}>
                         {a.pattern && a.pattern.includes('/') && (
                           // Assistant time (the provider is free then) hatched along the right edge.
                           <div className="cal-pattern" aria-hidden="true">
@@ -312,6 +338,7 @@ export default function CalendarGrid({
                           {a.premed_required ? <Pill className="cal-alert" size={12} strokeWidth={2.5} aria-label="Premedication" /> : null}
                           <strong>{a.first_name} {a.last_name}</strong>
                           {STATUS_ICON[a.status] && (() => { const [Icon, text] = STATUS_ICON[a.status]; return <span className={`cal-status s-${a.status}`} title={text}><Icon size={11} strokeWidth={3} /></span>; })()}
+                          {a.status === 'in_chair' && a.ready_for ? <span className={`cal-ready r-${a.ready_for}`} title={READY_LABEL[a.ready_for]}>{READY_SHORT[a.ready_for]}</span> : null}
                           {a.asap ? <span className="cal-asap" title="Wants an earlier time">ASAP</span> : null}
                           {a.series_id ? <Repeat className="cal-repeat" size={11} strokeWidth={2.5} aria-label="Recurring visit" /> : null}
                           {(() => { const b = eligibilityBadge(a.eligibility); return b ? <span className={`cal-elig ${b.tone}`} title={b.text}>{b.icon}</span> : null; })()}
@@ -325,6 +352,15 @@ export default function CalendarGrid({
                         {h >= 28 && <div className="cal-appt-meta"><span className="cal-time">{clock(s)}–{clock(e)}</span> {a.type_name || a.reason || ''}</div>}
                         {h >= 44 && <div className="cal-appt-meta">{col.showProvider ? a.provider_name : a.operatory_name || a.provider_name}{a.production ? <b className="cal-prod"> ${Math.round(a.production / 100).toLocaleString()}</b> : ''}</div>}
                         {h >= 60 && a.procedure_summary && <div className="cal-appt-meta cal-codes">{a.procedure_summary}</div>}
+                        {onNext && nextKind(a) && !dragging && (
+                          // One click for the next step of the visit, without opening the drawer.
+                          <button type="button" className="cal-next" tabIndex={-1}
+                            onPointerDown={(ev) => ev.stopPropagation()}
+                            onClick={(ev) => { ev.stopPropagation(); onNext(a); }}
+                            title={`${NEXT_LABEL[nextKind(a)]} ${a.first_name}`}>
+                            {NEXT_LABEL[nextKind(a)]}
+                          </button>
+                        )}
                         <div className="cal-resize" onPointerDown={(ev) => startResize(ev, a, ci, s, e)} />
                       </div>
                     );

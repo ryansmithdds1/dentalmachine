@@ -1,0 +1,32 @@
+/* Texts and calls: the shared reply box, the call pop, and the inbox's keyboard focus. */
+
+.reply-box { display: flex; align-items: flex-end; gap: 8px; }
+.reply-box textarea { flex: 1; min-height: 44px; resize: vertical; }
+.reply-box select { width: auto; }
+.reply-box button.primary { display: inline-flex; align-items: center; gap: 5px; }
+
+/* The call pop floats bottom-right over every screen and stays until dismissed or the call ends. */
+.call-pop-stack { position: fixed; right: 16px; bottom: 16px; z-index: 70; display: flex; flex-direction: column; gap: 10px; width: 340px; max-width: calc(100vw - 32px); }
+.call-pop { padding: 12px 14px; box-shadow: var(--shadow-lg); border-left: 4px solid var(--primary); animation: pop-in 0.12s ease-out; }
+.call-pop.is-missed { border-left-color: var(--danger, #dc2626); }
+.call-pop.is-ended { opacity: 0.8; }
+.call-pop-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.call-pop-head strong { display: inline-flex; align-items: center; gap: 6px; }
+.call-pop-name { font-size: 16px; margin-top: 4px; display: flex; align-items: center; gap: 8px; }
+.call-pop-kbd { font-size: 11px; padding: 1px 5px; border: 1px solid var(--border); border-radius: 4px; color: var(--muted); background: var(--subtle); }
+.call-pop-sub { font-size: 12px; }
+.call-pop-facts { font-size: 13px; margin-top: 6px; }
+.call-pop-family { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 6px; font-size: 12px; }
+.call-pop-family .muted { width: 100%; }
+.call-pop-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.call-pop-actions button { display: inline-flex; align-items: center; gap: 4px; }
+.call-pop .reply-box, .call-pop-attach { margin-top: 8px; }
+.call-pop-attach { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.call-pop-note { font-size: 12px; margin-top: 6px; }
+
+/* Inbox: the thread the keyboard is on, and the inline "attach this number" row. */
+.inbox-item:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+.inbox-attach { display: flex; flex-direction: column; gap: 6px; padding: 10px 16px; border-bottom: 1px solid var(--border); background: var(--subtle); }
+.inbox-keys { font-size: 11px; padding: 6px 10px; }
+.comms-composer { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
+.comms-composer .inline select { width: auto; }

@@ -59,6 +59,19 @@ export default function clinicalRoutes({ db }) {
     res.status(201).json(await db.get('SELECT * FROM tooth_conditions WHERE id = ?', id));
   });
 
+  // Charted in error (a slip, or Undo right after charting): the finding comes off the chart but the row stays,
+  // with who removed it, when and why. A real finding that's been treated is resolved instead.
+  r.post('/conditions/:cid/void', requirePermission('clinical:write'), async (req, res) => {
+    const existing = await findOr404(db, 'tooth_conditions', req.params.cid, req.user.practice_id, 'Condition');
+    if (existing.voided_at) return res.json({ ok: true, already: true });
+    const reason = String(req.body?.reason || '').trim().slice(0, 300) || 'Charted in error';
+    await recorded(db, 'tooth_conditions', existing.id, () => db.run(
+      "UPDATE tooth_conditions SET voided_at = datetime('now'), voided_by = ?, void_reason = ? WHERE id = ? AND voided_at IS NULL", req.user.id, reason, existing.id,
+    ));
+    await audit(db, req, 'condition.void', 'tooth_conditions', existing.id, { reason, tooth: existing.tooth, condition: existing.condition }, { reason, patientId: existing.patient_id });
+    res.json({ ok: true });
+  });
+
   r.put('/conditions/:cid', requirePermission('clinical:write'), async (req, res) => {
     const existing = await findOr404(db, 'tooth_conditions', req.params.cid, req.user.practice_id, 'Condition');
     const row = normalizeToothFields(pick(req.body, ['surfaces', 'condition', 'notes', 'resolved']));
@@ -203,6 +216,15 @@ export default function clinicalRoutes({ db }) {
     await recorded(db, 'procedures', existing.id, () => db.run("UPDATE procedures SET status = 'cancelled' WHERE id = ?", existing.id));
     await audit(db, req, 'procedure.cancel', 'procedures', existing.id);
     res.json({ ok: true });
+  });
+
+  // Undo for a planned procedure taken off the chart by mistake: it goes back to planned, with both steps on record.
+  r.post('/procedures/:pid/restore', requirePermission('clinical:write'), async (req, res) => {
+    const existing = await findOr404(db, 'procedures', req.params.pid, req.user.practice_id, 'Procedure');
+    if (existing.status !== 'cancelled') throw new HttpError(409, 'Only a removed procedure can be put back');
+    await recorded(db, 'procedures', existing.id, () => db.run("UPDATE procedures SET status = 'planned' WHERE id = ? AND status = 'cancelled'", existing.id));
+    await audit(db, req, 'procedure.restore', 'procedures', existing.id);
+    res.json(await db.get('SELECT * FROM procedures WHERE id = ?', existing.id));
   });
 
   // ---- Treatment plans ----
@@ -420,9 +442,13 @@ export default function clinicalRoutes({ db }) {
     requireFields(row, ['body']);
     if (String(row.body).length > 20000) throw new HttpError(400, 'A note can be at most 20,000 characters — split it, or add an addendum');
     if (row.provider_id) await findOr404(db, 'providers', row.provider_id, req.user.practice_id, 'Provider');
-    if (row.appointment_id && (await findOr404(db, 'appointments', row.appointment_id, req.user.practice_id, 'Appointment')).patient_id !== patient.id) throw new HttpError(400, "That visit is another patient's");
+    if (!row.appointment_id) row.appointment_id = null;
+    const visit = row.appointment_id ? await findOr404(db, 'appointments', row.appointment_id, req.user.practice_id, 'Appointment') : null;
+    if (visit && visit.patient_id !== patient.id) throw new HttpError(400, "That visit is another patient's");
+    // A note for a visit belongs to that visit's office.
+    if (visit?.location_id) row.location_id = visit.location_id;
     const id = await insert(db, 'clinical_notes', { ...row, patient_id: patient.id, practice_id: req.user.practice_id, author_id: req.user.id });
-    await audit(db, req, 'note.create', 'clinical_notes', id);
+    await audit(db, req, 'note.create', 'clinical_notes', id, row.appointment_id ? { appointment_id: row.appointment_id } : undefined);
     // Dictation the AI worked into the note: the person saving it reviewed it and is the approver.
     if (req.body?.ai_assisted) await audit(db, req, 'note.ai_draft_approved', 'clinical_notes', id, { drafted_by: 'AI (dictation)', approved_by: req.user.name }, { patientId: patient.id });
     res.status(201).json(await db.get('SELECT * FROM clinical_notes WHERE id = ?', id));

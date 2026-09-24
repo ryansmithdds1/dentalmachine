@@ -1,11 +1,14 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api } from '../../api.js';
 import { useApi } from '../../hooks.js';
 import { useAuth } from '../../auth.jsx';
 import { fmtDate, fmtDateTime, label } from '../../format.js';
-import { Badge, ErrorBox, Modal, useSubmit } from '../ui.jsx';
+import { Badge, ErrorBox, Modal } from '../ui.jsx';
 import { MessageTable } from '../../pages/Requests.jsx';
 import SendForms, { openPdf } from '../FormsSend.jsx';
+import ReplyBox from '../ReplyBox.jsx';
+import '../comms.css';
 
 // Messages, intake forms and communication preferences for one patient.
 export default function CommsTab({ patient, onChange }) {
@@ -35,7 +38,7 @@ export default function CommsTab({ patient, onChange }) {
           <label className="checkbox" style={{ color: 'var(--text)', marginTop: 6 }}>
             <input type="checkbox" checked={!!patient.email_opt_in} disabled={!can('patients:write')} onChange={() => togglePref('email_opt_in')} /> Email {patient.email ? `to ${patient.email}` : '(no email on file)'}
           </label>
-          {can('patients:write') && <div className="form-actions" style={{ justifyContent: 'flex-start' }}><button className="primary" onClick={() => setModal('message')}>Send a message</button></div>}
+          {can('patients:write') && <Composer patient={patient} onSent={reload} />}
         </div>
         <div className="card">
           <div className="inline" style={{ justifyContent: 'space-between' }}>
@@ -64,11 +67,6 @@ export default function CommsTab({ patient, onChange }) {
         <MessageTable messages={messages} />
       </div>
 
-      {modal === 'message' && (
-        <Modal title={`Message ${patient.first_name}`} onClose={() => setModal(null)}>
-          <MessageForm patient={patient} onDone={() => { setModal(null); reload(); }} />
-        </Modal>
-      )}
       {modal === 'send-forms' && <SendForms patient={patient} onClose={() => setModal(null)} onSent={() => { reload(); reloadForms(); }} />}
       {modal?.form && (
         <Modal title="Medical history" wide onClose={() => setModal(null)}>
@@ -79,34 +77,33 @@ export default function CommsTab({ patient, onChange }) {
   );
 }
 
-function MessageForm({ patient, onDone }) {
-  const [channel, setChannel] = useState(patient.phone && patient.sms_opt_in ? 'sms' : 'email');
+// Same reply box as Messages: Enter sends, Shift+Enter for a new line. Texts land in the patient's
+// conversation, so a reply shows up in Messages too.
+function Composer({ patient, onSent }) {
+  const [channel, setChannel] = useState(patient.phone && patient.sms_opt_in ? 'sms' : patient.email ? 'email' : 'sms');
   const [subject, setSubject] = useState('');
-  const [body, setBody] = useState('');
-  const { submit, busy, error } = useSubmit(async () => {
-    await api.post(`/patients/${patient.id}/messages`, { channel, subject, body });
-    onDone();
-  });
+  const send = async (body) => {
+    const msg = await api.post(`/patients/${patient.id}/messages`, { channel, subject, body });
+    setSubject('');
+    onSent?.();
+    return msg;
+  };
   return (
-    <form onSubmit={(e) => { e.preventDefault(); submit(); }}>
-      <ErrorBox error={error} />
-      <div className="form-grid">
-        <label>
-          Send by
-          <select value={channel} onChange={(e) => setChannel(e.target.value)}>
-            <option value="sms">Text ({patient.phone || 'no phone'})</option>
-            <option value="email">Email ({patient.email || 'no email'})</option>
-          </select>
-        </label>
-        {channel === 'email' && <label>Subject<input value={subject} onChange={(e) => setSubject(e.target.value)} /></label>}
-        <label className="full">
-          Message
-          <textarea rows={4} required value={body} onChange={(e) => setBody(e.target.value)} maxLength={channel === 'sms' ? 480 : 5000} />
-          {channel === 'sms' && <span className="muted">{body.length}/480 · Don&apos;t include clinical details in texts.</span>}
-        </label>
+    <div className="comms-composer">
+      <div className="inline" style={{ justifyContent: 'space-between' }}>
+        <strong>Send a message</strong>
+        <Link className="small" to={`/messages?patient=${patient.id}`}>Open the conversation</Link>
       </div>
-      <div className="form-actions"><button className="primary" disabled={busy}>Send</button></div>
-    </form>
+      <div className="inline">
+        <select value={channel} onChange={(e) => setChannel(e.target.value)} aria-label="Send by">
+          <option value="sms">Text ({patient.phone || 'no phone'})</option>
+          <option value="email">Email ({patient.email || 'no email'})</option>
+        </select>
+        {channel === 'email' && <input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Subject (optional)" aria-label="Subject" />}
+      </div>
+      <ReplyBox onSend={send} rows={3} label={`Message ${patient.first_name}`} maxLength={channel === 'sms' ? 480 : 5000}
+        placeholder={channel === 'sms' ? `Text ${patient.first_name}… (no clinical details by text)` : `Email ${patient.first_name}…`} />
+    </div>
   );
 }
 

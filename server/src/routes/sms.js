@@ -15,6 +15,9 @@ const CONFIRM = ['C', 'CONFIRM', 'CONFIRMED', 'Y', 'YES', 'OK', 'SI', 'CONFIRMO'
 const HELP = ['HELP', 'INFO', 'AYUDA'];
 const RESCHEDULE = ['R', 'RESCHEDULE', 'CHANGE', 'MOVE', 'CAMBIAR', 'CAMBIO'];
 const digits = (s) => String(s || '').replace(/\D/g, '').slice(-10);
+// Only US/Canada numbers can be texted back (caller ID can be faked; this keeps the office line from texting
+// arbitrary international numbers).
+export const textable = (s) => { const raw = String(s || '').replace(/\D/g, ''); return raw.length === 10 || (raw.length === 11 && raw.startsWith('1')); };
 const xml = (s) => String(s).replace(/[<>&'"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' })[c]);
 const twiml = (reply) => `<?xml version="1.0" encoding="UTF-8"?><Response>${reply ? `<Message>${xml(reply)}</Message>` : ''}</Response>`;
 
@@ -238,10 +241,13 @@ export default function conversationRoutes({ db, messenger }) {
     if (t.patientId) throw new HttpError(400, "Reply from the patient's conversation");
     const body = String(req.body?.body || '').trim().slice(0, 480);
     if (!body) throw new HttpError(400, 'body is required');
-    const last = (await numberMessages(req.user.practice_id, t.number)).filter((m) => m.direction === 'inbound').at(-1);
+    // Their last text, or (when we texted first, e.g. back after a call) the number we wrote to.
+    const list = await numberMessages(req.user.practice_id, t.number);
+    const last = list.filter((m) => m.direction === 'inbound').at(-1) || list.filter((m) => m.kind === 'reply').at(-1);
     if (!last) throw new HttpError(404, 'No texts from that number');
-    if (await isOptedOutAddress(db, req.user.practice_id, 'sms', last.from_address)) throw new HttpError(409, 'This number replied STOP — they need to text START before you can text them');
-    const msg = await sendMessage(db, messenger, { practiceId: req.user.practice_id, channel: 'sms', to: last.from_address, body, kind: 'reply', userId: req.user.id });
+    const to = last.direction === 'inbound' ? last.from_address : last.to_address;
+    if (await isOptedOutAddress(db, req.user.practice_id, 'sms', to)) throw new HttpError(409, 'This number replied STOP — they need to text START before you can text them');
+    const msg = await sendMessage(db, messenger, { practiceId: req.user.practice_id, channel: 'sms', to, body, kind: 'reply', userId: req.user.id });
     await audit(db, req, 'conversation.reply', 'messages', msg.id);
     publish(req.user.practice_id, { type: 'message', patient_id: null });
     res.status(201).json(msg);
@@ -262,6 +268,20 @@ export default function conversationRoutes({ db, messenger }) {
     res.json({ ok: true, moved: list.length, thread: `p${patient.id}` });
   });
 
+  // Text the caller back from the pop (someone who isn't a patient yet, or a patient on another number).
+  // Sends go through sendMessage, so a failure is saved on the message and raised in Needs attention; a
+  // resent request with the same Idempotency-Key gets the first answer.
+  r.post('/calls/:cid/text', requirePermission('patients:write'), async (req, res) => {
+    const c = await findOr404(db, 'calls', req.params.cid, req.user.practice_id, 'Call');
+    if (c.direction !== 'inbound' || !textable(c.from_number)) throw new HttpError(400, 'This caller’s number can’t be texted');
+    const body = String(req.body?.body || '').trim().slice(0, 480);
+    if (!body) throw new HttpError(400, 'Type a message first');
+    if (await isOptedOutAddress(db, req.user.practice_id, 'sms', c.from_number)) throw new HttpError(409, 'This number replied STOP — they need to text START before you can text them');
+    const msg = await sendMessage(db, messenger, { practiceId: req.user.practice_id, patientId: c.patient_id, channel: 'sms', to: c.from_number, body, kind: 'reply', userId: req.user.id });
+    await audit(db, req, 'call.text', 'messages', msg.id, { call_id: c.id });
+    publish(req.user.practice_id, { type: 'message', patient_id: c.patient_id ?? null });
+    res.status(201).json({ ...msg, thread: c.patient_id ? `p${c.patient_id}` : `n${digits(c.from_number)}` });
+  });
   // Assign a conversation to a teammate, or archive it (it comes back when the patient writes again).
   r.put('/conversations/:thread', requirePermission('patients:write'), async (req, res) => {
     parseThread(req.params.thread);

@@ -1,10 +1,11 @@
 import express, { Router } from 'express';
 import { raiseIssue, resolveIssue, failed } from '../issues.js';
 import { timingSafeEqual } from 'node:crypto';
-import { twilioSignature } from './sms.js';
+import { twilioSignature, textable } from './sms.js';
 import { requirePermission, HttpError } from '../auth.js';
-import { insert, practiceNow, audit, findOr404 } from '../util.js';
+import { insert, practiceNow, audit, findOr404, recorded } from '../util.js';
 import { publish } from '../events.js';
+import { patientScope } from '../officeaccess.js';
 import { practiceForNumber, patientForNumber, callerCard, isOpenNow, textBack, processRecording, summarizeCall, receptionistTurn } from '../phones.js';
 import { aiClient } from '../ai.js';
 
@@ -147,6 +148,8 @@ export function phoneWebhooks({ db, config, messenger, storage, transcriber, fet
   return r;
 }
 
+const tail10 = (s) => String(s || '').replace(/\D/g, '').slice(-10);
+
 const requireAdmin = (req, _res, next) => (req.user.role === 'admin' ? next() : next(new HttpError(403, 'Only administrators can do this')));
 
 // Staff: the call log, playing a recording, and the caller card for the screen pop.
@@ -233,7 +236,16 @@ export default function phoneRoutes({ db, storage }) {
     const c = await findOr404(db, 'calls', req.params.cid, req.user.practice_id, 'Call');
     await audit(db, req, 'call.view', 'calls', c.id);
     const { token_hash: _t, ai_turns: turns, ...call } = c;
-    res.json({ ...call, turns: JSON.parse(turns || '[]'), card: await callerCard(db, req.user.practice_id, c.patient_id) });
+    // Everyone on file with this number (a family often shares one), so the desk can pick who's calling.
+    const d = tail10(c.from_number);
+    // Only the patients this user may see (office restrictions), narrowed in SQL by the last four digits.
+    const scope = patientScope(req.user);
+    const matches = d.length === 10
+      ? (await db.all(`SELECT id, first_name, last_name, preferred_name, dob, phone, guarantor_id FROM patients p WHERE p.practice_id = ? AND p.status != 'archived' AND p.phone LIKE ?${scope.sql}`, req.user.practice_id, `%${d.slice(-4)}`, ...scope.args))
+        .filter((p) => tail10(p.phone) === d).sort((a, b) => (a.guarantor_id ? 1 : 0) - (b.guarantor_id ? 1 : 0) || a.id - b.id).slice(0, 10)
+        .map(({ phone: _p, guarantor_id: _g, ...p }) => p)
+      : [];
+    res.json({ ...call, turns: JSON.parse(turns || '[]'), card: await callerCard(db, req.user.practice_id, c.patient_id), matches, textable: textable(c.from_number) });
   });
   r.get('/calls/:cid/recording', requirePermission('patients:read'), async (req, res) => {
     const c = await findOr404(db, 'calls', req.params.cid, req.user.practice_id, 'Call');
@@ -245,8 +257,13 @@ export default function phoneRoutes({ db, storage }) {
   r.patch('/calls/:cid', requirePermission('patients:write'), async (req, res) => {
     const c = await findOr404(db, 'calls', req.params.cid, req.user.practice_id, 'Call');
     if (req.body.patient_id !== undefined) {
-      if (req.body.patient_id) await findOr404(db, 'patients', req.body.patient_id, req.user.practice_id, 'Patient');
-      await db.run('UPDATE calls SET patient_id = ? WHERE id = ?', req.body.patient_id || null, c.id);
+      const patient = req.body.patient_id ? await findOr404(db, 'patients', req.body.patient_id, req.user.practice_id, 'Patient') : null;
+      await recorded(db, 'calls', c.id, () => db.run('UPDATE calls SET patient_id = ? WHERE id = ?', patient?.id ?? null, c.id));
+      // A caller attached to a patient with no phone on file: remember the number on the chart, like texts do.
+      if (patient && !patient.phone && tail10(c.from_number).length === 10) {
+        await recorded(db, 'patients', patient.id, () => db.run('UPDATE patients SET phone = ? WHERE id = ?', c.from_number, patient.id));
+      }
+      await audit(db, req, 'call.attach', 'calls', c.id, { patient_id: patient?.id ?? null }, { before: { patient_id: c.patient_id }, after: { patient_id: patient?.id ?? null } });
     }
     if (req.body.handled !== undefined) await db.run(`UPDATE calls SET handled_at = ${req.body.handled ? "datetime('now')" : 'NULL'}, handled_by = ? WHERE id = ?`, req.body.handled ? req.user.id : null, c.id);
     if (req.body.notes !== undefined) await db.run('UPDATE calls SET notes = ? WHERE id = ?', String(req.body.notes || '').slice(0, 2000) || null, c.id);

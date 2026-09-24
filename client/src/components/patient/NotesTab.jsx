@@ -35,7 +35,8 @@ export default function NotesTab({ patient }) {
           <Scribe patient={patient} onSaved={reload} />
           <div className="card">
             <h2>New note</h2>
-            <NoteComposer patient={patient} providerId={patient.primary_provider_id} onSaved={reload} />
+            {/* Opens drafted from today's visit, linked to it, with the cursor ready to type or dictate. */}
+            <NoteComposer key={patient.id} patient={patient} draftToday autoFocus onSaved={reload} />
           </div>
         </div>
       )}

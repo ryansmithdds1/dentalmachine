@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { toast as showToast } from '../toast.js';
+import { toast as showToast, undoable } from '../toast.js';
+import { useShortcuts, useCommands } from '../shortcuts.js';
+import { useActivePatient } from '../activePatient.jsx';
+import { useRemembered } from '../prefs.js';
 import { api, getLocationId } from '../api.js';
 import { saveOfflineDay, PINBOARD_KEY } from '../offline.js';
 import { useLookup } from '../hooks.js';
@@ -13,6 +16,7 @@ import AppointmentForm from '../components/AppointmentForm.jsx';
 import BlockoutForm from '../components/calendar/BlockoutForm.jsx';
 import AppointmentDrawer from '../components/calendar/AppointmentDrawer.jsx';
 import CalendarGrid, { toMin, STATUS_COLORS } from '../components/calendar/CalendarGrid.jsx';
+import { planStep, nextKind, postsCharges, STEP_KEYS, READY_SHORT } from '../components/calendar/flow.js';
 
 // "Fit" sizes the grid so the whole office day fits the screen without scrolling; S/M/L are fixed sizes.
 const ZOOMS = [{ label: 'Fit', px: 0 }, { label: 'S', px: 1 }, { label: 'M', px: 1.5 }, { label: 'L', px: 2.2 }];
@@ -63,7 +67,8 @@ export default function Schedule() {
   const view = params.get('view') || (narrow ? 'agenda' : pref('view', 'day'));
   const [mode, setModeState] = useState(() => pref('mode', 'operatory'));
   const [zoom, setZoomState] = useState(() => Number(pref('zoom', 0)));
-  const [providerFilter, setProviderFilter] = useState('');
+  // Showing one provider is remembered per person (on the server), so a hygienist's screen opens on their own day.
+  const [providerPref, rememberProvider] = useRemembered('schedule.provider', '');
   const setMode = (m) => { setModeState(m); savePref('mode', m); };
   const setZoom = (z) => { setZoomState(z); savePref('zoom', z); };
   // Grid step (5/10/15 min) and how the week view splits each day.
@@ -115,6 +120,8 @@ export default function Schedule() {
   };
   const toggleChair = (id) => setChairLayout({ ...chairLayout, hidden: chairLayout.hidden.includes(id) ? chairLayout.hidden.filter((x) => x !== id) : [...chairLayout.hidden, id] });
   const providers = useLookup('/providers?active=true');
+  const providerFilter = providers.some((p) => String(p.id) === String(providerPref)) ? String(providerPref) : '';
+  const setProviderFilter = (v) => rememberProvider(v ? String(v) : '');
   const from = view === 'week' ? weekStart(date) : date;
   const to = view === 'week' ? shiftDate(from, 6) : date;
 
@@ -299,10 +306,92 @@ export default function Schedule() {
     }
   };
 
+  // ---- Patient flow: check in → seat → ready → out, one key or one click each ----
+  // Each step happens at once and the toast offers Undo (which steps back through the same routes, so the
+  // history shows both). Cancelling keeps its own confirmation in the drawer.
+  const { setActive } = useActivePatient();
+  const makeActive = useCallback((a) => a?.patient_id && setActive({ id: a.patient_id, first_name: a.first_name, last_name: a.last_name, preferred_name: a.preferred_name, dob: a.dob }), [setActive]);
+  const [focusComplete, setFocusComplete] = useState(0);
+  const runStep = async (a, kind) => {
+    const plan = planStep(a, kind);
+    if (plan.error) return toast(plan.error);
+    // Posting the visit's charges can't be taken back by Undo: open the drawer on its Complete button instead.
+    if (plan.status === 'completed' && postsCharges(a, can('clinical:write'))) {
+      setSelectedId(a.id);
+      setFocusComplete((n) => n + 1);
+      return toast('This visit has procedures to complete and charge — press Enter to finish it, or choose Visit only');
+    }
+    const before = a;
+    const saved = (u) => { replaceAppt(u); cache.current.clear(); return u; };
+    if (plan.status) {
+      replaceAppt({ ...a, status: plan.status, _pending: true });
+      await undoable(plan.done,
+        () => api.patch(`/appointments/${a.id}/status`, { status: plan.status }).then(saved),
+        () => api.patch(`/appointments/${a.id}/status`, { status: before.status, undo: true }).then(saved)).catch(() => replaceAppt(before));
+    } else {
+      replaceAppt({ ...a, ready_for: plan.ready, _pending: true });
+      await undoable(plan.done,
+        () => api.put(`/appointments/${a.id}/ready`, { ready_for: plan.ready }).then(saved),
+        () => api.put(`/appointments/${a.id}/ready`, { ready_for: before.ready_for || null, undo: true }).then(saved)).catch(() => replaceAppt(before));
+    }
+  };
+  // The visit a key acts on: the card with keyboard focus, else the one open in the drawer.
+  const target = () => {
+    const id = Number(document.activeElement?.closest?.('[data-appt-id]')?.dataset.apptId) || selectedId;
+    return appts.find((a) => a.id === id) || null;
+  };
+  const stepKey = (kind) => () => {
+    const a = target();
+    if (!a) return toast('Pick a visit first: click it, or press F to jump to the one happening now');
+    runStep(a, kind);
+  };
+  // F: put the keyboard on the visit happening now (or the next one today), so the flow keys work from there.
+  const focusNow = () => {
+    const today0 = appts.filter((a) => a.start_time.startsWith(date) && !['cancelled', 'no_show'].includes(a.status)).sort((x, y) => x.start_time.localeCompare(y.start_time));
+    const now = date === today ? nowMin : -1;
+    const pick = today0.find((a) => toMin(a.end_time) > now && a.status !== 'completed') || today0[0];
+    const el = pick && document.querySelector(`.cal [data-appt-id="${pick.id}"], .agenda [data-appt-id="${pick.id}"]`);
+    if (el) el.focus();
+    else toast('No visits to go to on this day');
+  };
+  const cycleProvider = () => {
+    const ids = ['', ...providers.map((p) => String(p.id))];
+    const next = ids[(ids.indexOf(providerFilter) + 1) % ids.length];
+    setProviderFilter(next);
+    toast(next ? `Showing ${providers.find((p) => String(p.id) === next).name} only` : 'Showing all providers');
+  };
+  const showBy = (m) => {
+    if (view === 'week') setWeekSplit(m === 'provider' ? 'provider' : 'operatory');
+    else {
+      setMode(m);
+      if (view !== 'day') go({ view: 'day' });
+    }
+  };
+  const w = can('schedule:write');
+  useShortcuts([
+    { combo: 'c', handler: () => showBy('operatory'), label: 'Chairs view (one column per chair)', section: 'Schedule views' },
+    { combo: 'p', handler: () => showBy('provider'), label: 'Providers view (one column per provider)', section: 'Schedule views' },
+    { combo: 'v', handler: cycleProvider, label: 'Show one provider (press again for the next, then all)', section: 'Schedule views' },
+    { combo: 'shift+v', handler: () => { setProviderFilter(''); toast('Showing all providers'); }, label: 'Show all providers', section: 'Schedule views' },
+    { combo: 'f', handler: focusNow, label: 'Jump to the visit happening now (then ↑ ↓ ← → between visits)', section: 'Patient flow' },
+    { combo: STEP_KEYS.in, handler: stepKey('in'), label: 'Check in the selected visit', section: 'Patient flow', enabled: w },
+    { combo: STEP_KEYS.seat, handler: stepKey('seat'), label: 'Seat', section: 'Patient flow', enabled: w },
+    { combo: STEP_KEYS.ready, handler: stepKey('ready'), label: 'Ready for the doctor (again to clear)', section: 'Patient flow', enabled: w },
+    { combo: STEP_KEYS.ready_checkout, handler: stepKey('ready_checkout'), label: 'Ready for checkout (again to clear)', section: 'Patient flow', enabled: w },
+    { combo: STEP_KEYS.out, handler: stepKey('out'), label: 'Out — visit complete', section: 'Patient flow', enabled: w },
+  ]);
+  useCommands([
+    { id: 'sched-chairs', label: 'Schedule: Chairs view', hint: 'C', run: () => showBy('operatory') },
+    { id: 'sched-providers', label: 'Schedule: Providers view', hint: 'P', run: () => showBy('provider') },
+    { id: 'sched-all', label: 'Schedule: show all providers', hint: 'Shift+V', run: () => setProviderFilter('') },
+    ...providers.map((p) => ({ id: `sched-only-${p.id}`, label: `Schedule: show only ${p.name}`, hint: 'V cycles providers', run: () => setProviderFilter(p.id) })),
+    { id: 'sched-today', label: 'Schedule: today', hint: 'T', run: () => go({ date: today }) },
+  ]);
+
   // ---- Keyboard shortcuts: ←/→ move, T today, D/W/A views, N new, Esc close ----
   useEffect(() => {
     const onKey = (e) => {
-      if (e.target.closest?.('input, textarea, select, [contenteditable]') || e.metaKey || e.ctrlKey || e.altKey || modal) return;
+      if (e.defaultPrevented || e.target.closest?.('input, textarea, select, [contenteditable]') || e.metaKey || e.ctrlKey || e.altKey || modal) return;
       const step = view === 'week' ? 7 : 1;
       const k = e.key.toLowerCase();
       if (e.key === 'ArrowLeft') go({ date: shiftDate(date, -step) });
@@ -359,8 +448,9 @@ export default function Schedule() {
       }));
     }
     const base = { date, isToday: date === today, hours: data.hours[date] };
+    const shownProvider = (a) => !providerFilter || a.provider_id === Number(providerFilter);
     if (mode === 'provider') {
-      return providers.map((p) => ({
+      return providers.filter((p) => !providerFilter || p.id === Number(providerFilter)).map((p) => ({
         ...base, key: `p${p.id}`, label: p.name, color: p.color, assign: { provider_id: p.id }, showProvider: false,
         hours: data.provider_hours?.[p.id]?.[date] ?? base.hours,
         ...(() => {
@@ -377,13 +467,13 @@ export default function Schedule() {
       sub: ((n) => `${n} appt${n === 1 ? '' : 's'}`)(appts.filter((a) => a.operatory_id === o.id && a.start_time.startsWith(date) && !['cancelled', 'no_show'].includes(a.status)).length),
       // Who's working in this chair today (from the visits booked in it).
       people: [...new Map(appts.filter((a) => a.operatory_id === o.id && a.start_time.startsWith(date)).map((a) => [a.provider_id, { name: a.provider_name, color: a.provider_color }])).values()],
-      accepts: (a) => a.start_time.startsWith(date) && a.operatory_id === o.id,
+      accepts: (a) => a.start_time.startsWith(date) && a.operatory_id === o.id && shownProvider(a),
       blockouts: blockouts.filter((b) => onDate(b, date) && (officeWide(b) || b.operatory_id === o.id)),
     }));
     if (appts.some((a) => !a.operatory_id && a.start_time.startsWith(date))) {
       cols.push({
         ...base, key: 'o-none', label: 'No chair', assign: { operatory_id: null }, showProvider: true,
-        accepts: (a) => a.start_time.startsWith(date) && !a.operatory_id, blockouts: blockouts.filter((b) => onDate(b, date) && officeWide(b)),
+        accepts: (a) => a.start_time.startsWith(date) && !a.operatory_id && shownProvider(a), blockouts: blockouts.filter((b) => onDate(b, date) && officeWide(b)),
       });
     }
     return cols;
@@ -432,7 +522,7 @@ export default function Schedule() {
   const dateInput = useRef(null);
 
   // ---- Summary ----
-  const dayAppts = view === 'week' ? appts : appts.filter((a) => a.start_time.startsWith(date));
+  const dayAppts = (view === 'week' ? appts : appts.filter((a) => a.start_time.startsWith(date))).filter((a) => !providerFilter || a.provider_id === Number(providerFilter));
   const production = dayAppts.reduce((s, a) => s + (a.production || 0), 0);
   const goal = (data?.daily_goal || 0) * (view === 'week' ? Math.max(1, columns.length) : 1);
   const unconfirmed = dayAppts.filter((a) => a.status === 'scheduled').length;
@@ -473,8 +563,8 @@ export default function Schedule() {
           </div>
           {view === 'day' && (
             <div className="seg">
-              <button className={mode === 'operatory' ? 'active' : ''} onClick={() => setMode('operatory')}>Chairs</button>
-              <button className={mode === 'provider' ? 'active' : ''} onClick={() => setMode('provider')}>Providers</button>
+              <button className={mode === 'operatory' ? 'active' : ''} onClick={() => setMode('operatory')} title="Chairs (C)">Chairs</button>
+              <button className={mode === 'provider' ? 'active' : ''} onClick={() => setMode('provider')} title="Providers (P)">Providers</button>
             </div>
           )}
           {view === 'week' && (
@@ -482,12 +572,11 @@ export default function Schedule() {
               {[['days', 'Days'], ['provider', 'By provider'], ['operatory', 'By chair']].map(([k, l]) => <button key={k} className={weekSplit === k ? 'active' : ''} onClick={() => setWeekSplit(k)}>{l}</button>)}
             </div>
           )}
-          {view !== 'day' && (
-            <select value={providerFilter} onChange={(e) => setProviderFilter(e.target.value)} aria-label="Provider filter" style={{ width: 'auto' }}>
-              <option value="">All providers</option>
-              {providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
-          )}
+          {/* One provider's day, in any view; remembered for next time. */}
+          <select value={providerFilter} onChange={(e) => setProviderFilter(e.target.value)} aria-label="Provider filter" title="Show one provider (V)" style={{ width: 'auto' }}>
+            <option value="">All providers</option>
+            {providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
           {view !== 'agenda' && (
             <div className="view-options">
               <button className={`icon-btn${optionsOpen ? ' active' : ''}`} onClick={() => setOptionsOpen(!optionsOpen)} aria-expanded={optionsOpen} title="View options"><SlidersHorizontal size={17} /></button>
@@ -535,7 +624,7 @@ export default function Schedule() {
 
       <div className="sched-main" ref={mainRef}>
         {!data ? <div className="empty">Loading schedule…</div> : view === 'agenda' ? (
-          <Agenda from={from} to={to} appts={appts} blockouts={blockouts} providerFilter={providerFilter} onOpen={(a) => setSelectedId(a.id)} today={today} />
+          <Agenda from={from} to={to} appts={appts} blockouts={blockouts} providerFilter={providerFilter} onOpen={(a) => { setSelectedId(a.id); makeActive(a); }} onFocusAppt={makeActive} today={today} />
         ) : columns.length === 0 ? (
           <div className="empty card" style={{ flex: 1 }}>
             The office is closed this {view === 'week' ? 'week' : 'day'}.{' '}
@@ -551,7 +640,8 @@ export default function Schedule() {
           <CalendarGrid
             columns={columns} appointments={appts} range={timeRange} pxPerMin={pxPerMin} nowMin={nowMin} step={step} colorBy={colorBy}
             onMove={onMove} onResize={onResize} readOnly={!can('schedule:write')}
-            onSelectRange={onSelectRange} onOpen={(a) => setSelectedId(a.id)}
+            onSelectRange={onSelectRange} onOpen={(a) => { setSelectedId(a.id); makeActive(a); }} onFocusAppt={makeActive}
+            onNext={w ? (a) => runStep(a, nextKind(a)) : undefined}
             onOpenBlockout={(b) => can('schedule:write') && setModal({ type: 'block', blockout: b })}
             placing={placing} onPlace={onPlace} selectedId={selectedId} scrollKey={`${view}|${from}|${zoom}`}
             onPin={can('schedule:write') ? onPin : undefined}
@@ -598,6 +688,7 @@ export default function Schedule() {
           onPin={() => { onPin(selected); setSelectedId(null); }}
           appt={selected} can={can} onClose={() => setSelectedId(null)}
           onStatus={(s, scope, extra) => setStatus(selected, s, scope, extra)}
+          onStep={(kind) => runStep(selected, kind)} focusComplete={focusComplete}
           onEdit={() => setModal({ type: 'edit', appt: selected })}
           onCheckout={() => nav(`/checkout/${selected.id}`)}
           onChart={() => nav(`/patients/${selected.patient_id}`)}
@@ -648,7 +739,7 @@ export default function Schedule() {
   );
 }
 
-function Agenda({ from, to, appts, blockouts, providerFilter, onOpen, today }) {
+function Agenda({ from, to, appts, blockouts, providerFilter, onOpen, onFocusAppt, today }) {
   const days = [];
   for (let d = from; d <= to; d = shiftDate(d, 1)) days.push(d);
   const shown = appts.filter((a) => !providerFilter || a.provider_id === Number(providerFilter));
@@ -666,13 +757,14 @@ function Agenda({ from, to, appts, blockouts, providerFilter, onOpen, today }) {
             {items.map(({ a, b }) => (b ? (
               <div key={`b${b.id}`} className="agenda-block">{fmtTime(b.start_time)}–{fmtTime(b.end_time)} · {b.reason}</div>
             ) : (
-              <button key={a.id} className={`agenda-item status-${a.status}`} style={{ '--c': a.type_color || a.provider_color }} onClick={() => onOpen(a)}>
+              <button key={a.id} data-appt-id={a.id} className={`agenda-item status-${a.status}`} style={{ '--c': a.type_color || a.provider_color }} onClick={() => onOpen(a)} onFocus={() => onFocusAppt(a)}>
                 <div className="agenda-time"><strong>{fmtTime(a.start_time)}</strong><span className="muted">{fmtTime(a.end_time)}</span></div>
                 <div className="agenda-body">
                   <strong>{a.premed_required ? '💊 ' : ''}{a.medical_alerts ? '⚠ ' : ''}{a.first_name} {a.last_name}</strong>
                   <span className="muted">{a.type_name || a.reason} · {a.provider_name}{a.operatory_name ? ` · ${a.operatory_name}` : ''}</span>
                 </div>
                 <span className={`badge ${a.status}`}>{a.status.replace('_', ' ')}</span>
+                {a.status === 'in_chair' && a.ready_for && <span className="badge ready-badge">{READY_SHORT[a.ready_for]}</span>}
               </button>
             )))}
           </section>

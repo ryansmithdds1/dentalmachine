@@ -15,6 +15,10 @@ import { appointmentScope, checkOffice, canSeePatient } from '../officeaccess.js
 export const STATUSES = ['scheduled', 'confirmed', 'checked_in', 'in_chair', 'completed', 'cancelled', 'no_show'];
 export const INACTIVE = "('cancelled','no_show')";
 export const CONFIRM_METHODS = ['phone', 'text', 'email', 'in_person', 'portal', 'left_message'];
+// The patient flow in order, and the times each step records (index + 1 = the step's rank).
+const FLOW_RANK = { scheduled: 0, confirmed: 0, checked_in: 1, in_chair: 2, completed: 3 };
+const FLOW_TIMES = [['arrived_at'], ['seated_at', 'ready_at', 'ready_for'], ['dismissed_at']];
+export const READY_FOR = ['doctor', 'checkout'];
 
 const SELECT = `SELECT a.*, p.first_name, p.last_name, p.preferred_name, p.phone, p.medical_alerts, p.premed_required, p.dob,
   pr.name AS provider_name, pr.color AS provider_color, o.name AS operatory_name,
@@ -487,6 +491,13 @@ export default function scheduleRoutes({ db }) {
     // "Left a message" is a contact attempt, not a confirmation.
     if (via) await recorded(db, 'appointments', existing.id, () => db.run('UPDATE appointments SET confirmed_via = ? WHERE id = ?', via, existing.id));
     else if (status === 'confirmed' && !existing.confirmed_via) await recorded(db, 'appointments', existing.id, () => db.run("UPDATE appointments SET confirmed_via = 'phone' WHERE id = ?", existing.id));
+    // Stepping back in the flow (an undo, or a mistaken check-in) clears the times of the steps undone, so
+    // the next real check-in or seating records the right time. The change log keeps what they were.
+    const rank = FLOW_RANK[status];
+    if (rank != null && FLOW_RANK[existing.status] > rank) {
+      const clear = FLOW_TIMES.filter((_, i) => i + 1 > rank).flat();
+      await recorded(db, 'appointments', existing.id, () => db.run(`UPDATE appointments SET ${clear.map((c) => `${c} = NULL`).join(', ')} WHERE id = ?`, existing.id));
+    }
     // Patient flow: when they arrived, were seated and left (practice-local time, for wait and chair times).
     const flow = { checked_in: 'arrived_at', in_chair: 'seated_at', completed: 'dismissed_at' }[status];
     if (flow) {
@@ -518,10 +529,30 @@ export default function scheduleRoutes({ db }) {
       }
       changed(req, ...later.map((o) => o.start_time));
     }
-    await audit(db, req, 'appointment.status', 'appointments', existing.id, { from: existing.status, to: status, ...(completedProcedures ? { completed_procedures: completedProcedures } : {}) });
+    // "undo" marks a step taken back from the schedule's Undo, so the history reads as what happened.
+    await audit(db, req, 'appointment.status', 'appointments', existing.id, { from: existing.status, to: status, ...(completedProcedures ? { completed_procedures: completedProcedures } : {}), ...(req.body.undo === true ? { undo: true } : {}) });
     changed(req, existing.start_time);
     await emitAppointment(db, existing.id);
     res.json({ ...(await db.get(`${SELECT} WHERE a.id = ?`, existing.id)), completed_procedures: completedProcedures });
+  });
+
+  // "Ready" for the patient in the chair: ready for the doctor's exam, or ready for checkout. A flag beside the
+  // status (not a status of its own) so the flow stays arrived → seated → ready → out. null clears it.
+  r.put('/appointments/:id/ready', requirePermission('schedule:write'), async (req, res) => {
+    const existing = await findOr404(db, 'appointments', req.params.id, req.user.practice_id, 'Appointment');
+    const readyFor = req.body?.ready_for ?? null;
+    requireOneOf(readyFor, READY_FOR, 'ready_for');
+    if (readyFor && existing.status !== 'in_chair') throw new HttpError(409, 'Seat the patient before marking them ready');
+    // Asking twice (a double click, a retry) changes nothing and keeps the first time.
+    if ((existing.ready_for || null) !== readyFor) {
+      const now = readyFor ? await practiceNow(db, req.user.practice_id) : null;
+      await recorded(db, 'appointments', existing.id, () => db.run('UPDATE appointments SET ready_for = ?, ready_at = ? WHERE id = ?', readyFor, now, existing.id));
+      await audit(db, req, 'appointment.ready', 'appointments', existing.id, { from: existing.ready_for || null, to: readyFor, ...(req.body.undo === true ? { undo: true } : {}) }, {
+        before: { ready_for: existing.ready_for, ready_at: existing.ready_at }, after: { ready_for: readyFor, ready_at: now },
+      });
+      changed(req, existing.start_time);
+    }
+    res.json(await db.get(`${SELECT} WHERE a.id = ?`, existing.id));
   });
 
   // ---- Provider time off and one-off hours ----

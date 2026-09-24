@@ -16,10 +16,13 @@ export default function Patients() {
   const [status, setStatus] = useState('active');
   const [offset, setOffset] = useState(0);
   const [adding, setAdding] = useState(false);
-  // ?new=1 (from quick search "New patient") opens the form.
+  // ?new=1 (from quick search "New patient") opens the form; &phone= (from a caller or texter not on file)
+  // starts it with their number.
   const [urlParams, setUrlParams] = useSearchParams();
+  const [prefill, setPrefill] = useState(null);
   useEffect(() => {
     if (urlParams.get('new') !== '1') return;
+    setPrefill(urlParams.get('phone') ? { phone: urlParams.get('phone').slice(0, 30) } : null);
     setAdding(true);
     setUrlParams({}, { replace: true });
   }, [urlParams, setUrlParams]);
@@ -77,7 +80,7 @@ export default function Patients() {
       </div>
       {adding && (
         <Modal title="New patient" wide onClose={() => setAdding(false)}>
-          <PatientForm onCancel={() => setAdding(false)} onSaved={(p) => nav(`/patients/${p.id}`)} />
+          <PatientForm defaults={prefill} onCancel={() => setAdding(false)} onSaved={(p) => nav(`/patients/${p.id}`)} />
         </Modal>
       )}
     </>

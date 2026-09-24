@@ -1,16 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../../api.js';
 import { fmtTime, fmtDateTime, fmtUtcDateTime, money, eligibilityBadge } from '../../format.js';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../../auth.jsx';
 import { Badge } from '../ui.jsx';
-
-const FLOW = {
-  scheduled: [['checked_in', 'Check in']],
-  confirmed: [['checked_in', 'Check in']],
-  checked_in: [['in_chair', 'Seat']],
-  in_chair: [['completed', 'Complete']],
-};
+import { nextKind, NEXT_LABEL, READY_LABEL, STEP_KEYS, postsCharges } from './flow.js';
+import './workflow.css';
 
 // Side panel for one appointment: keeps the calendar visible while the front desk works.
 const CONFIRM = [['phone', 'By phone'], ['text', 'By text'], ['email', 'By email'], ['in_person', 'In person']];
@@ -19,7 +14,7 @@ export const CONFIRMED_VIA = { phone: 'by phone', text: 'by text', email: 'by em
 // Minutes between two practice-local 'YYYY-MM-DD HH:MM' times.
 const mins = (a, b) => (a && b ? Math.round((Date.parse(`${b.replace(' ', 'T')}Z`) - Date.parse(`${a.replace(' ', 'T')}Z`)) / 60000) : null);
 
-export default function AppointmentDrawer({ appt: a, can, onClose, onStatus, onEdit, onChart, onMove, onPin, onToggleAsap, onReminder, onCheckout }) {
+export default function AppointmentDrawer({ appt: a, can, onClose, onStatus, onStep, focusComplete = 0, onEdit, onChart, onMove, onPin, onToggleAsap, onReminder, onCheckout }) {
   useEffect(() => {
     const onKey = (e) => e.key === 'Escape' && onClose();
     window.addEventListener('keydown', onKey);
@@ -35,6 +30,16 @@ export default function AppointmentDrawer({ appt: a, can, onClose, onStatus, onE
   useEffect(() => setConfirmCancel(false), [a.id]);
   const active = !['completed', 'cancelled', 'no_show'].includes(a.status);
   const date = new Date(`${a.start_time.slice(0, 10)}T12:00:00Z`).toLocaleDateString('en-US', { timeZone: 'UTC', weekday: 'long', month: 'long', day: 'numeric' });
+  // The next step of the visit, one click from the top of the panel (the same as its key on the schedule).
+  const next = w && active ? nextKind(a) : null;
+  const charges = postsCharges(a, can('clinical:write'));
+  // "O" on a visit that would post charges lands here, on the button that does it.
+  const completeRef = useRef(null);
+  useEffect(() => { if (focusComplete) completeRef.current?.focus(); }, [focusComplete]);
+  const completeWithProcedures = (
+    <button ref={completeRef} className="primary" title={`Completes ${a.procedure_summary} and posts ${money(a.production || 0)}`} onClick={() => onStatus('completed', null, { complete_procedures: true })}>Complete visit & procedures</button>
+  );
+  const kbd = (k) => <kbd>{k.replace('shift+', '⇧').toUpperCase()}</kbd>;
 
   return (
     <aside className="drawer" role="dialog" aria-label={`${a.first_name} ${a.last_name}`}>
@@ -42,6 +47,13 @@ export default function AppointmentDrawer({ appt: a, can, onClose, onStatus, onE
         <div>
           <h2 style={{ margin: 0 }}>{a.first_name} {a.last_name}</h2>
           <div className="muted">{date} · {fmtTime(a.start_time)}–{fmtTime(a.end_time)}</div>
+          {next && (
+            <div className="drawer-next">
+              {next === 'out' && charges ? completeWithProcedures : (
+                <button className="primary" onClick={() => onStep(next)} title={`Next step (${STEP_KEYS[next].toUpperCase()} on the schedule)`}>{NEXT_LABEL[next]}{kbd(STEP_KEYS[next])}</button>
+              )}
+            </div>
+          )}
         </div>
         <button className="small" onClick={onClose} aria-label="Close">✕</button>
       </div>
@@ -51,6 +63,7 @@ export default function AppointmentDrawer({ appt: a, can, onClose, onStatus, onE
         {a.medical_alerts && <div className="error">⚠ {a.medical_alerts}</div>}
         <div className="inline" style={{ flexWrap: 'wrap', marginBottom: 12 }}>
           <Badge value={a.status} />
+          {a.status === 'in_chair' && a.ready_for && <span className="badge ready-badge">{READY_LABEL[a.ready_for]}</span>}
           {a.type_name && <span className="badge" style={{ background: `${a.type_color}22`, color: a.type_color }}>{a.type_name}</span>}
           {a.asap ? <span className="badge warn">ASAP</span> : null}
           {a.series_id ? <span className="series-chip" title="Recurring visit">↻ {series ? `${series.position} of ${series.total} · every ${series.every > 1 ? `${series.every} ` : ''}${series.unit}${series.every > 1 ? 's' : ''}` : 'Recurring'}</span> : null}
@@ -68,18 +81,17 @@ export default function AppointmentDrawer({ appt: a, can, onClose, onStatus, onE
         {w && active && (
           <>
           <div className="drawer-actions">
-            {(FLOW[a.status] || []).map(([s, l]) => {
-              // Completing the visit completes its planned procedures too (charges post), for clinical staff.
-              if (s === 'completed' && a.procedure_summary && can('clinical:write')) {
-                return (
-                  <span key={s} className="inline">
-                    <button className="primary" title={`Completes ${a.procedure_summary} and posts ${money(a.production || 0)}`} onClick={() => onStatus('completed', null, { complete_procedures: true })}>Complete visit & procedures</button>
-                    <button onClick={() => onStatus('completed')} title="Mark the visit done without completing its procedures">Visit only</button>
-                  </span>
-                );
-              }
-              return <button key={s} className="primary" onClick={() => onStatus(s)}>{l}</button>;
-            })}
+            {a.status === 'in_chair' && (
+              <>
+                {/* Ready for the doctor's exam or for checkout; pressing the lit one clears it. */}
+                <button className={a.ready_for === 'doctor' ? 'active' : ''} aria-pressed={a.ready_for === 'doctor'} onClick={() => onStep('ready')}>{READY_LABEL.doctor}{kbd(STEP_KEYS.ready)}</button>
+                <button className={a.ready_for === 'checkout' ? 'active' : ''} aria-pressed={a.ready_for === 'checkout'} onClick={() => onStep('ready_checkout')}>{READY_LABEL.checkout}{kbd(STEP_KEYS.ready_checkout)}</button>
+                {/* Completing the visit completes its planned procedures too (charges post), for clinical staff. */}
+                {charges && next !== 'out' && completeWithProcedures}
+                {charges && <button onClick={() => onStatus('completed')} title="Mark the visit done without completing its procedures">Visit only</button>}
+                {!charges && next !== 'out' && <button onClick={() => onStep('out')}>Out · visit complete{kbd(STEP_KEYS.out)}</button>}
+              </>
+            )}
             {['checked_in', 'in_chair'].includes(a.status) && onCheckout && <button onClick={onCheckout}>Check out…</button>}
             {a.status === 'checked_in' && <ReadyText appt={a} />}
           </div>
@@ -145,7 +157,7 @@ export default function AppointmentDrawer({ appt: a, can, onClose, onStatus, onE
   );
 }
 
-const HISTORY_LABEL = { 'appointment.create': 'Booked', 'appointment.update': 'Changed', 'appointment.status': 'Status', 'appointment.checkout': 'Checked out', 'appointment.family': 'Booked (family)' };
+const HISTORY_LABEL = { 'appointment.ready': 'Ready', 'appointment.create': 'Booked', 'appointment.update': 'Changed', 'appointment.status': 'Status', 'appointment.checkout': 'Checked out', 'appointment.family': 'Booked (family)' };
 // Who booked, moved and changed this visit, and when.
 function ApptHistory({ id }) {
   const tz = useAuth().practice?.timezone;
@@ -164,7 +176,9 @@ function ApptHistory({ id }) {
     try {
       d = JSON.parse(r.details || '{}') || {};
     } catch { /* plain text */ }
-    if (r.action === 'appointment.status') return `${String(d.from || '').replace('_', ' ')} → ${String(d.to || '').replace('_', ' ')}`;
+    const undo = d.undo ? ' (undo)' : '';
+    if (r.action === 'appointment.status') return `${String(d.from || '').replace('_', ' ')} → ${String(d.to || '').replace('_', ' ')}${undo}`;
+    if (r.action === 'appointment.ready') return `${d.to ? READY_LABEL[d.to].toLowerCase() : 'not ready'}${undo}`;
     if (d.from && d.to) return `moved ${fmtDateTime(d.from)} → ${fmtDateTime(d.to)}`;
     if (d.fields) return d.fields.filter((f) => !['override_blockout', 'scope'].includes(f)).join(', ');
     return '';

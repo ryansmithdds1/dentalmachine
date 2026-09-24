@@ -1,0 +1,5 @@
+/* Office alert on the chart: loud but not in the way. */
+.office-alert-banner { display: flex; align-items: center; gap: 10px; margin-top: 14px; padding: 10px 14px; border-radius: 10px; background: var(--warn-soft); color: var(--warn); border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent); font-weight: 600; animation: alert-in 0.4s ease-out; }
+.office-alert-banner span { flex: 1; color: var(--text); }
+@keyframes alert-in { from { transform: translateY(-4px); opacity: 0; box-shadow: 0 0 0 6px color-mix(in srgb, var(--warn) 30%, transparent); } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .office-alert-banner { animation: none; } }

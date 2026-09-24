@@ -1,0 +1,16 @@
+/* Patient flow on the schedule: the "Ready" badge and the one-click next-step button. */
+.cal-ready { font-size: 9px; font-weight: 700; border-radius: 4px; padding: 0 4px; white-space: nowrap; background: #dcfce7; color: #166534; }
+.cal-ready.r-checkout { background: #dbeafe; color: #1e40af; }
+:root[data-theme='dark'] .cal-ready { background: rgba(34, 197, 94, 0.2); color: #bbf7d0; }
+:root[data-theme='dark'] .cal-ready.r-checkout { background: rgba(59, 130, 246, 0.22); color: #bfdbfe; }
+.badge.ready-badge { background: #dcfce7; color: #166534; text-transform: none; }
+
+/* Shown on the visit the mouse is over, the one with keyboard focus, and the open one. */
+.cal-next { position: absolute; right: 4px; bottom: 4px; z-index: 4; display: none; min-height: 0; height: 22px; padding: 0 8px; font-size: 11px; font-weight: 650;
+  border-radius: 6px; border: 1px solid var(--primary); background: var(--primary); color: #fff; cursor: pointer; line-height: 1; }
+.cal-next:hover { filter: brightness(1.08); }
+.cal-appt:hover .cal-next, .cal-appt:focus-within .cal-next, .cal-appt.selected .cal-next { display: inline-flex; align-items: center; }
+@media (hover: none) { .cal-appt.selected .cal-next { display: inline-flex; } }
+
+.drawer-next { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
+.drawer button kbd { font-size: 10px; opacity: 0.8; margin-left: 4px; }

@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useApi, useLookup } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
 import { useMakeActive } from '../activePatient.jsx';
+import './patient.css';
 import { money, fullName, age, fmtDate, fmtDateTime, fmtUtcDate, label, practiceToday } from '../format.js';
 import { Modal, Badge, ErrorBox, useSubmit, Menu } from '../components/ui.jsx';
 import { Pin, Pill, TriangleAlert, MoreHorizontal, GitMerge, FileArchive, ShieldCheck, CalendarPlus, Pencil } from 'lucide-react';
@@ -40,7 +41,8 @@ export default function PatientDetail() {
   const [modal, setModal] = useState(null);
   const [popup, setPopup] = useState(null);
 
-  // Pop-up office alert, shown once per session per patient (like Dentrix/Open Dental pop-ups).
+  // The office alert stands out the first time a patient is opened in a session (like Dentrix/Open Dental
+  // pop-ups), as a banner rather than a dialog so it never blocks what the user came to do.
   useEffect(() => {
     if (!p?.office_alert) return;
     const key = `dm_alert_seen_${p.id}`;
@@ -110,6 +112,13 @@ export default function PatientDetail() {
         </div>
       </div>
 
+      {/* The office alert, the first time this patient is opened today: hard to miss, but it doesn't stop you. */}
+      {popup && (
+        <div className="office-alert-banner no-print" role="alert">
+          <Pin size={16} aria-hidden /> <span>{popup}</span>
+          <button type="button" className="link" onClick={() => setPopup(null)} aria-label="Hide the office alert">Got it</button>
+        </div>
+      )}
       <div className="tabs" style={{ marginTop: 16 }}>
         {tabs.map(([key, text]) => (
           <button key={key} className={tab === key ? 'active' : ''} onClick={() => setTab(key)}>{text}</button>
@@ -130,12 +139,6 @@ export default function PatientDetail() {
       {tab === 'documents' && <DocumentsTab patient={p} />}
       {tab === 'comms' && <CommsTab patient={p} onChange={reload} />}
 
-      {popup && (
-        <Modal title="Office alert" onClose={() => setPopup(null)}>
-          <div className="office-popup">📌 {popup}</div>
-          <div className="form-actions"><button className="primary" autoFocus onClick={() => setPopup(null)}>Got it</button></div>
-        </Modal>
-      )}
       {modal === 'edit' && (
         <Modal title="Edit patient" wide onClose={() => setModal(null)}>
           <PatientForm patient={p} onCancel={() => setModal(null)} onSaved={() => { setModal(null); reload(); }} />

@@ -19,8 +19,8 @@ export function matches(combo, e) {
   // Letters are compared by the key's position, so Alt on a Mac (which types symbols) still works.
   const pressed = /^[a-z]$/.test(key) ? (e.code === `Key${key.toUpperCase()}` || e.key.toLowerCase() === key) : e.key.toLowerCase() === key;
   if (!pressed) return false;
-  // Shift only matters for letters; "?" already needs Shift to type.
-  return /^[a-z]$/.test(key) ? want.shift === e.shiftKey : true;
+  // Shift matters for letters and named keys (Enter vs Shift+Enter); "?" and other symbols already need it to type.
+  return key.length === 1 && !/^[a-z]$/.test(key) ? true : want.shift === e.shiftKey;
 }
 export const comboLabel = (combo) => combo.split('+').map((k) => ({ mod: isMac ? '⌘' : 'Ctrl', alt: isMac ? '⌥' : 'Alt', shift: 'Shift' }[k] || (k.length === 1 ? k.toUpperCase() : k[0].toUpperCase() + k.slice(1))));
 

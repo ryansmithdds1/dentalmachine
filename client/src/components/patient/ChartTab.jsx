@@ -4,7 +4,9 @@ import { useApi, useLookup } from '../../hooks.js';
 import { useAuth } from '../../auth.jsx';
 import { money, fmtDate, label, age, toCents, fromCents, practiceToday } from '../../format.js';
 import { Mic } from 'lucide-react';
-import Odontogram, { CONDITION_COLORS, codeArea, surfacesFor, QUADRANT_LABELS, baseTooth } from '../Odontogram.jsx';
+import ChartEntry from './ChartEntry.jsx';
+import { undoable } from '../../toast.js';
+import Odontogram, { STATUS_COLORS, CONDITION_COLORS, codeArea, surfacesFor, QUADRANT_LABELS, baseTooth } from '../Odontogram.jsx';
 import NoteComposer from '../NoteComposer.jsx';
 import { Badge, ErrorBox, Modal, useSubmit } from '../ui.jsx';
 
@@ -27,6 +29,7 @@ export default function ChartTab({ patient, onChange }) {
   const [dentition, setDentition] = useState(() => defaultDentition(patient.dob));
   const [tooth, setTooth] = useState(null);
   const [modal, setModal] = useState(null);
+  const [noteFor, setNoteFor] = useState(null);
   const [err, setErr] = useState(null);
   const write = can('clinical:write') && !asOf;
 
@@ -79,6 +82,8 @@ export default function ChartTab({ patient, onChange }) {
           <button className="small" onClick={() => window.print()} style={write ? undefined : { marginLeft: 'auto' }}>Print</button>
         </div>
         {asOf && <div className="public-notice" style={{ marginBottom: 8 }}>Showing the chart as it was on {fmtDate(asOf)}: conditions recorded and work completed by then. Planned treatment isn’t shown.</div>}
+        {write && !asOf && <ChartEntry patient={patient} tooth={tooth} onDone={refresh} />}
+        <ChartStats conditions={data.conditions} procedures={data.procedures} />
         <Odontogram conditions={data.conditions} procedures={data.procedures} selected={tooth} onSelect={pickTooth} dentition={dentition} />
       </div>
 
@@ -109,19 +114,28 @@ export default function ChartTab({ patient, onChange }) {
                     <td>#{c.tooth} {c.surfaces}</td>
                     <td>
                       <span className="badge" style={{ background: `${CONDITION_COLORS[c.condition]}22`, color: CONDITION_COLORS[c.condition] }}>{label(c.condition)}</span>
-                      {c.notes && <div className="muted" style={{ fontSize: 12 }}>{c.notes}</div>}
+                      {noteFor === c.id
+                        ? (
+                          <form className="inline" style={{ gap: 4, marginTop: 4 }} onSubmit={(e) => { e.preventDefault(); const notes = e.currentTarget.notes.value; setNoteFor(null); act(() => api.put(`/conditions/${c.id}`, { notes })); }}>
+                            <input name="notes" defaultValue={c.notes || ''} autoFocus aria-label={`Note for ${label(c.condition)} on #${c.tooth}`} onKeyDown={(e) => e.key === 'Escape' && setNoteFor(null)} style={{ fontSize: 12, padding: '3px 6px' }} />
+                            <button className="small">Save</button>
+                          </form>
+                        )
+                        : c.notes && <div className="muted" style={{ fontSize: 12 }}>{c.notes}</div>}
                     </td>
                     <td className="muted">{fmtDate(c.recorded_at)}{c.resolved ? ` · resolved ${fmtDate(c.resolved_at)}` : ''}</td>
                     <td>
                       {write && (
                         <div className="row-actions">
-                          <button className="small" onClick={() => {
-                            const notes = window.prompt(`Note for ${label(c.condition)} on #${c.tooth}:`, c.notes || '');
-                            if (notes != null) act(() => api.put(`/conditions/${c.id}`, { notes }));
-                          }}>Note</button>
+                          <button className="small" onClick={() => setNoteFor(c.id)}>Note</button>
                           {c.resolved
                             ? <button className="small" onClick={() => act(() => api.put(`/conditions/${c.id}`, { resolved: false }))}>Reopen</button>
                             : <button className="small" onClick={() => act(() => api.put(`/conditions/${c.id}`, { resolved: true }))}>Resolve</button>}
+                          <button className="small" title="Charted in error: take it off the chart (kept on record)" onClick={() => undoable(
+                            `Removed ${label(c.condition)} on #${c.tooth}`,
+                            async () => { await api.post(`/conditions/${c.id}/void`, { reason: 'Charted in error' }); refresh(); },
+                            async () => { await api.post(`/patients/${patient.id}/conditions`, { tooth: c.tooth, surfaces: c.surfaces, condition: c.condition, notes: c.notes }); refresh(); },
+                          ).catch(() => { /* shown as a toast */ })}>Remove</button>
                         </div>
                       )}
                     </td>
@@ -160,7 +174,11 @@ export default function ChartTab({ patient, onChange }) {
                                   {openPlans.map((tp) => <option key={tp.id} value={tp.id}>{tp.name}{tp.option_label ? ` (${tp.option_label})` : ''}</option>)}
                                 </select>
                               )}
-                              <button className="small danger" onClick={() => window.confirm(`Remove ${p.code}${p.tooth ? ` #${p.tooth}` : ''} from the chart?`) && act(() => api.post(`/procedures/${p.id}/cancel`))}>Delete</button>
+                              <button className="small danger" onClick={() => undoable(
+                                `Removed ${p.code}${p.tooth ? ` #${p.tooth}` : ''} from the chart`,
+                                async () => { await api.post(`/procedures/${p.id}/cancel`); refresh(); },
+                                async () => { await api.post(`/procedures/${p.id}/restore`); refresh(); },
+                              ).catch(() => { /* shown as a toast */ })}>Remove</button>
                             </>
                           )}
                           {p.status === 'completed' && (
@@ -196,6 +214,25 @@ export default function ChartTab({ patient, onChange }) {
           <EditProcedure proc={modal.proc} onDone={() => { setModal(null); refresh(); }} />
         </Modal>
       )}
+    </div>
+  );
+}
+
+// The chart at a glance: what's planned, what's wrong, what's missing.
+function ChartStats({ conditions, procedures }) {
+  const open = conditions.filter((c) => !c.resolved);
+  const planned = procedures.filter((p) => p.status === 'planned');
+  const stats = [
+    [STATUS_COLORS.planned, 'planned', planned.length, planned.reduce((s, p) => s + (p.fee || 0), 0)],
+    [STATUS_COLORS.problem, 'to treat', open.filter((c) => ['caries', 'fracture', 'abscess'].includes(c.condition)).length],
+    [STATUS_COLORS.watch, 'watching', open.filter((c) => c.condition === 'watch').length],
+    ['#94a3b8', 'missing', new Set(open.filter((c) => c.condition === 'missing').map((c) => c.tooth)).size],
+    [STATUS_COLORS.completed, 'done', procedures.filter((p) => p.status === 'completed').length],
+  ].filter(([, , n]) => n);
+  if (!stats.length) return null;
+  return (
+    <div className="chart-stats">
+      {stats.map(([color, what, n, fee]) => <span key={what} className="chart-stat"><i style={{ background: color }} /><b>{n}</b> {what}{fee ? ` · ${money(fee)}` : ''}</span>)}
     </div>
   );
 }

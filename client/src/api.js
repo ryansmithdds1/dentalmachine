@@ -46,17 +46,16 @@ export class ApiError extends Error {
 }
 
 // Every change carries an Idempotency-Key, so a double click or a resend never does the work twice:
-// the same request again within a few seconds reuses its key and gets the first answer back.
-const recent = new Map();
+// the same request again within a few seconds reuses its key and gets the first answer back. Any other change
+// in between means the person moved on (seat → undo → seat again), so the repeat is new work with a new key.
+let last = null;
 function idempotencyKey(method, path, body) {
   if (method === 'GET') return null;
   const sig = `${method} ${path} ${body === undefined ? '' : JSON.stringify(body)}`;
   const now = Date.now();
-  for (const [k, v] of recent) if (now - v.at > 8000) recent.delete(k);
-  const hit = recent.get(sig);
-  if (hit) return hit.key;
+  if (last && last.sig === sig && now - last.at <= 8000) return last.key;
   const key = globalThis.crypto?.randomUUID?.() || `${now}-${Math.random().toString(36).slice(2)}`;
-  recent.set(sig, { key, at: now });
+  last = { sig, key, at: now };
   return key;
 }
 

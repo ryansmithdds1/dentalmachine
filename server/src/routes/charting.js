@@ -3,6 +3,7 @@ import { requirePermission, HttpError } from '../auth.js';
 import { pick, requireFields, insert, update, findOr404, audit, practiceNow, localNow, validEmail } from '../util.js';
 import { quickFill, aiFill } from '../notedictation.js';
 import { aiClient } from '../ai.js';
+import { todaysVisits, visitFor, ownProviderId } from '../notedraft.js';
 import { log } from '../monitoring.js';
 
 // Charting support: note templates, vitals, the lab directory and the procedure code list tools.
@@ -198,13 +199,24 @@ export default function chartingRoutes({ db, config = {}, transcriber = null }) 
       if (p.patient_id !== patient.id) throw new HttpError(400, 'Procedure belongs to another patient');
       procedures.push(p);
     }
+    const now = await practiceNow(db, req.user.practice_id);
+    // The visit the note is for: the one asked for, else the one the procedures were done at, else today's.
+    const today = await todaysVisits(db, req.user.practice_id, patient.id, now);
+    const fromProcs = [...new Set(procedures.map((p) => p.appointment_id).filter(Boolean))];
+    const visit = req.query.appointment_id ? await visitFor(db, req.user.practice_id, patient.id, req.query.appointment_id)
+      : fromProcs.length === 1 ? await visitFor(db, req.user.practice_id, patient.id, fromProcs[0])
+        : fromProcs.length ? null : today.current;
+    // No procedures named: write up what's booked (or done) at that visit.
+    if (!ids.length && visit) {
+      procedures.push(...await db.all("SELECT * FROM procedures WHERE appointment_id = ? AND practice_id = ? AND patient_id = ? AND status != 'cancelled' ORDER BY id", visit.id, req.user.practice_id, patient.id));
+    }
     const all = (await templates(req.user.practice_id)).filter((t) => t.active);
     const chosen = req.query.template_id
       ? all.filter((t) => t.id === Number(req.query.template_id))
       : all.filter((t) => matchesCodes(t, procedures.map((p) => p.code)));
     const provider = procedures[0]?.provider_id ? (await db.get('SELECT name FROM providers WHERE id = ?', procedures[0].provider_id))?.name : null;
     const vitals = await db.get('SELECT * FROM vitals WHERE patient_id = ? AND practice_id = ? ORDER BY recorded_at DESC, id DESC LIMIT 1', patient.id, req.user.practice_id);
-    const date = (await practiceNow(db, req.user.practice_id)).slice(0, 10);
+    const date = now.slice(0, 10);
     // recorded_at is UTC: compare the practice-local day it was taken on (evening vitals are still "today").
     const { timezone } = await db.get('SELECT timezone FROM practices WHERE id = ?', req.user.practice_id);
     const takenOn = vitals && localNow(timezone, new Date(`${String(vitals.recorded_at).replace(' ', 'T').slice(0, 19)}Z`)).slice(0, 10);
@@ -215,7 +227,14 @@ export default function chartingRoutes({ db, config = {}, transcriber = null }) 
       return mergeNote(t.body, { ...ctx, procedures: mine.length ? mine : procedures });
     });
     const body = parts.join('\n\n');
-    res.json({ body, prompts: notePrompts(body), templates: chosen.map((t) => ({ id: t.id, name: t.name })), provider_id: procedures[0]?.provider_id ?? null });
+    // Written for the person writing it when they're a provider, else for the visit's (or procedure's) provider.
+    const userProvider = await ownProviderId(db, req.user);
+    res.json({
+      body, prompts: notePrompts(body), templates: chosen.map((t) => ({ id: t.id, name: t.name })),
+      provider_id: userProvider ?? visit?.provider_id ?? procedures[0]?.provider_id ?? null, user_provider_id: userProvider,
+      appointment_id: visit?.id ?? null, appointment_type_id: visit?.appointment_type_id ?? null,
+      visits: today.visits.map((v) => ({ id: v.id, start_time: v.start_time, status: v.status, type_name: v.type_name, provider_id: v.provider_id, provider_name: v.provider_name, appointment_type_id: v.appointment_type_id })),
+    });
   });
 
   // ---- Vitals ----

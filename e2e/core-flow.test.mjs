@@ -130,9 +130,9 @@ test('a new patient from first visit to paid claim and statement', async () => {
   await step('check in', async () => {
     await page.goto(`${base}/schedule?date=${today}`);
     await page.locator('.cal-appt', { hasText: last }).first().click();
-    await page.click('button:has-text("Check in")');
-    await page.click('button:has-text("Seat")');
-    await page.locator('button:has-text("Check out…")').waitFor();
+    await page.locator('.drawer button:has-text("Check in")').first().click();
+    await page.locator('.drawer button:has-text("Seat")').first().click();
+    await page.locator('.drawer button:has-text("Check out…")').waitFor();
   });
   assert.equal((await api(`/appointments/${appt.id}`)).status, 'in_chair');
 
@@ -222,13 +222,13 @@ test('chairside on a tablet and a phone', async () => {
       const sideways = () => tab.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
 
       await tab.goto(`${base}/patients/${pid}?tab=chart`);
-      await tab.waitForSelector('.odontogram');
+      await tab.waitForSelector('.odontogram2');
       while (await tab.locator('.modal-backdrop').count()) { await tab.keyboard.press('Escape'); await tab.waitForTimeout(150); }
       assert.equal(await sideways(), 0, `${label}: chart scrolls sideways`);
       const teeth = await tab.locator('.chart-layout > .card').first().boundingBox();
       const panel = await tab.locator('.chart-layout > div').nth(1).boundingBox();
       assert.ok(panel.y > teeth.y + teeth.height - 1, `${label}: the entry panel sits under the teeth`);
-      await tab.locator('.odontogram .tooth', { hasText: '30' }).first().tap();
+      await tab.locator('.tooth2[data-tooth="30"]').tap();
       await tab.getByText('Tooth #30').first().waitFor();
       await tab.waitForTimeout(600);
       const heading = await tab.getByText('Tooth #30').first().boundingBox();

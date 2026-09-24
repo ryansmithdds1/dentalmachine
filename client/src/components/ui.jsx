@@ -63,14 +63,17 @@ export function useSubmit(fn) {
   return { submit, busy, error, setError };
 }
 
+// Find and pick a patient: typos forgiven (the same search as Ctrl/⌘K), ↑/↓ and Enter to choose.
 export function PatientPicker({ value, onChange }) {
   const [q, setQ] = useState('');
   const [results, setResults] = useState([]);
+  const [hl, setHl] = useState(0);
   useEffect(() => {
     if (q.trim().length < 2) return setResults([]);
-    const t = setTimeout(() => api.get(`/patients?q=${encodeURIComponent(q)}&limit=8`).then((r) => setResults(r.rows)).catch(() => {}), 200);
+    const t = setTimeout(() => api.get(`/search?q=${encodeURIComponent(q)}`).then((r) => { setResults(r.patients); setHl(0); }).catch(() => { /* keep typing */ }), 150);
     return () => clearTimeout(t);
   }, [q]);
+  const pick = (p) => { onChange(p); setQ(''); setResults([]); };
 
   if (value) {
     return (
@@ -83,14 +86,19 @@ export function PatientPicker({ value, onChange }) {
   }
   return (
     <div style={{ position: 'relative' }}>
-      <input autoFocus placeholder="Search patient by name, phone, DOB…" value={q} onChange={(e) => setQ(e.target.value)} />
+      <input
+        autoFocus placeholder="Search patient by name, phone, DOB…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Find a patient"
+        onKeyDown={(e) => {
+          if (e.key === 'ArrowDown') { e.preventDefault(); setHl(Math.min(hl + 1, results.length - 1)); }
+          if (e.key === 'ArrowUp') { e.preventDefault(); setHl(Math.max(hl - 1, 0)); }
+          if (e.key === 'Enter' && results[hl]) { e.preventDefault(); pick(results[hl]); }
+        }}
+      />
       {results.length > 0 && (
-        <div className="card" style={{ position: 'absolute', zIndex: 10, left: 0, right: 0, padding: 4, marginTop: 4 }}>
-          {results.map((p) => (
-            <div key={p.id} className="clickable" style={{ padding: '7px 10px', cursor: 'pointer', borderRadius: 6 }}
-              onMouseDown={() => { onChange(p); setQ(''); }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = '#f1f5f9')}
-              onMouseLeave={(e) => (e.currentTarget.style.background = '')}>
+        <div className="card picker-results" role="listbox" style={{ position: 'absolute', zIndex: 10, left: 0, right: 0, padding: 4, marginTop: 4 }}>
+          {results.map((p, i) => (
+            <div key={p.id} role="option" aria-selected={i === hl} className={`picker-row${i === hl ? ' hl' : ''}`}
+              onMouseDown={(e) => { e.preventDefault(); pick(p); }} onMouseEnter={() => setHl(i)}>
               <strong>{fullName(p)}</strong> <span className="muted">{p.dob ? `· ${age(p.dob)}y · ${p.dob}` : ''} {p.phone ? `· ${p.phone}` : ''}</span>
             </div>
           ))}

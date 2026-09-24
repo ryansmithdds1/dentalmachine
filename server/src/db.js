@@ -2193,6 +2193,8 @@ const COLUMNS = [
   // Nothing important is hard-deleted: merged charts are archived and point at the kept one; removed rows keep who, when and why.
   ['patients', 'merged_into_id', 'INTEGER REFERENCES patients(id)'],
   ['tooth_conditions', 'voided_at', 'TEXT'],
+  ['tooth_conditions', 'voided_by', 'INTEGER REFERENCES users(id)'],
+  ['tooth_conditions', 'void_reason', 'TEXT'],
   ['claim_attachments', 'removed_at', 'TEXT'],
   ['claim_attachments', 'removed_by', 'INTEGER REFERENCES users(id)'],
   ['deposits', 'voided_at', 'TEXT'],
@@ -2224,6 +2226,10 @@ const COLUMNS = [
   ['practices', 'onboarding_dismissed', 'INTEGER NOT NULL DEFAULT 0'],
   ['appointments', 'checked_in_via', 'TEXT'],
   ['appointments', 'ready_texted_at', 'TEXT'],
+  // "Ready" in the patient flow (arrived → seated → ready → out) without widening the status CHECK:
+  // when the patient in the chair became ready, and for whom ('doctor' for the exam, or 'checkout').
+  ['appointments', 'ready_at', 'TEXT'],
+  ['appointments', 'ready_for', 'TEXT'],
   ['lab_cases', 'rx', 'TEXT'],
   ['lab_cases', 'document_ids', 'TEXT'],
   ['lab_cases', 'lab_token_hash', 'TEXT'],

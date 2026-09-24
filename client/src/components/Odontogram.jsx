@@ -1,12 +1,14 @@
-// Graphic odontogram. Universal numbering: permanent upper 1-16 and lower 32-17 (patient's right to left
-// as you face them), primary upper A-J and lower T-K, supernumerary teeth 51-82 / AS-TS drawn after the arch.
-const UPPER = Array.from({ length: 16 }, (_, i) => String(i + 1));
-const LOWER = Array.from({ length: 16 }, (_, i) => String(32 - i));
-const P_UPPER = 'ABCDEFGHIJ'.split('');
-const P_LOWER = 'TSRQPONMLK'.split('');
+import { useId, useRef } from 'react';
+import { UPPER, LOWER, P_UPPER, P_LOWER, baseTooth, isPosterior, isUpper, isMolar, isPrimary, toothClass, mesialOnRight } from './teeth.js';
+import './odontogram.css';
+
+export { baseTooth, isPosterior, isUpper, surfacesFor, QUADRANT_LABELS } from './teeth.js';
+
+// Graphic odontogram. Each tooth is drawn twice, the way a dentist looks at it: from the side (crown and
+// roots, shaped by tooth type) and from above (the five surfaces). Work and findings are painted on both.
 
 // What each colour means, everywhere on the chart.
-export const STATUS_COLORS = { planned: '#dc2626', completed: '#2563eb', existing: '#15803d', problem: '#b91c1c', watch: '#d97706' };
+export const STATUS_COLORS = { planned: '#e11d48', completed: '#2563eb', existing: '#16a34a', problem: '#c2410c', watch: '#d97706' };
 
 export const CONDITION_COLORS = {
   caries: STATUS_COLORS.problem,
@@ -48,33 +50,17 @@ export function codeArea(code) {
   return code.requires_tooth ? 'tooth' : 'mouth';
 }
 
-const POSTERIOR = new Set(['1', '2', '3', '4', '5', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '28', '29', '30', '31', '32', 'A', 'B', 'I', 'J', 'K', 'L', 'S', 'T']);
-const MOLARS = new Set(['1', '2', '3', '14', '15', '16', '17', '18', '19', '30', '31', '32', 'A', 'B', 'I', 'J', 'K', 'L', 'S', 'T']);
-// A supernumerary tooth is drawn like the tooth it sits beside (51 ↔ 1, AS ↔ A).
-export const baseTooth = (t) => {
-  const s = String(t).toUpperCase();
-  if (/^[A-T]S$/.test(s)) return s[0];
-  const n = Number(s);
-  return n >= 51 && n <= 82 ? String(n - 50) : s;
-};
-export const isPosterior = (t) => POSTERIOR.has(baseTooth(t));
-export const isUpper = (t) => {
-  const b = baseTooth(t);
-  return /^[A-J]$/.test(b) || (Number(b) >= 1 && Number(b) <= 16);
-};
-// The five surfaces as this tooth names them: posterior teeth have B and O, anterior F and I.
-export const surfacesFor = (t) => (t && !isPosterior(t) ? ['M', 'I', 'D', 'F', 'L'] : ['M', 'O', 'D', 'B', 'L']);
-export const QUADRANT_LABELS = { UR: 'Upper right', UL: 'Upper left', LL: 'Lower left', LR: 'Lower right', U: 'Upper arch', L: 'Lower arch' };
-
-// Everything drawn on one tooth.
-function toothState(tooth, conditions, procedures) {
+// Everything drawn on one tooth, plus a plain-words summary for its tooltip.
+export function toothState(tooth, conditions, procedures) {
   const fills = {};
   const overlays = [];
+  const notes = [];
   let missing = false;
   let planX = false;
   let watch = false;
   let mobility = false;
   for (const c of conditions.filter((x) => x.tooth === tooth && !x.resolved)) {
+    notes.push(`${c.condition.replace('_', ' ')}${c.surfaces ? ` ${c.surfaces}` : ''}`);
     if (c.condition === 'missing') missing = true;
     if (c.condition === 'impacted') overlays.push({ kind: 'impacted', color: CONDITION_COLORS.impacted });
     if (c.condition === 'watch') watch = true;
@@ -87,6 +73,7 @@ function toothState(tooth, conditions, procedures) {
   // Completed work draws over conditions, planned work over both.
   const ordered = [...procedures.filter((p) => p.tooth === tooth)].sort((a, b) => (a.status === b.status ? 0 : a.status === 'planned' ? 1 : -1));
   for (const p of ordered) {
+    notes.push(`${p.code}${p.surfaces ? ` ${p.surfaces}` : ''} ${p.status}`);
     const color = p.status === 'planned' ? STATUS_COLORS.planned : STATUS_COLORS.completed;
     const kind = overlayFor(p.code);
     if (kind === 'extraction') {
@@ -95,116 +82,296 @@ function toothState(tooth, conditions, procedures) {
     } else if (kind) overlays.push({ kind, color });
     if (p.surfaces && !['crown', 'veneer', 'sealant'].includes(kind)) for (const s of p.surfaces) fills[s] = color;
   }
-  return { fills, overlays, missing, planX, watch, mobility };
+  return { fills, overlays, missing, planX, watch, mobility, notes };
 }
 
-// One tooth: the crown as a five-surface diagram, with its root(s) above (upper) or below (lower).
-function ToothSvg({ tooth, state, size = 1 }) {
+// ---- Geometry. Side view in "upper" orientation: roots up (apex near y=4), the neck at y=64, the biting edge
+// near y=108. Lower teeth use the same shapes flipped. The top view sits in a 46-unit band.
+const WIDTH = { molar: 50, premolar: 36, canine: 34, central: 38, lateral: 30 };
+const LOWER_WIDTH = { molar: 50, premolar: 36, canine: 32, central: 26, lateral: 28 };
+const PRIMARY_WIDTH = { molar: 40, premolar: 36, canine: 30, central: 30, lateral: 27 };
+export const toothWidth = (t) => (isPrimary(t) ? PRIMARY_WIDTH : isUpper(t) ? WIDTH : LOWER_WIDTH)[toothClass(t)];
+const SIDE_H = 112;
+const TOP_H = 46;
+const GAP = 6;
+const H = SIDE_H + GAP + TOP_H;
+const NECK = 64;
+
+function crownPath(cls, w) {
+  const x = (f) => (f * w).toFixed(1);
+  if (cls === 'molar') return `M${x(0.1)} ${NECK} C0 76 ${x(0.01)} 96 ${x(0.12)} 103 Q${x(0.27)} 110 ${x(0.41)} 103 Q${x(0.5)} 99 ${x(0.59)} 103 Q${x(0.73)} 110 ${x(0.88)} 103 C${x(0.99)} 96 ${w} 76 ${x(0.9)} ${NECK} Z`;
+  if (cls === 'premolar') return `M${x(0.16)} ${NECK} C${x(0.02)} 76 ${x(0.03)} 94 ${x(0.18)} 102 Q${x(0.5)} 112 ${x(0.82)} 102 C${x(0.97)} 94 ${x(0.98)} 76 ${x(0.84)} ${NECK} Z`;
+  if (cls === 'canine') return `M${x(0.2)} ${NECK} C${x(0.04)} 76 ${x(0.06)} 92 ${x(0.26)} 100 L${x(0.5)} 110 L${x(0.74)} 100 C${x(0.94)} 92 ${x(0.96)} 76 ${x(0.8)} ${NECK} Z`;
+  return `M${x(0.2)} ${NECK} C${x(0.06)} 74 ${x(0.04)} 94 ${x(0.1)} 104 Q${x(0.5)} 110 ${x(0.9)} 104 C${x(0.96)} 94 ${x(0.94)} 74 ${x(0.8)} ${NECK} Z`;
+}
+
+// Root outlines, back to front, and the line of each canal (for root canals and posts).
+function rootsFor(tooth, w) {
+  const cls = toothClass(tooth);
   const upper = isUpper(tooth);
+  const shorten = isPrimary(tooth) ? 0.62 : 1;
+  const ap = (y) => NECK - (NECK - y) * shorten;
+  const x = (f) => (f * w).toFixed(1);
+  if (cls === 'molar') {
+    const a = ap(12);
+    const buccal = (l) => {
+      const X = (f) => x(l ? f : 1 - f);
+      return `M${X(0.1)} ${NECK} C${X(0.06)} ${ap(44)} ${X(0.14)} ${a + 4} ${X(0.26)} ${a} C${X(0.34)} ${a + 4} ${X(0.42)} ${ap(40)} ${X(0.44)} ${NECK} Z`;
+    };
+    const roots = [{ d: buccal(true) }, { d: buccal(false) }];
+    const canals = [`M${x(0.29)} ${NECK + 2} Q${x(0.27)} ${ap(36)} ${x(0.26)} ${a + 6}`, `M${x(0.71)} ${NECK + 2} Q${x(0.73)} ${ap(36)} ${x(0.74)} ${a + 6}`];
+    if (upper) {
+      const p = ap(6);
+      roots.unshift({ d: `M${x(0.34)} ${NECK} C${x(0.32)} ${ap(40)} ${x(0.44)} ${p + 2} ${x(0.5)} ${p} C${x(0.56)} ${p + 2} ${x(0.68)} ${ap(40)} ${x(0.66)} ${NECK} Z`, back: true });
+      canals.push(`M${x(0.5)} ${NECK + 2} L${x(0.5)} ${p + 6}`);
+    }
+    return { roots, canals, apexes: [[0.26 * w, a], [0.74 * w, a]] };
+  }
+  const apex = ap({ canine: 2, premolar: 12, central: upper ? 10 : 18, lateral: upper ? 14 : 18 }[cls]);
+  const mid = (NECK + apex) / 2 + 8;
+  return {
+    roots: [{ d: `M${x(0.22)} ${NECK} C${x(0.2)} ${mid} ${x(0.38)} ${apex + 6} ${x(0.5)} ${apex} C${x(0.62)} ${apex + 6} ${x(0.8)} ${mid} ${x(0.78)} ${NECK} Z` }],
+    canals: [`M${x(0.5)} ${NECK + 2} L${x(0.5)} ${apex + 6}`],
+    apexes: [[0.5 * w, apex]],
+  };
+}
+
+// A rounded outline for the top view: squarish molars, oval premolars, slim incisors.
+function topOutline(cls, w) {
+  const shape = { molar: [0.45, 19, 3.4], premolar: [0.42, 16, 2.5], canine: [0.4, 14, 2.1], central: [0.44, 10, 2.8], lateral: [0.43, 10, 2.6] }[cls];
+  const [fa, b, n] = shape;
+  const a = fa * w;
+  const cx = w / 2;
+  const cy = TOP_H / 2;
+  const pts = [];
+  for (let k = 0; k < 48; k++) {
+    const t = (k / 48) * Math.PI * 2;
+    const c = Math.cos(t);
+    const s = Math.sin(t);
+    pts.push(`${(cx + a * Math.sign(c) * Math.abs(c) ** (2 / n)).toFixed(1)},${(cy + b * Math.sign(s) * Math.abs(s) ** (2 / n)).toFixed(1)}`);
+  }
+  return { d: `M${pts.join(' L')} Z`, a, b, cx, cy };
+}
+
+const tint = (color, a) => `color-mix(in srgb, ${color} ${Math.round(a * 100)}%, transparent)`;
+
+function ToothSvg({ tooth, state, uid }) {
+  const upper = isUpper(tooth);
+  const cls = toothClass(tooth);
+  const w = toothWidth(tooth);
   const posterior = isPosterior(tooth);
-  const b = baseTooth(tooth);
-  const n = Number(b);
-  // Mesial faces the midline: the right of the drawing for the patient's right side.
-  const mesialRight = /^[A-E]$|^[P-T]$/.test(b) || (n >= 1 && n <= 8) || (n >= 25 && n <= 32);
-  const occ = posterior ? 'O' : 'I';
-  const facial = posterior ? 'B' : 'F';
-  const [top, bottom] = upper ? [facial, 'L'] : ['L', facial];
-  const [left, right] = mesialRight ? ['D', 'M'] : ['M', 'D'];
   const { fills, overlays, missing, planX, watch, mobility } = state;
-  const alt = { B: 'F', F: 'B', O: 'I', I: 'O' };
-  const c = (s) => fills[s] || fills[alt[s]] || 'var(--tooth)';
   const has = (k) => overlays.find((o) => o.kind === k);
-  const W = 40;
-  const H = 76;
-  // Crown box and root area, flipped for the lower arch.
-  const crownY = upper ? 36 : 2;
-  const rootTop = upper ? 2 : 40;
-  const rootBottom = upper ? 36 : 74;
-  const apex = upper ? rootTop : rootBottom;
-  const cervical = upper ? rootBottom : rootTop;
-  const roots = MOLARS.has(b) ? [12, 28] : [20];
+  const alt = { B: 'F', F: 'B', O: 'I', I: 'O' };
+  const fillOf = (s) => fills[s] || fills[alt[s]] || null;
+  const crown = crownPath(cls, w);
+  const { roots, canals, apexes } = rootsFor(tooth, w);
   const pontic = has('pontic');
   const implant = has('implant');
-  const stroke = missing ? 'var(--tooth-line-faint)' : 'var(--tooth-line)';
-  const x0 = 2;
-  const y0 = crownY;
-  const s = 36;
-  const i = 11;
+  const crownWork = has('crown');
+  const impacted = has('impacted');
+  const mRight = mesialOnRight(tooth);
+  const facial = posterior ? 'B' : 'F';
+  const occ = posterior ? 'O' : 'I';
+  const clipSide = `${uid}-s`;
+  const clipTop = `${uid}-t`;
+  const ghost = missing && !implant && !pontic;
+  // Side view group, flipped for the lower arch so crowns meet in the middle of the chart.
+  const sideY = upper ? 0 : TOP_H + GAP;
+  const sideTransform = upper ? undefined : `translate(0 ${sideY + SIDE_H}) scale(1 -1)`;
+  const topY = upper ? SIDE_H + GAP : 0;
+  const o = topOutline(cls, w);
+  const [topFace, bottomFace] = upper ? [facial, 'L'] : ['L', facial];
+  const [leftFace, rightFace] = mRight ? ['D', 'M'] : ['M', 'D'];
+  const anterior = cls === 'central' || cls === 'lateral' || cls === 'canine';
+  // The biting surface: a thin incisal edge on front teeth, a smaller copy of the outline on back teeth.
+  const inner = anterior
+    ? { d: `M${o.cx - o.a * 0.72} ${o.cy - 2.2} L${o.cx + o.a * 0.72} ${o.cy - 2.2} L${o.cx + o.a * 0.72} ${o.cy + 2.2} L${o.cx - o.a * 0.72} ${o.cy + 2.2} Z` }
+    : o;
+  const innerShift = anterior ? '' : `translate(${(o.cx * 0.54).toFixed(1)} ${(o.cy * 0.54).toFixed(1)}) scale(0.46)`;
+  const pad = 3;
+  const region = {
+    [topFace]: `${-pad},${-pad} ${w + pad},${-pad} ${o.cx},${o.cy}`,
+    [bottomFace]: `${-pad},${TOP_H + pad} ${w + pad},${TOP_H + pad} ${o.cx},${o.cy}`,
+    [leftFace]: `${-pad},${-pad} ${-pad},${TOP_H + pad} ${o.cx},${o.cy}`,
+    [rightFace]: `${w + pad},${-pad} ${w + pad},${TOP_H + pad} ${o.cx},${o.cy}`,
+  };
+  const line = ghost ? 'var(--tooth-line-faint)' : 'var(--tooth-line)';
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={size !== 1 ? { maxWidth: W * size } : undefined} aria-hidden="true">
-      <g opacity={missing ? 0.35 : 1}>
-        {/* roots */}
-        {!pontic && !implant && roots.map((x) => (
-          <path key={x} d={`M${x - 7} ${cervical} C${x - 7} ${(cervical + apex) / 2} ${x - 4} ${apex} ${x} ${apex} C${x + 4} ${apex} ${x + 7} ${(cervical + apex) / 2} ${x + 7} ${cervical}`} fill="var(--tooth-root)" stroke={stroke} strokeWidth="1" />
-        ))}
-        {implant && (
-          <g stroke={implant.color} strokeWidth="1.5" fill="none">
-            <rect x="15" y={Math.min(apex, cervical) + 2} width="10" height="30" rx="2" fill={`${implant.color}22`} />
-            {[0, 1, 2, 3, 4].map((k) => <line key={k} x1="15" x2="25" y1={Math.min(apex, cervical) + 6 + k * 6} y2={Math.min(apex, cervical) + 8 + k * 6} />)}
-          </g>
-        )}
-        {has('root_canal') && roots.map((x) => <line key={x} x1={x} x2={x} y1={cervical} y2={apex + (upper ? 3 : -3)} stroke={has('root_canal').color} strokeWidth="3" strokeLinecap="round" />)}
-        {has('post') && <line x1="20" x2="20" y1={cervical} y2={(cervical + apex) / 2} stroke={has('post').color} strokeWidth="4" />}
-        {/* crown: five surfaces */}
-        <g stroke={stroke} strokeWidth="1">
-          <polygon points={`${x0},${y0} ${x0 + s},${y0} ${x0 + s - i},${y0 + i} ${x0 + i},${y0 + i}`} fill={c(top)} />
-          <polygon points={`${x0 + s},${y0} ${x0 + s},${y0 + s} ${x0 + s - i},${y0 + s - i} ${x0 + s - i},${y0 + i}`} fill={c(right)} />
-          <polygon points={`${x0},${y0 + s} ${x0 + s},${y0 + s} ${x0 + s - i},${y0 + s - i} ${x0 + i},${y0 + s - i}`} fill={c(bottom)} />
-          <polygon points={`${x0},${y0} ${x0 + i},${y0 + i} ${x0 + i},${y0 + s - i} ${x0},${y0 + s}`} fill={c(left)} />
-          <rect x={x0 + i} y={y0 + i} width={s - 2 * i} height={s - 2 * i} fill={c(occ)} />
+    <svg viewBox={`-4 0 ${w + 8} ${H}`} className="tooth-svg" aria-hidden="true">
+      <defs>
+        <clipPath id={clipSide}><path d={crown} /></clipPath>
+        <clipPath id={clipTop}><path d={o.d} /></clipPath>
+      </defs>
+      {/* ---- side view ---- */}
+      <g transform={sideTransform} className={ghost ? 'ghost' : undefined}>
+        <g transform={impacted ? `rotate(${mRight ? -16 : 16} ${w / 2} ${NECK})` : undefined}>
+          {/* roots, or an implant post */}
+          {!pontic && !implant && roots.map((r, k) => (
+            <path key={k} d={r.d} fill={ghost ? 'none' : r.back ? 'url(#dm-root-back)' : 'url(#dm-root)'} stroke={line} strokeWidth="0.9" strokeDasharray={ghost ? '3 2' : undefined} />
+          ))}
+          {implant && (
+            <g>
+              <path d={`M${w * 0.36} ${NECK} L${w * 0.39} 12 Q${w / 2} 6 ${w * 0.61} 12 L${w * 0.64} ${NECK} Z`} fill="url(#dm-metal)" stroke={implant.color} strokeWidth="1.2" />
+              {[18, 26, 34, 42, 50, 58].map((y) => <line key={y} x1={w * 0.365} x2={w * 0.635} y1={y} y2={y - 3} stroke={implant.color} strokeWidth="1" opacity="0.8" />)}
+            </g>
+          )}
+          {has('root_canal') && !implant && canals.map((d, k) => <path key={k} d={d} stroke={has('root_canal').color} strokeWidth="2.6" strokeLinecap="round" fill="none" className="canal" />)}
+          {has('post') && <line x1={w / 2} x2={w / 2} y1={NECK + 2} y2={NECK - 26} stroke={has('post').color} strokeWidth="4" strokeLinecap="round" />}
+          {has('abscess') && apexes.slice(0, 1).map(([ax, ay]) => (
+            <g key="abscess"><circle cx={ax} cy={ay} r="9" fill="url(#dm-abscess)" /><circle cx={ax} cy={ay} r="3.4" fill={has('abscess').color} /></g>
+          ))}
+          {/* crown */}
+          <path d={crown} fill={ghost ? 'none' : 'url(#dm-enamel)'} stroke={line} strokeWidth="1" strokeDasharray={ghost ? '3 2' : undefined} />
+          {!ghost && (
+            <g clipPath={`url(#${clipSide})`}>
+              {fillOf(facial) && <rect x={w * 0.22} y={NECK} width={w * 0.56} height={34} fill={fillOf(facial)} opacity="0.85" />}
+              {fillOf('M') && <rect x={mRight ? w * 0.76 : -1} y={NECK} width={w * 0.25} height={50} fill={fillOf('M')} opacity="0.85" />}
+              {fillOf('D') && <rect x={mRight ? -1 : w * 0.76} y={NECK} width={w * 0.25} height={50} fill={fillOf('D')} opacity="0.85" />}
+              {fillOf(occ) && <rect x={-1} y={96} width={w + 2} height={16} fill={fillOf(occ)} opacity="0.85" />}
+              {has('veneer') && <rect x={w * 0.1} y={NECK + 4} width={w * 0.8} height={40} fill={has('veneer').color} opacity="0.5" />}
+              {(crownWork || pontic) && <path d={crown} fill={tint((crownWork || pontic).color, 0.3)} />}
+              <path d={crown} fill="url(#dm-shine)" />
+            </g>
+          )}
+          {(crownWork || pontic) && <path d={crown} fill="none" stroke={(crownWork || pontic).color} strokeWidth="2.4" />}
+          {pontic && (
+            <g stroke={pontic.color} strokeWidth="3" strokeLinecap="round">
+              <line x1={-4} x2={w * 0.12} y1={82} y2={82} /><line x1={w * 0.88} x2={w + 4} y1={82} y2={82} />
+            </g>
+          )}
+          {has('fracture') && <path d={`M${w * 0.3} ${NECK + 6} L${w * 0.46} ${NECK + 18} L${w * 0.4} ${NECK + 24} L${w * 0.62} ${NECK + 40}`} stroke={has('fracture').color} strokeWidth="2" fill="none" strokeLinecap="round" />}
+          {mobility && (
+            <g stroke={CONDITION_COLORS.mobility} strokeWidth="1.4" fill="none" strokeLinecap="round">
+              <path d={`M-2 80 q-3 5 0 10`} /><path d={`M${w + 2} 80 q3 5 0 10`} />
+            </g>
+          )}
+          {impacted && <path d={crown} fill="none" stroke={impacted.color} strokeWidth="1.4" strokeDasharray="3 2" />}
         </g>
-        {has('crown') && <rect x={x0 - 1} y={y0 - 1} width={s + 2} height={s + 2} rx="5" fill="none" stroke={has('crown').color} strokeWidth="3.5" />}
-        {pontic && (
-          <g>
-            <rect x={x0 - 1} y={y0 - 1} width={s + 2} height={s + 2} rx="5" fill="none" stroke={pontic.color} strokeWidth="3.5" />
-            <line x1="0" x2={W} y1={upper ? y0 - 3 : y0 + s + 3} y2={upper ? y0 - 3 : y0 + s + 3} stroke={pontic.color} strokeWidth="3" />
+        {planX && <path d={`M-2 6 L${w + 2} ${SIDE_H - 2} M${w + 2} 6 L-2 ${SIDE_H - 2}`} stroke={STATUS_COLORS.planned} strokeWidth="3" strokeLinecap="round" className="plan-x" />}
+      </g>
+      {/* ---- top view ---- */}
+      <g transform={`translate(0 ${topY})`} className={ghost ? 'ghost' : undefined}>
+        <path d={o.d} fill={ghost ? 'none' : 'url(#dm-enamel-top)'} stroke={line} strokeWidth="1" strokeDasharray={ghost ? '3 2' : undefined} />
+        {!ghost && (
+          <g clipPath={`url(#${clipTop})`}>
+            {Object.entries(region).map(([face, pts]) => fillOf(face) && <polygon key={face} points={pts} fill={fillOf(face)} opacity="0.88" />)}
+            <g stroke={line} strokeWidth="0.6" opacity="0.55">
+              <line x1={0} y1={0} x2={o.cx} y2={o.cy} /><line x1={w} y1={0} x2={o.cx} y2={o.cy} />
+              <line x1={0} y1={TOP_H} x2={o.cx} y2={o.cy} /><line x1={w} y1={TOP_H} x2={o.cx} y2={o.cy} />
+            </g>
+            <path d={inner.d} transform={innerShift || undefined} fill={fillOf(occ) || 'url(#dm-enamel-top)'} stroke={line} strokeWidth={innerShift ? 1.6 : 0.7} opacity={fillOf(occ) ? 0.95 : 1} />
+            {has('sealant') && <path d={inner.d} transform={innerShift || undefined} fill="url(#dm-sealant)" stroke={has('sealant').color} strokeWidth={innerShift ? 2.4 : 1} style={{ color: has('sealant').color }} />}
+            {(crownWork || pontic) && <path d={o.d} fill={tint((crownWork || pontic).color, 0.28)} />}
+            <path d={o.d} fill="url(#dm-shine-top)" />
           </g>
         )}
-        {has('veneer') && <rect x={x0 + 2} y={facial === top ? y0 + 1 : y0 + s - 6} width={s - 4} height="5" fill={has('veneer').color} />}
-        {has('sealant') && <text x="20" y={y0 + 22} textAnchor="middle" fontSize="11" fontWeight="700" fill={has('sealant').color}>S</text>}
-        {has('fracture') && <path d={`M${x0 + 8} ${y0 + 4} L${x0 + 16} ${y0 + 16} L${x0 + 12} ${y0 + 20} L${x0 + 26} ${y0 + 32}`} stroke={has('fracture').color} strokeWidth="2" fill="none" />}
-        {has('abscess') && <circle cx="20" cy={apex + (upper ? 4 : -4)} r="4" fill={has('abscess').color} />}
-        {has('impacted') && <rect x="1" y="1" width={W - 2} height={H - 2} rx="6" fill="none" stroke={has('impacted').color} strokeDasharray="3 2" />}
+        {(crownWork || pontic) && <path d={o.d} fill="none" stroke={(crownWork || pontic).color} strokeWidth="2.4" />}
+        {implant && !crownWork && <circle cx={o.cx} cy={o.cy} r={Math.min(o.a, o.b) * 0.45} fill="url(#dm-metal)" stroke={implant.color} strokeWidth="1.2" />}
+        {watch && <circle cx={w - 3} cy={upper ? TOP_H - 4 : 4} r="4" fill={STATUS_COLORS.watch} stroke="var(--panel)" strokeWidth="1.5" className="watch-dot" />}
+        {ghost && <path d={`M${w * 0.2} 8 L${w * 0.8} ${TOP_H - 8} M${w * 0.8} 8 L${w * 0.2} ${TOP_H - 8}`} stroke="var(--tooth-line-faint)" strokeWidth="2" strokeLinecap="round" />}
       </g>
-      {missing && <path d={`M4 ${y0 + 2} L36 ${y0 + s - 2} M36 ${y0 + 2} L4 ${y0 + s - 2}`} stroke="var(--tooth-line)" strokeWidth="2.5" />}
-      {planX && <path d={`M2 4 L38 ${H - 4} M38 4 L2 ${H - 4}`} stroke={STATUS_COLORS.planned} strokeWidth="3" />}
-      {watch && <circle cx="35" cy={upper ? 70 : 6} r="4" fill={STATUS_COLORS.watch} />}
-      {mobility && <text x="4" y={upper ? 72 : 10} fontSize="9" fontWeight="700" fill={CONDITION_COLORS.mobility}>M</text>}
     </svg>
   );
 }
 
-export default function Odontogram({ conditions = [], procedures = [], selected, onSelect, dentition = 'permanent', size = 1 }) {
+// Shared gradients for every tooth on the page (enamel, root, metal, shine), themed through CSS variables.
+function ChartDefs() {
+  return (
+    <svg width="0" height="0" style={{ position: 'absolute' }} aria-hidden="true">
+      <defs>
+        <linearGradient id="dm-enamel" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" style={{ stopColor: 'var(--enamel-1)' }} /><stop offset="0.55" style={{ stopColor: 'var(--enamel-2)' }} /><stop offset="1" style={{ stopColor: 'var(--enamel-3)' }} />
+        </linearGradient>
+        <radialGradient id="dm-enamel-top" cx="0.4" cy="0.35" r="0.8">
+          <stop offset="0" style={{ stopColor: 'var(--enamel-1)' }} /><stop offset="1" style={{ stopColor: 'var(--enamel-3)' }} />
+        </radialGradient>
+        <linearGradient id="dm-root" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0" style={{ stopColor: 'var(--root-2)' }} /><stop offset="0.45" style={{ stopColor: 'var(--root-1)' }} /><stop offset="1" style={{ stopColor: 'var(--root-2)' }} />
+        </linearGradient>
+        <linearGradient id="dm-root-back" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0" style={{ stopColor: 'var(--root-2)', stopOpacity: 0.55 }} /><stop offset="1" style={{ stopColor: 'var(--root-2)', stopOpacity: 0.35 }} />
+        </linearGradient>
+        <linearGradient id="dm-metal" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0" stopColor="#8b95a3" /><stop offset="0.4" stopColor="#e5e9ef" /><stop offset="0.7" stopColor="#aab3bf" /><stop offset="1" stopColor="#6b7684" />
+        </linearGradient>
+        <linearGradient id="dm-shine" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0" stopColor="#fff" stopOpacity="0" /><stop offset="0.28" stopColor="#fff" stopOpacity="0.38" /><stop offset="0.4" stopColor="#fff" stopOpacity="0" />
+        </linearGradient>
+        <radialGradient id="dm-shine-top" cx="0.32" cy="0.28" r="0.5">
+          <stop offset="0" stopColor="#fff" stopOpacity="0.45" /><stop offset="1" stopColor="#fff" stopOpacity="0" />
+        </radialGradient>
+        <radialGradient id="dm-abscess">
+          <stop offset="0" stopColor={STATUS_COLORS.problem} stopOpacity="0.55" /><stop offset="1" stopColor={STATUS_COLORS.problem} stopOpacity="0" />
+        </radialGradient>
+        <pattern id="dm-sealant" width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+          <rect width="4" height="4" fill="currentColor" opacity="0.18" /><line x1="0" y1="0" x2="0" y2="4" stroke="currentColor" strokeWidth="1.4" opacity="0.7" />
+        </pattern>
+      </defs>
+    </svg>
+  );
+}
+
+export default function Odontogram({ conditions = [], procedures = [], selected, onSelect, dentition = 'permanent' }) {
+  const uid = useId().replace(/:/g, '');
+  const box = useRef(null);
+  const showPrimary = dentition !== 'permanent';
+  const showPermanent = dentition !== 'primary';
+  // Rows in the order they're drawn, for arrow-key moves.
+  const rows = [showPermanent && UPPER, showPrimary && P_UPPER, showPrimary && P_LOWER, showPermanent && LOWER].filter(Boolean);
+  const move = (e) => {
+    const keys = { ArrowLeft: [0, -1], ArrowRight: [0, 1], ArrowUp: [-1, 0], ArrowDown: [1, 0] };
+    if (!keys[e.key]) return;
+    const current = document.activeElement?.dataset?.tooth || selected;
+    let r = rows.findIndex((row) => row.includes(current));
+    let c = r >= 0 ? rows[r].indexOf(current) : 0;
+    if (r < 0) r = 0;
+    e.preventDefault();
+    const [dr, dc] = keys[e.key];
+    const nr = Math.max(0, Math.min(rows.length - 1, r + dr));
+    // Up/down keeps roughly the same place along the arch, even between permanent and primary rows.
+    c = dr ? Math.round((c / (rows[r].length - 1)) * (rows[nr].length - 1)) : Math.max(0, Math.min(rows[nr].length - 1, c + dc));
+    const next = rows[nr][c];
+    box.current?.querySelector(`[data-tooth="${next}"]`)?.focus();
+    onSelect?.(next);
+  };
   const tooth = (t) => {
     const state = toothState(t, conditions, procedures);
     const upper = isUpper(t);
-    const missing = state.missing;
+    const label = `Tooth ${t}${state.notes.length ? `: ${state.notes.join(', ')}` : ''}`;
     return (
       <button
-        type="button" key={t} className={`tooth${selected === t ? ' selected' : ''}${missing ? ' missing' : ''}`}
-        onClick={() => onSelect?.(t === selected ? null : t)} title={`Tooth ${t}${missing ? ' (missing)' : ''}`} aria-pressed={selected === t}
+        type="button" key={t} data-tooth={t} style={{ '--w': toothWidth(t) + 8 }}
+        className={`tooth2${selected === t ? ' selected' : ''}${state.missing ? ' missing' : ''}${state.notes.length ? ' charted' : ''}${isMolar(t) ? ' molar' : ''}`}
+        onClick={() => onSelect?.(t === selected ? null : t)} title={label} aria-label={label} aria-pressed={selected === t}
+        tabIndex={selected ? (selected === t ? 0 : -1) : (t === '1' || t === 'A' ? 0 : -1)}
       >
-        {upper && <span className="num">{t}</span>}
-        <ToothSvg tooth={t} state={state} size={size} />
-        {!upper && <span className="num">{t}</span>}
+        {upper && <span className="tnum">{t}</span>}
+        <ToothSvg tooth={t} state={state} uid={`${uid}-${t}`} />
+        {!upper && <span className="tnum">{t}</span>}
       </button>
     );
   };
   // Supernumerary teeth appear once something is charted on them.
   const extra = [...new Set([...conditions, ...procedures].map((x) => x.tooth).filter((t) => t && baseTooth(t) !== t))];
   const areaWork = procedures.filter((p) => p.area);
-  const showPrimary = dentition !== 'permanent';
-  const showPermanent = dentition !== 'primary';
+  const arch = (teeth, cls) => (
+    <div className={`arch2 ${cls}`} style={{ gridTemplateColumns: teeth.map((t) => `${toothWidth(t) + 8}fr`).join(' ') }}>
+      {teeth.map(tooth)}
+    </div>
+  );
   return (
-    <div>
-      <div className="odontogram">
-        {showPermanent && <div className="arch">{UPPER.map(tooth)}</div>}
-        {showPrimary && <div className="arch primary">{P_UPPER.map(tooth)}</div>}
-        <div className="muted arch-sides"><span>Patient right</span><span>Patient left</span></div>
-        {showPrimary && <div className="arch primary">{P_LOWER.map(tooth)}</div>}
-        {showPermanent && <div className="arch">{LOWER.map(tooth)}</div>}
+    <div className="odonto-wrap">
+      <ChartDefs />
+      <div className="odontogram2" ref={box} onKeyDown={move} role="group" aria-label="Tooth chart: arrow keys move between teeth">
+        <div className="odo-side-labels" aria-hidden="true"><span>R</span><span>L</span></div>
+        {showPermanent && arch(UPPER, 'upper')}
+        {showPrimary && arch(P_UPPER, 'upper primary')}
+        <div className="odo-midline" aria-hidden="true"><span>Patient right</span><span className="odo-plane" /><span>Patient left</span></div>
+        {showPrimary && arch(P_LOWER, 'lower primary')}
+        {showPermanent && arch(LOWER, 'lower')}
         {extra.length > 0 && (
-          <div className="arch supernumerary">
+          <div className="arch2 supernumerary">
             <span className="muted" style={{ fontSize: 11, alignSelf: 'center' }}>Supernumerary</span>
             {extra.map(tooth)}
           </div>
@@ -225,21 +392,21 @@ export default function Odontogram({ conditions = [], procedures = [], selected,
 }
 
 export function ChartLegend() {
+  const dot = (c) => <i className="lg-dot" style={{ background: c }} />;
   return (
-    <div className="legend">
-      <span><i style={{ background: STATUS_COLORS.planned }} />Treatment planned</span>
-      <span><i style={{ background: STATUS_COLORS.completed }} />Completed here</span>
-      <span><i style={{ background: STATUS_COLORS.existing }} />Existing (other office)</span>
-      <span><i style={{ background: STATUS_COLORS.problem }} />Caries / fracture / abscess</span>
-      <span><i style={{ background: STATUS_COLORS.watch, borderRadius: '50%' }} />Watch</span>
-      <span><i className="lg-crown" />Crown</span>
-      <span><i className="lg-rct" />Root canal</span>
-      <span><i className="lg-implant" />Implant</span>
-      <span><i className="lg-pontic" />Pontic</span>
-      <span><b style={{ color: STATUS_COLORS.existing }}>S</b> Sealant</span>
+    <div className="legend2">
+      <span>{dot(STATUS_COLORS.planned)}Planned</span>
+      <span>{dot(STATUS_COLORS.completed)}Done here</span>
+      <span>{dot(STATUS_COLORS.existing)}Existing</span>
+      <span>{dot(STATUS_COLORS.problem)}Caries · fracture · abscess</span>
+      <span>{dot(STATUS_COLORS.watch)}Watch</span>
+      <span><i className="lg2 lg2-crown" />Crown</span>
+      <span><i className="lg2 lg2-rct" />Root canal</span>
+      <span><i className="lg2 lg2-implant" />Implant</span>
+      <span><i className="lg2 lg2-pontic" />Bridge</span>
+      <span><i className="lg2 lg2-sealant" />Sealant</span>
       <span><b style={{ color: STATUS_COLORS.planned }}>✕</b> Extraction planned</span>
-      <span><b>✕</b> Missing</span>
-      <span><b style={{ color: CONDITION_COLORS.mobility }}>M</b> Mobility</span>
+      <span><i className="lg2 lg2-missing" />Missing</span>
     </div>
   );
 }
