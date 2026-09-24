@@ -1,8 +1,8 @@
 // A · Insurance payments on autopilot: the exceptions worklist. A denial is decided and a secondary claim is sent
 // in one key each (budget: 3 actions each). Spec: docs/workflows/specs/A-eob-autopilot.md
 //
-// Needs the autopilot routes mounted (server/src/routes/eobauto.js) and the /insurance-autopilot screen routed
-// in App.jsx; until then the tests skip with a note rather than fail.
+// Needs the autopilot routes mounted (server/src/routes/eobauto.js); the screen is the Insurance autopilot tab of
+// Billing (/claims?tab=autopilot — /insurance-autopilot redirects there). Until then the tests skip with a note.
 /* global document, sessionStorage, fetch */
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -29,8 +29,8 @@ async function wired(t) {
   ready ??= (async () => {
     const probe = await s.get('/eob-autopilot');
     if (!Array.isArray(probe?.items)) return false;
-    await s.page.goto(`${app.base}/insurance-autopilot`);
-    return s.page.locator('h1:has-text("Insurance autopilot")').waitFor({ timeout: 8000 }).then(() => true, () => false);
+    await s.page.goto(`${app.base}/claims?tab=autopilot`);
+    return s.page.locator('h2:has-text("Insurance autopilot")').waitFor({ timeout: 8000 }).then(() => true, () => false);
   })();
   if (!(await ready)) { t.skip('Insurance autopilot not mounted yet (routes/eobauto.js + App.jsx route, see docs/workflows/specs/A-eob-autopilot.md)'); return false; }
   return true;
@@ -83,7 +83,7 @@ test('A3: a denial is decided and a secondary claim goes out — one key each', 
   assert.equal(imp.status, 201, JSON.stringify(imp.data));
   assert.deepEqual(imp.data.claims.map((c) => c.result), ['denied', 'posted']);
 
-  await page.goto(`${app.base}/insurance-autopilot`);
+  await page.goto(`${app.base}/claims?tab=autopilot`);
   await page.waitForSelector('.eob-item.current:has-text("Denied")');
   assert.match(await page.locator('.eob-panel').innerText(), /Not covered under the patient’s plan/);
   const deny = await measure(page, async () => {
@@ -111,7 +111,7 @@ test('A3: a denial is decided and a secondary claim goes out — one key each', 
 test('A1: settings show the 30-day preview and turn auto-posting on in one click', async (t) => {
   if (!(await wired(t))) return;
   const { page } = s;
-  await page.goto(`${app.base}/insurance-autopilot?tab=settings`);
+  await page.goto(`${app.base}/claims?tab=autopilot&sub=settings`);
   await page.waitForSelector('.eob-preview');
   assert.match(await page.locator('.eob-preview').innerText(), /would have posted on their own/);
   const r = await measure(page, async () => {

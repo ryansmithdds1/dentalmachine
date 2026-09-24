@@ -48,7 +48,8 @@ export function show(k, v) {
   return typeof v === 'object' ? JSON.stringify(v) : String(v);
 }
 
-export default function Verification() {
+// embedded: shown as the Verification tab of Billing (its own page before), so its heading is a section's.
+export default function Verification({ embedded = false }) {
   const { can, user, practice } = useAuth();
   const nav = useNavigate();
   const [params, setParams] = useSearchParams();
@@ -143,7 +144,7 @@ export default function Verification() {
     <div className="vf-page">
       <div className="page-header">
         <div>
-          <h1>Insurance verification</h1>
+          {embedded ? <h2 className="vf-title">Insurance verification</h2> : <h1>Insurance verification</h1>}
           <div className="muted">
             {data?.automatic
               ? `Eligibility is checked by itself ${data.settings.days_ahead ? `${data.settings.days_ahead} day${data.settings.days_ahead === 1 ? '' : 's'} before each visit` : ''}${data.settings.days_ahead && data.settings.morning_of ? ' and ' : ''}${data.settings.morning_of ? 'the morning of' : ''}; full breakdowns are applied to the whole plan. You only see what needs a person.`

@@ -34,7 +34,7 @@ test('IV verify tomorrow’s list: 1 key checks everyone and applies clean answe
   const { page } = s;
   const a = await insuredVisit('Ivy', '05:00');
   const b = await insuredVisit('Ike', '05:15');
-  await page.goto(`${app.base}/verification?range=tomorrow&view=all`);
+  await page.goto(`${app.base}/claims?tab=verification&range=tomorrow&view=all`);
   await page.locator('.vf-row', { hasText: a.p.last_name }).waitFor();
   await page.locator('.vf-row', { hasText: b.p.last_name }).waitFor();
   const r = await measure(page, async () => {
@@ -56,7 +56,7 @@ test('IV resolve an exception in ≤ 2 actions: coverage inactive → text the p
   const x = await insuredVisit('Ina', '05:30');
   const phone = await s.post(`/verification/policies/${x.policy.id}/phone`, { active: false, reference: 'REF-1', rep_name: 'Dana' });
   assert.ok(phone.check_id, JSON.stringify(phone));
-  await page.goto(`${app.base}/verification?range=tomorrow`);
+  await page.goto(`${app.base}/claims?tab=verification&range=tomorrow`);
   const row = page.locator('.vf-row', { hasText: x.p.last_name });
   await row.waitFor();
   assert.match(await row.innerText(), /Coverage inactive/);
@@ -76,7 +76,7 @@ test('IV resolve an exception in ≤ 2 actions: coverage inactive → text the p
 test('IV verified by phone from the keyboard: P, reference, representative, Enter (≤ 5)', async () => {
   const { page } = s;
   const x = await insuredVisit('Ora', '05:45');
-  await page.goto(`${app.base}/verification?range=tomorrow&view=all`);
+  await page.goto(`${app.base}/claims?tab=verification&range=tomorrow&view=all`);
   const row = page.locator('.vf-row', { hasText: x.p.last_name });
   await row.waitFor();
   await row.click();

@@ -20,7 +20,8 @@ scanned or photographed. Nobody has to start anything for a clean ERA once the o
 Measured (e2e `e2e/workflows/A-eob-autopilot.test.mjs`): denial 1 action, secondary 1 action, turn on 1 click.
 
 ## Screen
-**Insurance autopilot** (`/insurance-autopilot`, `pages/EobAutopilot.jsx`; also in Ctrl/⌘K):
+**Insurance autopilot** — a tab of Billing (`/claims?tab=autopilot`, its sections `&sub=paper|billing|recon|settings`;
+`/insurance-autopilot` redirects there), `pages/EobAutopilot.jsx`; also in Ctrl/⌘K:
 - **Worklist** — one list of everything that needs a person, J/K to move, the selected item's details in a side panel
   (reason in plain words, CARC codes, billed / paid / written off / patient / PPO-allowed), one key per action (shown on
   each button). Clean payments waiting to post are a single banner with **Post all**.

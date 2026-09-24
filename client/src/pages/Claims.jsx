@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState } from 'react';
+import { Fragment, Suspense, lazy, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { api, getToken } from '../api.js';
 import { useApi } from '../hooks.js';
@@ -19,10 +19,16 @@ import Collections from '../components/Collections.jsx';
 import EligibilityBatch from '../components/EligibilityBatch.jsx';
 import Deposits from '../components/Deposits.jsx';
 
+// Insurance verification and the insurance autopilot were pages of their own (/verification,
+// /insurance-autopilot — those addresses redirect here). Loaded when their tab opens.
+const Verification = lazy(() => import('./Verification.jsx'));
+const EobAutopilot = lazy(() => import('./EobAutopilot.jsx'));
+
 const FILTERS = [['attention', 'Needs attention'], ['draft', 'Ready to send'], ['submitted', 'Submitted'], ['partially_paid', 'Partially paid'], ['denied', 'Denied'], ['paid', 'Paid'], ['void', 'Void'], ['', 'All']];
 
-// Billing workspace: claims (with 837 batches), ERA remittance posting and payment plans.
-const TABS = [['claims', 'Claims'], ['approve', 'Ready to approve'], ['checks', 'Insurance payments'], ['eligibility', 'Eligibility'], ['followup', 'Insurance follow-up'], ['preauths', 'Pre-authorizations'], ['era', 'Remittance (ERA)'], ['insplans', 'Insurance plans'], ['statements', 'Statements'], ['refunds', 'Credits & refunds'], ['plans', 'Payment plans'], ['deposits', 'Deposits'], ['collections', 'Collections']];
+// Billing workspace: claims (with 837 batches), the insurance autopilot, insurance verification, ERA
+// remittance posting and payment plans.
+const TABS = [['claims', 'Claims'], ['approve', 'Ready to approve'], ['autopilot', 'Insurance autopilot'], ['checks', 'Insurance payments'], ['verification', 'Verification'], ['eligibility', 'Eligibility'], ['followup', 'Insurance follow-up'], ['preauths', 'Pre-authorizations'], ['era', 'Remittance (ERA)'], ['insplans', 'Insurance plans'], ['statements', 'Statements'], ['refunds', 'Credits & refunds'], ['plans', 'Payment plans'], ['deposits', 'Deposits'], ['collections', 'Collections']];
 // Billing opens where this person last worked (G B goes straight back to the follow-up list, say). Per-browser only.
 const TAB_KEY = 'dm.billing.tab';
 const lastTab = () => { try { const t = localStorage.getItem(TAB_KEY); return TABS.some(([k]) => k === t) ? t : null; } catch { return null; } };
@@ -36,6 +42,8 @@ export default function Claims() {
   const { data: waiting } = useApi(can('billing:read') ? '/claim-queue/count' : null);
   const [approveCount, setApproveCount] = useState(null);
   const badge = approveCount ?? waiting?.count ?? 0;
+  // The sidebar's Billing badge follows the queue as claims are approved here.
+  useEffect(() => { if (approveCount != null) window.dispatchEvent(new CustomEvent('dm:claim-queue', { detail: approveCount })); }, [approveCount]);
   return (
     <>
       <div className="page-header"><h1>Billing</h1></div>
@@ -59,6 +67,10 @@ export default function Claims() {
       {tab === 'collections' && <Collections />}
       {tab === 'eligibility' && <EligibilityBatch />}
       {tab === 'deposits' && <Deposits />}
+      <Suspense fallback={<div className="empty">Loading…</div>}>
+        {tab === 'verification' && <Verification embedded />}
+        {tab === 'autopilot' && <EobAutopilot embedded />}
+      </Suspense>
     </>
   );
 }

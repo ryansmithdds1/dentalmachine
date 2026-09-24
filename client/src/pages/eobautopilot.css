@@ -37,3 +37,7 @@
   .eob-panel { position: static; }
   .eob-item { grid-template-columns: 1fr; }
 }
+
+/* As the Insurance autopilot tab of Billing: a section heading, and its sections as a second, lighter row of tabs. */
+.eob-title { margin: 0 0 2px; font-size: 17px; }
+.eob-subtabs { border-bottom: none; margin-bottom: 8px; }

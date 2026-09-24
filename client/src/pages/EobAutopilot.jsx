@@ -15,23 +15,25 @@ import './eobautopilot.css';
 // the paper EOB scanner, patient billing, the daily reconciliation and the owner's switches.
 const TABS = [['work', 'Worklist'], ['paper', 'Paper EOB'], ['billing', 'Billing patients'], ['recon', 'Reconciliation'], ['settings', 'Settings']];
 
-export default function EobAutopilot() {
+// embedded: the Insurance autopilot tab of Billing (?tab=autopilot), where its own sections are ?sub=.
+export default function EobAutopilot({ embedded = false }) {
   const [params, setParams] = useSearchParams();
-  const tab = params.get('tab') || 'work';
-  const setTab = (t) => setParams((p) => { const n = new URLSearchParams(p); if (t === 'work') n.delete('tab'); else n.set('tab', t); return n; });
+  const key = embedded ? 'sub' : 'tab';
+  const tab = params.get(key) || 'work';
+  const setTab = (t) => setParams((p) => { const n = new URLSearchParams(p); if (t === 'work') n.delete(key); else n.set(key, t); return n; });
   useCommands(TABS.map(([k, label]) => ({ id: `eob-${k}`, label: `Insurance autopilot: ${label}`, run: () => setTab(k) })));
   return (
     <>
       <div className="page-header">
         <div>
-          <h1>Insurance autopilot</h1>
+          {embedded ? <h2 className="eob-title">Insurance autopilot</h2> : <h1>Insurance autopilot</h1>}
           <div className="muted">Insurance payments post themselves when every cent adds up. You only see what needs a person.</div>
         </div>
       </div>
-      <div className="tabs" role="tablist">
+      <div className={`tabs${embedded ? ' eob-subtabs' : ''}`} role="tablist">
         {TABS.map(([k, label]) => <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'active' : ''} onClick={() => setTab(k)}>{label}</button>)}
       </div>
-      {tab === 'work' && <Worklist />}
+      {tab === 'work' && <Worklist paperLink={embedded ? '?tab=autopilot&sub=paper' : '?tab=paper'} />}
       {tab === 'paper' && <PaperEob />}
       {tab === 'billing' && <Billing />}
       {tab === 'recon' && <Reconciliation />}
@@ -41,7 +43,7 @@ export default function EobAutopilot() {
 }
 
 // ---- The worklist ----
-function Worklist() {
+function Worklist({ paperLink }) {
   const { data, error, reload } = useApi('/eob-autopilot');
   const { can } = useAuth();
   const navigate = useNavigate();
@@ -117,7 +119,7 @@ function Worklist() {
           {write && <button className="primary" disabled={busy} onClick={postAll}>Post all <kbd>Shift</kbd>+<kbd>P</kbd></button>}
         </div>
       )}
-      {data?.paper_waiting > 0 && <div className="card"><Link to="?tab=paper">{data.paper_waiting} paper EOB{data.paper_waiting === 1 ? '' : 's'} read and waiting for your “looks right” →</Link></div>}
+      {data?.paper_waiting > 0 && <div className="card"><Link to={paperLink}>{data.paper_waiting} paper EOB{data.paper_waiting === 1 ? '' : 's'} read and waiting for your “looks right” →</Link></div>}
       {data && (
         <div className="eob-counts">
           {Object.entries(data.counts || {}).filter(([k]) => k !== 'ready').map(([k, n]) => <span key={k} className={`eob-chip eob-${k}`}>{data.kinds[k]} {n}</span>)}

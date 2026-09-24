@@ -315,7 +315,7 @@ function Remittances({ claim }) {
         <tbody>{data.map((r) => (
           <tr key={r.id}>
             <td>{fmtUtcDate(r.created_at, practice?.timezone)}</td><td>{r.source === 'era' ? 'ERA' : 'Paper EOB'} {r.trace || ''}</td><td>{money(r.paid)}</td><td>{money(r.contractual)}</td><td>{money(r.patient_resp)}</td>
-            <td>{STATE[r.state] || r.state}{r.state === 'exception' && r.reason ? ` — ${r.reason}` : ''}{r.state === 'exception' ? <> · <Link to="/insurance-autopilot">worklist</Link></> : null}</td>
+            <td>{STATE[r.state] || r.state}{r.state === 'exception' && r.reason ? ` — ${r.reason}` : ''}{r.state === 'exception' ? <> · <Link to="/claims?tab=autopilot">worklist</Link></> : null}</td>
             <td>{r.eob_url && <button className="small" onClick={() => open(r.eob_url)}>See the EOB</button>}</td>
           </tr>
         ))}</tbody></table>

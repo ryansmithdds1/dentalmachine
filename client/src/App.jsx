@@ -1,4 +1,5 @@
 import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import Rail from './nav/Rail.jsx';
 import { ErrorBoundary } from './errors.jsx';
 import { useAuth } from './auth.jsx';
 import { label } from './format.js';
@@ -10,9 +11,9 @@ import { ActivePatientProvider } from './activePatient.jsx';
 import CommandPalette from './components/CommandPalette.jsx';
 import IntranetCommands from './components/intranet/IntranetCommands.jsx';
 import DocumentCommands from './components/docs/DocumentCommands.jsx';
-import ChecklistCommands, { ChecklistBadge } from './components/checklists/ChecklistCommands.jsx';
+import ChecklistCommands from './components/checklists/ChecklistCommands.jsx';
 import PaperworkCommands from './components/consents/PaperworkCommands.jsx';
-import QuickCommands, { TaskBadge } from './components/QuickCommands.jsx';
+import QuickCommands from './components/QuickCommands.jsx';
 import ChatPanel from './components/chat/ChatPanel.jsx';
 import ChatBadge from './components/chat/ChatBadge.jsx';
 import UrgentBanner from './components/chat/UrgentBanner.jsx';
@@ -26,9 +27,8 @@ import { readOfflineDay } from './offline.js';
 import OfflineBanner from './offline/OfflineBanner.jsx';
 import { pendingCount } from './offline/index.js';
 import { ClockButton } from './components/TimeClock.jsx';
-import { useLiveEvents } from './live.js';
 import MfaSetup from './components/MfaSetup.jsx';
-import { Sun, CalendarDays, Users, MessageSquare, Inbox as InboxIcon, PhoneCall, Megaphone, Receipt, ListChecks, ChartColumn, Landmark, Settings as SettingsIcon, Search, PanelLeftClose, PanelLeftOpen, LogOut, Keyboard, Monitor, Moon, Sparkles, Phone, Building2, Star, HelpCircle, AlertTriangle, BookOpen, Clock, Banknote, Gauge, Repeat, ShieldCheck, FolderOpen, CalendarRange, ClipboardCheck, CircleDollarSign, PackageCheck, Send, BadgeCheck, Headset } from 'lucide-react';
+import { Sun, LogOut, Keyboard, Monitor, Moon } from 'lucide-react';
 import { getThemePref, setThemePref, watchTheme } from './theme.js';
 
 // Pages load on demand so the first screen appears quickly.
@@ -69,7 +69,6 @@ const Settings = lazy(() => import('./pages/Settings.jsx'));
 const Statement = lazy(() => import('./pages/Statement.jsx'));
 const Requests = lazy(() => import('./pages/Requests.jsx'));
 const Attention = lazy(() => import('./pages/Attention.jsx'));
-const AttentionBadge = lazy(() => import('./pages/Attention.jsx').then((m) => ({ default: m.AttentionBadge })));
 const Inbox = lazy(() => import('./pages/Inbox.jsx'));
 const Office = lazy(() => import('./pages/Office.jsx'));
 const TimeClockPage = lazy(() => import('./pages/TimeClock.jsx'));
@@ -97,7 +96,6 @@ const MyBonus = lazy(() => import('./components/bonus/MyBonus.jsx'));
 const BillingAutopilot = lazy(() => import('./pages/BillingAutopilot.jsx'));
 const BillingLink = lazy(() => import('./pages/public/BillingLink.jsx'));
 const Phones = lazy(() => import('./pages/Phones.jsx'));
-const Verification = lazy(() => import('./pages/Verification.jsx'));
 const Metrics = lazy(() => import('./pages/Metrics.jsx'));
 const ChartAudit = lazy(() => import('./pages/ChartAudit.jsx'));
 const OfficeDocuments = lazy(() => import('./pages/OfficeDocuments.jsx'));
@@ -107,7 +105,6 @@ const Business = lazy(() => import('./pages/Business.jsx'));
 const LabCheckin = lazy(() => import('./pages/LabCheckin.jsx'));
 const ReviewsDashboard = lazy(() => import('./pages/ReviewsDashboard.jsx'));
 const Referrals = lazy(() => import('./pages/Referrals.jsx'));
-const EobAutopilot = lazy(() => import('./pages/EobAutopilot.jsx'));
 const CheckinPage = lazy(() => import('./pages/public/CheckinPage.jsx'));
 const StatusPage = lazy(() => import('./pages/public/StatusPage.jsx'));
 const Help = lazy(() => import('./pages/Help.jsx'));
@@ -213,16 +210,6 @@ function OwnPassword() {
   );
 }
 
-function UnreadBadge() {
-  const [n, setN] = useState(0);
-  const load = () => api.get('/conversations/unread').then((r) => setN(r.unread)).catch(() => {});
-  useEffect(() => {
-    load();
-  }, []);
-  useLiveEvents((e) => e.type === 'message' && load());
-  return n > 0 ? <span className="nav-badge">{n}</span> : null;
-}
-
 function StaffApp() {
   const { user, practice, loading, offline, logout, can, refresh } = useAuth();
   if (loading) return <div className="empty">Loading…</div>;
@@ -261,43 +248,6 @@ function StaffApp() {
     );
   }
 
-  const nav = [
-    ['/', Sun, 'Today', true],
-    ['/attention', AlertTriangle, 'Needs attention', can('patients:read')],
-    ['/chart-audit', ShieldCheck, 'Chart audit', can('clinical:read')],
-    ['/schedule', CalendarDays, 'Schedule', can('schedule:read')],
-    ['/patients', Users, 'Patients', can('patients:read')],
-    ['/messages', MessageSquare, 'Messages', can('patients:read')],
-    ['/requests', InboxIcon, 'Online requests', can('schedule:read')],
-    ['/calls', Phone, 'Calls', can('patients:read')],
-    ['/followups', PhoneCall, 'Follow-up lists', can('schedule:read')],
-    ['/recall', Repeat, 'Recall autopilot', can('schedule:read')],
-    ['/metrics', Gauge, 'Metrics', can('reports:read') || can('reports:own')],
-    ['/capacity', CalendarRange, 'Capacity', can('schedule:read')],
-    ['/business', CircleDollarSign, 'Business', can('business:view') || can('timeclock:manage')],
-    ['/lab-checkin', PackageCheck, 'Lab check-in', can('clinical:write')],
-    ['/referrals', Send, 'Referrals', can('patients:read')],
-    ['/insurance-autopilot', BadgeCheck, 'Insurance autopilot', can('billing:read')],
-    ['/campaigns', Megaphone, 'Campaigns', can('patients:write')],
-    ['/reputation', Star, 'Reviews', can('patients:read')],
-    ['/phones', Headset, 'Phones', can('patients:read')],
-    ['/claims', Receipt, 'Billing', can('billing:read')],
-    ['/verification', BadgeCheck, 'Insurance verification', can('billing:read')],
-    ['/office', ListChecks, 'To-do & labs', true],
-    ['/checklists', ClipboardCheck, 'Checklists', true],
-    ['/timeclock', Clock, 'Time clock', true],
-    ['/deposits', Banknote, 'Deposits & cash', can('billing:read')],
-    ['/documents', FolderOpen, 'Documents', can('clinical:read') || can('officedocs:read')],
-    ['/intranet', BookOpen, 'Intranet', true],
-    ['/reports', ChartColumn, 'Reports', can('reports:read')],
-    ['/marketing', Megaphone, 'Marketing results', can('reports:read')],
-    ['/ask', Sparkles, 'Ask your data', can('reports:read')],
-    ['/finance', Landmark, 'Finance', can('finance:read')],
-    ['/group', Building2, 'Group', user.role === 'admin' || !!practice?.org_role],
-    ['/settings', SettingsIcon, 'Settings', true],
-    ['/help', HelpCircle, 'Help', true],
-  ];
-
   return (
     <Routes>
       <Route path="/appointments/:id/route-slip" element={<RouteSlip />} />
@@ -312,7 +262,7 @@ function StaffApp() {
       <Route path="/deposits/:id/slip" element={<DepositSlipPrint />} />
       <Route path="/appointments/:id/walkout" element={<WalkoutPrint />} />
       <Route path="/referrals/:id/letter" element={<ReferralLetterPrint />} />
-      <Route path="*" element={<ActivePatientProvider><Shell nav={nav} /></ActivePatientProvider>} />
+      <Route path="*" element={<ActivePatientProvider><Shell /></ActivePatientProvider>} />
     </Routes>
   );
 }
@@ -344,9 +294,21 @@ const seenSetup = () => {
   return false;
 };
 
-// The navigation rail: icons only by default so the schedule gets the screen, labels on hover, and a
-// pin to keep it open (remembered on this computer). You, your office, the time clock and sign-out live
-// in the menu under your initials.
+// An old page address that is a Billing tab now: same query string, and the autopilot's own ?tab= (its
+// sections) becomes ?sub= so it doesn't clash with Billing's tab.
+function MovedToBilling({ tab, sub = false }) {
+  const { search } = useLocation();
+  const old = new URLSearchParams(search);
+  const next = new URLSearchParams({ tab });
+  for (const [k, v] of old) {
+    if (k === 'tab') { if (sub) next.set('sub', v); } else next.append(k, v);
+  }
+  return <Navigate to={`/claims?${next}`} replace />;
+}
+
+// The navigation rail (nav/Rail.jsx): group icons only by default so the schedule gets the screen, their pages
+// on hover, and a pin to keep it open (remembered on this computer). You, your office, the time clock and
+// sign-out live in the menu under your initials.
 const railPref = () => {
   try {
     return localStorage.getItem('dm_nav_open') === '1';
@@ -393,26 +355,7 @@ function UserMenu({ user, practice, logout }) {
   );
 }
 
-// The collapsed rail's page list scrolls (an admin has more screens than fit), and a scroll box clips
-// CSS tooltips, so the labels for those icons are drawn here, outside it.
-function RailTip() {
-  const [tip, setTip] = useState(null);
-  useEffect(() => {
-    const over = (e) => {
-      const el = e.target.closest?.('.rail-nav [data-tip]');
-      if (!el || document.querySelector('.app.rail-open') || window.innerWidth <= 800) return setTip(null);
-      const r = el.getBoundingClientRect();
-      setTip({ text: el.dataset.tip, top: r.top + r.height / 2, left: r.right + 12 });
-    };
-    const hide = () => setTip(null);
-    document.addEventListener('pointerover', over);
-    document.addEventListener('scroll', hide, true);
-    return () => { document.removeEventListener('pointerover', over); document.removeEventListener('scroll', hide, true); };
-  }, []);
-  return tip ? <div className="rail-tip" style={{ top: tip.top, left: tip.left }} aria-hidden>{tip.text}</div> : null;
-}
-
-function Shell({ nav }) {
+function Shell() {
   const location = useLocation();
   const { user, practice, logout } = useAuth();
   const [railOpen, setRailOpen] = useState(railPref);
@@ -437,38 +380,17 @@ function Shell({ nav }) {
       <CallPop />
       <ChatPanel />
       <IdleLogout />
-      <aside className="sidebar rail">
-        <div className="rail-brand" title={practice?.name}>
-          <span className="rail-logo" aria-hidden>
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M7 3c-2.5 0-4 2-4 4.5 0 3 1.5 4.5 2 7.5.4 2.6 1 6 2.7 6 1.8 0 1.5-4.5 3-6.2.5-.5 1.1-.5 1.6 0 1.5 1.7 1.2 6.2 3 6.2 1.7 0 2.3-3.4 2.7-6 .5-3 2-4.5 2-7.5C21 5 19.5 3 17 3c-2 0-3 1-5 1S9 3 7 3Z" /></svg>
-          </span>
-          <span className="rail-label">Dental Machine<small>{practice?.name}</small></span>
-        </div>
-        <button className="rail-item" onClick={() => window.dispatchEvent(new Event('dm:search'))} data-tip="Search (Ctrl K)">
-          <Search size={19} strokeWidth={1.9} /><span className="rail-label">Search <kbd>Ctrl K</kbd></span>
-        </button>
-        <ChatBadge />
-        <RailTip />
-        <nav className="nav rail-nav">
-          {nav.filter((n) => n[3]).map(([to, Icon, text]) => (
-            <NavLink key={to} to={to} end={to === '/'} className="rail-item" data-tip={text} aria-label={text}>
-              <Icon size={19} strokeWidth={1.9} aria-hidden />
-              <span className="rail-label">{text}</span>
-              {to === '/messages' && <UnreadBadge />}
-              {to === '/attention' && <Suspense fallback={null}><AttentionBadge /></Suspense>}
-              {to === '/office' && <TaskBadge />}
-              {to === '/checklists' && <ChecklistBadge />}
-            </NavLink>
-          ))}
-        </nav>
-        <div className="rail-foot">
-          <button className="rail-item" onClick={toggleRail} data-tip={railOpen ? 'Collapse menu' : 'Keep menu open'} aria-label={railOpen ? 'Collapse menu' : 'Expand menu'}>
-            {railOpen ? <PanelLeftClose size={19} strokeWidth={1.9} /> : <PanelLeftOpen size={19} strokeWidth={1.9} />}
-            <span className="rail-label">Collapse</span>
-          </button>
-          <UserMenu user={user} practice={practice} logout={logout} />
-        </div>
-      </aside>
+      <Rail
+        railOpen={railOpen} onToggleRail={toggleRail} chat={<ChatBadge />} userMenu={<UserMenu user={user} practice={practice} logout={logout} />}
+        brand={(
+          <div className="rail-brand" title={practice?.name}>
+            <span className="rail-logo" aria-hidden>
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M7 3c-2.5 0-4 2-4 4.5 0 3 1.5 4.5 2 7.5.4 2.6 1 6 2.7 6 1.8 0 1.5-4.5 3-6.2.5-.5 1.1-.5 1.6 0 1.5 1.7 1.2 6.2 3 6.2 1.7 0 2.3-3.4 2.7-6 .5-3 2-4.5 2-7.5C21 5 19.5 3 17 3c-2 0-3 1-5 1S9 3 7 3Z" /></svg>
+            </span>
+            <span className="rail-label">Dental Machine<small>{practice?.name}</small></span>
+          </div>
+        )}
+      />
       <main className={`main${fullBleed ? ' full-bleed' : ''}`} id="main" tabIndex={-1}>
         <EnvironmentBanner />
         <UrgentBanner />
@@ -490,7 +412,8 @@ function Shell({ nav }) {
             <Route path="/patients/:id/statement" element={<Statement />} />
             <Route path="/followups" element={<Followups />} />
             <Route path="/recall" element={<Recall />} />
-            <Route path="/verification" element={<Verification />} />
+            {/* Insurance verification and the insurance autopilot are tabs of Billing now; old links still work. */}
+            <Route path="/verification" element={<MovedToBilling tab="verification" />} />
             <Route path="/phones" element={<Phones />} />
             <Route path="/xray-review" element={<XrayReviewPage />} />
             <Route path="/marketing" element={<Marketing />} />
@@ -509,7 +432,7 @@ function Shell({ nav }) {
             <Route path="/lab-checkin" element={<LabCheckin />} />
             <Route path="/reviews" element={<ReviewsDashboard />} />
             <Route path="/referrals" element={<Referrals />} />
-            <Route path="/insurance-autopilot" element={<EobAutopilot />} />
+            <Route path="/insurance-autopilot" element={<MovedToBilling tab="autopilot" sub />} />
             <Route path="/billing-autopilot" element={<BillingAutopilot />} />
             <Route path="/timeclock" element={<TimeClockPage />} />
             <Route path="/bonus" element={<MyBonus />} />

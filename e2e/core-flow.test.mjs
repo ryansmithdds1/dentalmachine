@@ -190,7 +190,7 @@ test('a new patient from first visit to paid claim and statement', async () => {
   // Clean ERA payments wait on the insurance autopilot for one "Post all" (a person posts the money).
   await step('post ERA', async () => {
     if (['paid', 'partially_paid'].includes((await api(`/claims/${claimId}`)).status)) return;
-    await page.goto(`${base}/insurance-autopilot`);
+    await page.goto(`${base}/claims?tab=autopilot`);
     await page.click('button:has-text("Post all")');
     for (let i = 0; i < 20 && !['paid', 'partially_paid'].includes((await api(`/claims/${claimId}`)).status); i++) await page.waitForTimeout(250);
   });

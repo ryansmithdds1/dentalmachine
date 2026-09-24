@@ -14,7 +14,7 @@ for a coworker. Nothing showed at a glance whether a visit's breakdown was curre
 (**R** checks everyone in the range). An exception: **≤ 2** (select it, **T** texts the patient a secure link for a
 photo of their new card). Verified by phone: **≤ 5** (**P**, reference number, Tab, representative, Enter).
 
-## IV1 · The screen (Insurance verification, `/verification`)
+## IV1 · The screen (Insurance verification — the Verification tab of Billing, `/claims?tab=verification`; `/verification` redirects there)
 - Upcoming visits for **Today / Tomorrow / Next 7 days / Next 14 days** (keys **1–4**; the last one used is
   remembered) and per **office**. Views: **Needs a person** (default), **Waiting on patient**, **Everyone** (**V**).
 - Each visit shows two statuses, the same pills as the chart and patient bar (`VerifyBadge`):

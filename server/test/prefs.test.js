@@ -20,6 +20,29 @@ test('smart defaults: each person\'s last-used values, per key and scope, privat
   assert.deepEqual((await other.get('/me/prefs')).data, {});
 });
 
+test('sidebar pins: up to 3 pages per person, checked, recorded with before and after', async () => {
+  const { api } = await h.practice();
+  assert.equal((await api.put('/me/nav-pins', { pins: ['/schedule', '/claims'] })).status, 200);
+  assert.deepEqual((await api.get('/me/prefs')).data['nav.pins'], ['/schedule', '/claims']);
+  await api.put('/me/nav-pins', { pins: ['/claims', '/schedule', '/messages'] });
+  // Too many, not a page, twice the same, or not a list: refused, and nothing changes.
+  assert.equal((await api.put('/me/nav-pins', { pins: ['/a', '/b', '/c', '/d'] })).status, 400);
+  assert.equal((await api.put('/me/nav-pins', { pins: ['https://evil.example'] })).status, 400);
+  assert.equal((await api.put('/me/nav-pins', { pins: ['/claims', '/claims'] })).status, 400);
+  assert.equal((await api.put('/me/nav-pins', { pins: '/claims' })).status, 400);
+  // The generic "last used" route can't write around the checks.
+  assert.equal((await api.put('/me/prefs/nav.pins', { value: ['/x', '/y', '/z', '/w'] })).status, 400);
+  assert.deepEqual((await api.get('/me/prefs')).data['nav.pins'], ['/claims', '/schedule', '/messages']);
+  // Saving the same pins again is not a change.
+  await api.put('/me/nav-pins', { pins: ['/claims', '/schedule', '/messages'] });
+  const me = (await api.get('/auth/me')).data;
+  const rows = await h.db.all("SELECT * FROM audit_log WHERE action = 'nav.pins' AND entity = 'users' AND entity_id = ? ORDER BY id", me.user?.id ?? me.id);
+  assert.equal(rows.length, 2);
+  assert.deepEqual(JSON.parse(rows[1].changes).pins, ['/schedule, /claims', '/claims, /schedule, /messages']);
+  assert.equal((await api.put('/me/nav-pins', { pins: [] })).status, 200);
+  assert.deepEqual((await api.get('/me/prefs')).data['nav.pins'], []);
+});
+
 test('undo toasts and shortcut matching (client helpers)', async () => {
   const { toast, onToast, undoable } = await import('../../client/src/toast.js');
   const { matches, comboLabel } = await import('../../client/src/shortcuts.js');

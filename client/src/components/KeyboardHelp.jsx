@@ -4,7 +4,7 @@ import { Modal } from './ui.jsx';
 import { useShortcutList, comboLabel, registeredHelp } from '../shortcuts.js';
 
 // "?" shows every keyboard shortcut; "g" then a letter jumps to a main area (like Gmail or GitHub).
-const GO = { t: ['/', 'Today'], s: ['/schedule', 'Schedule'], p: ['/patients', 'Patients'], m: ['/messages', 'Messages'], f: ['/followups', 'Follow-up lists'], b: ['/claims', 'Billing'], r: ['/reports', 'Reports'], o: ['/office', 'To-do & labs'], x: ['/settings', 'Settings'] };
+const GO = { t: ['/', 'Today (dashboard)'], s: ['/schedule', 'Schedule'], p: ['/patients', 'Patients'], m: ['/messages', 'Messages'], f: ['/followups', 'Follow-up lists'], b: ['/claims', 'Billing & claims'], r: ['/reports', 'Reports'], o: ['/office', 'To-do & labs'], x: ['/settings', 'Settings'] };
 const typing = (el) => !!el?.closest?.('input, textarea, select, [contenteditable]');
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || '');
 

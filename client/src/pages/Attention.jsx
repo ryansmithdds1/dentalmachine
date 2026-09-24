@@ -94,11 +94,3 @@ function CloseIssue({ issue, status, onClose, onDone }) {
     </Modal>
   );
 }
-
-// The count on the sidebar: open items in this person's list.
-export function AttentionBadge() {
-  const { data, reload } = useApi('/issues?role=mine');
-  useLiveEvents((e) => e.type === 'issues' && reload());
-  const n = data?.issues.length || 0;
-  return n > 0 ? <span className="nav-badge">{n}</span> : null;
-}

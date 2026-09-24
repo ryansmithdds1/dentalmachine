@@ -77,7 +77,8 @@ kbd { font: 500 11px/1 inherit; border: 1px solid currentColor; border-radius: 4
 /* Collapsed: the label appears as a tooltip beside the icon */
 .app:not(.rail-open) .rail-item[data-tip]:hover::after { content: attr(data-tip); position: absolute; left: calc(100% + 12px); top: 50%; transform: translateY(-50%); background: #0c1524; color: #fff; font-size: 12.5px; font-weight: 500; padding: 6px 10px; border-radius: 8px; white-space: nowrap; box-shadow: var(--shadow-lg); pointer-events: none; z-index: 50; }
 /* The page list scrolls when it's taller than the window, so the menu under your initials stays on screen.
-   Its labels come from RailTip (App.jsx) because the scroll box would clip the tooltip above. */
+   Pinned icons' labels come from RailTip and the groups' pages from their flyouts (nav/Rail.jsx, fixed to
+   the window) because the scroll box would clip anything drawn inside it. */
 @media (min-width: 801px) {
   .rail-nav { min-height: 0; overflow-y: auto; overflow-x: hidden; margin: 0 -8px; padding: 0 0 0 8px; scrollbar-width: thin; scrollbar-color: transparent transparent; }
   .rail-nav:hover { scrollbar-color: rgba(255, 255, 255, 0.2) transparent; }
@@ -487,7 +488,7 @@ button.active, .seg button.active { background: var(--primary-soft); color: var(
   .app { flex-direction: column; }
   .sidebar, .rail-open .sidebar { width: 100%; height: auto; position: sticky; top: 0; z-index: 40; flex-direction: row; align-items: center; padding: 6px 8px; }
   .rail-brand { padding: 0 4px 0 0; }
-  .rail-brand .rail-label, .rail-item .rail-label, .rail-foot > .rail-item:first-child { display: none !important; }
+  .rail-brand .rail-label, .rail-item .rail-label, .rail-foot > .rail-desktop { display: none !important; }
   .nav { flex-direction: row; overflow-x: auto; scrollbar-width: none; }
   .nav::-webkit-scrollbar { display: none; }
   .rail-item { width: 40px; flex: none; justify-content: center; padding: 0; }

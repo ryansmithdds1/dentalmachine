@@ -35,6 +35,8 @@ test('CAP open capacity: a red meter and its recommendation in one action', asyn
   await page.goto(`${app.base}/`);
   await page.waitForSelector('.sidebar');
   const r = await measure(page, async () => {
+    // The Schedule group's flyout opens on hover (not an action); Capacity is one click in it.
+    await page.hover('.rail-group[data-group="schedule"] .rail-group-btn');
     await page.locator('.sidebar a[href="/capacity"]').click();
     await page.waitForSelector('.cap-rec.red');
   });

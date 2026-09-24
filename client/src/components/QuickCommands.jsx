@@ -34,7 +34,7 @@ async function pollTasks() {
     tell();
   } catch { /* signed out or offline: the next poll tries again */ }
 }
-function useTaskCount() {
+export function useTaskCount() {
   const [c, setC] = useState(taskStore.count);
   useEffect(() => {
     taskStore.listeners.add(setC);
@@ -153,11 +153,4 @@ export default function QuickCommands() {
       )}
     </>
   );
-}
-
-// The count on To-do & labs: open tasks assigned to me (red when some are due today or overdue).
-export function TaskBadge() {
-  const c = useTaskCount();
-  if (!c?.open) return null;
-  return <span className={`nav-badge${c.due ? '' : ' calm'}`} title={`${c.open} open task${c.open === 1 ? '' : 's'} for you${c.due ? `, ${c.due} due` : ''}`}>{c.open}</span>;
 }

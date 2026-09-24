@@ -26,6 +26,12 @@ export function setPref(key, value) {
   // A lost preference only means one more click next time.
   api.put(`/me/prefs/${encodeURIComponent(key)}`, { value }).catch(() => { /* not important */ });
 }
+// For a preference saved through a route of its own (e.g. PUT /me/nav-pins, which checks and records it):
+// updates what this screen shows at once; the caller saves it and puts the old value back if that fails.
+export function showPref(key, value) {
+  cache = { ...(cache || {}), [key]: value };
+  notify();
+}
 
 // [value, remember] — value is the last one remembered (or the fallback until prefs load).
 export function useRemembered(key, fallback) {

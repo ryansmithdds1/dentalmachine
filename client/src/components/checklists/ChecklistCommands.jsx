@@ -57,13 +57,3 @@ export default function ChecklistCommands() {
     </div>
   );
 }
-
-// A count for the nav item (optional): items due for me now, red when any is overdue.
-export function ChecklistBadge() {
-  const [c, setC] = useState(null);
-  const load = useCallback(() => api.get('/checklists/count').then(setC).catch(() => {}), []);
-  useEffect(() => { load(); const t = setInterval(load, 5 * 60_000); return () => clearInterval(t); }, [load]);
-  useLiveEvents((e) => { if (e.type === 'checklists') load(); });
-  if (!c?.due) return null;
-  return <span className={`badge ${c.overdue ? 'danger' : 'info'}`} style={{ marginLeft: 'auto' }} aria-label={`${c.due} checklist items due`}>{c.due}</span>;
-}

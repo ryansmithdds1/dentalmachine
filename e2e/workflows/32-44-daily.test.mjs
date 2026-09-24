@@ -236,9 +236,11 @@ test('#42 end-of-day deposit that balances: ≤ 4 actions from anywhere', async 
   const pay = await s.post(`/patients/${p.id}/payments`, { amount: 12000, method: 'check', reference: '4411' });
   assert.ok(!pay.error, JSON.stringify(pay));
   await page.goto(`${app.base}/schedule`);
-  await page.waitForSelector('a[href="/deposits"]');
+  await page.waitForSelector('.rail-group[data-group="billing"]');
   const r = await measure(page, async () => {
-    await page.click('a[href="/deposits"]');
+    // Deposits & cash is in the Billing group's flyout: hover (not an action), then one click.
+    await page.hover('.rail-group[data-group="billing"] .rail-group-btn');
+    await page.click('.sidebar a[href="/deposits"]');
     await waitFocus('Bag or deposit slip number');
     await page.keyboard.type('BAG-0042');
     await page.keyboard.press('Enter');
