@@ -18,6 +18,7 @@ import billingRoutes from './routes/billing.js';
 import insuranceRoutes from './routes/insurance.js';
 import settingsRoutes from './routes/settings.js';
 import reportRoutes from './routes/reports.js';
+import reportLibraryRoutes from './routes/reportlibrary.js';
 import engagementRoutes from './routes/engagement.js';
 import publicRoutes from './routes/public.js';
 import documentRoutes from './routes/documents.js';
@@ -306,6 +307,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(insuranceRoutes({ db }));
   api.use(settingsRoutes({ db, secret, config, messenger }));
   api.use(reportRoutes({ db }));
+  api.use(reportLibraryRoutes({ db }));
   api.use(engagementRoutes({ db, messenger, config }));
   api.use(documentRoutes({ db, storage, config }));
   api.use(paymentRoutes({ db, config, messenger, payments, mailer }));

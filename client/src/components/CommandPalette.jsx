@@ -88,7 +88,8 @@ export default function CommandPalette() {
         ...(hit('clear patient') ? [{ key: 'clear', label: `Clear ${nameOf(active)}`, sub: 'Stop working on this patient', run: clear, icon: '×' }] : []),
       ]
       : [];
-    const screen = screenCommands().filter((c) => hit(c.label)).map((c) => ({ key: `s${c.id}`, label: c.label, sub: c.hint || 'This screen', run: c.run, icon: '⚡' }));
+    // Screens can register many commands (every report, every link): show a few until the person types.
+    const screen = screenCommands().filter((c) => hit(c.label)).slice(0, ql ? 40 : 8).map((c) => ({ key: `s${c.id}`, label: c.label, sub: c.hint || 'This screen', run: c.run, icon: '⚡' }));
     return [
       ...res.patients.map(patient),
       // The best match's common actions, right under it.

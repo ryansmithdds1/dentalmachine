@@ -10,6 +10,8 @@ import CloseBooks from '../components/CloseBooks.jsx';
 import Reconciliation from '../components/Reconciliation.jsx';
 import SavedReports from '../components/SavedReports.jsx';
 import ReportBuilder from '../components/ReportBuilder.jsx';
+import ReportLibrary from '../components/ReportLibrary.jsx';
+import { useCommands } from '../shortcuts.js';
 import { api, downloadCsv, dollars, getLocationId } from '../api.js';
 import { MoreRows } from '../components/ui.jsx';
 import { ProviderSelect, CsvButton, PrintButton } from '../components/ReportControls.jsx';
@@ -17,11 +19,15 @@ import { ProviderSelect, CsvButton, PrintButton } from '../components/ReportCont
 export default function Reports() {
   const [params, setParams] = useSearchParams();
   const tab = params.get('tab') || 'kpis';
+  // The report library's catalog; its reports can also be opened by name from the command bar (Ctrl K).
+  const { data: library, error: libraryError } = useApi('/report-library');
+  useCommands((library?.reports || []).map((r) => ({ id: `report-${r.id}`, label: `Report: ${r.name}`, hint: `Report library · ${r.category}`, run: () => setParams({ tab: 'library', report: r.id }) })));
   return (
     <>
       <div className="page-header"><h1>Reports</h1></div>
       <div className="tabs">
         <button className={tab === 'kpis' ? 'active' : ''} onClick={() => setParams({ tab: 'kpis' })}>Practice KPIs</button>
+        <button className={tab === 'library' ? 'active' : ''} onClick={() => setParams({ tab: 'library' })}>Report library</button>
         <button className={tab === 'ops' ? 'active' : ''} onClick={() => setParams({ tab: 'ops' })}>Day sheet, production & A/R</button>
         <button className={tab === 'referrals' ? 'active' : ''} onClick={() => setParams({ tab: 'referrals' })}>Referrals</button>
         <button className={tab === 'memberships' ? 'active' : ''} onClick={() => setParams({ tab: 'memberships' })}>Memberships</button>
@@ -33,7 +39,7 @@ export default function Reports() {
         <button className={tab === 'saved' ? 'active' : ''} onClick={() => setParams({ tab: 'saved' })}>Saved & scheduled</button>
         <button className={tab === 'builder' ? 'active' : ''} onClick={() => setParams({ tab: 'builder' })}>Report builder</button>
       </div>
-      {tab === 'kpis' ? <Analytics /> : tab === 'hygiene' ? <HygieneReport /> : tab === 'plans' ? <PlanReport /> : tab === 'close' ? <CloseBooks /> : tab === 'reconcile' ? <Reconciliation /> : tab === 'saved' ? <SavedReports /> : tab === 'builder' ? <ReportBuilder /> : tab === 'referrals' ? <ReferralReport /> : tab === 'memberships' ? <MembershipReport /> : tab === 'reviews' ? <ReviewReport /> : <Operational />}
+      {tab === 'kpis' ? <Analytics /> : tab === 'library' ? <ReportLibrary catalog={library} error={libraryError} /> : tab === 'hygiene' ? <HygieneReport /> : tab === 'plans' ? <PlanReport /> : tab === 'close' ? <CloseBooks /> : tab === 'reconcile' ? <Reconciliation /> : tab === 'saved' ? <SavedReports /> : tab === 'builder' ? <ReportBuilder /> : tab === 'referrals' ? <ReferralReport /> : tab === 'memberships' ? <MembershipReport /> : tab === 'reviews' ? <ReviewReport /> : <Operational />}
     </>
   );
 }

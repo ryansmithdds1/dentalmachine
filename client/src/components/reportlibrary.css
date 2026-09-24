@@ -1,0 +1,111 @@
+/* Reports → Report library. Colours come from the theme variables in styles.css, so dark mode follows. */
+.rl { display: grid; grid-template-columns: 232px minmax(0, 1fr); gap: 20px; align-items: start; }
+.rl-side { position: sticky; top: 12px; display: flex; flex-direction: column; gap: 12px; max-height: calc(100vh - 24px); overflow-y: auto; padding-bottom: 12px; }
+.rl-main { min-width: 0; }
+
+.rl-search { position: relative; display: block; }
+.rl-search svg { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--faint); pointer-events: none; }
+.rl-search input { padding-left: 32px; background: var(--panel); }
+
+.rl-cats { display: flex; flex-direction: column; gap: 1px; }
+.rl-cats-rule { height: 1px; background: var(--border); margin: 6px 4px; }
+button.rl-cat { justify-content: flex-start; border: none; background: none; box-shadow: none; min-height: 32px; padding: 4px 10px; border-radius: var(--radius-sm); color: var(--text-2); font-weight: 500; width: 100%; }
+button.rl-cat:hover { background: var(--hover); }
+button.rl-cat.active { background: var(--primary-soft); color: var(--primary-ink); font-weight: 600; }
+.rl-cat svg { color: #d99a06; flex: none; }
+.rl-cat span:first-of-type { flex: 1; text-align: left; overflow: hidden; text-overflow: ellipsis; }
+.rl-count { font-size: 11px; font-weight: 600; color: var(--faint); font-variant-numeric: tabular-nums; }
+.rl-cat.active .rl-count { color: var(--primary-ink); }
+
+.rl-sidelist { display: flex; flex-direction: column; gap: 1px; border-top: 1px solid var(--border); padding-top: 10px; }
+.rl-sidelist .rl-eyebrow { padding: 0 10px 4px; }
+button.rl-sideitem { justify-content: flex-start; border: none; background: none; box-shadow: none; min-height: 28px; padding: 3px 10px; font-size: 12.5px; color: var(--muted); white-space: normal; text-align: left; border-radius: 6px; }
+button.rl-sideitem:hover { color: var(--text); background: var(--hover); }
+button.rl-sideitem.active { color: var(--primary-ink); background: var(--primary-soft); font-weight: 600; }
+
+.rl-eyebrow { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 650; color: var(--faint); margin: 0; }
+.rl-intro { margin: 2px 0 14px; }
+.rl-intro h2 { font-size: 18px; margin: 0 0 2px; }
+.rl-intro p { margin: 0; max-width: 70ch; }
+.rl-group { margin-bottom: 20px; }
+.rl-group > .rl-eyebrow { margin-bottom: 8px; }
+.rl-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px; }
+.rl-card { position: relative; display: flex; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); transition: border-color 0.12s, box-shadow 0.12s, transform 0.12s; }
+.rl-card:hover { border-color: var(--border-strong); box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08); transform: translateY(-1px); }
+button.rl-card-open { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 13px 40px 14px 15px; border: none; background: none; box-shadow: none; white-space: normal; text-align: left; border-radius: var(--radius); }
+button.rl-card-open:hover { background: none; }
+button.rl-card-open:focus-visible { box-shadow: var(--ring); }
+.rl-card-name { font-weight: 650; color: var(--text); display: inline-flex; gap: 6px; align-items: center; }
+.rl-card-desc { color: var(--muted); font-size: 12.5px; line-height: 1.4; font-weight: 400; }
+.rl-tag { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; background: var(--info-soft); color: var(--info); border-radius: 99px; padding: 1px 7px; }
+.rl-empty { color: var(--muted); display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+
+button.rl-star { position: absolute; top: 8px; right: 8px; border: none; background: none; box-shadow: none; min-height: 0; padding: 4px; color: var(--faint); border-radius: 6px; }
+button.rl-star:hover { color: #d99a06; background: var(--hover); }
+button.rl-star.on { color: #d99a06; }
+button.rl-star.on svg { fill: currentColor; }
+button.rl-star.inline { position: static; vertical-align: middle; margin-left: 4px; }
+
+.rl-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; margin-bottom: 12px; }
+.rl-head-text { min-width: 0; flex: 1 1 320px; }
+button.rl-back { font-size: 12.5px; margin-bottom: 8px; gap: 4px; }
+.rl-title { font-size: 20px; margin: 2px 0 2px; display: flex; align-items: center; gap: 2px; letter-spacing: -0.015em; }
+.rl-desc { margin: 0; max-width: 72ch; }
+.rl-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.rl-filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 14px; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; margin-bottom: 12px; }
+.rl-field { display: flex; flex-direction: column; gap: 4px; font-size: 11.5px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.rl-field input, .rl-field select { width: auto; min-width: 150px; text-transform: none; letter-spacing: normal; font-weight: 400; color: var(--text); font-size: 14px; }
+.rl-field .seg button { text-transform: none; letter-spacing: normal; font-size: 13px; }
+.rl-stepper { display: inline-flex; gap: 4px; align-items: center; }
+.rl-presets { display: flex; gap: 4px; flex-wrap: wrap; padding-bottom: 3px; }
+.rl-presets button.active { border-color: var(--primary); }
+button.rl-reset { margin-left: auto; margin-bottom: 3px; }
+
+.rl-table-card { padding: 0; overflow: hidden; transition: opacity 0.15s; }
+.rl-table-card.loading { opacity: 0.6; }
+.rl-table { font-size: 13.5px; }
+.rl-table th { position: sticky; top: 0; z-index: 1; padding: 0; white-space: nowrap; }
+.rl-table th.num .rl-sort { justify-content: flex-end; }
+button.rl-sort { width: 100%; justify-content: flex-start; gap: 4px; border: none; background: none; box-shadow: none; min-height: 0; padding: 9px 12px; font: inherit; font-weight: 600; color: inherit; border-radius: 0; }
+button.rl-sort:hover { color: var(--text); background: none; }
+.rl-table td { padding: 8px 12px; }
+.rl-table tbody tr:hover td { background: var(--hover); }
+.rl-table td.rl-neg { color: var(--danger); }
+.rl-table tfoot td { border-top: 2px solid var(--border-strong); border-bottom: none; white-space: nowrap; }
+.rl-summary .rl-section th { background: var(--subtle); color: var(--text-2); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.05em; padding: 8px 12px; }
+.rl-summary tr.rl-strong td { font-weight: 650; }
+.rl-note { font-size: 12.5px; margin: 10px 2px 0; max-width: 90ch; }
+.rl-note.warn { background: var(--warn-soft); color: var(--warn); padding: 8px 12px; border-radius: var(--radius-sm); }
+
+.rl-skeleton { display: flex; flex-direction: column; gap: 10px; padding: 16px; }
+.rl-skeleton i { display: block; height: 14px; border-radius: 6px; background: linear-gradient(90deg, var(--subtle), var(--grid-major), var(--subtle)); background-size: 200% 100%; animation: rl-shimmer 1.2s linear infinite; }
+.rl-skeleton i:nth-child(2) { width: 86%; }
+.rl-skeleton i:nth-child(3) { width: 92%; }
+.rl-skeleton i:nth-child(4) { width: 70%; }
+@keyframes rl-shimmer { to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .rl-skeleton i { animation: none; } .rl-card:hover { transform: none; } }
+
+.rl-print-head { display: none; }
+
+@media (max-width: 900px) {
+  .rl { grid-template-columns: minmax(0, 1fr); }
+  .rl-side { position: static; max-height: none; }
+  .rl-cats { flex-direction: row; flex-wrap: wrap; gap: 4px; }
+  button.rl-cat { width: auto; }
+  .rl-cats-rule, .rl-sidelist { display: none; }
+}
+
+@media print {
+  .rl { display: block; }
+  .rl-print-head { display: block; font-size: 12px; margin-bottom: 8px; color: #000; }
+  .rl-head { margin-bottom: 6px; }
+  .rl-table-card { border: none; box-shadow: none; overflow: visible; }
+  .rl-table { font-size: 11px; }
+  .rl-table th { position: static; }
+  .rl-table thead { display: table-header-group; }
+  .rl-table tr { break-inside: avoid; }
+  .rl-table tbody tr:hover td { background: none; }
+  .rl-table td, button.rl-sort { padding: 4px 6px; }
+  .rl-note.warn { background: none; }
+}
