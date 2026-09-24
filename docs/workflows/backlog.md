@@ -82,6 +82,25 @@ T4. **Tasks from chat and personal to-do lists:** turn any message into a task (
 T5. **Fast and keyboard-first:** Ctrl/⌘J opens chat from anywhere, a slide-out panel so the current screen stays,
     ↑ to edit the last message, Enter to send, Shift+Enter for a new line, and the command bar can "message @Maria …".
 
+## Paperwork on autopilot (asked for, high priority)
+Builds on intake forms, consents, form packets, automatic sends before visits, and the in-progress workflows 23
+(in-office signing pass) and 30 (one review worklist).
+P1. **The right forms, picked for you:** each visit knows what's due (new patient packet, yearly medical history
+    update, HIPAA acknowledgement, financial policy, the consent for the procedures booked, COVID/other screening the
+    office sets) and sends it automatically before the visit; one "Send forms" button (or key) for anything else.
+P2. **Any way the patient likes:** text or email link to their own phone (no login, DOB check), a QR code at the
+    desk, or the office iPad.
+P3. **iPad kiosk mode:** a locked kiosk screen for a tablet at the front desk or in the operatory — staff hand it
+    over with the patient's forms already loaded (no searching, no DOB typing via the in-office pass), big friendly
+    screens in English/Spanish, signature, card photos, and it returns to the kiosk home and clears itself when done
+    or idle; staff see live "Maria is on page 3 of 5".
+P4. **Straight into the chart, no retyping:** contact details and insurance apply automatically (insurance card photos
+    read and matched to the policy); medical history changes are merged with a one-screen "what changed" for the
+    clinician to accept in one key; signed consents and forms are filed as PDFs on the chart; allergies and
+    medications update the alerts everywhere; nothing is typed twice.
+P5. **Status and follow-up:** each visit shows forms done / not done on the schedule and the huddle, automatic
+    reminders to finish, and the few that need a person land in one worklist (from workflow 30).
+
 ## Then: remaining workflow batches
 9. Batch 4 (32–44): new patient setup, ERA/EOB posting, prescriptions, lab cases, huddle actions, recall lists,
    pre-auths, financing, adjustments, referrals, end-of-day, review requests (fix the count bug), clock in/out.
