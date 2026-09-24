@@ -55,6 +55,25 @@ who did it · what happened · when · what was there before · what is there no
     changes, permissions, scheduling conflicts, imports, integrations, audit logging.
 18. **Keep it simple:** clear tables, small modules, standard tech, comments that explain why.
 
+## Efficiency Principles (every UI change)
+The team's workflows are listed in `docs/workflows/task-list.md`; each one's spec and click budget is in
+`docs/workflows/specs/`. Safety rules above still win: undo never replaces the audit trail, and money/clinical
+records are still reversed, not deleted.
+1. Every one of the top 20 workflows must be completable with the keyboard alone.
+2. A global command bar (Cmd/Ctrl-K) finds any patient, opens any screen and runs any common action.
+3. The active patient stays in context across every screen until the user switches. Never make the user
+   search for the same patient twice.
+4. No stacked modals. Prefer inline editing and side panels.
+5. No "Are you sure?" dialogs except for destructive actions that can't be undone. Everything else saves
+   optimistically, with an undo toast.
+6. Every field gets a smart default (last used value, provider's usual, today's date, the patient's primary
+   insurance…).
+7. If the system already knows something, it never asks for it again.
+8. If a task can happen automatically in the background, it should; the UI shows only the exceptions that
+   need a person.
+9. Click budgets per workflow live in `docs/workflows/specs/`. A change that exceeds a budget is a bug
+   (the Playwright workflow tests in `e2e/workflows/` fail when one is exceeded).
+
 ## Conventions
 - Server: Node/Express, async `db` (SQLite and Postgres — both must pass). Tables in the `SCHEMA` literal in
   `db.js` (no backticks inside; referenced tables first); new columns in `COLUMNS`. No `json_extract`; no

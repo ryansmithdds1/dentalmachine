@@ -1,3 +1,4 @@
+import { searchPatients } from '../patientsearch.js';
 import { Router } from 'express';
 import { requirePermission, HttpError, can } from '../auth.js';
 import { pick, requireFields, insert, update, findOr404, audit, practiceNow, mapSeq, friendlyDateTime, recorded } from '../util.js';
@@ -488,21 +489,10 @@ export default function frontDeskRoutes({ db, messenger }) {
 
   // Global quick search (command palette): patients by name/phone/DOB/ID, plus claims by number.
   r.get('/search', requirePermission('patients:read'), async (req, res) => {
-    const q = String(req.query.q || '').trim();
+    const q = String(req.query.q || '').trim().slice(0, 100);
     if (q.length < 2) return res.json({ patients: [], claims: [] });
     const pid = req.user.practice_id;
-    const like = `%${q}%`;
-    const digits = q.replace(/\D/g, '');
-    const scope = patientScope(req.user);
-    const patients = await db.all(
-      `SELECT id, first_name, last_name, preferred_name, dob, phone, status, medical_alerts FROM patients p
-       WHERE practice_id = ? AND status != 'archived'${scope.sql} AND (
-         (first_name || ' ' || last_name) LIKE ? OR (last_name || ', ' || first_name) LIKE ? OR preferred_name LIKE ? OR email LIKE ?
-         OR (? != '' AND length(?) >= 4 AND replace(replace(replace(replace(phone,'(',''),')',''),'-',''),' ','') LIKE ?)
-         OR dob = ? OR CAST(id AS TEXT) = ?)
-       ORDER BY last_name, first_name LIMIT 8`,
-      pid, ...scope.args, like, like, like, like, digits, digits, `%${digits}%`, q, q.replace(/^#/, ''),
-    );
+    const patients = await searchPatients(db, pid, q, { scope: patientScope(req.user) });
     const claims = /^#?\d+$/.test(q)
       ? await db.all('SELECT c.id, c.status, p.first_name, p.last_name FROM claims c JOIN patients p ON p.id = c.patient_id WHERE c.practice_id = ? AND c.id = ?', pid, Number(q.replace('#', '')))
       : [];
