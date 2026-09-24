@@ -566,6 +566,13 @@ LB3. **By voice:** "Lab case is in for Maria Lopez — crown for number 30, shad
 LB4. **Problems handled:** a failed check notifies the doctor, drafts a note to the lab (remake/adjust) and offers to
      move the visit; late cases and remakes are tracked per lab (turnaround and remake rate report).
 
+LB5. **Special materials and parts, not just lab cases (asked for):** a visit can need parts that must be ordered and
+     on hand — implant fixtures (brand, platform, diameter × length), abutments/screws/healing caps, scan bodies, bone
+     graft and membranes, aligners/retainers arriving from the ortho lab, sedation supplies, special burs or kits. Each
+     is a "needed for this visit" item with status (to order → ordered → arrived → checked/set aside), linked to the
+     inventory module (stock reserved if on the shelf, reorder if not), shown on the schedule card with the lab status
+     in one "ready / not ready" badge, flagged in the huddle days ahead, checked in by photo/voice like lab cases.
+     Templates per procedure (e.g. implant placement → fixture + healing abutment + graft) prefill what's needed.
 ## Then: remaining workflow batches
 9. Batch 4 (32–44): new patient setup, ERA/EOB posting, prescriptions, lab cases, huddle actions, recall lists,
    pre-auths, financing, adjustments, referrals, end-of-day, review requests (fix the count bug), clock in/out.
