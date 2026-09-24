@@ -10,7 +10,12 @@
 //  • Imaging programs can be named by preset ("apps": [{ "preset": "dexis" }]) from presets.json next to this
 //    file; any field set in bridge-config.json (command, args, writeFile, watch, name) overrides the preset's.
 //    Apps written out in full, as before presets existed, keep working unchanged.
-// Usage: node dental-machine-bridge.mjs bridge-config.json [--list-sensors | --check]
+//  • Desk scanners: "Scan" in the chart scans on this PC's scanner ("scanner": { "driver": "auto" }) —
+//    WIA on Windows (installer/scan.ps1), SANE's scanimage on macOS/Linux, or any command that writes page
+//    images to a folder — makes one PDF and files it to the patient. Scan folders (ScanSnap, copiers that
+//    "scan to folder"): a watch folder with "kind": "scan" files P<chart#>_… to that chart, the rest to the
+//    scan inbox. See docs/documents.md.
+// Usage: node dental-machine-bridge.mjs bridge-config.json [--list-sensors | --list-scanners | --check]
 import { spawn } from 'node:child_process';
 import { readFileSync, writeFileSync, readdirSync, statSync, existsSync, mkdirSync, renameSync, rmSync } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -18,7 +23,7 @@ import { hostname, tmpdir } from 'node:os';
 import { join, resolve, dirname, basename, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const VERSION = '1.4.0';
+const VERSION = '1.5.0';
 const configPath = resolve(process.argv[2] || 'bridge-config.json');
 const config = JSON.parse(readFileSync(configPath, 'utf8'));
 const server = String(config.server || '').replace(/\/$/, '');
@@ -93,6 +98,18 @@ function resolveApps() {
   return apps;
 }
 config.apps = resolveApps();
+// Scan folders: "scanFolders": [{ "preset": "scansnap" }] or [{ "folder": "D:\\Scans" }] — paperwork a scanner saves there
+// is filed to the chart named in the file (P<chart#>_…) or waits in the scan inbox.
+for (const entry of Array.isArray(config.scanFolders) ? config.scanFolders : []) {
+  const p = entry?.preset ? scanPreset(entry.preset) : null;
+  if (entry?.preset && (!p || p.type !== 'folder')) {
+    setupProblems.push({ name: `Scan folder "${entry.preset}"`, ok: false, note: `No scan-folder preset called "${entry.preset}" in presets.json` });
+    continue;
+  }
+  const folder = entry.folder || p?.folder;
+  if (!folder) continue;
+  config.watch = [...(config.watch || []), { create: true, ...entry, folder, kind: 'scan' }];
+}
 for (const w of config.watch || []) {
   w.folder = fromConfigDir(w.folder);
   if (w.moveTo) w.moveTo = fromConfigDir(w.moveTo);
@@ -159,6 +176,10 @@ async function commandLoop() {
           }
           if (cmd.type === 'sensor_test') {
             testSensor(cmd);
+            continue;
+          }
+          if (cmd.type === 'scan') {
+            scanJob(cmd); // reports its own progress and result
             continue;
           }
           result = { ok: true, message: cmd.type === 'launch' ? launch(cmd) : `Unknown command ${cmd.type}` };
@@ -354,6 +375,214 @@ async function testSensor(cmd) {
   return done(true, `${sensor.name || 'Sensor'} works — got a ${Math.round(data.length / 1024)} KB image`);
 }
 
+// ---- Desk scanners ("Scan" in the chart) ----
+// "scanner": { "driver": "auto" | "wia" | "sane" | "command", "device": "…", "name": "Front desk scanner" }
+//  • wia     — Windows: installer/scan.ps1 drives the Windows Image Acquisition service (flatbed or feeder, duplex
+//              when the scanner has it), one JPEG per page. UNTESTED on real hardware: written from the WIA 2.0
+//              automation documentation; check with `--list-scanners` and one test scan.
+//  • sane    — macOS/Linux: SANE's `scanimage` (brew install sane-backends / apt install sane-utils).
+//              UNTESTED against real scanners: source names ("ADF", "ADF Duplex", "Flatbed") differ between
+//              backends — set "sources": { "feeder": "…", "duplex": "…", "flatbed": "…" } to match `scanimage -A`.
+//  • command — any program that scans: "command" + "args" with {dir} (write page files there, in page order),
+//              {dpi}, {color} (color|gray|bw), {source} (auto|flatbed|feeder), {duplex} (1|0) and {device}.
+// The pages become one PDF (JPEG pages are embedded as they are, so nothing is re-compressed) unless the chart
+// asked for separate pictures, then go to the patient the scan was started for.
+// scan.ps1 is looked for next to the bridge (installer/ or the same folder); install packages that don't carry
+// it get the copy embedded at the end of this file, written out on first use.
+const SCAN_PS1 = [join(dirname(fileURLToPath(import.meta.url)), 'installer', 'scan.ps1'), join(dirname(fileURLToPath(import.meta.url)), 'scan.ps1')].find((p) => existsSync(p))
+  || join(tmpdir(), `dm-bridge-scan-${VERSION}.ps1`);
+const ensureScanScript = () => {
+  if (!existsSync(SCAN_PS1)) writeFileSync(SCAN_PS1, embeddedScanPs1().replace(/\n/g, '\r\n'));
+  return SCAN_PS1;
+};
+const whichSync = (cmd) => {
+  const dirs = String(process.env.PATH || '').split(process.platform === 'win32' ? ';' : ':');
+  const exts = process.platform === 'win32' ? ['.exe', '.cmd', ''] : [''];
+  for (const d of dirs) for (const e of exts) if (d && existsSync(join(d, cmd + e))) return join(d, cmd + e);
+  return null;
+};
+function scanPreset(id) {
+  const file = [config.presetsFile ? fromConfigDir(config.presetsFile) : null, join(dirname(fileURLToPath(import.meta.url)), 'presets.json'), join(dirname(configPath), 'presets.json')].find((f) => f && existsSync(f));
+  try {
+    return (JSON.parse(readFileSync(file, 'utf8')).scanPresets || []).find((p) => p.id === String(id).toLowerCase()) || null;
+  } catch {
+    return null;
+  }
+}
+function resolveScanner(raw) {
+  if (!raw) return null;
+  let r = typeof raw === 'string' ? { driver: raw } : { ...raw };
+  if (r.preset) {
+    const p = scanPreset(r.preset);
+    if (!p || p.type !== 'device') setupProblems.push({ name: `Scanner "${r.preset}"`, ok: false, note: `No scanner preset called "${r.preset}" in presets.json` });
+    else r = { driver: p.driver, device: p.device, name: p.name, ...r };
+  }
+  let driver = String(r.driver || 'auto').toLowerCase();
+  if (driver === 'auto') driver = process.platform === 'win32' ? 'wia' : whichSync('scanimage') ? 'sane' : null;
+  if (!driver) {
+    setupProblems.push({ name: 'Scanner', ok: false, note: 'No scanner driver found: install SANE (scanimage), or set "scanner": { "driver": "command", … } in bridge-config.json' });
+    return null;
+  }
+  if (driver === 'command' && !r.command) {
+    setupProblems.push({ name: 'Scanner', ok: false, note: '"scanner.driver" is "command" but "scanner.command" is not set' });
+    return null;
+  }
+  return {
+    feeder: true, flatbed: true, duplex: driver !== 'command' ? true : !!r.duplex, timeoutSeconds: 300, ...r, driver,
+    name: r.name || (r.device ? `${r.device}` : driver === 'wia' ? 'Scanner (WIA)' : driver === 'sane' ? 'Scanner (SANE)' : 'Scanner'),
+    sources: { flatbed: 'Flatbed', feeder: 'ADF', duplex: 'ADF Duplex', ...(r.sources || {}) },
+  };
+}
+const scannerCfg = resolveScanner(config.scanner || null);
+
+const runProc = (command, args, { timeoutSeconds = 300, cwd } = {}) => new Promise((done) => {
+  let out = '';
+  let err = '';
+  let child;
+  try {
+    child = spawn(command, args, { windowsHide: true, cwd });
+  } catch (e) {
+    done({ ok: false, code: null, out, err: e.message });
+    return;
+  }
+  const timer = setTimeout(() => child.kill(), timeoutSeconds * 1000);
+  child.stdout?.on('data', (d) => { out += d; });
+  child.stderr?.on('data', (d) => { err += d; });
+  child.on('error', (e) => { clearTimeout(timer); done({ ok: false, code: null, out, err: e.message }); });
+  child.on('exit', (code) => { clearTimeout(timer); done({ ok: code === 0, code, out, err }); });
+});
+
+// Width, height and colour components of a JPEG (from its frame header), or null.
+function jpegInfo(buf) {
+  if (buf[0] !== 0xff || buf[1] !== 0xd8) return null;
+  let p = 2;
+  while (p + 9 < buf.length) {
+    if (buf[p] !== 0xff) { p++; continue; }
+    const marker = buf[p + 1];
+    if (marker === 0xd8 || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) { p += 2; continue; }
+    const len = buf.readUInt16BE(p + 2);
+    if ((marker >= 0xc0 && marker <= 0xc3) || (marker >= 0xc5 && marker <= 0xc7) || (marker >= 0xc9 && marker <= 0xcb) || (marker >= 0xcd && marker <= 0xcf)) {
+      return { height: buf.readUInt16BE(p + 5), width: buf.readUInt16BE(p + 7), components: buf[p + 9] };
+    }
+    p += 2 + len;
+  }
+  return null;
+}
+
+// One PDF from JPEG pages, each page sized from the scan's resolution (so a letter page prints as a letter page).
+function jpegsToPdf(pages, dpi = 300) {
+  const objs = [];
+  const add = (body) => { objs.push(body); return objs.length; };
+  const catalog = add(null);
+  const tree = add(null);
+  const kids = [];
+  for (const jpg of pages) {
+    const info = jpegInfo(jpg);
+    if (!info) throw new Error('A page is not a JPEG image');
+    const w = (info.width / dpi) * 72;
+    const h = (info.height / dpi) * 72;
+    const space = info.components === 1 ? '/DeviceGray' : info.components === 4 ? '/DeviceCMYK' : '/DeviceRGB';
+    const img = add(Buffer.concat([Buffer.from(`<< /Type /XObject /Subtype /Image /Width ${info.width} /Height ${info.height} /ColorSpace ${space} /BitsPerComponent 8 /Filter /DCTDecode${info.components === 4 ? ' /Decode [1 0 1 0 1 0 1 0]' : ''} /Length ${jpg.length} >>\nstream\n`), jpg, Buffer.from('\nendstream')]));
+    const draw = `q ${w.toFixed(2)} 0 0 ${h.toFixed(2)} 0 0 cm /Im0 Do Q`;
+    const content = add(`<< /Length ${draw.length} >>\nstream\n${draw}\nendstream`);
+    kids.push(add(`<< /Type /Page /Parent ${tree} 0 R /MediaBox [0 0 ${w.toFixed(2)} ${h.toFixed(2)}] /Resources << /XObject << /Im0 ${img} 0 R >> >> /Contents ${content} 0 R >>`));
+  }
+  objs[catalog - 1] = `<< /Type /Catalog /Pages ${tree} 0 R >>`;
+  objs[tree - 1] = `<< /Type /Pages /Kids [${kids.map((k) => `${k} 0 R`).join(' ')}] /Count ${kids.length} >>`;
+  const parts = [Buffer.from('%PDF-1.4\n%\xe2\xe3\xcf\xd3\n', 'latin1')];
+  let offset = parts[0].length;
+  const offsets = [];
+  objs.forEach((body, i) => {
+    const chunk = Buffer.concat([Buffer.from(`${i + 1} 0 obj\n`), Buffer.isBuffer(body) ? body : Buffer.from(body, 'latin1'), Buffer.from('\nendobj\n')]);
+    offsets.push(offset);
+    offset += chunk.length;
+    parts.push(chunk);
+  });
+  const xref = `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n${offsets.map((o) => `${String(o).padStart(10, '0')} 00000 n \n`).join('')}trailer\n<< /Size ${objs.length + 1} /Root ${catalog} 0 R >>\nstartxref\n${offset}\n%%EOF\n`;
+  parts.push(Buffer.from(xref, 'latin1'));
+  return Buffer.concat(parts);
+}
+
+// Runs the scanner into a fresh folder; → sorted page file paths (or throws with a message for the chart).
+async function scanPages(opts, dir) {
+  const s = scannerCfg;
+  const color = opts.color || 'gray';
+  const source = opts.source || 'auto';
+  if (s.driver === 'wia') {
+    const args = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', s.script || ensureScanScript(), '-OutDir', dir, '-Source', source, '-Color', color, '-Dpi', String(opts.dpi || 300)];
+    if (opts.duplex) args.push('-Duplex');
+    if (s.device) args.push('-Device', s.device);
+    const out = await runProc(s.powershell || 'powershell.exe', args, { timeoutSeconds: s.timeoutSeconds });
+    if (!out.ok) throw new Error((out.err || out.out).split(/\r?\n/).filter(Boolean).pop() || `scan.ps1 failed (exit ${out.code})`);
+  } else if (s.driver === 'sane') {
+    const mode = { color: 'Color', gray: 'Gray', bw: 'Lineart' }[color];
+    const args = ['--format=jpeg', `--resolution=${opts.dpi || 300}`, `--mode=${mode}`, `--batch=${join(dir, 'page-%03d.jpg')}`];
+    if (s.device) args.unshift(`--device-name=${s.device}`);
+    if (source === 'flatbed') args.push(`--source=${s.sources.flatbed}`, '--batch-count=1');
+    else if (source === 'feeder') args.push(`--source=${opts.duplex ? s.sources.duplex : s.sources.feeder}`);
+    else args.push('--batch-count=1');
+    const out = await runProc(s.command || 'scanimage', args, { timeoutSeconds: s.timeoutSeconds });
+    // scanimage ends a feeder batch with "Document feeder out of documents" (exit 7) once pages were read.
+    if (!out.ok && !(out.code === 7 && readdirSync(dir).length)) throw new Error((out.err || out.out).split(/\r?\n/).filter(Boolean).pop() || `scanimage failed (exit ${out.code})`);
+  } else {
+    const fillScan = (a) => String(a).replace(/\{(\w+)\}/g, (m, k) => ({ dir, dpi: String(opts.dpi || 300), color, source, duplex: opts.duplex ? '1' : '0', device: s.device || '' })[k] ?? m);
+    const out = await runProc(fillScan(s.command), (s.args || []).map(fillScan), { timeoutSeconds: s.timeoutSeconds });
+    if (!out.ok) throw new Error((out.err || out.out).split(/\r?\n/).filter(Boolean).pop() || `The scan command failed (exit ${out.code})`);
+  }
+  const files = readdirSync(dir).filter((n) => /\.(jpe?g|png|tiff?|pdf)$/i.test(n)).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).map((n) => join(dir, n));
+  if (!files.length) throw new Error('The scanner didn’t produce any pages — is there paper in it?');
+  return files;
+}
+
+async function scanJob(cmd) {
+  const who = `${cmd.patient.first_name} ${cmd.patient.last_name}`;
+  const opts = cmd.options || {};
+  const finish = (ok, message) => {
+    log(message);
+    return call('POST', `/commands/${cmd.id}/result`, { ok, message }).catch(() => {});
+  };
+  if (!scannerCfg) return finish(false, 'No scanner is set up in bridge-config.json on this computer');
+  const dir = join(tmpdir(), `dm-scan-${cmd.id}-${Date.now()}`);
+  mkdirSync(dir, { recursive: true });
+  try {
+    progress(cmd, 'waiting', `Scanning for ${who}${opts.source === 'feeder' ? ' from the feeder' : opts.source === 'flatbed' ? ' from the glass' : ''}…`);
+    const files = await scanPages(opts, dir);
+    const jpegs = files.map((f) => readFileSync(f));
+    const allJpeg = jpegs.every((b) => jpegInfo(b));
+    progress(cmd, 'uploading', `${files.length} page${files.length === 1 ? '' : 's'} scanned — sending to the chart`);
+    if (opts.format !== 'jpg' && allJpeg) {
+      const pdf = jpegsToPdf(jpegs, opts.dpi || 300);
+      await call('POST', `/scans/${cmd.id}/file?${new URLSearchParams({ filename: 'scan.pdf' })}`, pdf, { 'Content-Type': 'application/pdf' });
+    } else {
+      // Separate pictures asked for, or pages that aren't JPEG (a PDF or PNG from the scan command): each as it is.
+      for (const [i, f] of files.entries()) {
+        await call('POST', `/scans/${cmd.id}/file?${new URLSearchParams({ filename: basename(f), ...(files.length > 1 ? { page: String(i + 1) } : {}) })}`, jpegs[i], { 'Content-Type': 'application/octet-stream' });
+      }
+    }
+    return finish(true, `Scanned ${files.length} page${files.length === 1 ? '' : 's'} into ${who}’s chart`);
+  } catch (err) {
+    progress(cmd, 'error', `Scan failed: ${err.message}`);
+    return finish(false, `Scan failed: ${err.message}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+const scannerBody = () => (scannerCfg ? {
+  name: scannerCfg.name, driver: scannerCfg.driver, feeder: scannerCfg.feeder !== false, flatbed: scannerCfg.flatbed !== false, duplex: !!scannerCfg.duplex,
+  color: scannerCfg.color !== false, dpis: scannerCfg.dpis || [150, 200, 300, 600],
+} : { name: null });
+if (process.argv.includes('--list-scanners')) {
+  if (process.platform === 'win32') {
+    const out = await runProc('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ensureScanScript(), '-List']);
+    console.log(out.out || out.err || 'scan.ps1 printed nothing');
+  } else if (whichSync('scanimage')) {
+    const out = await runProc('scanimage', ['-L']);
+    console.log(out.out || out.err);
+  } else console.log('No scanner tools found: install SANE (scanimage) or set "scanner": { "driver": "command" } in bridge-config.json');
+  process.exit(0);
+}
+
 // Picks up new files from each watched folder once they've finished writing.
 async function scan() {
   for (const w of config.watch || []) {
@@ -373,6 +602,32 @@ async function scan() {
       // "P123_bitewing.jpg" / "P123-pan.dcm" style names carry the chart number. The "P" is required by
       // default so capture timestamps ("20260923_1015.jpg") are never mistaken for a patient number.
       const idFromName = (new RegExp(w.patientIdPattern || '^[Pp](\\d+)[_\\-. ]').exec(basename(name)) || [])[1];
+      if (w.kind === 'scan') {
+        // Paperwork from a scanner's folder: to the chart named in the file, else the scan inbox.
+        const q = new URLSearchParams({ filename: name, ...(idFromName ? { patient_id: idFromName } : {}) });
+        try {
+          const out = await call('POST', `/scan-inbox?${q}`, data, { 'Content-Type': 'application/octet-stream', 'X-Content-SHA256': createHash('sha256').update(data).digest('hex') });
+          log(out.inbox ? `${name}: in the scan inbox for the office to file${out.reason ? ` (${out.reason})` : ''}` : `${name} → patient #${out.patient_id}${out.duplicate ? ' (already filed)' : ''}`);
+          state.seen[key] = out.id;
+          uploads.ok++;
+          if (w.moveTo) {
+            mkdirSync(w.moveTo, { recursive: true });
+            renameSync(path, join(w.moveTo, name));
+          }
+        } catch (err) {
+          if (err.status && err.status >= 400 && err.status < 500 && err.status !== 401 && err.status !== 404 && err.status !== 429) {
+            log(`${name}: not accepted (${err.message}) — left in the folder`);
+            state.seen[key] = 'refused';
+          } else {
+            log(`${name}: upload failed (${err.message}); will retry`);
+            uploads.failed++;
+            uploads.lastError = `${name}: ${err.message}`.slice(0, 200);
+            continue;
+          }
+        }
+        saveState();
+        continue;
+      }
       const params = new URLSearchParams({ filename: name, category: w.category || 'xray' });
       if (idFromName) params.set('patient_id', idFromName);
       if (lastPatient && Date.now() - lastPatient.at < 45 * 60_000) params.set('opened_patient_id', lastPatient.id);
@@ -441,6 +696,10 @@ function selfCheck() {
       if (sensor.preset && found) add('Sensor connected', !!sensor.device, sensor.device ? null : 'The sensor did not show up among the TWAIN devices — plug it in, install its TWAIN driver, then restart the bridge');
     }
   }
+  if (scannerCfg) {
+    if (scannerCfg.driver === 'wia' && scannerCfg.script) add('Scanner script', existsSync(scannerCfg.script), `${scannerCfg.script} is missing — fix "scanner.script" or remove it to use the built-in one`);
+    else if (scannerCfg.driver === 'sane') add('Scanner (scanimage)', !!(scannerCfg.command ? existsSync(scannerCfg.command) || whichSync(scannerCfg.command) : whichSync('scanimage')), 'scanimage not found — install SANE (sane-utils / sane-backends)');
+  }
   add('Bridge state file', canWrite(dirname(statePath)), `Can't save ${statePath}`);
   if (uploads.failed) add('Uploads', uploads.ok > 0, `${uploads.failed} failed since the last check (${uploads.lastError})`);
   return checks;
@@ -457,12 +716,146 @@ const helloBody = () => ({
   hostname: hostname(), version: VERSION, checks: selfCheck(), uploads: { ok: uploads.ok, failed: uploads.failed },
 });
 const hello = await call('POST', '/hello', helloBody());
+// The scanner is registered separately (servers without document scanning answer 404: nothing to do).
+const sayScanner = () => call('POST', '/scanner', scannerBody()).catch((err) => { if (err.status !== 404) log('scanner check-in failed:', err.message); });
+await sayScanner();
 for (const c of hello.problems || []) log(`Setup problem: ${c.name} — ${c.note}`);
-log(`Connected to ${hello.practice} as "${hello.workstation}". Programs: ${(config.apps || []).map((a) => a.name).join(', ') || 'none'}. Watching: ${(config.watch || []).map((w) => w.folder).join(', ') || 'nothing'}.${sensor ? ` Sensor: ${sensor.name || 'yes'}.` : ''}`);
+log(`Connected to ${hello.practice} as "${hello.workstation}". Programs: ${(config.apps || []).map((a) => a.name).join(', ') || 'none'}. Watching: ${(config.watch || []).map((w) => w.folder).join(', ') || 'nothing'}.${sensor ? ` Sensor: ${sensor.name || 'yes'}.` : ''}${scannerCfg ? ` Scanner: ${scannerCfg.name}.` : ''}`);
 // Report the self-check every 10 minutes, so a moved export folder or unplugged sensor shows up in the office.
 setInterval(() => {
   call('POST', '/hello', helloBody()).then(() => { uploads.ok = 0; uploads.failed = 0; uploads.lastError = null; }).catch((err) => log('check-in failed:', err.message));
+  sayScanner();
 }, 10 * 60_000);
 setInterval(() => scan().catch((err) => log('scan failed:', err.message)), pollSeconds * 1000);
 scan().catch((err) => log('scan failed:', err.message));
 commandLoop();
+
+// ---- The WIA scan script (a copy of installer/scan.ps1, kept identical by the tests) ----
+// BEGIN scan.ps1
+function embeddedScanPs1() {
+  return String.raw`# Dental Machine bridge: scan on this PC's scanner through Windows Image Acquisition (WIA 2.0).
+# Called by dental-machine-bridge.mjs when "Scan" is pressed in a chart; writes one JPEG per page into -OutDir
+# (page-001.jpg, page-002.jpg, …). The bridge makes the PDF and files it to the patient.
+#
+#   powershell -NoProfile -ExecutionPolicy Bypass -File scan.ps1 -List
+#   powershell -NoProfile -ExecutionPolicy Bypass -File scan.ps1 -OutDir C:\Temp\scan -Source feeder -Duplex -Color gray -Dpi 300
+#
+# UNTESTED ON REAL HARDWARE. Written from Microsoft's WIA 2.0 automation documentation (WIA.DeviceManager,
+# Item.Transfer, WIA property ids below). Scanners differ in what they report: if a feeder scan returns only one
+# page or fails, try -Source flatbed, check the scanner's own WIA driver is installed (not just TWAIN), and run
+# -List. ScanSnap models have no WIA driver: use a "scan folder" instead (see docs/documents.md).
+param(
+  [string]$OutDir = "$env:TEMP\dm-scan",
+  [ValidateSet('auto', 'flatbed', 'feeder')][string]$Source = 'auto',
+  [switch]$Duplex,
+  [ValidateSet('color', 'gray', 'bw')][string]$Color = 'gray',
+  [int]$Dpi = 300,
+  [string]$Device = '',
+  [switch]$List
+)
+$ErrorActionPreference = 'Stop'
+
+# WIA constants
+$ScannerDeviceType = 1
+$WIA_DPS_DOCUMENT_HANDLING_CAPABILITIES = 3086
+$WIA_DPS_DOCUMENT_HANDLING_STATUS = 3087
+$WIA_DPS_DOCUMENT_HANDLING_SELECT = 3088
+$WIA_DPS_PAGES = 3096
+$WIA_IPS_CUR_INTENT = 6146
+$WIA_IPS_XRES = 6147
+$WIA_IPS_YRES = 6148
+$FEEDER = 1; $FLATBED = 2; $DUPLEX = 4; $FEED_READY = 1
+$FormatJPEG = '{B96B3CAE-0728-11D3-9D7B-0000F81EF32E}'
+$WIA_ERROR_PAPER_EMPTY = 0x80210003
+
+function Set-Prop($props, [int]$id, $value) {
+  foreach ($p in $props) {
+    if ($p.PropertyID -eq $id) {
+      try { $p.Value = $value; return $true } catch { return $false }
+    }
+  }
+  return $false
+}
+function Get-Prop($props, [int]$id) {
+  foreach ($p in $props) { if ($p.PropertyID -eq $id) { return $p.Value } }
+  return $null
+}
+
+$manager = New-Object -ComObject WIA.DeviceManager
+$scanners = @($manager.DeviceInfos | Where-Object { $_.Type -eq $ScannerDeviceType })
+
+if ($List) {
+  if (-not $scanners.Count) { Write-Output 'No WIA scanners found. Install the scanner''s WIA driver (TWAIN-only scanners won''t show here).'; exit 0 }
+  foreach ($s in $scanners) {
+    $name = ($s.Properties | Where-Object { $_.Name -eq 'Name' }).Value
+    Write-Output "$name  (id $($s.DeviceID))"
+  }
+  exit 0
+}
+
+if (-not $scanners.Count) { Write-Error 'No WIA scanner found on this computer — is it plugged in and switched on?'; exit 2 }
+$info = $scanners[0]
+if ($Device) {
+  $match = $scanners | Where-Object { ($_.Properties | Where-Object { $_.Name -eq 'Name' }).Value -like "*$Device*" -or $_.DeviceID -eq $Device } | Select-Object -First 1
+  if (-not $match) { Write-Error "No WIA scanner named '$Device' (run scan.ps1 -List)"; exit 2 }
+  $info = $match
+}
+$dev = $info.Connect()
+
+# Where the paper comes from. "auto": the feeder when it has paper in it, else the glass.
+$caps = Get-Prop $dev.Properties $WIA_DPS_DOCUMENT_HANDLING_CAPABILITIES
+$hasFeeder = $caps -ne $null -and (($caps -band $FEEDER) -ne 0)
+$useFeeder = $false
+if ($Source -eq 'feeder') {
+  if (-not $hasFeeder) { Write-Error 'This scanner has no document feeder'; exit 3 }
+  $useFeeder = $true
+} elseif ($Source -eq 'auto' -and $hasFeeder) {
+  $status = Get-Prop $dev.Properties $WIA_DPS_DOCUMENT_HANDLING_STATUS
+  $useFeeder = $status -ne $null -and (($status -band $FEED_READY) -ne 0)
+}
+if ($useFeeder) {
+  $select = $FEEDER
+  if ($Duplex -and (($caps -band $DUPLEX) -ne 0)) { $select = $FEEDER -bor $DUPLEX }
+  [void](Set-Prop $dev.Properties $WIA_DPS_DOCUMENT_HANDLING_SELECT $select)
+  [void](Set-Prop $dev.Properties $WIA_DPS_PAGES 1)
+} elseif ($hasFeeder) {
+  [void](Set-Prop $dev.Properties $WIA_DPS_DOCUMENT_HANDLING_SELECT $FLATBED)
+}
+
+$item = $dev.Items.Item(1)
+$intent = @{ color = 1; gray = 2; bw = 4 }[$Color]
+[void](Set-Prop $item.Properties $WIA_IPS_CUR_INTENT $intent)
+[void](Set-Prop $item.Properties $WIA_IPS_XRES $Dpi)
+[void](Set-Prop $item.Properties $WIA_IPS_YRES $Dpi)
+
+New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
+$page = 0
+$process = New-Object -ComObject WIA.ImageProcess
+[void]$process.Filters.Add($process.FilterInfos.Item('Convert').FilterID)
+$process.Filters.Item(1).Properties.Item('FormatID').Value = $FormatJPEG
+$process.Filters.Item(1).Properties.Item('Quality').Value = 85
+
+while ($true) {
+  try {
+    $image = $item.Transfer($FormatJPEG)
+  } catch {
+    $code = $_.Exception.HResult
+    if ($page -gt 0 -and ($code -eq $WIA_ERROR_PAPER_EMPTY -or $code -eq -2145320957)) { break }
+    if ($page -eq 0 -and ($code -eq $WIA_ERROR_PAPER_EMPTY -or $code -eq -2145320957)) { Write-Error 'The feeder is empty — put the pages in and scan again'; exit 4 }
+    Write-Error "Scan failed: $($_.Exception.Message)"
+    exit 5
+  }
+  # Some drivers ignore the requested format: convert to JPEG so the bridge can build the PDF.
+  if ($image.FormatID -ne $FormatJPEG) { $image = $process.Apply($image) }
+  $page++
+  $path = Join-Path $OutDir ('page-{0:D3}.jpg' -f $page)
+  if (Test-Path $path) { Remove-Item $path -Force }
+  $image.SaveFile($path)
+  Write-Output "page $page -> $path"
+  if (-not $useFeeder) { break }
+}
+Write-Output "done $page"
+exit 0
+`;
+}
+// END scan.ps1

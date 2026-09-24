@@ -3058,6 +3058,37 @@ CREATE TABLE IF NOT EXISTS opportunity_events (
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE (appointment_id, rule_id)
 );
+-- Notes on a document (docs/documents.md): who wrote what, when. An edit is a new row that supersedes the old
+-- one (status 'superseded', kept as history); a removal only sets status 'deleted'. A note with page/x/y is a
+-- sticky-note pin on that spot (x and y as fractions of the page or image, pages counted from 1).
+CREATE TABLE IF NOT EXISTS document_notes (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  document_id INTEGER NOT NULL REFERENCES documents(id),
+  patient_id INTEGER REFERENCES patients(id),
+  body TEXT NOT NULL,
+  page INTEGER,
+  x REAL,
+  y REAL,
+  color TEXT,
+  supersedes_id INTEGER REFERENCES document_notes(id),
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','superseded','deleted')),
+  source TEXT NOT NULL DEFAULT 'human',
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  closed_by INTEGER REFERENCES users(id),
+  closed_at TEXT
+);
+-- Full-text search over documents (docsearch.js): keyed hashes (HMAC) of the words in a document's read text,
+-- never the words themselves; the text itself is kept encrypted in file storage like the file. Derived data:
+-- rebuilt whenever a document is read again, so its rows are replaced (deleted and re-added) freely.
+CREATE TABLE IF NOT EXISTS document_terms (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  document_id INTEGER NOT NULL REFERENCES documents(id),
+  term TEXT NOT NULL,
+  UNIQUE (document_id, term)
+);
 `;
 
 // Columns added after the first release. SQLite has no ADD COLUMN IF NOT EXISTS, so check first.
@@ -3461,12 +3492,50 @@ const COLUMNS = [
   ['time_punches', 'shift_end', 'TEXT'],
   ['practices', 'recording_retention_days', 'INTEGER NOT NULL DEFAULT 90'],
   ['practices', 'recall_cadence', 'INTEGER NOT NULL DEFAULT 0'],
+  ['documents', 'folder', 'TEXT'],
+  ['documents', 'appointment_id', 'INTEGER REFERENCES appointments(id)'],
+  ['documents', 'claim_id', 'INTEGER REFERENCES claims(id)'],
+  ['documents', 'treatment_plan_id', 'INTEGER REFERENCES treatment_plans(id)'],
+  ['documents', 'ocr_status', 'TEXT'],
+  ['documents', 'ocr_source', 'TEXT'],
+  ['documents', 'ocr_key', 'TEXT'],
+  ['documents', 'ocr_encrypted', 'INTEGER NOT NULL DEFAULT 0'],
+  ['documents', 'ocr_chars', 'INTEGER'],
+  ['documents', 'ocr_at', 'TEXT'],
+  ['documents', 'ocr_error', 'TEXT'],
+  ['documents', 'suggested_category', 'TEXT'],
+  ['documents', 'suggestion_reason', 'TEXT'],
+  ['documents', 'suggestion_source', 'TEXT'],
+  ['documents', 'review_status', 'TEXT'],
+  ['documents', 'review_assignee', 'INTEGER REFERENCES users(id)'],
+  ['documents', 'review_task_id', 'INTEGER REFERENCES tasks(id)'],
+  ['documents', 'review_note', 'TEXT'],
+  ['documents', 'review_requested_by', 'INTEGER REFERENCES users(id)'],
+  ['documents', 'review_requested_at', 'TEXT'],
+  ['documents', 'reviewed_by', 'INTEGER REFERENCES users(id)'],
+  ['documents', 'reviewed_at', 'TEXT'],
+  ['documents', 'expires_on', 'TEXT'],
+  ['documents', 'expiry_task_id', 'INTEGER REFERENCES tasks(id)'],
+  ['documents', 'virus_status', 'TEXT'],
+  ['documents', 'inbox', 'INTEGER NOT NULL DEFAULT 0'],
+  ['bridge_agents', 'scanner', 'TEXT'],
+  ['bridge_agents', 'scanner_info', 'TEXT'],
+  ['practices', 'document_ai', 'INTEGER NOT NULL DEFAULT 1'],
 ];
 
 // CHECK constraints widened after release: [table, constraint name on Postgres, old text, new text].
 const RELAXED = [
   ['messages', 'messages_channel_check', "CHECK (channel IN ('sms','email'))", "CHECK (channel IN ('sms','email','portal'))"],
   ['messages', 'messages_status_check', "CHECK (status IN ('queued','sent','failed'))", "CHECK (status IN ('queued','sent','failed','blocked'))"],
+  // Document management: more kinds of patient paperwork, and office (non-patient) documents.
+  ['documents', 'documents_category_check', "CHECK (category IN ('xray','photo','document','consent','insurance_card','referral','other'))",
+    "CHECK (category IN ('xray','photo','document','consent','insurance_card','referral','other','eob','lab_rx','id_card','xray_report','medical_history','correspondence','contract','license','policy','invoice','certificate','hr'))"],
+];
+
+// NOT NULL constraints dropped after release: [table, column, old column text (SQLite), new column text].
+// Office documents (contracts, licences, policies, invoices) are documents that belong to no patient.
+const NULLABLE = [
+  ['documents', 'patient_id', 'patient_id INTEGER NOT NULL REFERENCES patients(id),\n  category', 'patient_id INTEGER REFERENCES patients(id),\n  category'],
 ];
 
 // Enforced by the database itself, whatever the code does: the audit log is append-only (only the id
@@ -3601,6 +3670,16 @@ function openSqlite(path) {
   }
   // SQLite can't alter a CHECK; a wider one is swapped into the stored table definition (safe: existing rows still pass).
   for (const [table, , from, to] of RELAXED) {
+    const sql = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(table)?.sql;
+    if (!sql?.includes(from)) continue;
+    const version = db.prepare('PRAGMA schema_version').get().schema_version;
+    db.exec('PRAGMA writable_schema = ON');
+    db.prepare("UPDATE sqlite_master SET sql = ? WHERE type = 'table' AND name = ?").run(sql.replace(from, to), table);
+    db.exec(`PRAGMA schema_version = ${version + 1}`);
+    db.exec('PRAGMA writable_schema = OFF');
+  }
+  // The same for a NOT NULL that no longer applies (existing rows all have a value, so they still pass).
+  for (const [table, , from, to] of NULLABLE) {
     const sql = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(table)?.sql;
     if (!sql?.includes(from)) continue;
     const version = db.prepare('PRAGMA schema_version').get().schema_version;
@@ -3752,7 +3831,7 @@ async function openPostgres(url, { freshSchema = false } = {}) {
   const setup = await pool.connect();
   // Skip the migration when this exact schema is already in place (serverless cold starts would
   // otherwise re-run hundreds of statements each time).
-  const version = createHash('sha256').update(JSON.stringify([SCHEMA, COLUMNS, INDEXES, RELAXED, GUARDS_PG])).digest('hex').slice(0, 16);
+  const version = createHash('sha256').update(JSON.stringify([SCHEMA, COLUMNS, INDEXES, RELAXED, NULLABLE, GUARDS_PG])).digest('hex').slice(0, 16);
   const current = await setup.query('SELECT version FROM schema_meta').then((r) => r.rows[0]?.version, () => null);
   if (current === version && !freshSchema) setup.release();
   else {
@@ -3764,6 +3843,7 @@ async function openPostgres(url, { freshSchema = false } = {}) {
       await setup.query(pgSchema(SCHEMA));
       for (const [table, column, def] of COLUMNS) await setup.query(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${column} ${pgSchema(def)}`);
       for (const [table, name, , to] of RELAXED) await setup.query(`ALTER TABLE ${table} DROP CONSTRAINT IF EXISTS ${name}; ALTER TABLE ${table} ADD CONSTRAINT ${name} ${to}`);
+      for (const [table, column] of NULLABLE) await setup.query(`ALTER TABLE ${table} ALTER COLUMN ${column} DROP NOT NULL`);
       await setup.query(pgSchema(INDEXES));
       for (const q of GUARDS_PG) await setup.query(q);
       await setup.query('CREATE TABLE IF NOT EXISTS schema_meta (version TEXT NOT NULL)');

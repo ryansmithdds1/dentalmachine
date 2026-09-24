@@ -1,0 +1,139 @@
+/* Document management (docs/documents.md): viewer + side panel, scan menu, phone scanner, office documents.
+   Colours come from the :root tokens in styles.css, so dark mode follows automatically. */
+
+/* The document dialog is wide enough for the viewer and its side panel. */
+.modal:has(.docview) { max-width: min(1320px, 96vw); }
+.docview { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; align-items: start; }
+.docview-main { position: relative; min-width: 0; }
+.docview-hint { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--panel); padding: 6px 12px; border-radius: 999px; font-size: 13px; pointer-events: none; }
+@media (max-width: 900px) {
+  .docview { grid-template-columns: 1fr; }
+}
+
+/* ---- Preview ---- */
+.docp { --docp-h: 68vh; position: relative; background: var(--subtle); border: 1px solid var(--border); border-radius: var(--radius-sm); min-height: 240px; display: flex; flex-direction: column; align-items: stretch; }
+.docp-loading { align-items: center; justify-content: center; color: var(--muted); }
+.docp-pinwrap { position: relative; align-self: center; max-width: 100%; line-height: 0; }
+.docp-pinwrap.placing { cursor: crosshair; outline: 2px dashed var(--primary); outline-offset: 2px; }
+.docp-img { max-width: 100%; max-height: var(--docp-h); display: block; margin: 0 auto; background: #fff; }
+.docp-pdfwrap { position: relative; }
+.docp-pdf { width: 100%; height: var(--docp-h); border: 0; display: block; border-radius: var(--radius-sm); background: #fff; }
+.docp-pdfhint { position: absolute; left: 10px; bottom: 10px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; font-size: 12.5px; line-height: 1.4; }
+.docp-pin { position: absolute; transform: translate(-50%, -100%); width: 28px; height: 28px; min-height: 0; padding: 0; border-radius: 50% 50% 50% 4px; border: 2px solid rgba(0, 0, 0, 0.25); display: inline-flex; align-items: center; justify-content: center; color: #1f2937; box-shadow: var(--shadow); cursor: pointer; line-height: 1; }
+.docp-pin.yellow { background: #fde047; } .docp-pin.pink { background: #f9a8d4; } .docp-pin.blue { background: #93c5fd; } .docp-pin.green { background: #86efac; }
+.docp-pin:focus-visible { outline: 3px solid var(--primary); }
+.docp-media { display: flex; align-items: center; justify-content: center; padding: 24px; min-height: 160px; }
+.docp-media video { max-width: 100%; max-height: var(--docp-h); border-radius: var(--radius-sm); background: #000; }
+.docp-media audio { width: min(560px, 100%); }
+.docp-text { max-height: var(--docp-h); overflow: auto; background: var(--panel); border-radius: var(--radius-sm); }
+.docp-text pre { margin: 0; padding: 16px 18px; white-space: pre-wrap; word-break: break-word; font: 13.5px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--text); }
+.docp-textnote { padding: 8px 18px 0; font-size: 12.5px; }
+.docp-table { max-height: var(--docp-h); overflow: auto; background: var(--panel); }
+.docp-table table { border-collapse: collapse; font-size: 13px; width: max-content; min-width: 100%; }
+.docp-table th, .docp-table td { border: 1px solid var(--border); padding: 4px 8px; text-align: left; white-space: nowrap; }
+.docp-table th { background: var(--subtle); position: sticky; top: 0; }
+.docp-empty { padding: 32px 20px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.docp-empty button { display: inline-flex; gap: 6px; align-items: center; margin-top: 8px; }
+.docp-pager { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 8px; border-top: 1px solid var(--border); font-size: 13px; }
+
+/* ---- Side panel ---- */
+.docside { display: flex; flex-direction: column; gap: 12px; max-height: 78vh; overflow: auto; padding-right: 2px; }
+.docside-sec { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 12px; background: var(--panel); display: flex; flex-direction: column; gap: 8px; }
+.docside-sec h3 { margin: 0; font-size: 14px; display: inline-flex; align-items: center; gap: 6px; }
+.docside-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.docside-count { background: var(--primary-soft); color: var(--primary-ink); border-radius: 999px; font-size: 11.5px; padding: 0 7px; }
+.docside-dl { display: grid; grid-template-columns: 82px 1fr; gap: 4px 8px; margin: 0; font-size: 13px; }
+.docside-dl dt { color: var(--muted); }
+.docside-dl dd { margin: 0; overflow-wrap: anywhere; }
+.docside-expired { color: var(--danger); font-weight: 600; }
+.docside-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.docside-empty { font-size: 13px; }
+.docside-suggest { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--info-soft); border: 1px solid color-mix(in srgb, var(--info) 30%, transparent); color: var(--text); font-size: 13.5px; }
+.docside-suggest svg { color: var(--info); flex: none; margin-top: 2px; }
+.docside-notes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.docside-notes li { border-left: 3px solid var(--border-strong); padding: 4px 0 4px 10px; }
+.docside-notes li.pinned.yellow { border-left-color: #eab308; } .docside-notes li.pinned.pink { border-left-color: #ec4899; }
+.docside-notes li.pinned.blue { border-left-color: #3b82f6; } .docside-notes li.pinned.green { border-left-color: #22c55e; }
+.docside-notes li.focus { background: var(--primary-soft); border-radius: 6px; }
+.docside-note-body { white-space: pre-wrap; font-size: 13.5px; overflow-wrap: anywhere; }
+.docside-note-meta { font-size: 12px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.docside-note-actions { margin-left: auto; display: inline-flex; gap: 4px; }
+.docside-note-actions button { padding: 2px 4px; min-height: 0; }
+.docside-pinno { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; background: #fde047; color: #1f2937; font-size: 11px; font-weight: 700; margin-right: 6px; }
+.docside-old { font-size: 12.5px; padding-left: 13px; }
+.docside-add textarea, .docside-notes textarea { width: 100%; resize: vertical; font: inherit; }
+.docside-add { display: flex; flex-direction: column; gap: 6px; }
+.docside-pinhint { font-size: 12.5px; color: var(--info); display: inline-flex; gap: 5px; align-items: center; }
+.docside-review { font-size: 13.5px; padding: 8px 10px; background: var(--warn-soft); border-radius: 6px; }
+.docside-review input { flex: 1; min-width: 0; }
+.docside-reviewform, .docside-linkform { display: flex; flex-direction: column; gap: 6px; }
+.docside-links { list-style: none; margin: 0; padding: 0; font-size: 13.5px; display: flex; flex-direction: column; gap: 4px; }
+.docside-words { max-height: 220px; overflow: auto; white-space: pre-wrap; font-size: 12px; background: var(--subtle); padding: 8px; border-radius: 6px; margin: 0; }
+.docside button.active { background: var(--primary-soft); border-color: var(--primary); color: var(--primary-ink); }
+
+/* ---- Tiles (documents grid) ---- */
+.doc-thumb.kind { background: var(--subtle); color: var(--muted); flex-direction: column; gap: 6px; font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.04em; }
+.doc-badges { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 3px; }
+.doc-badge { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; border-radius: 999px; padding: 1px 7px; background: var(--subtle); color: var(--text-2); }
+.doc-badge.review { background: var(--warn-soft); color: var(--warn); }
+.doc-badge.suggest { background: var(--info-soft); color: var(--info); }
+.doc-badge.expired { background: var(--danger-soft); color: var(--danger); }
+.doc-hit { font-size: 11.5px; color: var(--text-2); background: color-mix(in srgb, var(--warn-soft) 70%, transparent); border-radius: 4px; padding: 3px 5px; margin-top: 4px; }
+.docs-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+.docs-toolbar h2 { margin: 0 auto 0 0; }
+.docs-toolbar input[type='search'] { width: 240px; max-width: 100%; }
+.docs-found { font-size: 12.5px; color: var(--muted); margin: -4px 0 10px; }
+
+/* ---- Scan menu (opens under the Scan button) ---- */
+.scan-anchor { position: relative; }
+.scan-trigger { display: inline-flex; align-items: center; gap: 6px; }
+.scanmenu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; width: min(420px, 92vw); background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-lg); padding: 6px; display: flex; flex-direction: column; gap: 2px; }
+.scanmenu-item { display: flex; align-items: center; gap: 12px; text-align: left; padding: 10px 12px; border: 0; background: transparent; border-radius: 8px; width: 100%; white-space: normal; min-height: 56px; }
+.scanmenu-item:hover:not(:disabled), .scanmenu-item:focus-visible { background: var(--hover); }
+.scanmenu-item span { display: flex; flex-direction: column; gap: 2px; flex: 1; }
+.scanmenu-item small { color: var(--muted); font-size: 12.5px; }
+.scanmenu-item svg { color: var(--primary); flex: none; }
+.scanmenu-item:disabled svg { color: var(--faint); }
+.deskscan { display: flex; flex-direction: column; gap: 8px; padding: 8px; }
+.deskscan-head { display: flex; align-items: center; gap: 8px; }
+.deskscan-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.scan-progress { display: flex; gap: 12px; align-items: center; padding: 16px; }
+.spin { animation: dm-spin 1s linear infinite; }
+@keyframes dm-spin { to { transform: rotate(360deg); } }
+
+/* ---- Office documents page ---- */
+.offdocs-tabs { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 12px; }
+.offdocs-tabs button[aria-selected='true'] { background: var(--primary-soft); color: var(--primary-ink); border-color: var(--primary); }
+.offdocs-list { width: 100%; border-collapse: collapse; font-size: 14px; }
+.offdocs-list th, .offdocs-list td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.offdocs-list tr.row { cursor: pointer; }
+.offdocs-list tr.row:hover, .offdocs-list tr.row:focus-visible { background: var(--hover); outline: none; }
+.offdocs-name { display: flex; align-items: center; gap: 8px; }
+.offdocs-name svg { color: var(--muted); flex: none; }
+.offdocs-filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; margin-bottom: 12px; }
+.offdocs-filters select, .offdocs-filters input[type='date'] { width: auto; }
+.offdocs-filters label:not(.docs-check) { flex: 0 0 auto; }
+.docs-check { display: inline-flex !important; flex-direction: row !important; align-items: center; gap: 6px; font-size: 13.5px; }
+.docs-check input { width: auto; margin: 0; }
+.offdocs-snippet { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+@media (max-width: 720px) {
+  .offdocs-list .hide-sm { display: none; }
+  .deskscan-grid { grid-template-columns: 1fr; }
+}
+
+/* ---- Phone scanner (public page) ---- */
+.pscan { display: flex; flex-direction: column; gap: 12px; }
+.pscan-big { display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 64px; font-size: 18px; font-weight: 600; border-radius: 14px; width: 100%; position: relative; overflow: hidden; }
+.pscan-big input[type='file'] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.pscan-edit { position: relative; touch-action: none; user-select: none; line-height: 0; background: #111; border-radius: 12px; overflow: hidden; }
+.pscan-edit canvas { width: 100%; height: auto; display: block; }
+.pscan-edit svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.pscan-handle { fill: rgba(20, 184, 166, 0.25); stroke: #14b8a6; stroke-width: 3; cursor: grab; }
+.pscan-modes { display: flex; gap: 6px; flex-wrap: wrap; }
+.pscan-modes button[aria-pressed='true'] { background: var(--primary-soft); border-color: var(--primary); color: var(--primary-ink); }
+.pscan-pages { display: flex; gap: 8px; overflow-x: auto; padding: 4px 0; }
+.pscan-page { position: relative; flex: none; width: 84px; }
+.pscan-page img { width: 84px; height: 110px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border); background: #fff; }
+.pscan-page .n { position: absolute; left: 4px; top: 4px; background: var(--text); color: var(--panel); font-size: 11px; border-radius: 999px; padding: 0 6px; }
+.pscan-page .tools { display: flex; justify-content: space-between; }
+.pscan-page .tools button { min-height: 0; padding: 2px 6px; font-size: 12px; }

@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import QRCode from 'qrcode';
 import { api, getToken } from '../../api.js';
 import { useApi } from '../../hooks.js';
 import { useAuth } from '../../auth.jsx';
-import { fmtDate, label } from '../../format.js';
+import { fmtDate } from '../../format.js';
 import { ErrorBox, Modal } from '../ui.jsx';
 import { useLiveEvents } from '../../live.js';
-import { ScanLine, Radio, Video, Upload } from 'lucide-react';
+import { ScanLine, Radio, Video, Upload, StickyNote, Flag, Sparkles, Download } from 'lucide-react';
 import { useRemembered } from '../../prefs.js';
 import { useShortcuts, typingIn } from '../../shortcuts.js';
 import { toast, undoable } from '../../toast.js';
@@ -19,25 +20,38 @@ import { MOUNTS, slotLabels } from '../imaging/mounts.js';
 import { fetchBlob, useThumb } from '../imaging/thumbs.js';
 import { thumbStyle } from '../imaging/imageproc.js';
 import { readWs, saveWs } from '../imaging/workstation.js';
+import DocView from '../docs/DocView.jsx';
+import ScanMenu from '../docs/ScanMenu.jsx';
+import { downloadDoc } from '../docs/DocPreview.jsx';
+import { ACCEPT, PATIENT_CATEGORIES, catLabel, KindIcon, kindLabel } from '../docs/filekinds.jsx';
+import '../docs/docs.css';
 
-// Browsers can't show TIFF or DICOM; those are offered as downloads instead of a broken preview.
+// What the image viewer opens (DICOM is converted on the server); everything else opens in the document viewer.
 const previewable = (mime) => /^image\/(png|jpeg|gif|webp|bmp)$/.test(mime);
-// What the image viewer opens (DICOM is converted on the server).
 const viewerable = (mime) => previewable(mime) || mime === 'application/dicom';
 
-const CATEGORIES = ['xray', 'photo', 'document', 'consent', 'insurance_card', 'referral', 'other'];
-const catLabel = (c) => (c === 'xray' ? 'X-ray' : label(c));
+const CATEGORIES = PATIENT_CATEGORIES;
 const uploadKey = () => `up-${globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2, 12)}`}`;
+// Words in a document's name/category that a paper would be recognised by (for the file's own category guess).
+const NAME_HINTS = [[/\beob\b|explanation.of.benefits/i, 'eob'], [/lab[_ -]?(rx|slip)/i, 'lab_rx'], [/med(ical)?[_ -]?hist/i, 'medical_history']];
 
-function Thumb({ doc, onOpen }) {
+function Thumb({ doc, hit, onOpen }) {
   const src = useThumb(doc.id, viewerable(doc.mime));
   return (
-    <button className="doc-tile" onClick={onOpen}>
-      <div className="doc-thumb">{src ? <img src={src} alt={doc.filename} style={thumbStyle(doc.adjust)} /> : <span style={{ fontSize: 32 }}>{doc.mime === 'application/pdf' ? '📄' : '📎'}</span>}</div>
+    <button className="doc-tile" onClick={onOpen} data-doc={doc.id}>
+      <div className={`doc-thumb${src ? '' : ' kind'}`}>{src ? <img src={src} alt={doc.filename} style={thumbStyle(doc.adjust)} /> : <><KindIcon doc={doc} size={34} /><span>{kindLabel(doc)}</span></>}</div>
       <div className="doc-meta">
         <strong>{doc.filename}{doc.annotated ? ' ✎' : ''}{doc.retake_of ? ' · retake' : ''}</strong>
-        <span className="muted">{catLabel(doc.category)}{doc.tooth ? ` · #${doc.tooth}` : ''} · {fmtDate(doc.created_at)}</span>
+        <span className="muted">{catLabel(doc.category)}{doc.tooth ? ` · #${doc.tooth}` : ''}{doc.folder ? ` · ${doc.folder}` : ''} · {fmtDate(doc.taken_at || doc.created_at)}</span>
         {doc.tags && JSON.parse(doc.tags).length > 0 && <span className="doc-tags">{JSON.parse(doc.tags).map((t) => <i key={t}>{t}</i>)}</span>}
+        {(doc.note_count > 0 || doc.review_status === 'needs_review' || doc.suggested_category) && (
+          <span className="doc-badges">
+            {doc.review_status === 'needs_review' && <span className="doc-badge review" title={`Needs review by ${doc.review_assignee_name || 'someone'}`}><Flag size={11} aria-hidden /> Review{doc.review_assignee_name ? `: ${doc.review_assignee_name.split(' ')[0]}` : ''}</span>}
+            {doc.note_count > 0 && <span className="doc-badge"><StickyNote size={11} aria-hidden /> {doc.note_count}</span>}
+            {doc.suggested_category && <span className="doc-badge suggest" title={doc.suggestion_reason || ''}><Sparkles size={11} aria-hidden /> {catLabel(doc.suggested_category)}?</span>}
+          </span>
+        )}
+        {hit?.snippet && <span className="doc-hit">{hit.snippet}</span>}
       </div>
     </button>
   );
@@ -47,23 +61,26 @@ export default function DocumentsTab({ patient }) {
   const { can } = useAuth();
   const canWrite = can('clinical:write');
   const { data: docs, reload } = useApi(`/patients/${patient.id}/documents`);
-  // Images captured through an imaging bridge appear without a refresh.
+  // Images captured through an imaging bridge (and scans, phone photos) appear without a refresh.
   useLiveEvents((e) => e.type === 'documents' && e.patient_id === patient.id && reload());
   // "Automatic" files each upload by what it is (see imaging/category.js); a type picked here is remembered.
   const [typePick, rememberType] = useRemembered('documents.type', 'auto');
   const [lastPdf, rememberPdf] = useRemembered('documents.category@pdf', 'document');
   const [tooth, setTooth] = useState('');
   const [filter, setFilter] = useState('');
+  const [folder, setFolder] = useState('');
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState(null);
   const [viewing, setViewing] = useState(null);
   const [compare, setCompare] = useState(null);
   const input = useRef(null);
-  const [editing, setEditing] = useState(false);
   const [search, setSearch] = useState('');
+  const [found, setFound] = useState(null); // full-text results from the server: { q, byId }
   const [phone, setPhone] = useState(false);
+  const [scanOpen, setScanOpen] = useState(false);
   const [studio, setStudio] = useState(null);
   const [dragging, setDragging] = useState(false);
+  const [params, setParams] = useSearchParams();
   const who = patient.preferred_name || patient.first_name;
 
   const upload = async (files) => {
@@ -76,8 +93,9 @@ export default function DocumentsTab({ patient }) {
       for (const file of files) {
         // CBCT zips and 3D scans: the server works out whether it's an x-ray series or a scan.
         const threeD = /\.(zip|stl|ply|obj)$/i.test(file.name || '');
-        const category = typePick !== 'auto' ? typePick : threeD ? null : await guessCategory(file, { lastPdf });
-        const q = new URLSearchParams({ ...(category ? { category } : {}), filename: file.name || 'upload', ...(tooth ? { tooth } : {}) });
+        const named = NAME_HINTS.find(([re]) => re.test(file.name || ''))?.[1];
+        const category = typePick !== 'auto' ? typePick : threeD ? null : named || await guessCategory(file, { lastPdf });
+        const q = new URLSearchParams({ ...(category ? { category } : {}), filename: file.name || 'upload', ...(tooth ? { tooth } : {}), ...(folder ? { folder } : {}) });
         const res = await fetch(`/api/patients/${patient.id}/documents?${q}`, {
           method: 'POST',
           // One key per file: a retried or doubled request files it once.
@@ -135,32 +153,32 @@ export default function DocumentsTab({ patient }) {
   };
 
   const viewables = (list) => list.filter((d) => viewerable(d.mime));
-  const open = async (doc, list = null) => {
+  const open = (doc, list = null) => {
     setCompare(null);
-    setEditing(false);
     // CBCT and 3D scans open in their own viewer, which streams what it needs (no whole-file download).
-    if (is3dDoc(doc)) { setViewing({ doc, url: null, three: true }); return; }
-    if (viewerable(doc.mime)) { setViewing({ doc, url: null, viewer: true, list: (list || viewables(shown)).map((d) => d.id) }); return; }
-    setViewing({ doc, url: null });
-    try {
-      setViewing({ doc, url: await fetchBlob(doc.id) });
-    } catch (e) {
-      setError(e);
-      setViewing(null);
-    }
+    if (is3dDoc(doc)) { setViewing({ doc, three: true }); return; }
+    if (viewerable(doc.mime)) { setViewing({ doc, viewer: true, list: (list || viewables(shown)).map((d) => d.id) }); return; }
+    setViewing({ doc, list: (list || shown).filter((d) => !viewerable(d.mime) && !is3dDoc(d)).map((d) => d.id) });
   };
-  // ← → in the viewer: the next image in the same list (the grid as filtered, or the x-rays).
+  // ?doc=123 (from search, the command bar, a to-do): open that document once the list is here.
+  useEffect(() => {
+    const want = Number(params.get('doc'));
+    if (!want || !docs) return;
+    const d = docs.find((x) => x.id === want);
+    if (d) open(d);
+    else toast('That document isn’t in this chart any more', { tone: 'error' });
+    const next = new URLSearchParams(params);
+    next.delete('doc');
+    setParams(next, { replace: true });
+  }, [docs, params]); // eslint-disable-line react-hooks/exhaustive-deps
+  // ← → in the viewer: the next document in the same list (the grid as filtered, or the x-rays).
   const step = (d) => setViewing((v) => {
     if (!v?.list?.length) return v;
     const at = v.list.indexOf(v.doc.id);
     const next = (docs || []).find((x) => x.id === v.list[(at + d + v.list.length) % v.list.length]);
     return next ? { ...v, doc: next } : v;
   });
-  const close = () => {
-    if (viewing?.url) URL.revokeObjectURL(viewing.url);
-    setViewing(null);
-    setEditing(false);
-  };
+  const close = () => setViewing(null);
   // No "Are you sure?": the file is only hidden (kept for the record), and Undo brings it back.
   const remove = async (doc) => {
     close();
@@ -190,13 +208,37 @@ export default function DocumentsTab({ patient }) {
   useShortcuts([
     { combo: 'x', handler: openLatestXrays, label: 'Open the latest x-rays (← → between images, Esc closes)', section: 'Documents & x-rays', enabled: !studio && !viewing },
     { combo: 'u', handler: () => input.current?.click(), label: 'Add files (or drop / paste them anywhere here)', section: 'Documents & x-rays', enabled: canWrite && !studio && !viewing },
+    { combo: 's', handler: () => setScanOpen(true), label: 'Scan: this computer’s scanner, a phone, or a file', section: 'Documents & x-rays', enabled: canWrite && !studio && !viewing },
+    { combo: 'f', handler: () => document.getElementById(`docsearch-${patient.id}`)?.focus(), label: 'Search this chart’s documents (the words inside too)', section: 'Documents & x-rays', enabled: !studio && !viewing },
   ]);
 
+  // Search: names, notes and tags here at once; the words inside documents (and document notes) from the server.
+  useEffect(() => {
+    const q = search.trim();
+    if (q.length < 2) { setFound(null); return undefined; }
+    const t = setTimeout(() => {
+      api.get(`/patients/${patient.id}/documents/search?q=${encodeURIComponent(q)}`)
+        .then((rows) => setFound({ q, byId: new Map(rows.map((r) => [r.id, r])) }))
+        .catch(() => setFound(null));
+    }, 250);
+    return () => clearTimeout(t);
+  }, [search, patient.id]);
   const tagsOf = (d) => { try { return JSON.parse(d.tags || '[]'); } catch { return []; } };
   const words = search.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  const shown = (docs || []).filter((d) => (!filter || d.category === filter)
-    && words.every((w) => [d.filename, d.notes, d.tooth ? `#${d.tooth}` : '', catLabel(d.category), ...tagsOf(d)].join(' ').toLowerCase().includes(w)));
+  const localHit = (d) => words.every((w) => [d.filename, d.notes, d.folder, d.tooth ? `#${d.tooth}` : '', catLabel(d.category), ...tagsOf(d)].join(' ').toLowerCase().includes(w));
+  const shown = (docs || []).filter((d) => (!filter || d.category === filter) && (!folder || d.folder === folder)
+    && (!words.length || localHit(d) || found?.byId.has(d.id)));
+  const folders = [...new Set((docs || []).map((d) => d.folder).filter(Boolean))].sort();
+  const insideOnly = found ? shown.filter((d) => found.byId.has(d.id) && !localHit(d)).length : 0;
   const position = viewing?.list?.length > 1 ? `${viewing.list.indexOf(viewing.doc.id) + 1} of ${viewing.list.length}` : null;
+  const afterScan = async (list) => {
+    await reload();
+    if (list?.length === 1) {
+      const fresh = await api.get(`/patients/${patient.id}/documents`).catch(() => null);
+      const d = fresh?.find((x) => x.id === list[0].id);
+      if (d) open(d, [d]);
+    }
+  };
 
   return (
     <div className={`docs-drop${dragging ? ' over' : ''}`} {...drop} data-testid="documents-drop">
@@ -214,16 +256,16 @@ export default function DocumentsTab({ patient }) {
             </label>
             <label>Tooth (optional)<input value={tooth} onChange={(e) => setTooth(e.target.value)} style={{ width: 90 }} placeholder="e.g. 19" /></label>
             <label>
-              Files (images, PDF, DICOM, 3D scans STL/PLY/OBJ · max 25 MB; CBCT zip up to 1 GB)
-              <input ref={input} type="file" multiple accept="image/*,application/pdf,.dcm,.zip,.stl,.ply,.obj" disabled={uploading} onChange={(e) => upload([...e.target.files])} />
+              Files (PDF, pictures, Word/Excel, audio, video, DICOM, 3D scans · CBCT zip up to 1 GB)
+              <input ref={input} type="file" multiple accept={ACCEPT} disabled={uploading} onChange={(e) => upload([...e.target.files])} />
             </label>
             <label>
               CBCT folder
               <input type="file" webkitdirectory="" disabled={uploading} aria-label="Upload a CBCT folder" onChange={async (e) => {
                 const files = [...e.target.files];
                 if (!files.length) return;
-                const folder = (files[0].webkitRelativePath || 'cbct').split('/')[0] || 'cbct';
-                upload([new File([await zipFolder(files)], `${folder}.zip`, { type: 'application/zip' })]);
+                const dir = (files[0].webkitRelativePath || 'cbct').split('/')[0] || 'cbct';
+                upload([new File([await zipFolder(files)], `${dir}.zip`, { type: 'application/zip' })]);
                 e.target.value = '';
               }} />
             </label>
@@ -233,49 +275,58 @@ export default function DocumentsTab({ patient }) {
       )}
       <ErrorBox error={error} />
       <div className="card">
-        <div className="page-header" style={{ marginBottom: 10 }}>
-          <h2 style={{ margin: 0 }}>Documents & imaging</h2>
-          <input type="search" aria-label="Search documents" placeholder="Search name, note, tag…" value={search} onChange={(e) => setSearch(e.target.value)} style={{ width: 220 }} />
-          {canWrite && <button onClick={() => setPhone(true)} title="Take photos or scans with a phone straight into this chart">📱 Scan from phone</button>}
-          <select aria-label="Show" value={filter} onChange={(e) => setFilter(e.target.value)} style={{ width: 170 }}>
+        <div className="docs-toolbar">
+          <h2>Documents & imaging</h2>
+          <input id={`docsearch-${patient.id}`} type="search" aria-label="Search documents" placeholder="Search names, notes and the words inside…" value={search} onChange={(e) => setSearch(e.target.value)} />
+          <select aria-label="Show" value={filter} onChange={(e) => setFilter(e.target.value)} style={{ width: 160 }}>
             <option value="">All types</option>
             {CATEGORIES.map((c) => <option key={c} value={c}>{catLabel(c)}</option>)}
           </select>
+          {folders.length > 0 && (
+            <select aria-label="Folder" value={folder} onChange={(e) => setFolder(e.target.value)} style={{ width: 150 }}>
+              <option value="">All folders</option>
+              {folders.map((f) => <option key={f} value={f}>{f}</option>)}
+            </select>
+          )}
+          {canWrite && (
+            <span className="scan-anchor">
+              <button className="primary scan-trigger" onClick={() => setScanOpen((o) => !o)} aria-haspopup="menu" aria-expanded={scanOpen} title="Scan or add a document (S)"><ScanLine size={15} aria-hidden /> Scan <kbd>S</kbd></button>
+              <ScanMenu patient={patient} open={scanOpen} setOpen={setScanOpen} onPhone={() => setPhone(true)} onUpload={() => input.current?.click()} onScanned={afterScan} />
+            </span>
+          )}
         </div>
-        {docs && !shown.length && <div className="empty">{docs.length ? 'Nothing matches.' : `No documents yet. ${canWrite ? 'Drop files here or paste an image to add them.' : ''}`}</div>}
-        <div className="doc-grid">{shown.map((d) => <Thumb key={d.id} doc={d} onOpen={() => open(d)} />)}</div>
+        {found && insideOnly > 0 && <div className="docs-found">{insideOnly} found by the words inside {insideOnly === 1 ? 'it' : 'them'}</div>}
+        {docs && !shown.length && <div className="empty">{docs.length ? 'Nothing matches.' : `No documents yet. ${canWrite ? 'Scan (S), drop files here or paste an image to add them.' : ''}`}</div>}
+        <datalist id="doc-folders">{folders.map((f) => <option key={f} value={f} />)}</datalist>
+        <div className="doc-grid">{shown.map((d) => <Thumb key={d.id} doc={d} hit={found?.byId.get(d.id)} onOpen={() => open(d)} />)}</div>
       </div>
 
       {viewing && (
         <Modal title={viewing.doc.filename} wide onClose={close}>
           {/* Delete removes (with Undo); the viewer's own keys (← →, zoom, tools) work while it has focus. */}
-          <div onKeyDown={(e) => { if (e.key === 'Delete' && canWrite && !typingIn(e.target)) { e.preventDefault(); remove(viewing.doc); } }}>
+          <div onKeyDown={(e) => {
+            if (typingIn(e.target)) return;
+            if (e.key === 'Delete' && canWrite) { e.preventDefault(); remove(viewing.doc); }
+            if (!viewing.viewer && viewing.list?.length > 1 && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) { e.preventDefault(); step(e.key === 'ArrowRight' ? 1 : -1); }
+          }}>
             <div className="muted" style={{ marginBottom: 10 }}>
               {position && <strong className="doc-position">{position} · </strong>}
-              {catLabel(viewing.doc.category)}{viewing.doc.tooth ? ` · tooth #${viewing.doc.tooth}` : ''} · {viewing.doc.taken_at ? `taken ${fmtDate(viewing.doc.taken_at)} · ` : ''}added {fmtDate(viewing.doc.created_at)}{viewing.doc.uploaded_by_name ? ` by ${viewing.doc.uploaded_by_name}` : viewing.doc.notes ? ` · ${viewing.doc.notes}` : ''}
+              {catLabel(viewing.doc.category)}{viewing.doc.tooth ? ` · tooth #${viewing.doc.tooth}` : ''} · {viewing.doc.taken_at ? `taken ${fmtDate(viewing.doc.taken_at)} · ` : ''}added {fmtDate(viewing.doc.created_at)}{viewing.doc.uploaded_by_name ? ` by ${viewing.doc.uploaded_by_name}` : ''}
             </div>
-            {viewing.viewer && (
-              <div className={compare ? 'viewer-compare' : ''}>
-                <ImageViewer doc={viewing.doc} canEdit={canWrite} compact={!!compare} height={compare ? '60vh' : editing ? '46vh' : '62vh'} autoFocus
-                  onPrev={viewing.list?.length > 1 ? () => step(-1) : undefined} onNext={viewing.list?.length > 1 ? () => step(1) : undefined} />
-                {compare && <ImageViewer key={compare.id} doc={compare} canEdit={canWrite} compact height="60vh" />}
-              </div>
-            )}
-            {viewing.three && <Viewer3D documentId={viewing.doc.id} canEdit={canWrite} onClose={close} onSaved={reload} height="78vh" />}
-            {!viewing.viewer && !viewing.three && !viewing.url && <div className="empty">Loading…</div>}
-            {viewing.url && previewable(viewing.doc.mime) && <img src={viewing.url} alt={viewing.doc.filename} className="doc-viewer" />}
-            {viewing.url && viewing.doc.mime === 'application/pdf' && <iframe src={viewing.url} title={viewing.doc.filename} className="doc-viewer" style={{ height: '70vh', width: '100%', border: 0 }} />}
-            {viewing.url && !viewerable(viewing.doc.mime) && viewing.doc.mime !== 'application/pdf' && <p>Preview not available for this file type — <a href={viewing.url} download={viewing.doc.filename}>download it</a> to open in your imaging software.</p>}
-            {editing && (
-              <DocumentDetails key={viewing.doc.id} doc={viewing.doc} onClose={() => setEditing(false)}
-                onSaved={(d) => {
-                  // A PDF filed as something else teaches the default for the next PDF.
-                  if (viewing.doc.mime === 'application/pdf' && d.category !== viewing.doc.category) rememberPdf(d.category);
-                  setEditing(false);
-                  setViewing((v) => v && { ...v, doc: { ...v.doc, ...d } });
-                  reload();
-                }} />
-            )}
+            <DocView key={viewing.doc.id} doc={viewing.doc}
+              renderViewer={viewing.viewer ? () => (
+                <div className={compare ? 'viewer-compare' : ''}>
+                  <ImageViewer doc={viewing.doc} canEdit={canWrite} compact={!!compare} height={compare ? '60vh' : '62vh'} autoFocus
+                    onPrev={viewing.list?.length > 1 ? () => step(-1) : undefined} onNext={viewing.list?.length > 1 ? () => step(1) : undefined} />
+                  {compare && <ImageViewer key={compare.id} doc={compare} canEdit={canWrite} compact height="60vh" />}
+                </div>
+              ) : viewing.three ? () => <Viewer3D documentId={viewing.doc.id} canEdit={canWrite} onClose={close} onSaved={reload} height="72vh" /> : null}
+              onChanged={(d) => {
+                // A PDF filed as something else teaches the default for the next PDF.
+                if (d?.category && !d.suggested && viewing.doc.mime === 'application/pdf' && d.category !== viewing.doc.category) rememberPdf(d.category);
+                if (d?.id === viewing.doc.id) setViewing((v) => v && { ...v, doc: { ...v.doc, ...d } });
+                reload();
+              }} />
             <div className="form-actions doc-actions">
               {viewing.viewer && (
                 <label className="inline" style={{ gap: 6, marginRight: 'auto' }}>Compare with
@@ -285,9 +336,9 @@ export default function DocumentsTab({ patient }) {
                   </select>
                 </label>
               )}
-              {viewing.url && <a href={viewing.url} download={viewing.doc.filename}><button>Download</button></a>}
-              {viewing.viewer && <button onClick={() => fetchBlob(viewing.doc.id).then((u) => Object.assign(document.createElement('a'), { href: u, download: viewing.doc.filename }).click())}>Download original</button>}
-              {canWrite && !editing && <button onClick={() => setEditing(true)}>Edit details</button>}
+              {viewing.viewer
+                ? <button onClick={() => fetchBlob(viewing.doc.id).then((u) => Object.assign(document.createElement('a'), { href: u, download: viewing.doc.filename }).click())}><Download size={14} aria-hidden /> Download original</button>
+                : <button onClick={() => downloadDoc(viewing.doc).catch((e) => toast(e.message, { tone: 'error' }))}><Download size={14} aria-hidden /> Download</button>}
               {canWrite && <button className="danger" onClick={() => remove(viewing.doc)} title="Remove from the chart (Delete) — you can undo">Remove</button>}
             </div>
           </div>
@@ -325,40 +376,11 @@ function PhoneScan({ patient, category, onClose }) {
       {link && (
         <div style={{ textAlign: 'center', marginTop: 12 }}>
           {qr && <img src={qr} alt="QR code to upload from a phone" width={220} height={220} />}
-          <p>Scan with the phone camera, then take photos of the {catLabel(cat).toLowerCase()} (insurance card, referral letter, outside x-ray…). They land in {patient.first_name}&apos;s chart.</p>
+          <p>Scan the code with the phone’s camera, then photograph the pages — each page is found, straightened and cleaned up on the phone, and they arrive here as one PDF in {patient.first_name}&apos;s chart.</p>
           <p className="muted" style={{ fontSize: 12, wordBreak: 'break-all' }}>{link.url}<br />Works for 15 minutes.</p>
         </div>
       )}
     </Modal>
-  );
-}
-
-// Fix what was recorded at upload, in a panel under the image (not a second dialog on top of the viewer).
-// Enter saves, Esc closes just this panel.
-function DocumentDetails({ doc, onClose, onSaved }) {
-  const [f, setF] = useState({ filename: doc.filename, category: doc.category, tooth: doc.tooth || '', taken_at: doc.taken_at || '', notes: doc.notes || '', tags: (() => { try { return JSON.parse(doc.tags || '[]').join(', '); } catch { return ''; } })() });
-  const [error, setError] = useState(null);
-  const first = useRef(null);
-  useEffect(() => { first.current?.focus(); }, []);
-  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
-  const save = async (e) => {
-    e.preventDefault();
-    try { onSaved(await api.put(`/documents/${doc.id}`, f)); } catch (err) { setError(err); }
-  };
-  return (
-    <form className="doc-details" aria-label="Document details" onSubmit={save} onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onClose(); } }}>
-      <h3>Details</h3>
-      <ErrorBox error={error} />
-      <div className="form-grid">
-        <label className="full">Name<input ref={first} value={f.filename} onChange={set('filename')} /></label>
-        <label>Type<select value={f.category} onChange={set('category')}>{CATEGORIES.map((c) => <option key={c} value={c}>{catLabel(c)}</option>)}</select></label>
-        <label>Tooth<input value={f.tooth} onChange={set('tooth')} placeholder="e.g. 19" /></label>
-        <label>Date taken<input type="date" value={f.taken_at} onChange={set('taken_at')} /></label>
-        <label className="full">Note<input value={f.notes} onChange={set('notes')} /></label>
-        <label className="full">Tags (comma-separated)<input value={f.tags} onChange={set('tags')} placeholder="e.g. pre-op, ortho records" /></label>
-      </div>
-      <div className="form-actions"><button type="button" onClick={onClose}>Cancel</button><button className="primary">Save details</button></div>
-    </form>
   );
 }
 

@@ -27,6 +27,7 @@ import cadenceRoutes from './routes/cadence.js';
 import recallBookRoutes, { recallVoiceWebhooks } from './routes/recallbook.js';
 import chatRoutes from './routes/chat.js';
 import chartAuditRoutes from './routes/chartaudit.js';
+import { docBridgeRoutes, docMediaRoutes } from './routes/docbridge.js';
 import longRecordingRoutes from './routes/longrecording.js';
 import metricRoutes from './routes/metrics.js';
 import digestRoutes, { digestPublicRoutes } from './routes/digests.js';
@@ -253,6 +254,9 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
     res.set('Cache-Control', 'no-store');
     next();
   }, bridgeAgentRoutes({ db, storage }));
+  // Desk scanners through the bridge (scan jobs and results) and streamed audio/video with Range support.
+  app.use('/api/bridge', docBridgeRoutes({ db, storage, config }));
+  app.use('/api/media', (_req, res, next) => { res.set('Cache-Control', 'no-store'); next(); }, docMediaRoutes({ db, storage, secret }));
 
   // Errors in the browser app, passed on to error monitoring (the DSN stays on the server). Only the
   // message, stack and page route are kept — nothing typed into the page.

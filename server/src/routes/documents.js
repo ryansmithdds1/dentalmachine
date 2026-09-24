@@ -1,13 +1,16 @@
 import express, { Router } from 'express';
 import { autoAnalyze } from '../xrayai.js';
 import { requirePermission, HttpError } from '../auth.js';
-import { findOr404, insert, audit, requireOneOf, validTooth, newToken, recorded } from '../util.js';
-import { sniffMime } from './imaging.js';
-import { sniffScanMime, inspectUpload } from '../volume.js';
+import { findOr404, insert, audit, validTooth, newToken, recorded, isRealDate } from '../util.js';
 import { dicomToImage } from '../dicomimage.js';
 import { makeThumbnail, imageSize } from '../thumbnails.js';
 import { publish } from '../events.js';
 import { buildRecordExport } from '../recordexport.js';
+import { loadDoc, storeUpload, queueRead, readFile, sendFile, PATIENT_CATEGORIES, OFFICE_CATEGORIES } from '../docfiles.js';
+import { readLimitFor } from '../filetypes.js';
+import { createVirusScanner } from '../virusscan.js';
+import { createOcr } from '../ocr.js';
+import docManageRoutes, { cleanFolder } from './docmanage.js';
 
 // Mount layouts (FMX etc.): how many images each holds; the client draws the slots.
 export const MOUNT_TEMPLATES = { fmx18: 18, fmx20: 20, fmx14: 14, bw4: 4, bw2: 2, vbw7: 7, pa1: 1, pa2: 2, pa4: 4, pano1: 1, photos8: 8 };
@@ -60,10 +63,9 @@ export function cleanExposure(e) {
 }
 const parseJson = (v) => (v ? JSON.parse(v) : null);
 
-const CATEGORIES = ['xray', 'photo', 'document', 'consent', 'insurance_card', 'referral', 'other'];
-const ALLOWED = /^(image\/(png|jpeg|gif|webp|bmp|tiff)|application\/pdf|application\/dicom|text\/plain|application\/zip|model\/(stl|ply|obj))$/;
-// A CBCT series arrives as one zip of DICOM slices (50–500 MB); everything else keeps the usual limit.
-const MAX_VOLUME_BYTES = 1024 * 1024 * 1024;
+// Patient document types; office documents have their own (docfiles.js). What a file may be, and how large,
+// is settled by filetypes.js from its contents.
+const CATEGORIES = PATIENT_CATEGORIES;
 // Tags: short labels to find documents by ("pre-op", "ortho records", "insurance"), stored as a JSON list.
 export function cleanTags(v) {
   const list = (Array.isArray(v) ? v : String(v || '').split(','))
@@ -73,12 +75,27 @@ export function cleanTags(v) {
 }
 
 export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
-const rawSmall = express.raw({ type: () => true, limit: MAX_UPLOAD_BYTES });
-const rawVolume = express.raw({ type: () => true, limit: MAX_VOLUME_BYTES });
+// The body is read up to the largest size the file's name allows (a video more than a PDF); the contents then
+// decide what it is and whether that size is allowed for it.
+const rawFor = (req, res, next) => express.raw({ type: () => true, limit: readLimitFor(String(req.query.filename || '')) })(req, res, next);
 
 // Patient documents & imaging. Files are uploaded as the raw request body.
+// config.virusScanner / config.ocrAdapter replace the virus scanner and the OCR reader (tests, other vendors).
 export default function documentRoutes({ db, storage, config = {} }) {
   const r = Router();
+  const scanner = config.virusScanner || createVirusScanner();
+  const reader = createOcr({ config });
+  r.use(docManageRoutes({ db, storage, config, reader, scanner }));
+  const linkRow = async (req, patientId, q) => {
+    const row = {};
+    for (const [key, table, label] of [['appointment_id', 'appointments', 'Visit'], ['claim_id', 'claims', 'Claim'], ['treatment_plan_id', 'treatment_plans', 'Treatment plan']]) {
+      if (q[key] === undefined || q[key] === null || q[key] === '') continue;
+      const found = await findOr404(db, table, q[key], req.user.practice_id, label);
+      if (found.patient_id !== patientId) throw new HttpError(400, `That ${label.toLowerCase()} is another patient’s`);
+      row[key] = found.id;
+    }
+    return row;
+  };
 
   // The patient's copy of their record (HIPAA right of access): summary PDF, the data, and their files.
   r.get('/patients/:id/record-export', requirePermission('clinical:read'), requirePermission('billing:read'), async (req, res) => {
@@ -90,72 +107,52 @@ export default function documentRoutes({ db, storage, config = {} }) {
 
   r.get('/patients/:id/documents', requirePermission('clinical:read'), async (req, res) => {
     const patient = await findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient');
-    res.json((await db.all(
+    const rows = await db.all(
       `SELECT d.id, d.category, d.filename, d.mime, d.size, d.tooth, d.notes, d.source, d.taken_at, d.created_at, d.tags, d.adjust, d.exposure, d.retake_of, u.name AS uploaded_by_name,
-         CASE WHEN d.annotations IS NOT NULL AND d.annotations != '[]' THEN 1 ELSE 0 END AS annotated
-       FROM documents d LEFT JOIN users u ON u.id = d.uploaded_by
+         CASE WHEN d.annotations IS NOT NULL AND d.annotations != '[]' THEN 1 ELSE 0 END AS annotated,
+         d.folder, d.appointment_id, d.claim_id, d.treatment_plan_id, d.ocr_status, CASE WHEN d.ocr_key IS NOT NULL THEN 1 ELSE 0 END AS has_text,
+         d.suggested_category, d.suggestion_reason, d.suggestion_source, d.review_status, d.review_assignee, ra.name AS review_assignee_name, d.virus_status,
+         (SELECT COUNT(*) FROM document_notes n WHERE n.document_id = d.id AND n.status = 'active') AS note_count
+       FROM documents d LEFT JOIN users u ON u.id = d.uploaded_by LEFT JOIN users ra ON ra.id = d.review_assignee
        WHERE d.practice_id = ? AND d.patient_id = ? AND d.deleted_at IS NULL ORDER BY d.id DESC`,
       req.user.practice_id, patient.id,
-    )).map((d) => ({ ...d, adjust: parseJson(d.adjust), exposure: parseJson(d.exposure) })));
+    );
+    // Paperwork that arrived another way (a phone, an imaging bridge) and hasn't been read yet is read now,
+    // in the background, so it becomes searchable (recent files only; older ones on request).
+    const recent = new Date(Date.now() - 14 * 86400_000).toISOString().slice(0, 19).replace('T', ' ');
+    for (const d of rows) if (!d.ocr_status && d.created_at >= recent && !['xray', 'photo'].includes(d.category)) queueRead(db, storage, config, reader, d.id);
+    res.json(rows.map((d) => ({ ...d, adjust: parseJson(d.adjust), exposure: parseJson(d.exposure) })));
   });
 
   r.post(
     '/patients/:id/documents',
     requirePermission('clinical:write'),
-    (req, res, next) => (/\.zip$/i.test(String(req.query.filename || '')) ? rawVolume : rawSmall)(req, res, next),
+    rawFor,
     async (req, res) => {
       const patient = await findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient');
-      if (!Buffer.isBuffer(req.body) || !req.body.length) throw new HttpError(400, 'Empty upload');
+      const q = req.query;
+      if (q.taken_at && !isRealDate(String(q.taken_at))) throw new HttpError(400, 'taken_at must be a real date (YYYY-MM-DD)');
+      const extra = { ...(await linkRow(req, patient.id, q)), folder: cleanFolder(q.folder), taken_at: q.taken_at ? String(q.taken_at) : null };
+      if (q.tags) extra.tags = cleanTags(q.tags);
       // Go by the file's contents: browsers send DICOM (and often TIFF) as application/octet-stream,
-      // and a declared type isn't proof of what the file is.
-      const declared = String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
-      const mime = sniffMime(req.body, String(req.query.filename || '')) || sniffScanMime(req.body, String(req.query.filename || '')) || (declared === 'text/plain' ? declared : null);
-      if (!mime || !ALLOWED.test(mime)) throw new HttpError(415, 'Only images, PDFs, DICOM, CBCT (zip of DICOM), 3D scans (STL/PLY/OBJ) and text files can be uploaded');
-      // A zip must be a CBCT series or a set of scans (never arbitrary files); it's filed as an x-ray or photo.
-      const scan = mime === 'application/zip' || mime.startsWith('model/') ? inspectUpload(req.body, String(req.query.filename || '')) : null;
-      if (mime === 'application/zip' && !scan) throw new HttpError(415, 'That zip isn’t a CBCT series or a 3D scan');
-      if (mime === 'application/zip' && req.body.length > MAX_UPLOAD_BYTES && !/\.zip$/i.test(String(req.query.filename || ''))) throw new HttpError(413, 'Upload is too large');
-      const category = String(req.query.category || scan?.category || 'document');
-      requireOneOf(category, CATEGORIES, 'category');
-      const tooth = req.query.tooth ? String(req.query.tooth).toUpperCase() : null;
-      if (!validTooth(tooth)) throw new HttpError(400, 'tooth must be 1-32 or A-T');
-      let filename = String(req.query.filename || 'upload').replace(/[^\w.\- ()]/g, '_').slice(0, 200);
-      // Plain text is only what it claims to be: readable UTF-8, never named as a page or script.
-      if (mime === 'text/plain') {
-        try {
-          new TextDecoder('utf-8', { fatal: true }).decode(req.body);
-        } catch {
-          throw new HttpError(415, 'That text file isn’t plain text');
-        }
-        if (req.body.includes(0)) throw new HttpError(415, 'That text file isn’t plain text');
-        // Text-format scans (ASCII STL/OBJ/PLY) keep their names; anything else (.html, .svg, .js) becomes .txt.
-        if (!/\.(txt|stl|obj|ply|csv)$/i.test(filename)) filename = `${filename.replace(/\.[^.]*$/, '')}.txt`;
-      }
-      const { storageKey, encrypted } = await storage.save(req.user.practice_id, req.body);
-      const id = await insert(db, 'documents', {
-        practice_id: req.user.practice_id, patient_id: patient.id, category, filename, mime, size: req.body.length,
-        storage_key: storageKey, encrypted: encrypted ? 1 : 0, tooth, notes: req.query.notes ? String(req.query.notes).slice(0, 500) : null,
-        uploaded_by: req.user.id,
+      // and a declared type isn't proof of what the file is (filetypes.js).
+      const out = await storeUpload(db, storage, {
+        req, practiceId: req.user.practice_id, patientId: patient.id, scope: 'patient', body: req.body, filename: String(q.filename || 'upload'),
+        declared: String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase(), category: q.category ? String(q.category) : null,
+        tooth: q.tooth ? String(q.tooth) : null, notes: q.notes, uploadedBy: req.user.id, scanner, extra,
       });
-      await audit(db, req, 'document.upload', 'documents', id, { patient_id: patient.id, category });
-      if (category === 'xray') autoAnalyze(db, id);
-      res.status(201).json(await db.get('SELECT id, category, filename, mime, size, tooth, notes, created_at FROM documents WHERE id = ?', id));
+      if (out.category === 'xray') autoAnalyze(db, out.id);
+      queueRead(db, storage, config, reader, out.id);
+      res.status(201).json(await db.get('SELECT id, category, filename, mime, size, tooth, notes, folder, created_at FROM documents WHERE id = ?', out.id));
     },
   );
 
-  r.get('/documents/:did/file', requirePermission('clinical:read'), async (req, res) => {
-    const doc = await findOr404(db, 'documents', req.params.did, req.user.practice_id, 'Document');
-    if (doc.deleted_at) throw new HttpError(404, 'Document not found');
-    const data = await storage.read(doc.storage_key, !!doc.encrypted);
-    if (!data) throw new HttpError(404, 'File missing from storage');
-    await audit(db, req, 'document.view', 'documents', doc.id, { patient_id: doc.patient_id });
-    res.set({
-      'Content-Type': doc.mime,
-      'Content-Length': data.length,
-      'Content-Disposition': `${req.query.download ? 'attachment' : 'inline'}; filename="${doc.filename.replace(/"/g, '')}"`,
-      'Content-Security-Policy': "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; sandbox",
-    });
-    res.send(data);
+  // The file itself. Range requests are answered (audio/video seeking, large PDFs); viewing is recorded
+  // once per opening (the first range), not for every piece the player asks for.
+  r.get('/documents/:did/file', async (req, res) => {
+    const doc = await loadDoc(db, req, req.params.did);
+    const data = await readFile(storage, doc);
+    if (sendFile(req, res, doc, data)) await audit(db, req, 'document.view', 'documents', doc.id, { patient_id: doc.patient_id });
   });
 
   // The image as a browser can show it: DICOM is converted (PNG, or its embedded JPEG); other images as they are.
@@ -171,9 +168,8 @@ export default function documentRoutes({ db, storage, config = {} }) {
     return { mime: doc.mime, data, pixelSpacing: null };
   };
 
-  r.get('/documents/:did/image', requirePermission('clinical:read'), async (req, res) => {
-    const doc = await findOr404(db, 'documents', req.params.did, req.user.practice_id, 'Document');
-    if (doc.deleted_at) throw new HttpError(404, 'Document not found');
+  r.get('/documents/:did/image', async (req, res) => {
+    const doc = await loadDoc(db, req, req.params.did);
     const img = await viewable(doc);
     await audit(db, req, 'document.view', 'documents', doc.id, { patient_id: doc.patient_id });
     res.set({ 'Content-Type': img.mime, 'Content-Length': img.data.length, 'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'none'; sandbox" });
@@ -182,8 +178,8 @@ export default function documentRoutes({ db, storage, config = {} }) {
 
   // What the viewer needs besides the pixels: saved annotations and the mm-per-pixel scale for measuring
   // (from the DICOM header when there is one, else what the user calibrated).
-  r.get('/documents/:did/viewer', requirePermission('clinical:read'), async (req, res) => {
-    const doc = await findOr404(db, 'documents', req.params.did, req.user.practice_id, 'Document');
+  r.get('/documents/:did/viewer', async (req, res) => {
+    const doc = await loadDoc(db, req, req.params.did, { allowDeleted: true });
     let spacing = null;
     if (doc.mime === 'application/dicom') {
       try { spacing = (await viewable(doc)).pixelSpacing?.[0] || null; } catch { spacing = null; }
@@ -196,17 +192,16 @@ export default function documentRoutes({ db, storage, config = {} }) {
   });
 
   // Saved viewing adjustments (brightness, sharpen, invert, rotation…): what the image opens with next time.
-  r.put('/documents/:did/adjust', requirePermission('clinical:write'), async (req, res) => {
-    const doc = await findOr404(db, 'documents', req.params.did, req.user.practice_id, 'Document');
-    if (doc.deleted_at) throw new HttpError(404, 'Document not found');
+  r.put('/documents/:did/adjust', async (req, res) => {
+    const doc = await loadDoc(db, req, req.params.did, { write: true });
     const adjust = cleanAdjust(req.body?.adjust);
     await db.run('UPDATE documents SET adjust = ? WHERE id = ?', adjust ? JSON.stringify(adjust) : null, doc.id);
     publish(req.user.practice_id, { type: 'documents', patient_id: doc.patient_id });
     res.json({ ok: true, adjust });
   });
 
-  r.put('/documents/:did/annotations', requirePermission('clinical:write'), async (req, res) => {
-    const doc = await findOr404(db, 'documents', req.params.did, req.user.practice_id, 'Document');
+  r.put('/documents/:did/annotations', async (req, res) => {
+    const doc = await loadDoc(db, req, req.params.did, { write: true, allowDeleted: true });
     const list = req.body?.annotations;
     if (!Array.isArray(list) || list.length > 200) throw new HttpError(400, 'annotations must be a list of up to 200');
     const clean = list.map((a) => {
@@ -264,9 +259,8 @@ export default function documentRoutes({ db, storage, config = {} }) {
   });
 
   // Grid previews: made here when the format allows, else by the first browser to show the image (below).
-  r.get('/documents/:did/thumb', requirePermission('clinical:read'), async (req, res) => {
-    const doc = await findOr404(db, 'documents', req.params.did, req.user.practice_id, 'Document');
-    if (doc.deleted_at) throw new HttpError(404, 'Document not found');
+  r.get('/documents/:did/thumb', async (req, res) => {
+    const doc = await loadDoc(db, req, req.params.did);
     let thumb = doc.thumb_key ? { mime: doc.thumb_mime, data: await storage.read(doc.thumb_key, !!doc.thumb_encrypted) } : null;
     if (!thumb?.data) {
       if (!/^image\//.test(doc.mime) && doc.mime !== 'application/dicom') throw new HttpError(404, 'No preview for this file type');
@@ -281,9 +275,8 @@ export default function documentRoutes({ db, storage, config = {} }) {
     res.send(thumb.data);
   });
   // A browser's preview of an image the server can't decode (it only needs making once).
-  r.put('/documents/:did/thumb', requirePermission('clinical:write'), express.raw({ type: () => true, limit: 300_000 }), async (req, res) => {
-    const doc = await findOr404(db, 'documents', req.params.did, req.user.practice_id, 'Document');
-    if (doc.deleted_at) throw new HttpError(404, 'Document not found');
+  r.put('/documents/:did/thumb', express.raw({ type: () => true, limit: 300_000 }), async (req, res) => {
+    const doc = await loadDoc(db, req, req.params.did);
     if (doc.thumb_key) return res.json({ ok: true, existing: true });
     const size = Buffer.isBuffer(req.body) ? imageSize(req.body) : null;
     if (!size || size.width > 480 || size.height > 480 || !size.width || !size.height) throw new HttpError(400, 'A preview must be a PNG or JPEG no larger than 480 pixels');
@@ -293,14 +286,16 @@ export default function documentRoutes({ db, storage, config = {} }) {
   });
 
   // Fix what was recorded at upload: type, tooth, date taken, name, note.
-  r.put('/documents/:did', requirePermission('clinical:write'), async (req, res) => {
-    const doc = await findOr404(db, 'documents', req.params.did, req.user.practice_id, 'Document');
-    if (doc.deleted_at) throw new HttpError(404, 'Document not found');
+  r.put('/documents/:did', async (req, res) => {
+    const doc = await loadDoc(db, req, req.params.did, { write: true });
     const b = req.body || {};
     const row = {};
+    const allowed = doc.patient_id || doc.inbox ? CATEGORIES : OFFICE_CATEGORIES;
     if (b.category !== undefined) {
-      if (!CATEGORIES.includes(b.category)) throw new HttpError(400, `category must be one of ${CATEGORIES.join(', ')}`);
+      if (!allowed.includes(b.category)) throw new HttpError(400, `category must be one of ${allowed.join(', ')}`);
       row.category = b.category;
+      // Filed by a person: a pending suggestion is settled either way.
+      if (doc.suggested_category) row.suggested_category = null;
     }
     if (b.tooth !== undefined) {
       const t = String(b.tooth || '').trim().toUpperCase();
@@ -322,11 +317,23 @@ export default function documentRoutes({ db, storage, config = {} }) {
       const e = cleanExposure(b.exposure);
       row.exposure = e ? JSON.stringify(e) : null;
     }
+    if (b.folder !== undefined) row.folder = cleanFolder(b.folder);
+    if (b.expires_on !== undefined) {
+      if (b.expires_on && !isRealDate(b.expires_on)) throw new HttpError(400, 'expires_on must be a real date (YYYY-MM-DD)');
+      row.expires_on = b.expires_on || null;
+      // A new date (a renewal) gets its own reminder; the old one is closed.
+      if (row.expires_on !== doc.expires_on) {
+        row.expiry_task_id = null;
+        if (doc.expiry_task_id) await db.run("UPDATE tasks SET status = 'done', completed_at = datetime('now'), completed_by = ? WHERE id = ? AND status = 'open'", req.user.id, doc.expiry_task_id);
+      }
+    }
+    Object.assign(row, await linkRow(req, doc.patient_id, b));
+    for (const k of ['appointment_id', 'claim_id', 'treatment_plan_id']) if (b[k] === null || b[k] === '') row[k] = null;
     if (!Object.keys(row).length) throw new HttpError(400, 'Nothing to change');
     await recorded(db, 'documents', doc.id, () => db.run(`UPDATE documents SET ${Object.keys(row).map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, ...Object.values(row), doc.id));
     await audit(db, req, 'document.update', 'documents', doc.id, { patient_id: doc.patient_id, ...row });
-    publish(req.user.practice_id, { type: 'documents', patient_id: doc.patient_id });
-    const out = await db.get('SELECT id, category, tooth, taken_at, filename, notes, tags, exposure FROM documents WHERE id = ?', doc.id);
+    publish(req.user.practice_id, doc.patient_id ? { type: 'documents', patient_id: doc.patient_id } : { type: 'office-documents' });
+    const out = await db.get('SELECT id, category, tooth, taken_at, filename, notes, tags, exposure, folder, expires_on, appointment_id, claim_id, treatment_plan_id FROM documents WHERE id = ?', doc.id);
     res.json({ ...out, exposure: parseJson(out.exposure) });
   });
 
@@ -342,22 +349,22 @@ export default function documentRoutes({ db, storage, config = {} }) {
   });
 
   // Soft delete: the file is retained for record-keeping but hidden from the chart. Removing twice is harmless.
-  r.delete('/documents/:did', requirePermission('clinical:write'), async (req, res) => {
-    const doc = await findOr404(db, 'documents', req.params.did, req.user.practice_id, 'Document');
+  r.delete('/documents/:did', async (req, res) => {
+    const doc = await loadDoc(db, req, req.params.did, { write: true, allowDeleted: true });
     if (doc.deleted_at) return res.json({ ok: true, already: true });
     await recorded(db, 'documents', doc.id, () => db.run("UPDATE documents SET deleted_at = datetime('now') WHERE id = ? AND deleted_at IS NULL", doc.id));
     await audit(db, req, 'document.delete', 'documents', doc.id, { patient_id: doc.patient_id, filename: doc.filename, category: doc.category });
-    publish(req.user.practice_id, { type: 'documents', patient_id: doc.patient_id });
+    publish(req.user.practice_id, doc.patient_id ? { type: 'documents', patient_id: doc.patient_id } : { type: 'office-documents' });
     res.json({ ok: true });
   });
 
   // Undo a removal: the same file comes back to the chart (the removal and the restore both stay in the audit trail).
-  r.post('/documents/:did/restore', requirePermission('clinical:write'), async (req, res) => {
-    const doc = await findOr404(db, 'documents', req.params.did, req.user.practice_id, 'Document');
+  r.post('/documents/:did/restore', async (req, res) => {
+    const doc = await loadDoc(db, req, req.params.did, { write: true, allowDeleted: true });
     if (!doc.deleted_at) return res.json({ ok: true, already: true });
     await recorded(db, 'documents', doc.id, () => db.run('UPDATE documents SET deleted_at = NULL WHERE id = ?', doc.id));
     await audit(db, req, 'document.restore', 'documents', doc.id, { patient_id: doc.patient_id, filename: doc.filename, reason: req.body?.reason ? String(req.body.reason).slice(0, 200) : null });
-    publish(req.user.practice_id, { type: 'documents', patient_id: doc.patient_id });
+    publish(req.user.practice_id, doc.patient_id ? { type: 'documents', patient_id: doc.patient_id } : { type: 'office-documents' });
     res.json({ ok: true });
   });
 
