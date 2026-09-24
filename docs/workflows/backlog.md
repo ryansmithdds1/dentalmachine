@@ -101,6 +101,31 @@ P4. **Straight into the chart, no retyping:** contact details and insurance appl
 P5. **Status and follow-up:** each visit shows forms done / not done on the schedule and the huddle, automatic
     reminders to finish, and the few that need a person land in one worklist (from workflow 30).
 
+## Treatment plans and financial options (asked for, high priority)
+Builds on treatment plans and phases, case presentation / case acceptance pages, estimates, payment plans,
+financing lenders (CareCredit etc.), memberships and the in-progress workflows 21/22. Goal: simple for the team to
+build, simple and visual for the patient to choose — no clutter.
+F1. **Build the plan fast:** add treatment from the chart or by typing (chart shorthand), drag procedures between
+    phases (Phase 1 urgent, Phase 2…), name phases, reorder, mark alternatives ("Option A: implant / Option B:
+    bridge"), and the estimate (insurance, write-off, patient portion, remaining annual max per phase and across a
+    benefit-year split) updates live.
+F2. **Present it visually:** a clean patient-facing view (chair screen, iPad or a link to their phone): the teeth
+    involved on a small chart, each phase as a card with what, why (short plain words, optional photo/x-ray), how
+    many visits, and their cost; alternatives side by side; nothing technical unless they tap for detail.
+F3. **Financial options side by side:** for the whole plan or a phase, the patient sees and picks:
+    pay in full with a prepay discount (percentage set by the office, only where allowed); in-office payment plan
+    (down payment, number of months, interest/fees if any — monthly amount calculated automatically, autopay card on
+    file); third-party financing (CareCredit, Sunbit, Cherry, Proceed… — monthly payment calculated from each lender's
+    promo terms, e.g. 0% for 12 months or APR over 24/36/48/60, with the apply link); membership plan pricing for
+    patients without insurance. PPO patients see "Your in-network savings: $X" (office fee − PPO fee) where it
+    applies. Each option shows total, due today and monthly, in large simple numbers.
+F4. **One tap to accept:** the patient picks phases + an option and signs; the choice creates the payment plan /
+    financing application / prepay charge and discount (as ledger entries, reversible, audited), books the first
+    visit, and sends the consent (see Consents). Staff can do the same from the desk in a few keys.
+F5. **Office settings with guardrails:** discount limits, which options show, lender terms, minimum down payment,
+    max months — set by the owner; the numbers shown to the patient are stored exactly as presented (with the
+    fee schedule and estimate version) so the agreement can always be reproduced.
+
 ## Insurance payments posted and billed on autopilot (asked for, high priority)
 Builds on ERA (835) import and matching, paper EOB reading (AI), claims, statements, text-to-pay and autopay.
 Goal: a person only touches the exceptions.
