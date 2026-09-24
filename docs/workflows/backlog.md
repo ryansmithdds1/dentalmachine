@@ -194,6 +194,23 @@ I2. **SOPs and documents:** a simple internal wiki — pages with headings, chec
 I3. **Office announcements** pinned at the top (ties into team chat), and new-hire onboarding checklists that link
     to the SOPs.
 
+## Document management and scanning (asked for)
+Builds on patient Documents (encrypted storage, categories, restore) and the imaging bridge (which can watch folders).
+D1. **Scan straight in:** scan from any desk scanner — TWAIN/WIA on Windows through the bridge (Fujitsu/Ricoh
+    ScanSnap, Epson, Canon, Brother, HP), network scanners that save to a folder or email, and phone/iPad camera
+    capture with edge detection, de-skew and multi-page — into the patient's chart in one step; the active patient
+    is filled in so nothing is searched twice.
+D2. **Any file type:** PDF, images (JPG, PNG, HEIC, TIFF incl. multi-page), Word/Excel, text, DICOM and STL (to the 3D
+    viewer), audio/video; previews for everything that can be previewed, download for the rest; size limits and
+    virus/type checks on upload.
+D3. **Easy to store and find:** drag-and-drop anywhere on the chart, automatic category suggestion (insurance card,
+    EOB, referral, consent, lab Rx, ID, x-ray report) with a reason shown, folders/tags, dates, linked to the visit,
+    claim or treatment, and full-text search (OCR on scans) from the command bar.
+D4. **Notes on documents:** notes and comments on each document (who, when; kept with history), highlights or
+    sticky notes on a page, and a "needs review" flag that routes it to a person.
+D5. **Office documents too:** non-patient documents (contracts, licences, policies, vendor invoices) with the same
+    tools, tied into the office intranet.
+
 ## Then: remaining workflow batches
 9. Batch 4 (32–44): new patient setup, ERA/EOB posting, prescriptions, lab cases, huddle actions, recall lists,
    pre-auths, financing, adjustments, referrals, end-of-day, review requests (fix the count bug), clock in/out.
