@@ -81,3 +81,38 @@ test('with AI on: the dictation is worked into the right sentences, contradictio
   assert.match(fallback.warning, /couldn't help/);
   assert.match(fallback.body, /Crown seat #3\. FujiCEM\./);
 });
+
+const calls = [];
+const dg = harness({
+  config: { transcribe: 'deepgram', deepgramKey: 'dg-key' },
+  fetchImpl: async (url, opts) => {
+    if (String(url).includes('deepgram.com')) {
+      calls.push({ url: String(url), opts });
+      return new Response(JSON.stringify({ results: { channels: [{ alternatives: [{ transcript: '2 carpules of articaine, rubber dam' }] }] } }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    return globalThis.fetch(url, opts);
+  },
+});
+
+test('server dictation: the medical speech model, primed with dental words and the office’s template answers; audio not kept', async () => {
+  const { token } = await dg.practice();
+  const auth = { Authorization: `Bearer ${token}` };
+  assert.equal((await (await fetch(`${dg.origin}/api/dictation`, { headers: auth })).json()).mode, 'server');
+  const res = await fetch(`${dg.origin}/api/dictation/transcribe`, { method: 'POST', headers: { ...auth, 'Content-Type': 'audio/webm;codecs=opus' }, body: Buffer.from('fake-audio') });
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).text, '2 carpules of articaine, rubber dam');
+  const url = new URL(calls.at(-1).url);
+  assert.equal(url.searchParams.get('model'), 'nova-3-medical');
+  const terms = url.searchParams.getAll('keyterm');
+  assert.ok(terms.includes('articaine') && terms.includes('Isolite'), 'dental vocabulary');
+  assert.ok(terms.includes('Vitrebond'), 'answers from the office’s own templates');
+  assert.equal(calls.at(-1).opts.headers['Content-Type'], 'audio/webm');
+  assert.equal((await fetch(`${dg.origin}/api/dictation/transcribe`, { method: 'POST', headers: { ...auth, 'Content-Type': 'audio/webm' }, body: Buffer.alloc(0) })).status, 400);
+});
+
+test('without a speech service the screen uses the browser, and the server refuses audio', async () => {
+  const { token } = await h.practice();
+  const auth = { Authorization: `Bearer ${token}` };
+  assert.equal((await (await fetch(`${h.origin}/api/dictation`, { headers: auth })).json()).mode, 'browser');
+  assert.equal((await fetch(`${h.origin}/api/dictation/transcribe`, { method: 'POST', headers: { ...auth, 'Content-Type': 'audio/webm' }, body: Buffer.from('x') })).status, 409);
+});

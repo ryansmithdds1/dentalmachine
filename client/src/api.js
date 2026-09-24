@@ -81,6 +81,15 @@ async function request(method, path, body, extraHeaders = {}) {
   return data;
 }
 
+// Sends raw audio (a piece of dictation) and gets JSON back.
+export async function postAudio(path, blob) {
+  const token = getToken();
+  const res = await fetch(`/api${path}`, { method: 'POST', headers: { 'Content-Type': blob.type || 'audio/webm', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...locationHeader() }, body: blob });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new ApiError(res.status, data.error || res.statusText, data.details, data.request_id);
+  return data;
+}
+
 export const api = {
   get: (p) => request('GET', p),
   post: (p, b = {}) => request('POST', p, b),

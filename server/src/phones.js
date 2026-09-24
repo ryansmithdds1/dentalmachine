@@ -62,7 +62,11 @@ export async function textBack(db, messenger, call, practice, appUrl) {
 export function createTranscriber({ config, fetchImpl = globalThis.fetch }) {
   const mode = config.transcribe;
   if (mode === 'sandbox') {
-    return { mode, async transcribe() { return 'Caller: Hi, I need to move my cleaning next week.\nOffice: Sure, how about Thursday at 10?\nCaller: That works, thank you.'; } };
+    return {
+      mode,
+      async transcribe() { return 'Caller: Hi, I need to move my cleaning next week.\nOffice: Sure, how about Thursday at 10?\nCaller: That works, thank you.'; },
+      async dictation() { return 'two carpules of articaine, rubber dam, shade A2'; },
+    };
   }
   if (mode === 'deepgram' && config.deepgramKey) {
     return {
@@ -77,6 +81,18 @@ export function createTranscriber({ config, fetchImpl = globalThis.fetch }) {
         const utt = data.results?.utterances || [];
         if (utt.length) return utt.sort((a, b) => a.start - b.start).map((u) => `${u.channel === 0 ? 'Caller' : 'Office'}: ${u.transcript}`).join('\n');
         return (data.results?.channels || []).map((c, i) => `${i === 0 ? 'Caller' : 'Office'}: ${c.alternatives?.[0]?.transcript || ''}`).join('\n');
+      },
+      // A dentist's dictation: the medical model, primed with the dental words it will hear (drug names,
+      // materials, the office's own template answers) so "articaine" doesn't come back as "article".
+      async dictation(audio, { contentType = 'audio/webm', keyterms = [] } = {}) {
+        const q = new URLSearchParams({ model: 'nova-3-medical', smart_format: 'true', numerals: 'true' });
+        for (const k of keyterms.slice(0, 100)) q.append('keyterm', k);
+        const res = await fetchImpl(`https://api.deepgram.com/v1/listen?${q}`, {
+          method: 'POST', headers: { Authorization: `Token ${config.deepgramKey}`, 'Content-Type': contentType }, body: audio,
+        });
+        if (!res.ok) throw new Error(`Deepgram error ${res.status}`);
+        const data = await res.json();
+        return (data.results?.channels?.[0]?.alternatives?.[0]?.transcript || '').trim();
       },
     };
   }

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Mic, MicOff, Undo2 } from 'lucide-react';
 import { api } from '../api.js';
-import { useLookup } from '../hooks.js';
+import { useApi, useLookup } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
 import { ErrorBox, useSubmit } from './ui.jsx';
 import useDictation from './useDictation.js';
@@ -85,11 +85,14 @@ export default function NoteComposer({ patient, procedureIds = [], providerId: i
       }
     });
   };
-  const mic = useDictation(dictate);
+  // The office's speech service when there is one (medical vocabulary, under its BAA), else the browser's.
+  const { data: hearing } = useApi(can('clinical:write') ? '/dictation' : null);
+  const mic = useDictation(dictate, { mode: hearing?.mode });
+  const autoStarted = useRef(false);
   useEffect(() => {
-    if (autoListen && mic.supported) mic.start();
+    if (autoListen && hearing && mic.supported && !autoStarted.current) { autoStarted.current = true; mic.start(); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoListen]);
+  }, [autoListen, hearing]);
   // Alt+M starts and stops dictation from anywhere in the composer's screen.
   useEffect(() => {
     const onKey = (e) => { if (e.altKey && (e.key === 'm' || e.key === 'M' || e.code === 'KeyM')) { e.preventDefault(); mic.toggle(); } };
@@ -142,6 +145,7 @@ export default function NoteComposer({ patient, procedureIds = [], providerId: i
         {history.length > 0 && <button type="button" className="small" onClick={undo} title="Undo the last change (or say “undo that”)"><Undo2 size={15} aria-hidden /> Undo</button>}
       </div>
       {mic.error && <div className="error">{mic.error}</div>}
+      {mic.listening && <div className="muted" style={{ fontSize: 11, margin: '-4px 0 6px' }}>{mic.server ? 'Heard by the office’s medical speech service.' : 'Heard by your browser’s speech recognition — avoid saying patient names.'}</div>}
       {working > 0 && <div className="muted dictate-status">Updating the note…</div>}
       {last && !working && (
         <div className="dictate-status">

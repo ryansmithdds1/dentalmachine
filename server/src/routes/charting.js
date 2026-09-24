@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import express, { Router } from 'express';
 import { requirePermission, HttpError } from '../auth.js';
 import { pick, requireFields, insert, update, findOr404, audit, practiceNow, localNow } from '../util.js';
 import { quickFill, aiFill } from '../notedictation.js';
@@ -9,6 +9,13 @@ import { log } from '../monitoring.js';
 
 const CATEGORIES = ['diagnostic', 'preventive', 'restorative', 'endodontics', 'periodontics', 'prosthodontics', 'oral_surgery', 'orthodontics', 'implants', 'adjunctive'];
 const AREAS = ['tooth', 'quadrant', 'arch', 'mouth'];
+
+// What a dentist says that general speech recognition gets wrong.
+export const DENTAL_TERMS = ['articaine', 'lidocaine', 'mepivacaine', 'prilocaine', 'bupivacaine', 'Septocaine', 'carpule', 'carpules', 'IANB', 'PSA', 'infiltration',
+  'rubber dam', 'Isolite', 'Vitrebond', 'Fuji', 'RelyX', 'TempBond', 'Durelon', 'composite', 'amalgam', 'zirconia', 'e.max', 'PFM', 'buildup', 'pulpotomy',
+  'mesial', 'distal', 'occlusal', 'buccal', 'lingual', 'facial', 'incisal', 'MOD', 'periapical', 'bitewing', 'caries', 'recurrent decay', 'gingivitis',
+  'periodontitis', 'bleeding on probing', 'furcation', 'mobility', 'abfraction', 'attrition', 'erosion', 'amoxicillin', 'clindamycin', 'ibuprofen', 'chlorhexidine',
+  'Peridex', 'fluoride varnish', 'sealant', 'prophy', 'scaling and root planing', 'extraction', 'socket', 'sutures', 'chromic gut', 'Gelfoam', 'hemostasis', 'endo', 'apex'];
 
 // Starter templates for a new practice. {field} merges; [[Label: a|b|c]] asks the writer to pick.
 export const DEFAULT_TEMPLATES = [
@@ -76,7 +83,7 @@ export function parseCsv(text) {
 
 const requireAdmin = (req, _res, next) => (req.user.role === 'admin' ? next() : next(new HttpError(403, 'Administrator access required')));
 
-export default function chartingRoutes({ db, config = {} }) {
+export default function chartingRoutes({ db, config = {}, transcriber = null }) {
   const r = Router();
 
   // ---- Note templates ----
@@ -126,6 +133,29 @@ export default function chartingRoutes({ db, config = {} }) {
 
   // A note drafted from the templates for the given procedures (or one template by id), merged and
   // ready for the writer to answer its prompts.
+  // How dictation is heard: by the server's speech service (covered by its BAA, primed with dental words) when
+  // one is set up, else by the browser's own speech recognition.
+  r.get('/dictation', requirePermission('clinical:write'), (_req, res) => res.json({ mode: transcriber?.dictation ? 'server' : 'browser', vendor: transcriber?.mode ?? null }));
+
+  // One spoken piece (the audio between pauses) to text. The audio isn't kept.
+  r.post('/dictation/transcribe', requirePermission('clinical:write'), express.raw({ type: ['audio/*', 'application/octet-stream'], limit: '8mb' }), async (req, res) => {
+    if (!transcriber?.dictation) throw new HttpError(409, 'Server dictation isn’t set up — the browser’s speech recognition is used instead');
+    const audio = Buffer.isBuffer(req.body) ? req.body : null;
+    if (!audio?.length) throw new HttpError(400, 'No audio');
+    const contentType = String(req.get('Content-Type') || 'audio/webm').split(';')[0];
+    const text = await transcriber.dictation(audio, { contentType, keyterms: await dictationTerms(req.user.practice_id) });
+    res.json({ text });
+  });
+
+  // Words the speech service should expect: dental vocabulary plus every answer in this office's templates.
+  const dictationTerms = async (pid) => {
+    const fromTemplates = (await db.all('SELECT body FROM note_templates WHERE practice_id = ? AND active = 1', pid))
+      .flatMap((t) => notePrompts(t.body).flatMap((q) => q.options))
+      .flatMap((o) => o.split(/[\s,/]+/))
+      .filter((w) => /[a-z]{4,}/i.test(w));
+    return [...new Set([...DENTAL_TERMS, ...fromTemplates])].slice(0, 100);
+  };
+
   // Dictation into the note being written: returns the note with the dictation worked in. Nothing is saved
   // here — the dentist sees what changed and saves (and signs) the note as usual.
   r.post('/patients/:id/note-dictate', requirePermission('clinical:write'), async (req, res) => {

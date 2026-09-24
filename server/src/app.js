@@ -202,6 +202,9 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
       'X-Frame-Options': 'DENY',
       'Referrer-Policy': 'no-referrer',
       'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
+      // Microphone (dictation, the assistant) and camera (photos, mobile check-in) for this site only; nothing else.
+      'Permissions-Policy': 'microphone=(self), camera=(self), geolocation=(), payment=(), usb=(), interest-cohort=()',
+      'Cross-Origin-Opener-Policy': 'same-origin-allow-popups',
     });
     next();
   });
@@ -261,7 +264,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(patientRoutes({ db }));
   api.use(scheduleRoutes({ db }));
   api.use(clinicalRoutes({ db }));
-  api.use(chartingRoutes({ db, config }));
+  api.use(chartingRoutes({ db, config, transcriber }));
   api.use(referralRoutes({ db }));
   api.use(importRoutes({ db }));
   api.use(backupRoutes({ db, storage, config }));
