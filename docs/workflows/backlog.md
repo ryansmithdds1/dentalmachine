@@ -133,6 +133,27 @@ F5. **Office settings with guardrails:** discount limits, which options show, le
     max months — set by the owner; the numbers shown to the patient are stored exactly as presented (with the
     fee schedule and estimate version) so the agreement can always be reproduced.
 
+## Treatment follow-up cadence and the doctor's letter (asked for, high priority)
+Builds on unscheduled treatment lists (Follow-ups), texting/email/calls, treatment plans, x-rays/photos and
+statements/mailing (Lob).
+TF1. **A cadence the office sets:** a recommended default sequence for patients with diagnosed treatment not yet
+     scheduled (e.g. day 2 text, day 7 email, day 14 call, day 30 text, day 60 email, day 90 doctor's letter), editable
+     per practice and per treatment urgency (urgent / soon / elective) and paused automatically when the patient
+     books, declines in writing, or asks not to be contacted; quiet hours and preferred channel respected.
+TF2. **Automatic where reasonable:** texts and emails go out on their own (with a link to schedule or ask a question,
+     treatment and cost shown, the office's own words), calls land as tasks on the right person's list with the
+     script and the patient's details, each outcome (reached, left message, will call back, declined) logged in one
+     click, and the next step scheduled.
+TF3. **The doctor's letter:** when the cadence reaches the letter step (or the doctor chooses), a letter is generated
+     from the doctor: a well-designed page with the practice letterhead, the patient's name, the diagnosis in plain
+     words, why it matters and what can happen if it's left, the relevant x-ray or intraoral photo with the area
+     marked, the treatment recommended and its estimated cost, how to schedule, and the doctor's signature. The doctor
+     reviews and approves (one click, or in a batch) — AI can draft the wording but never sends it on its own (rule 10).
+     Sent by email (PDF) and/or printed or mailed (Lob), filed on the chart as a document, and recorded as the
+     informed-notice step (it also satisfies the chart audit's "informed refusal / patient notified" check).
+TF4. **See it working:** a follow-up board by stage, what each step produced (booked, $ scheduled), and patients
+     at the end of the cadence who still haven't responded.
+
 ## Insurance payments posted and billed on autopilot (asked for, high priority)
 Builds on ERA (835) import and matching, paper EOB reading (AI), claims, statements, text-to-pay and autopay.
 Goal: a person only touches the exceptions.
