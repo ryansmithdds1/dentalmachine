@@ -165,13 +165,13 @@ export default function growthRoutes({ db, messenger, config, mailer = { enabled
       if (method === 'print' && useMail && mailable(a)) {
         // Mailed statements show the last 90 days (or since the last statement) with the balance carried forward.
         const since = a.statement_sent_at ? a.statement_sent_at.slice(0, 10) : addDays(today, -90);
-        const data = await statementData(db, pid, a, { family: true, since });
+        const data = await statementData(db, pid, a, { family: true, since, appUrl: config.appUrl });
         try {
           const letter = await mailer.sendLetter({
             description: `Statement ${today} #${a.id}`, idempotencyKey: `statement-${runId}-${a.id}`,
             to: { name: `${a.first_name} ${a.last_name}`, address: a.address, city: a.city, state: a.state, zip: a.zip },
             from: { name: practice.name, address: practice.address, city: practice.city, state: practice.state, zip: practice.zip },
-            html: statementHtml({ practice, account: a, entries: data.entries, previousBalance: data.previous_balance, balance: data.balance, pendingInsurance: a.pending_insurance, pendingWriteOff: a.pending_write_off, portalUrl, statementDate: today, aging: data.aging, plans: data.plans }),
+            html: statementHtml({ practice, account: a, entries: data.entries, previousBalance: data.previous_balance, balance: data.balance, pendingInsurance: a.pending_insurance, pendingWriteOff: a.pending_write_off, portalUrl, statementDate: today, aging: data.aging, plans: data.plans, payCode: data.pay_code, billpayPage: data.billpay_page }),
           });
           method = 'mail';
           reference = letter.reference;

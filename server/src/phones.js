@@ -5,6 +5,8 @@ import { sendMessage } from './messaging.js';
 import { hoursFor } from './hours.js';
 import { openSlots, validateAppt } from './routes/schedule.js';
 import { publish } from './events.js';
+import { reviewCall } from './phonecoach.js';
+import { createCallScorer } from './ai/callscore.js';
 
 // The office phone line: who's calling (matched to the patient), the call log, recordings turned into
 // transcripts and a short summary, a text back when a call is missed, and an AI receptionist that answers
@@ -144,7 +146,7 @@ export async function summarizeCall(db, config, callId) {
 }
 
 // A recording is fetched from Twilio, kept (encrypted) with the practice's files, transcribed and summarized.
-export async function processRecording(db, { storage, transcriber, config, fetchImpl = globalThis.fetch }, callId, recordingUrl) {
+export async function processRecording(db, { storage, transcriber, config, fetchImpl = globalThis.fetch, messenger = null }, callId, recordingUrl) {
   const call = await db.get('SELECT * FROM calls WHERE id = ?', callId);
   if (!call || !recordingUrl) return;
   const sid = config.twilioAccountSid;
@@ -157,6 +159,9 @@ export async function processRecording(db, { storage, transcriber, config, fetch
     const transcript = await transcriber.transcribe(audio, { contentType: 'audio/mpeg' });
     await db.run('UPDATE calls SET transcript = ? WHERE id = ?', transcript, call.id);
     await summarizeCall(db, config, call.id);
+    // Coaching (PH3-PH5): scored against the office's protocol when AI is on, why they didn't book, and an upset
+    // caller flagged to the owner — its own failures become Needs attention items, never this recording's.
+    await reviewCall(db, { scorer: createCallScorer({ config }), messenger, config }, call.id);
   }
 }
 

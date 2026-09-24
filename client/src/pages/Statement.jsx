@@ -13,8 +13,10 @@ export default function Statement() {
   const { data: s } = useApi(`/patients/${id}/statement${family ? '?family=1' : ''}`);
   const [qr, setQr] = useState(null);
   useEffect(() => {
-    if (s?.pay_url) QRCode.toDataURL(s.pay_url, { margin: 1, width: 132 }).then(setQr).catch(() => setQr(null));
-  }, [s?.pay_url]);
+    // The "Pay my bill" link carries the statement code, so scanning it goes straight to the amount due.
+    const url = s?.billpay_url || s?.pay_url;
+    if (url) QRCode.toDataURL(url, { margin: 1, width: 132 }).then(setQr).catch(() => setQr(null));
+  }, [s?.billpay_url, s?.pay_url]);
   if (!s) return <div className="empty">Loading…</div>;
   const { practice: pr, patient: p } = s;
   const cols = s.family ? 4 : 3;
@@ -84,7 +86,9 @@ export default function Statement() {
           {qr && <img src={qr} alt="QR code to pay online" width={112} height={112} />}
           <div>
             <strong>Ways to pay</strong>
-            <div>{s.pay_url ? <>Online: scan the code or visit <span className="mono">{s.pay_url}</span></> : 'Online through your patient portal'}</div>
+            {s.billpay_page && s.pay_code
+              ? <div>Online in under a minute: scan the code, or visit <span className="mono">{s.billpay_page}</span> and enter statement code <strong className="mono">{s.pay_code}</strong></div>
+              : <div>{s.pay_url ? <>Online: scan the code or visit <span className="mono">{s.pay_url}</span></> : 'Online through your patient portal'}</div>}
             <div>By phone: {pr.phone || 'call the office'} · Or at your next visit</div>
             <div className="muted" style={{ fontSize: 12 }}>Questions about your bill? Call us — we’re happy to help or set up a payment plan.</div>
           </div>

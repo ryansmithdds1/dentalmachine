@@ -9,6 +9,7 @@ import { money, fmtDate, fmtDateTime, label, shiftDate, practiceToday } from '..
 import { Badge, ErrorBox, Modal, useSubmit, MoreRows } from '../components/ui.jsx';
 import AppointmentForm from '../components/AppointmentForm.jsx';
 import { brokenLabel } from '../components/calendar/BrokenPicker.jsx';
+import RecallBoard from '../components/RecallBoard.jsx';
 import './followups.css';
 
 const OUTCOMES = [['left_voicemail', 'Left voicemail'], ['texted', 'Texted'], ['emailed', 'Emailed'], ['spoke_scheduled', 'Spoke — scheduled'], ['spoke_will_call', 'Spoke — will call back'], ['declined', 'Declined'], ['wrong_number', 'Wrong number'], ['note', 'Note']];
@@ -32,11 +33,13 @@ export default function Followups() {
       <div className="tabs">
         <button className={tab === 'unconfirmed' ? 'active' : ''} onClick={() => setParams({ tab: 'unconfirmed' })}>Unconfirmed</button>
         <button className={tab === 'recall' ? 'active' : ''} onClick={() => setParams({ tab: 'recall' })}>Recall</button>
+        <button className={tab === 'board' ? 'active' : ''} onClick={() => setParams({ tab: 'board' })}>Recall board</button>
         <button className={tab === 'unscheduled' ? 'active' : ''} onClick={() => setParams({ tab: 'unscheduled' })}>Unscheduled treatment {unsched ? <span className="count">{unsched.length}</span> : null}</button>
         <button className={tab === 'broken' ? 'active' : ''} onClick={() => setParams({ tab: 'broken' })}>Broken appointments {broken ? <span className="count">{broken.length}</span> : null}</button>
       </div>
       {tab === 'unconfirmed' && <Unconfirmed />}
       {tab === 'recall' && <Recall />}
+      {tab === 'board' && <RecallBoard />}
       {tab === 'unscheduled' && <CallList kind="unscheduled" rows={unsched} onChange={reloadUnsched} />}
       {tab === 'broken' && <CallList kind="broken" rows={broken} onChange={reloadBroken} />}
     </>

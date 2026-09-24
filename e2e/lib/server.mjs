@@ -9,7 +9,8 @@ import { chromium } from 'playwright';
 
 export const root = join(dirname(fileURLToPath(import.meta.url)), '../..');
 
-export async function startApp() {
+// entry: another server script to run instead of server/src/index.js (e.g. one that adds routes under test).
+export async function startApp({ entry = 'server/src/index.js' } = {}) {
   if (process.env.E2E_URL) return { base: process.env.E2E_URL, stop: async () => {} };
   const dist = process.env.CLIENT_DIST || join(root, 'client/dist');
   if (!existsSync(join(dist, 'index.html'))) throw new Error('Build the client first: npm run build');
@@ -21,7 +22,7 @@ export async function startApp() {
   };
   const seeded = spawnSync(process.execPath, ['--disable-warning=ExperimentalWarning', 'server/src/seed.js'], { cwd: root, env, encoding: 'utf8' });
   if (seeded.status !== 0) throw new Error(`Seeding failed: ${seeded.stderr}`);
-  const server = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', 'server/src/index.js'], { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] });
+  const server = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', entry], { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] });
   server.stderr.on('data', (d) => process.env.E2E_DEBUG && process.stderr.write(d));
   const base = `http://localhost:${port}`;
   for (let i = 0; i < 80; i++) {

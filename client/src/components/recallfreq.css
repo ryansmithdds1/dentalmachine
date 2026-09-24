@@ -1,0 +1,42 @@
+/* Recall frequencies (RF3–RF4): the patient's recall panel (RecallPanel.jsx), the office-wide recall board
+   (RecallBoard.jsx) and the "also due" list in the booking form. Theme tokens only, so dark mode follows. */
+.rf-panel { display: flex; flex-direction: column; gap: 6px; }
+.rf-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12.5px; }
+.rf-title { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; font-size: 14px; color: var(--text); }
+.rf-ins { display: inline-flex; align-items: center; gap: 4px; }
+.rf-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.rf-item { position: relative; padding: 6px 24px 6px 10px; border-left: 3px solid var(--border); border-bottom: 1px solid var(--border); }
+.rf-item:last-child { border-bottom: 0; }
+.rf-item.rf-overdue { border-left-color: var(--danger); }
+.rf-item.rf-due { border-left-color: var(--info); }
+.rf-item.rf-due_soon { border-left-color: var(--warn); }
+.rf-item.rf-current, .rf-item.rf-scheduled { border-left-color: var(--ok); }
+.rf-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.rf-name { min-width: 84px; }
+.rf-due { font-size: 13px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.rf-sub { font-size: 12px; line-height: 1.45; margin-top: 2px; }
+.rf-ins-warn { color: var(--warn); font-weight: 600; }
+.rf-act { position: absolute; top: 6px; right: 4px; padding: 2px; color: var(--muted); }
+.rf-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.rf-inline { border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 10px 12px; background: var(--subtle); display: flex; flex-direction: column; gap: 8px; }
+.rf-inline-head { display: flex; justify-content: space-between; align-items: center; }
+.rf-inline .form-actions { margin-top: 0; }
+.rf-retired { font-size: 12px; }
+
+.rf-board { display: flex; flex-direction: column; gap: 10px; }
+.rf-types { display: flex; flex-wrap: wrap; gap: 6px; }
+.rf-type { font-size: 12.5px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border); background: var(--panel); color: var(--text-2); }
+.rf-type.active { border-color: var(--primary); background: var(--primary-soft); color: var(--primary-ink); }
+.rf-filters { flex-wrap: wrap; gap: 8px; }
+.rf-filters select { width: auto; }
+.rf-table tr.rf-cur td { background: var(--primary-soft); }
+.rf-table tr { cursor: default; }
+
+.rf-bundle { margin-top: 14px; }
+.rf-bundle h3 { display: flex; align-items: center; gap: 6px; }
+.rf-bundle .why { font-size: 12px; color: var(--muted); margin-left: 24px; }
+
+@media (max-width: 640px) {
+  .rf-name { min-width: 0; }
+  .rf-filters input { max-width: none !important; }
+}

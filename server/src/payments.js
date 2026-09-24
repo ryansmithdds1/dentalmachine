@@ -111,6 +111,30 @@ export function createPayments({ config, fetchImpl = globalThis.fetch }) {
         }
         return out;
       },
+      // Online payments from the patient portal and "Pay my bill" (billpay.js): Stripe's hosted page, one payment
+      // type per page — 'card' (Apple Pay / Google Pay / Link show there too, on devices that have them) or 'ach'
+      // (a US bank account, which clears in a few days). saveCard keeps the card on the customer for next time.
+      ach: config.stripeAch ?? process.env.PAYMENTS_ACH === 'on',
+      async checkout({ customerId, amount, description, method = 'card', saveCard = false, metadata = {}, successUrl, cancelUrl, idempotencyKey }) {
+        const md = (prefix) => Object.fromEntries(Object.entries(metadata).filter(([, v]) => v != null).map(([k, v]) => [`${prefix}[${k}]`, String(v)]));
+        const s = await stripe('POST', 'checkout/sessions', {
+          mode: 'payment', 'line_items[0][quantity]': '1', 'line_items[0][price_data][currency]': 'usd', 'line_items[0][price_data][unit_amount]': String(amount),
+          'line_items[0][price_data][product_data][name]': description, 'payment_method_types[0]': method === 'ach' ? 'us_bank_account' : 'card',
+          ...(customerId ? { customer: customerId } : {}), ...(saveCard ? { 'payment_intent_data[setup_future_usage]': 'off_session' } : {}),
+          ...md('metadata'), ...md('payment_intent_data[metadata]'), client_reference_id: String(metadata.payment_request_id || ''),
+          success_url: successUrl, cancel_url: cancelUrl,
+        }, { idempotencyKey });
+        return { id: s.id, url: s.url };
+      },
+      checkoutSession: (id) => stripe('GET', `checkout/sessions/${encodeURIComponent(id)}`),
+      // The card or bank account a payment used (to save it for next time).
+      async paymentMethodOf(paymentIntentId) {
+        const pi = await stripe('GET', `payment_intents/${encodeURIComponent(paymentIntentId)}`, { 'expand[]': 'payment_method' });
+        const pm = pi.payment_method;
+        if (!pm || typeof pm !== 'object') return null;
+        return { id: pm.id, type: pm.type, customer: pi.customer || pm.customer || null, brand: pm.card?.brand || pm.us_bank_account?.bank_name || null, last4: pm.card?.last4 || pm.us_bank_account?.last4 || null, exp_month: pm.card?.exp_month ?? null, exp_year: pm.card?.exp_year ?? null };
+      },
+      detach: (paymentMethodId) => stripe('POST', `payment_methods/${encodeURIComponent(paymentMethodId)}/detach`, {}),
       async charge({ method, amount, description, idempotencyKey, metadata: extra = {} }) {
         // Every charge names its practice, so reconciliation can list a practice's charges at Stripe.
         const metadata = { practice_id: method.practice_id, ...extra };
@@ -151,6 +175,21 @@ export function createPayments({ config, fetchImpl = globalThis.fetch }) {
         if (!String(reference || '').startsWith('sbx_')) throw new HttpError(400, "That payment wasn't made by card — refund it by cash or check");
         return { reference: `sbx_re_${Date.now().toString(36)}${randomBytes(4).toString('hex')}`, status: 'succeeded' };
       },
+      // The portal and "Pay my bill" in sandbox: the published test numbers only (never a real card or account).
+      ach: true,
+      sandboxPay({ method, number, amount }) {
+        const n = String(number || '').replace(/\D/g, '');
+        if (method === 'ach') {
+          if (!['000123456789', '000111111116'].includes(n)) throw new HttpError(400, 'Sandbox accepts test bank accounts only: 000123456789 (clears), 000111111116 (refused)');
+          if (n === '000111111116') return { ok: false, reason: 'Bank account refused (insufficient funds)' };
+          return { ok: true, reference: sbx('sbx_pi_'), brand: 'bank', last4: n.slice(-4) };
+        }
+        if (!['4242424242424242', '4000000000000002', '5555555555554444'].includes(n)) throw new HttpError(400, 'Sandbox accepts test cards only: 4242 4242 4242 4242 (approves), 4000 0000 0000 0002 (declines), 5555 5555 5555 4444');
+        if (n.endsWith('0002')) return { ok: false, reason: 'Card declined (generic decline)' };
+        if (amount < 50) return { ok: false, reason: 'Amount too small' };
+        return { ok: true, reference: sbx('sbx_pi_'), brand: n.startsWith('5') ? 'mastercard' : 'visa', last4: n.slice(-4) };
+      },
+      async detach() {},
       async charge({ method, amount }) {
         if (method.last4 === '0002') return { ok: false, reason: 'Card declined (generic decline)' };
         if (amount < 50) return { ok: false, reason: 'Amount too small' };

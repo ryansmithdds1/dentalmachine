@@ -110,9 +110,10 @@ export function portalPublicRoutes({ db, secret, messenger }) {
   return r;
 }
 
-export function portalRoutes({ db, secret, config, payments, messenger, storage }) {
-  const r = Router();
-  r.use(async (req, _res, next) => {
+// The signed-in portal patient (req.portal), shared with the other portal routers (routes/portalaccount.js).
+export function portalSession(db, secret) {
+  return async (req, _res, next) => {
+    if (req.portal) return next();
     const token = String(req.headers.authorization || '').replace(/^Bearer /, '');
     const payload = verifyToken(token, secret);
     if (!payload || payload.aud !== 'portal') return next(new HttpError(401, 'Please sign in again'));
@@ -127,7 +128,12 @@ export function portalRoutes({ db, secret, config, payments, messenger, storage 
     req.portal = { patient, practice, household, ids: household.map((h) => h.id) };
     _res.set('Cache-Control', 'no-store');
     next();
-  });
+  };
+}
+
+export function portalRoutes({ db, secret, config, payments, messenger, storage }) {
+  const r = Router();
+  r.use(portalSession(db, secret));
   r.use(idempotency(db, secret, { scopeOf: (req) => `portal${req.portal.patient.id}:${req.portal.session ?? ''}` }));
   const inList = (ids) => ids.map(() => '?').join(',');
   // Signing out ends every portal session this patient has open (a shared or lost device included), not

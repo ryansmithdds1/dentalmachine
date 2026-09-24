@@ -27,6 +27,7 @@ import { LabCaseForm, TaskForm, WaitlistForm, LAB_STATUSES } from '../components
 import { api, download } from '../api.js';
 import { CustomFieldValues, MergeDialog } from '../components/Switching.jsx';
 import { MembershipCard } from '../components/Memberships.jsx';
+import RecallPanel from '../components/RecallPanel.jsx';
 import MedicalHistory, { medStale, MEDICAL_CONDITIONS } from '../components/patient/MedicalHistory.jsx';
 
 export { MEDICAL_CONDITIONS };
@@ -222,12 +223,7 @@ function Overview({ p, reload }) {
         <MembershipCard patient={p} onChange={reload} />
         <div className="card">
           <h2>Recall</h2>
-          {p.recalls.length === 0 ? <div className="muted">No recall set. Completing a prophy creates one automatically.</div> : p.recalls.map((r) => (
-            <div key={r.id} className="inline" style={{ justifyContent: 'space-between' }}>
-              <span>{label(r.type)} every {r.interval_months} months</span>
-              <span>Due {fmtDate(r.due_date)} <Badge value={r.status} /></span>
-            </div>
-          ))}
+          <RecallPanel patientId={p.id} heading={false} />
           <RecallStatus patientId={p.id} />
         </div>
         <div className="card">

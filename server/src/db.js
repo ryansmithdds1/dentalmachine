@@ -4061,6 +4061,255 @@ CREATE TABLE IF NOT EXISTS chart_shortcuts (
   updated_at TEXT,
   UNIQUE (practice_id, owner, starter_key)
 );
+-- Statement codes for website bill pay (PT3, billpay.js): one live code per family, printed on statements;
+-- replacing one sets revoked_at on the old code (never deleted).
+CREATE TABLE IF NOT EXISTS billpay_codes (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  code TEXT NOT NULL,
+  revoked_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (practice_id, code)
+);
+-- Phones: every call saved, linked and coached (PH1-PH7, phonecoach.js, routes/phonecoach.js, docs/phones.md).
+-- The practice's phone rules: the recording disclosure callers hear, who answers the phones (user ids, JSON), who is
+-- told about upset callers and missed-call days (user ids, JSON; optional text numbers that get no patient details),
+-- the missed-call % target, live transcription and AI scoring on/off. Configuration: edited in place, audited.
+CREATE TABLE IF NOT EXISTS phone_settings (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL UNIQUE REFERENCES practices(id),
+  recording_disclosure TEXT,
+  answerer_ids TEXT,
+  alert_user_ids TEXT,
+  alert_sms_to TEXT,
+  missed_target_pct INTEGER NOT NULL DEFAULT 15,
+  missed_min_calls INTEGER NOT NULL DEFAULT 10,
+  live_transcription INTEGER NOT NULL DEFAULT 0,
+  scoring INTEGER NOT NULL DEFAULT 1,
+  updated_by INTEGER REFERENCES users(id),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- Phone protocols (PH2): the office's way of handling each kind of call, as weighted steps (JSON: key, label, weight,
+-- required, hints). One active protocol per call type; an edit bumps the version and is audited, and each score keeps
+-- the steps it was scored against. Retired protocols are archived, never deleted.
+CREATE TABLE IF NOT EXISTS phone_protocols (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  call_type TEXT NOT NULL CHECK (call_type IN ('general','new_patient','emergency','scheduling','billing')),
+  name TEXT NOT NULL,
+  philosophy TEXT,
+  steps TEXT NOT NULL,
+  version INTEGER NOT NULL DEFAULT 1,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','archived')),
+  created_by INTEGER REFERENCES users(id),
+  updated_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- An AI read of a call against its protocol (PH3): labelled AI, with the transcript's own words as evidence for each
+-- step. A re-score supersedes the earlier one (kept). Coaching only: never acted on automatically.
+CREATE TABLE IF NOT EXISTS call_scores (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  call_id INTEGER NOT NULL REFERENCES calls(id),
+  protocol_id INTEGER REFERENCES phone_protocols(id),
+  protocol_version INTEGER,
+  call_type TEXT NOT NULL,
+  score INTEGER NOT NULL,
+  steps TEXT NOT NULL,
+  summary TEXT,
+  model TEXT NOT NULL,
+  source TEXT NOT NULL DEFAULT 'ai',
+  status TEXT NOT NULL DEFAULT 'current' CHECK (status IN ('current','superseded')),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- An owner's or manager's own rating (0-100, used instead of the AI's in averages) and coaching comments.
+-- Append-only: the newest rating counts, earlier ones stay.
+CREATE TABLE IF NOT EXISTS call_reviews (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  call_id INTEGER NOT NULL REFERENCES calls(id),
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  rating INTEGER,
+  comment TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- Why a caller didn't book (PH4): the AI's suggestion (with the words it heard) and the reason a person confirmed.
+-- One per call; a change of reason is recorded before/after.
+CREATE TABLE IF NOT EXISTS call_no_book (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  call_id INTEGER NOT NULL UNIQUE REFERENCES calls(id),
+  patient_id INTEGER REFERENCES patients(id),
+  suggested_reason TEXT CHECK (suggested_reason IN ('cost','time','insurance','shopping','think','other')),
+  suggested_quote TEXT,
+  suggested_by TEXT,
+  reason TEXT CHECK (reason IN ('cost','time','insurance','shopping','think','other')),
+  note TEXT,
+  confirmed_by INTEGER REFERENCES users(id),
+  confirmed_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- Phone alerts (PH5, PH7): an upset caller (with the moment heard) or a day over the missed-call target. One per
+-- problem (dedupe_key); open until someone acknowledges it (who, when, a note). Never deleted.
+CREATE TABLE IF NOT EXISTS phone_alerts (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  kind TEXT NOT NULL CHECK (kind IN ('upset','missed_rate')),
+  dedupe_key TEXT NOT NULL,
+  call_id INTEGER REFERENCES calls(id),
+  patient_id INTEGER REFERENCES patients(id),
+  quote TEXT,
+  detail TEXT,
+  source TEXT NOT NULL DEFAULT 'automation',
+  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','acknowledged')),
+  notified TEXT,
+  ack_by INTEGER REFERENCES users(id),
+  ack_at TEXT,
+  ack_note TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (practice_id, dedupe_key)
+);
+-- Live transcription (PH6): the finished phrases heard during a call (caller or office), from the phone provider's
+-- real-time transcription (or the sandbox). Only final phrases are kept; partial words are parsed and dropped.
+CREATE TABLE IF NOT EXISTS call_segments (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  call_id INTEGER NOT NULL REFERENCES calls(id),
+  track TEXT NOT NULL DEFAULT 'caller' CHECK (track IN ('caller','office')),
+  text TEXT NOT NULL,
+  seq INTEGER NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (call_id, track, seq)
+);
+-- Recall frequencies (RF1–RF4, recallsync.js / recallfreq.js, docs/workflows/specs/RF-recall-frequencies.md).
+-- Work done at another office (x-rays taken elsewhere…), entered by hand so the recall resets from its date.
+-- source is always 'outside'. Corrected by voiding (status 'voided', with who and why), never deleted.
+CREATE TABLE IF NOT EXISTS recall_outside (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  location_id INTEGER REFERENCES locations(id),
+  code TEXT NOT NULL,
+  done_on TEXT NOT NULL,
+  source TEXT NOT NULL DEFAULT 'outside',
+  office_name TEXT,
+  note TEXT,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','voided')),
+  voided_at TEXT,
+  voided_by INTEGER REFERENCES users(id),
+  void_reason TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- Each time something done (a completed procedure, or outside work) reset a recall, with the recall as it was
+-- before and the recalls it retired (perio maintenance retires the prophy). A voided procedure marks its row
+-- undone and the recall goes back to what the remaining rows say (or to the state before the first one).
+CREATE TABLE IF NOT EXISTS recall_resets (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  recall_id INTEGER NOT NULL REFERENCES recalls(id),
+  procedure_id INTEGER REFERENCES procedures(id),
+  outside_id INTEGER REFERENCES recall_outside(id),
+  code TEXT NOT NULL,
+  done_date TEXT NOT NULL,
+  location_id INTEGER REFERENCES locations(id),
+  before_state TEXT,
+  retired TEXT,
+  undone_at TEXT,
+  undone_reason TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (recall_id, procedure_id),
+  UNIQUE (recall_id, outside_id)
+);
+-- Insurance verification center (IV1–IV4, verification.js / planverify.js). One row per verified benefit
+-- breakdown: how (method), by whom (verified_by, source, actor), what it changed on the plan and so for everyone
+-- on it (plan_changes before/after, patients_updated), the patient's own amounts (patient_detail), and — when the
+-- plan's identity wasn't certain — the plan-level changes waiting for a person (group_status 'review', proposed).
+-- Rows are never deleted; only the review decision is filled in later.
+CREATE TABLE IF NOT EXISTS benefit_verifications (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  patient_insurance_id INTEGER NOT NULL REFERENCES patient_insurance(id),
+  plan_id INTEGER REFERENCES insurance_plans(id),
+  location_id INTEGER REFERENCES locations(id),
+  method TEXT NOT NULL,
+  eligibility_check_id INTEGER REFERENCES eligibility_checks(id),
+  document_id INTEGER REFERENCES documents(id),
+  read_id INTEGER,
+  complete INTEGER NOT NULL DEFAULT 0,
+  plan_changes TEXT,
+  proposed TEXT,
+  patient_detail TEXT,
+  evidence TEXT,
+  review_reasons TEXT,
+  group_status TEXT NOT NULL DEFAULT 'none' CHECK (group_status IN ('none','applied','review','applied_after_review','kept')),
+  patients_updated INTEGER NOT NULL DEFAULT 0,
+  reference TEXT,
+  rep_name TEXT,
+  notes TEXT,
+  source TEXT NOT NULL DEFAULT 'human',
+  actor TEXT,
+  verified_by INTEGER REFERENCES users(id),
+  reviewed_by INTEGER REFERENCES users(id),
+  reviewed_at TEXT,
+  review_note TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- A benefit document (payer portal page, fax) read by AI: a draft until a person confirms it field by field
+-- (then it becomes a benefit_verifications row) or sets it aside. Never applied on its own.
+CREATE TABLE IF NOT EXISTS benefit_reads (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  patient_insurance_id INTEGER NOT NULL REFERENCES patient_insurance(id),
+  plan_id INTEGER REFERENCES insurance_plans(id),
+  document_id INTEGER REFERENCES documents(id),
+  proposed TEXT NOT NULL,
+  reason TEXT,
+  sandbox INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','confirmed','discarded')),
+  created_by INTEGER REFERENCES users(id),
+  confirmed_by INTEGER REFERENCES users(id),
+  confirmed_at TEXT,
+  verification_id INTEGER REFERENCES benefit_verifications(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- The automatic eligibility checks before each visit (days ahead, and the morning of): one row per policy,
+-- visit day and window, claimed before the check runs so no pass (or second server) checks it twice. Job
+-- bookkeeping: failed rows are retried (attempts) and then become a Needs attention item.
+CREATE TABLE IF NOT EXISTS verification_runs (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  patient_insurance_id INTEGER NOT NULL REFERENCES patient_insurance(id),
+  appointment_id INTEGER REFERENCES appointments(id),
+  visit_date TEXT NOT NULL,
+  run_window TEXT NOT NULL CHECK (run_window IN ('ahead','morning')),
+  status TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running','done','skipped','failed')),
+  eligibility_check_id INTEGER REFERENCES eligibility_checks(id),
+  attempts INTEGER NOT NULL DEFAULT 0,
+  error TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT,
+  UNIQUE (patient_insurance_id, visit_date, run_window)
+);
+CREATE INDEX IF NOT EXISTS idx_billpay_codes_patient ON billpay_codes(practice_id, patient_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_phone_protocols_active ON phone_protocols(practice_id, call_type) WHERE status = 'active';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_call_scores_current ON call_scores(call_id) WHERE status = 'current';
+CREATE INDEX IF NOT EXISTS idx_call_scores_practice ON call_scores(practice_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_call_reviews_call ON call_reviews(call_id, id);
+CREATE INDEX IF NOT EXISTS idx_call_no_book ON call_no_book(practice_id, created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_recall_outside_once ON recall_outside(practice_id, patient_id, code, done_on) WHERE status = 'active';
+CREATE INDEX IF NOT EXISTS idx_recall_resets_proc ON recall_resets(procedure_id);
+CREATE INDEX IF NOT EXISTS idx_recall_resets_recall ON recall_resets(recall_id);
+CREATE INDEX IF NOT EXISTS idx_benefit_verif_policy ON benefit_verifications(patient_insurance_id);
+CREATE INDEX IF NOT EXISTS idx_benefit_verif_plan ON benefit_verifications(plan_id, group_status);
+CREATE INDEX IF NOT EXISTS idx_verif_runs_day ON verification_runs(practice_id, visit_date);
 `;
 
 // Columns added after the first release. SQLite has no ADD COLUMN IF NOT EXISTS, so check first.
@@ -4588,6 +4837,28 @@ const COLUMNS = [
   ['review_feedback', 'resolution_note', 'TEXT'],
   ['review_feedback', 'notified_at', 'TEXT'],
   ['reviews', 'mentions_checked_at', 'TEXT'],
+  ['calls', 'agent_id', 'INTEGER REFERENCES users(id)'],
+  ['calls', 'agent_source', 'TEXT'],
+  ['calls', 'answered_at', 'TEXT'],
+  ['calls', 'ring_seconds', 'INTEGER'],
+  ['calls', 'call_type', 'TEXT'],
+  ['calls', 'appointment_id', 'INTEGER REFERENCES appointments(id)'],
+  ['calls', 'linked_via', 'TEXT'],
+  ['calls', 'desk_result', 'TEXT'],
+  ['recall_types', 'age_until', 'INTEGER'],
+  ['recall_types', 'adult_key', 'TEXT'],
+  ['recall_types', 'retires', 'TEXT'],
+  ['recall_types', 'bundle', 'INTEGER NOT NULL DEFAULT 0'],
+  ['recalls', 'last_done_date', 'TEXT'],
+  ['recalls', 'last_done_code', 'TEXT'],
+  ['recalls', 'last_done_source', 'TEXT'],
+  ['recalls', 'last_done_location_id', 'INTEGER'],
+  ['recalls', 'interval_overridden', 'INTEGER NOT NULL DEFAULT 0'],
+  ['recalls', 'interval_reason', 'TEXT'],
+  ['recalls', 'status_reason', 'TEXT'],
+  ['practices', 'recall_due_soon_days', 'INTEGER NOT NULL DEFAULT 30'],
+  ['practices', 'recall_overdue_days', 'INTEGER NOT NULL DEFAULT 30'],
+  ['practices', 'verification_settings', 'TEXT'],
 ];
 
 // CHECK constraints widened after release: [table, constraint name on Postgres, old text, new text].

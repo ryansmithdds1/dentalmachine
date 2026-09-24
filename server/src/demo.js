@@ -118,6 +118,10 @@ export async function seedDemo(db) {
       await db.run('UPDATE ledger_entries SET entry_date = ? WHERE patient_id = ? AND entry_date = ?', pastDay, id, today);
       await db.run('UPDATE procedures SET completed_at = ? WHERE appointment_id = ?', `${pastDay} 10:00:00`, pastAppt);
       await db.run('UPDATE recalls SET due_date = ? WHERE patient_id = ?', addMonths(pastDay, 6), id);
+      // The visit was on pastDay, so that's when each recall was last done (recallsync.js keeps these).
+      await db.run('UPDATE recalls SET last_done_date = ? WHERE patient_id = ? AND last_done_date IS NOT NULL', pastDay, id);
+      await db.run('UPDATE recall_resets SET done_date = ? WHERE patient_id = ?', pastDay, id);
+      for (const r of await db.all('SELECT id, interval_months FROM recalls WHERE patient_id = ?', id)) await db.run('UPDATE recalls SET due_date = ? WHERE id = ?', addMonths(pastDay, r.interval_months), r.id);
 
       // Charting findings and a treatment plan for some patients.
       if (rand() < 0.5) {
@@ -242,6 +246,10 @@ export async function seedDemo(db) {
     for (let j = 30; j < 40; j++) {
       const pid = patients[j];
       await db.run("UPDATE recalls SET due_date = ?, status = 'due' WHERE patient_id = ?", dayOffset(j % 3 === 0 ? 12 : -(j - 25) * 9), pid);
+      // Their last visit then was one interval before that due date.
+      for (const r of await db.all('SELECT id, due_date, interval_months FROM recalls WHERE patient_id = ? AND last_done_date IS NOT NULL', pid)) {
+        await db.run('UPDATE recalls SET last_done_date = ? WHERE id = ?', addMonths(r.due_date, -r.interval_months), r.id);
+      }
       if (j % 2 === 0) {
         const when = dayOffset(-(j - 28) * 3);
         await insert(db, 'appointments', {

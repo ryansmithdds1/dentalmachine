@@ -8,9 +8,10 @@ import { Badge, ErrorBox, Modal } from '../ui.jsx';
 import { MessageTable } from '../../pages/Requests.jsx';
 import SendForms, { openPdf } from '../FormsSend.jsx';
 import ReplyBox from '../ReplyBox.jsx';
+import PatientCalls from '../phones/PatientCalls.jsx';
 import '../comms.css';
 
-// Messages, intake forms and communication preferences for one patient.
+// Messages, calls, intake forms and communication preferences for one patient.
 export default function CommsTab({ patient, onChange }) {
   const { can } = useAuth();
   const { data: messages, reload } = useApi(`/messages?patient_id=${patient.id}`);
@@ -66,6 +67,8 @@ export default function CommsTab({ patient, onChange }) {
         <div style={{ padding: '14px 16px' }}><h2 style={{ margin: 0 }}>Message history</h2></div>
         <MessageTable messages={messages} />
       </div>
+
+      <PatientCalls patient={patient} />
 
       {modal === 'send-forms' && <SendForms patient={patient} onClose={() => setModal(null)} onSent={() => { reload(); reloadForms(); }} />}
       {modal?.form && (

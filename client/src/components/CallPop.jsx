@@ -10,6 +10,8 @@ import { toast } from '../toast.js';
 import { money, fmtDateTime } from '../format.js';
 import { PatientPicker } from './ui.jsx';
 import ReplyBox from './ReplyBox.jsx';
+import NextOpenings from './phones/NextOpenings.jsx';
+import NoBookReason from './phones/NoBookReason.jsx';
 import './comms.css';
 
 const nameOf = (p) => `${p.preferred_name || p.first_name} ${p.last_name}`;
@@ -51,9 +53,16 @@ export default function CallPop() {
     patch(c.call_id, { chosen: p.id });
     setActive(p);
   };
+  // Whoever works the pop took the call (for their own phone numbers); the first person keeps it.
+  const claim = (c) => {
+    if (c.claimed || !can('patients:write')) return;
+    patch(c.call_id, { claimed: true });
+    api.post(`/phones/calls/${c.call_id}/claim`).catch(() => patch(c.call_id, { claimed: false })); // retried on the next action
+  };
   const openChart = (c) => {
     const p = chosenOf(c);
     if (!p) return;
+    claim(c);
     setActive(p);
     nav(`/patients/${p.id}`);
   };
@@ -79,7 +88,10 @@ export default function CallPop() {
       if (info.card && info.matches.length <= 1 && !onChart) setActive(info.card);
     } else if (e.event === 'ended') {
       patch(e.call_id, { state: 'ended' });
+      // A call that ended without a booking shows the one-click reasons while it fades (and waits in Calls → Didn't book).
       later(e.call_id, 8000);
+    } else if (e.event === 'booked') {
+      patch(e.call_id, { booked: true });
     } else if (e.event === 'missed') {
       // A missed call stays up until someone deals with it (text back, attach, dismiss).
       patch(e.call_id, { state: 'missed' });
@@ -143,6 +155,11 @@ export default function CallPop() {
                   <div>Next visit: {c.card.next_visit ? `${fmtDateTime(c.card.next_visit.start_time)}${c.card.next_visit.reason ? ` · ${c.card.next_visit.reason}` : ''}` : <span className="text-warn">none scheduled</span>}</div>
                   {c.card.last_visit && <div className="muted">Last seen {fmtDateTime(c.card.last_visit).split(' ')[0]}</div>}
                 </div>
+                {c.state === 'ended' && !c.booked && can('patients:write') && <NoBookReason callId={c.call_id} />}
+                {c.state !== 'ended' && !c.booked && can('schedule:read') && (
+                  <NextOpenings callId={c.call_id} patient={who || c.card} primary={c === top} onBooked={() => patch(c.call_id, { booked: true, claimed: true })} />
+                )}
+                {c.booked && <div className="call-pop-note">Booked on this call. <Link to="/schedule">See the schedule</Link></div>}
               </>
             ) : (
               <>
@@ -160,6 +177,7 @@ export default function CallPop() {
                       <ReplyBox autoFocus rows={2} label="Text back" onSend={(body) => textBack(c, body)}
                         value={c.draft ?? `Hi, this is ${practice?.name || 'the office'} — we saw your call. How can we help?`} onChange={(v) => patch(c.call_id, { draft: v })} />
                     )}
+                    {c.state !== 'ended' && can('schedule:read') && !c.mode && <NextOpenings callId={c.call_id} patient={null} primary={false} />}
                     {c.mode === 'attach' && (
                       <div className="call-pop-attach">
                         <PatientPicker value={null} onChange={(p) => p && attach(c, p)} />

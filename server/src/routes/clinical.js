@@ -6,6 +6,7 @@ import { completeProcedure, estimateCoverage, primaryPolicy, voidLedgerEntry } f
 import { signedVersion } from './casepres.js';
 import { memberSavings } from '../memberships.js';
 import { officeFee } from '../fees.js';
+import { undoRecallResets } from '../recallsync.js';
 
 export const CONDITIONS = [
   'caries', 'missing', 'filling', 'crown', 'root_canal', 'implant', 'bridge_pontic', 'fracture',
@@ -209,7 +210,10 @@ export default function clinicalRoutes({ db }) {
     if (existing.status !== 'completed') throw new HttpError(409, 'Only completed procedures can be un-completed');
     const charge = await db.get("SELECT * FROM ledger_entries WHERE procedure_id = ? AND type = 'charge' AND voided_at IS NULL AND reverses_id IS NULL ORDER BY id DESC LIMIT 1", existing.id);
     if (charge) await voidLedgerEntry(db, charge, { userId: req.user.id, reason: req.body?.reason });
-    else await recorded(db, 'procedures', existing.id, () => db.run("UPDATE procedures SET status = 'planned', completed_at = NULL WHERE id = ?", existing.id));
+    else {
+      await recorded(db, 'procedures', existing.id, () => db.run("UPDATE procedures SET status = 'planned', completed_at = NULL WHERE id = ?", existing.id));
+      await undoRecallResets(db, { procedureId: existing.id }, req.body?.reason); // voiding a charge already does this
+    }
     await audit(db, req, 'procedure.uncomplete', 'procedures', existing.id, { reason: req.body?.reason });
     res.json(await db.get('SELECT * FROM procedures WHERE id = ?', existing.id));
   });

@@ -72,7 +72,8 @@ test('recall types: defaults, custom types, and which codes reset them', async (
   const ctx = await setup();
   const { api, patient } = ctx;
   const types = (await api.get('/recall-types')).data;
-  assert.deepEqual(types.filter((t) => t.active).map((t) => t.key).sort(), ['perio_maint', 'prophy']);
+  // RF1 (recalls.js): cleanings, exam, x-rays and fluoride are tracked from the start; office-defined ones are off.
+  assert.deepEqual(types.filter((t) => t.active).map((t) => t.key).sort(), ['bwx', 'child_prophy', 'exam', 'fluoride', 'fmx', 'perio_maint', 'prophy']);
   const bwx = types.find((t) => t.key === 'bwx');
   await api.put(`/recall-types/${bwx.id}`, { active: true });
   const custom = await api.post('/recall-types', { name: 'Fluoride varnish', interval_months: 6, codes: 'd1206' });
@@ -84,7 +85,7 @@ test('recall types: defaults, custom types, and which codes reset them', async (
     await api.post(`/patients/${patient.id}/procedures`, { code, provider_id: ctx.provider.id, complete: true });
   }
   const recalls = await h.db.all('SELECT type, interval_months FROM recalls WHERE patient_id = ? ORDER BY type', patient.id);
-  assert.deepEqual(recalls.map((r) => [r.type, r.interval_months]), [['bwx', 12], ['fluoride_varnish', 6], ['prophy', 6]]);
+  assert.deepEqual(recalls.map((r) => [r.type, r.interval_months]), [['bwx', 12], ['fluoride', 6], ['fluoride_varnish', 6], ['prophy', 6]]);
   const listed = (await api.get('/recalls?before=2099-01-01')).data;
   assert.ok(listed.some((r) => r.type_name === 'Bitewings'));
 });

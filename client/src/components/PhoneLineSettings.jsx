@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { api } from '../api.js';
 import { useApi } from '../hooks.js';
 import { ErrorBox, useSubmit } from './ui.jsx';
+import PhoneSettings from './phones/PhoneSettings.jsx';
 
 // Settings → Phone line: the Twilio number, the desk phone it rings, recording, the missed-call text and
 // when the AI receptionist picks up.
@@ -44,10 +45,11 @@ export default function PhoneLineSettings() {
         </label>
       </div>
       <label className="checkbox"><input type="checkbox" checked={cur.missed_call_text} onChange={(e) => change({ missed_call_text: e.target.checked })} /> Text missed callers back right away (“Sorry we missed your call — reply here or book online”)</label>
-      <label className="checkbox"><input type="checkbox" checked={cur.record_calls} onChange={(e) => change({ record_calls: e.target.checked })} /> Record calls (callers hear “This call may be recorded”) — transcribed and summarized when transcription is set up. Check your state’s consent rules.</label>
+      <label className="checkbox"><input type="checkbox" checked={cur.record_calls} onChange={(e) => change({ record_calls: e.target.checked })} /> Record calls (callers hear the message below) — transcribed and summarized when transcription is set up. Check your state’s consent rules.</label>
       <label style={{ marginTop: 8 }}>Voicemail greeting<textarea rows={2} value={cur.voicemail_greeting} onChange={(e) => change({ voicemail_greeting: e.target.value })} placeholder={`You've reached ${practice.name}. We can't take your call right now…`} /></label>
       <p className="muted" style={{ fontSize: 12 }}>The AI receptionist can find open times and book existing patients, take new-patient requests (held for you in Online requests), move or cancel a caller’s visit, and take messages. It never gives medical advice; urgent calls become a high-priority task.</p>
       <div className="form-actions">{saved && <span className="muted">Saved</span>}<button className="primary" disabled={busy}>Save</button></div>
+      <PhoneSettings />
       <TrackingNumbers />
     </form>
   );

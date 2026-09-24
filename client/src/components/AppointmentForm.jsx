@@ -5,7 +5,9 @@ import { fmtTime, fmtDate } from '../format.js';
 import { useActivePatient } from '../activePatient.jsx';
 import { useRemembered } from '../prefs.js';
 import { ErrorBox, PatientPicker, useSubmit } from './ui.jsx';
+import { toast } from '../toast.js';
 import './calendar/workflow.css';
+import './recallfreq.css';
 
 export const REPEATS = [
   { value: '', label: 'Does not repeat' },
@@ -160,6 +162,26 @@ export default function AppointmentForm({ appointment, defaults = {}, patient: i
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [types.length]);
 
+  // A hygiene visit takes along what's due by that day (bitewings, exam, fluoride — RF3, routes/recallfreq.js):
+  // ticked when it's due and insurance pays, so booking it is still one Enter. Only a suggestion: if it can't load
+  // the visit books without it.
+  const [bundle, setBundle] = useState([]);
+  const [bundleOn, setBundleOn] = useState([]);
+  const bundleKey = isNew && patient && form.date && (form.provider_id || form.appointment_type_id) ? `${patient.id}|${form.date}|${form.provider_id}|${form.appointment_type_id}` : null;
+  useEffect(() => {
+    if (!bundleKey) { setBundle([]); return undefined; }
+    let live = true;
+    const q = new URLSearchParams({ date: form.date });
+    if (form.provider_id) q.set('provider_id', form.provider_id);
+    if (form.appointment_type_id) q.set('appointment_type_id', form.appointment_type_id);
+    api.get(`/patients/${patient.id}/recall-bundle?${q}`).then((b) => {
+      if (!live) return;
+      setBundle(b.items || []);
+      setBundleOn((b.items || []).filter((i) => i.checked).map((i) => i.code));
+    }).catch(() => { if (live) setBundle([]); });
+    return () => { live = false; };
+  }, [bundleKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     if (!patient || appointment) return;
     api.get(`/patients/${patient.id}/procedures?status=planned`).then((rows) => setPlanned(rows.filter((p) => !p.appointment_id))).catch(() => setPlanned([]));
@@ -189,6 +211,12 @@ export default function AppointmentForm({ appointment, defaults = {}, patient: i
         ? await api.put(`/appointments/${appointment.id}`, { ...body, ...(appointment.series_id && scope === 'following' ? { scope: 'following' } : {}) })
         : await api.post('/appointments', { ...body, procedure_ids: selectedProcs, ...(rule ? { repeat: { every: rule.every, unit: rule.unit, ...(rule.monthly_by ? { monthly_by: rule.monthly_by } : {}), ...(repeat.end === 'until' ? { until: repeat.until } : { count: Number(repeat.count) }) } } : {}) });
       if (form.operatory_id) rememberChair(Number(form.operatory_id));
+      const chosen = !appointment ? bundle.filter((i) => bundleOn.includes(i.code)).map((i) => i.code) : [];
+      const visitId = saved?.id ?? saved?.appointment?.id;
+      if (chosen.length && visitId) {
+        // The visit is booked either way; if the extras don't attach, say so (they can be added from the visit).
+        await api.post(`/appointments/${visitId}/recall-bundle`, { codes: chosen }).catch((e) => toast(`Booked, but ${chosen.join(', ')} weren't added: ${e.message}`, { tone: 'error' }));
+      }
       const report = saved.series || saved.series_update;
       if (report?.skipped?.length) {
         alert(`${saved.series ? `Booked ${report.created} visits.` : `Updated ${report.updated} later visits.`} These couldn't be booked:\n\n${report.skipped.map((s) => `• ${s.start_time.slice(0, 10)} ${fmtTime(s.start_time)} — ${s.reason}`).join('\n')}`);
@@ -353,6 +381,21 @@ export default function AppointmentForm({ appointment, defaults = {}, patient: i
                 onChange={(e) => setSelectedProcs(e.target.checked ? [...selectedProcs, p.id] : selectedProcs.filter((x) => x !== p.id))} />
               {p.code} {p.description} {p.tooth ? `#${p.tooth}` : ''} {p.surfaces || ''}
             </label>
+          ))}
+        </div>
+      )}
+
+      {!appointment && bundle.length > 0 && (
+        <div className="rf-bundle" aria-label="Also due at this visit">
+          <h3>Also due — add to this visit</h3>
+          {bundle.map((i) => (
+            <div key={i.code}>
+              <label className="checkbox" style={{ color: 'var(--text)' }}>
+                <input type="checkbox" checked={bundleOn.includes(i.code)} onChange={(e) => setBundleOn(e.target.checked ? [...bundleOn, i.code] : bundleOn.filter((x) => x !== i.code))} />
+                {i.code} {i.short}{i.insurance && i.insurance.eligible_on > form.date ? <span className="rf-ins-warn"> · insurance pays from {fmtDate(i.insurance.eligible_on)}</span> : null}
+              </label>
+              <div className="why">{i.why}</div>
+            </div>
           ))}
         </div>
       )}

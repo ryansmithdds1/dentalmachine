@@ -21,6 +21,8 @@ import labCheckinRoutes from './routes/labcheckin.js';
 import clinicalRoutes from './routes/clinical.js';
 import billingRoutes from './routes/billing.js';
 import insuranceRoutes from './routes/insurance.js';
+import verificationRoutes from './routes/verification.js';
+import recallFreqRoutes from './routes/recallfreq.js';
 import settingsRoutes from './routes/settings.js';
 import reportRoutes from './routes/reports.js';
 import reportLibraryRoutes from './routes/reportlibrary.js';
@@ -54,6 +56,7 @@ import conversationRoutes, { smsWebhook } from './routes/sms.js';
 import { deliveryWebhooks } from './routes/delivery.js';
 import { voiceWebhooks } from './routes/voice.js';
 import phoneRoutes, { phoneWebhooks } from './routes/phones.js';
+import phoneCoachRoutes, { phoneCoachWebhooks } from './routes/phonecoach.js';
 import { createTranscriber } from './phones.js';
 import financeRoutes, { financePublicRoutes } from './routes/finance.js';
 import scribeRoutes from './routes/scribe.js';
@@ -95,6 +98,8 @@ import orthoRoutes from './routes/ortho.js';
 import imagingRoutes, { bridgeAgentRoutes } from './routes/imaging.js';
 import bridgePackageRoutes from './routes/bridgepackage.js';
 import { portalPublicRoutes, portalRoutes } from './routes/portal.js';
+import portalAccountRoutes from './routes/portalaccount.js';
+import billpayPublicRoutes, { billpayStaffRoutes, billpayEmbedRoutes } from './routes/billpay.js';
 import systemRoutes from './routes/system.js';
 import offlineRoutes from './routes/offline.js';
 import chartingRoutes from './routes/charting.js';
@@ -219,6 +224,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   app.use(voiceWebhooks({ db, config }));
   app.use(recallVoiceWebhooks({ db, config, messenger, secret }));
   app.use(phoneWebhooks({ db, config, messenger, storage, transcriber, fetchImpl }));
+  app.use(phoneCoachWebhooks({ db, config, messenger }));
   app.use(lenderWebhooks({ db }));
   app.use(reputationPublicRoutes({ db, secret, gbp, config }));
   app.use(financePublicRoutes({ db, config, secret, plaid, qbo }));
@@ -260,7 +266,9 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
     res.set('Cache-Control', 'no-store');
     next();
   }, publicRoutes({ db, storage, payments, messenger, config, secret, fetchImpl }), publicCasePresentation({ db, storage, secret }), portalPublicRoutes({ db, secret, messenger }), campaignPublicRoutes({ db }), surveyPublicRoutes({ db }), labPublicRoutes({ db, storage }), learnPublicRoutes({ db }), checkinPublicRoutes({ db }), paperworkPublicRoutes({ db, storage, secret }));
+  app.use('/api/public', billpayPublicRoutes({ db, secret, payments, messenger, config, fetchImpl }));
   app.use('/api/public', onlineSchedPublicRoutes({ db, messenger, payments, storage, config, fetchImpl }));
+  app.use('/api/portal', portalAccountRoutes({ db, secret, config, payments, messenger }));
   app.use('/api/portal', portalRoutes({ db, secret, config, payments, messenger, storage }));
   app.use('/api/v1', apiV1Routes({ db }));
   app.use('/api/mcp', (_req, res, next) => { res.set('Cache-Control', 'no-store'); next(); }, mcpRoutes({ db }));
@@ -316,6 +324,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   // Before scheduleRoutes: /schedule/production?date= is answered here (?from= requests pass through to schedule.js).
   api.use(productionRoutes({ db }));
   api.use(scheduleRoutes({ db }));
+  api.use(recallFreqRoutes({ db }));
   api.use(dayTemplateRoutes({ db }));
   api.use(capacityRoutes({ db }));
   api.use(clinicalRoutes({ db }));
@@ -341,6 +350,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(intakeReviewRoutes({ db }));
   api.use(askRoutes({ db, config }));
   api.use(phoneRoutes({ db, storage }));
+  api.use(phoneCoachRoutes({ db, config, messenger }));
   api.use(orgRoutes({ db }));
   api.use(claimAiRoutes({ db, config }));
   api.use(labRxRoutes({ db, messenger, config }));
@@ -358,6 +368,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(billingRoutes({ db, payments, config, messenger }));
   api.use(cashDepositRoutes({ db, storage }));
   api.use(insuranceRoutes({ db }));
+  api.use(verificationRoutes({ db, config, clearinghouse, storage, messenger }));
   api.use(settingsRoutes({ db, secret, config, messenger }));
   api.use(reportRoutes({ db }));
   api.use(reportLibraryRoutes({ db }));
@@ -399,9 +410,11 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(orthoRoutes({ db, payments }));
   api.use(imagingRoutes({ db, storage }));
   api.use(bridgePackageRoutes({ db, config }));
+  api.use(billpayStaffRoutes({ db, config, payments }));
   api.use(systemRoutes({ db, config, messenger, storage, payments, clearinghouse, erx, mailer }));
   // The website booking embed (/embed.js) and the embeddable booking page's framing rules.
   app.use(onlineSchedEmbedRoutes({ db }));
+  app.use(billpayEmbedRoutes());
   app.use('/api', api);
   app.use('/api', (_req, _res, next) => next(new HttpError(404, 'Not found')));
 

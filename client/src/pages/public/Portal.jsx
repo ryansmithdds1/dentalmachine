@@ -3,6 +3,7 @@ import { useParams, useSearchParams } from 'react-router-dom';
 import { money } from '../../format.js';
 import { ErrorBox } from '../../components/ui.jsx';
 import PublicLayout from './PublicLayout.jsx';
+import PortalAccount from './PortalAccount.jsx';
 import { fmtDateL, fmtTimeL, suggestLang, useLang, useT } from './i18n.js';
 
 // Patient portal: sign in with a one-time code, then see visits, balance, forms and plans for the household.
@@ -120,7 +121,9 @@ function Dashboard({ token, onSignOut }) {
   const [params, setParams] = useSearchParams();
   const [me, setMe] = useState(null);
   const [error, setError] = useState(null);
-  const [notice, setNotice] = useState(params.get('paid') ? 'Thank you — your payment was received and will show on your account shortly.' : null);
+  const [notice, setNotice] = useState(params.get('paid') && !params.get('session_id') ? 'Thank you — your payment was received and will show on your account shortly.' : params.get('card') === 'saved' ? 'Your card is saved securely with our card processor.' : null);
+  // Back from the card processor's page: the account panel makes sure the payment is posted.
+  const [returned] = useState(() => (params.get('session_id') ? { session_id: params.get('session_id') } : null));
   const [moving, setMoving] = useState(null);
   const load = useCallback(async () => {
     try {
@@ -134,7 +137,7 @@ function Dashboard({ token, onSignOut }) {
   }, [token, onSignOut]);
   useEffect(() => {
     load();
-    if (params.get('paid')) setParams({}, { replace: true });
+    if (params.get('paid') || params.get('card') || params.get('pay')) setParams({}, { replace: true });
   }, [load]); // eslint-disable-line react-hooks/exhaustive-deps
   const act = async (fn, msg) => {
     setError(null);
@@ -160,20 +163,8 @@ function Dashboard({ token, onSignOut }) {
       <ErrorBox error={error} />
 
       <div className="portal-grid">
-        <section className="card">
-          <h2>{t('Balance')}</h2>
-          <div className="portal-balance">{money(Math.max(0, me.amount_due))}</div>
-          <div className="muted" style={{ fontSize: 13 }}>
-            {me.pending_insurance > 0 ? t('Account balance {balance}, including {insurance} we expect from insurance.', { balance: money(me.balance), insurance: money(me.pending_insurance) }) : me.balance < 0 ? t('You have a {amount} credit.', { amount: money(-me.balance) }) : t('Amount due now.')}
-          </div>
-          {me.payments_enabled && me.amount_due > 0 && <PayForm token={token} due={me.amount_due} onPaid={(url) => (url ? (window.location.href = url) : act(async () => {}, 'Thank you — your payment was received.'))} />}
-          {me.payment_plans.map((pp) => (
-            <div key={pp.id} className="portal-plan">
-              <strong>{t('Payment plan')}</strong> · {t('{paid} paid, {left} left', { paid: money(pp.paid), left: money(pp.remaining) })}
-              {pp.next_due_date && <div className="muted">{t('Next {amount} due {date}', { amount: money(pp.next_due_amount), date: shortDate(lang, pp.next_due_date) })}{pp.autopay ? ` — ${t('paid automatically')}` : ''}</div>}
-            </div>
-          ))}
-        </section>
+        {/* The account: what's owed and why, each visit, the family, statements, receipts, paying, cards and plans. */}
+        <PortalAccount token={token} onSignOut={onSignOut} returned={returned} />
 
         <section className="card">
           <h2>{t('Upcoming visits')}</h2>
@@ -218,13 +209,6 @@ function Dashboard({ token, onSignOut }) {
 
         <Messages token={token} onError={setError} />
 
-        <section className="card">
-          <h2>{t('Statements & receipts')}</h2>
-          <button className="small" onClick={() => act(() => download('/portal/statement.pdf', token, 'statement.pdf'))}>{t('Download statement (PDF)')}</button>{' '}
-          <button className="small" onClick={() => act(() => download('/portal/record-export', token, 'health-record.zip'))} title={t('Your records: a summary, your chart details, and your x-rays and documents')}>{t('Download my health record')}</button>
-          <Receipts token={token} onError={setError} />
-        </section>
-
         <Memberships token={token} household={me.household} onDone={(msg) => act(async () => {}, msg)} onError={setError} />
 
         <InsuranceSection token={token} onDone={(msg) => act(async () => {}, msg)} />
@@ -233,22 +217,9 @@ function Dashboard({ token, onSignOut }) {
           <h2>{t('Your details')}</h2>
           <ContactForm token={token} patient={p} onSaved={() => act(async () => {}, 'Your details were updated.')} />
           {me.household.length > 1 && <p className="muted" style={{ fontSize: 13 }}>{t('Household: {names}', { names: me.household.map((h) => h.first_name).join(', ') })}</p>}
-          {me.cards.length > 0 && <p className="muted" style={{ fontSize: 13 }}>{t('Card on file: {cards}', { cards: me.cards.map((c) => `${c.brand ? c.brand[0].toUpperCase() + c.brand.slice(1) : t('Card')} •••• ${c.last4}`).join(', ') })}</p>}
+          <button className="small" onClick={() => act(() => download('/portal/record-export', token, 'health-record.zip'))} title={t('Your records: a summary, your chart details, and your x-rays and documents')}>{t('Download my health record')}</button>
         </section>
 
-        <section className="card portal-wide">
-          <h2>{t('Recent account activity')}</h2>
-          {me.activity.map((e, i) => (
-            <div key={i} className="portal-activity">
-              <div>
-                <div>{e.description || e.type}</div>
-                <div className="muted" style={{ fontSize: 12 }}>{shortDate(lang, e.entry_date)}{me.household.length > 1 ? ` · ${e.patient_name}` : ''}</div>
-              </div>
-              <div className={`num${e.amount < 0 ? ' paid' : ''}`}>{e.amount < 0 ? `−${money(-e.amount)}` : money(e.amount)}</div>
-            </div>
-          ))}
-          {me.activity.length === 0 && <p className="muted">{t('No activity yet.')}</p>}
-        </section>
       </div>
     </PublicLayout>
   );
@@ -307,24 +278,6 @@ function Messages({ token, onError }) {
   );
 }
 
-function Receipts({ token, onError }) {
-  const t = useT();
-  const lang = useLang();
-  const [list, setList] = useState(null);
-  useEffect(() => { call('GET', '/portal/payments', null, token).then(setList).catch(onError); }, [token, onError]);
-  if (!list?.length) return null;
-  return (
-    <div style={{ marginTop: 10 }}>
-      {list.slice(0, 10).map((p) => (
-        <div key={p.id} className="portal-activity">
-          <div>{shortDate(lang, p.entry_date)}<span className="muted"> · {money(-p.amount)}</span></div>
-          <button className="link" onClick={() => download(`/portal/receipts/${p.id}.pdf`, token, `receipt-${p.id}.pdf`).catch(onError)}>{t('Receipt')}</button>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 function Memberships({ token, household, onDone, onError }) {
   const t = useT();
   const [data, setData] = useState(null);
@@ -353,32 +306,6 @@ function Memberships({ token, household, onDone, onError }) {
         </div>
       ))}
     </section>
-  );
-}
-
-function PayForm({ token, due, onPaid }) {
-  const t = useT();
-  const [amount, setAmount] = useState((due / 100).toFixed(2));
-  const [error, setError] = useState(null);
-  const [busy, setBusy] = useState(false);
-  return (
-    <form className="portal-pay" onSubmit={async (e) => {
-      e.preventDefault();
-      setBusy(true);
-      setError(null);
-      try {
-        const r = await call('POST', '/portal/pay', { amount: Math.round(Number(amount) * 100) }, token);
-        onPaid(r.url || null);
-      } catch (err) {
-        setError(err);
-      } finally {
-        setBusy(false);
-      }
-    }}>
-      <label>{t('Amount ($)')}<input type="number" min="0.5" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} /></label>
-      <button className="primary" disabled={busy}>{t('Pay now')}</button>
-      <ErrorBox error={error} />
-    </form>
   );
 }
 

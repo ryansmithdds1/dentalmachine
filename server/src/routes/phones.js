@@ -8,12 +8,25 @@ import { publish } from '../events.js';
 import { patientScope } from '../officeaccess.js';
 import { practiceForNumber, patientForNumber, callerCard, isOpenNow, textBack, processRecording, summarizeCall, receptionistTurn } from '../phones.js';
 import { aiClient } from '../ai.js';
+import { phoneSettings, DEFAULT_DISCLOSURE, answerers, shiftIndex } from '../phonecoach.js';
+import { createLiveTranscription } from '../livecall.js';
+import { utcToLocal } from '../timeclock.js';
 
 const xml = (s) => String(s).replace(/[<>&'"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' })[c]);
 const twiml = (body) => `<?xml version="1.0" encoding="UTF-8"?><Response>${body}</Response>`;
 const say = (text) => `<Say voice="Polly.Joanna-Neural">${xml(text)}</Say>`;
 // Work done after answering Twilio; a failure becomes a Needs-attention item for the practice.
 const laterFor = (db) => (label, fn, practiceId) => setImmediate(() => fn().catch((err) => raiseIssue(db, { practiceId, kind: 'integration', key: `phone:${label}`, role: 'front_desk', title: `Phone line: ${label} failed`, detail: err.message })));
+
+// An answered call nobody claimed on screen goes to the one person who answers phones and was on shift then.
+async function attributeAgent(db, call) {
+  const tz = (await db.get('SELECT timezone FROM practices WHERE id = ?', call.practice_id))?.timezone || 'America/New_York';
+  const local = utcToLocal(tz, Date.parse(`${String(call.created_at).replace(' ', 'T')}Z`));
+  const { answerers: team } = await answerers(db, call.practice_id);
+  const ids = new Set(team.map((u) => u.id));
+  const onShift = (await shiftIndex(db, call.practice_id, local.slice(0, 10), local.slice(0, 10)))(local).filter((id) => ids.has(id));
+  if (onShift.length === 1) await db.run("UPDATE calls SET agent_id = ?, agent_source = 'shift' WHERE id = ? AND agent_id IS NULL", onShift[0], call.id);
+}
 
 // Twilio's webhooks for the office line. Point the number's "A call comes in" at /api/webhooks/twilio/voice/inbound
 // and its call status callback at /api/webhooks/twilio/call-status.
@@ -27,6 +40,7 @@ export function phoneWebhooks({ db, config, messenger, storage, transcriber, fet
     return given.length === expected.length && timingSafeEqual(given, expected);
   };
   const later = laterFor(db);
+  const live = createLiveTranscription({ config });
   const guard = (req, res, next) => (signed(req) ? next() : res.status(403).type('text/xml').send(twiml('')));
   const url = (path) => xml(`${config.appUrl}/api/webhooks/twilio/voice/${path}`);
   const callOf = (req) => db.get('SELECT * FROM calls WHERE id = ?', Number(req.query.call));
@@ -46,8 +60,11 @@ export function phoneWebhooks({ db, config, messenger, storage, transcriber, fet
     const again = req.body.CallSid ? await db.get("SELECT id FROM calls WHERE provider_id = ? AND direction = 'inbound'", String(req.body.CallSid)) : null;
     if (again) return send(res, practice.forward_to ? `<Dial timeout="${Math.min(60, Math.max(5, practice.ring_seconds || 20))}" action="${url(`dial-done?call=${again.id}`)}">${/^sip:/i.test(practice.forward_to) ? `<Sip>${xml(practice.forward_to)}</Sip>` : `<Number>${xml(practice.forward_to)}</Number>`}</Dial>` : `<Redirect method="POST">${url(`ai?call=${again.id}`)}</Redirect>`);
     const tracked = (await db.all('SELECT number, source FROM tracking_numbers WHERE practice_id = ? AND active = 1', practice.id)).find((t) => t.number.replace(/\D/g, '').slice(-10) === String(req.body.To || '').replace(/\D/g, '').slice(-10));
+    // Linked by the number (only patients of this practice, never archived ones); a number a family shares links to
+    // the account holder, and the screen asks who's calling.
+    const sharing = patient ? (await db.all("SELECT phone FROM patients WHERE practice_id = ? AND status != 'archived' AND phone IS NOT NULL AND phone LIKE ?", practice.id, `%${tail10(from).slice(-4)}`)).filter((x) => tail10(x.phone) === tail10(from)).length : 0;
     const id = await insert(db, 'calls', {
-      source: tracked?.source ?? null, new_caller: patient ? 0 : 1,
+      source: tracked?.source ?? null, new_caller: patient ? 0 : 1, linked_via: patient ? (sharing > 1 ? 'family_number' : 'number') : null,
       practice_id: practice.id, patient_id: patient?.id ?? null, direction: 'inbound', purpose: 'inbound', from_number: from, to_number: String(req.body.To || ''),
       provider_id: String(req.body.CallSid || '') || null, status: 'ringing', caller_name: req.body.CallerName || null,
     });
@@ -72,7 +89,11 @@ export function phoneWebhooks({ db, config, messenger, storage, transcriber, fet
     }
     // Ring the office; recorded (both sides, on separate channels) when the practice records calls.
     const rec = practice.record_calls ? ` record="record-from-answer-dual" recordingStatusCallback="${url(`recording?call=${id}`)}"` : '';
-    send(res, (practice.record_calls ? say('This call may be recorded for quality and training.') : '')
+    // The recording disclosure the office wrote (Settings → Phones), before anyone picks up; and live transcription
+    // for the call screen when the provider supports it and the office turned it on.
+    const phone = await phoneSettings(db, practice.id);
+    const listen = live && !live.sandbox && phone.live_transcription ? live.twiml(`${config.appUrl}/api/webhooks/twilio/voice/transcription?call=${id}`) : '';
+    send(res, listen + (practice.record_calls ? say(phone.recording_disclosure || DEFAULT_DISCLOSURE) : '')
       + `<Dial timeout="${Math.min(60, Math.max(5, practice.ring_seconds || 20))}" action="${url(`dial-done?call=${id}`)}"${rec}>${/^sip:/i.test(practice.forward_to) ? `<Sip>${xml(practice.forward_to)}</Sip>` : `<Number>${xml(practice.forward_to)}</Number>`}</Dial>`);
   });
 
@@ -81,13 +102,21 @@ export function phoneWebhooks({ db, config, messenger, storage, transcriber, fet
     const call = await callOf(req);
     if (!call) return send(res, '<Hangup/>');
     const status = String(req.body.DialCallStatus || '');
+    // How long it rang before someone answered (the dial ends after the conversation: total time less talk time).
+    const elapsed = Math.max(0, Math.round((Date.now() - Date.parse(`${String(call.created_at).replace(' ', 'T')}Z`)) / 1000));
     if (status === 'completed' || status === 'answered') {
-      await db.run("UPDATE calls SET status = 'completed', outcome = 'answered', duration = ?, ended_at = datetime('now') WHERE id = ?", Number(req.body.DialCallDuration) || null, call.id);
+      const talk = Number(req.body.DialCallDuration) || 0;
+      const ring = Math.max(0, elapsed - talk);
+      await db.run("UPDATE calls SET status = 'completed', outcome = 'answered', desk_result = 'answered', ring_seconds = ?, answered_at = ?, duration = ?, ended_at = datetime('now') WHERE id = ?",
+        ring, new Date(Date.parse(`${String(call.created_at).replace(' ', 'T')}Z`) + ring * 1000).toISOString().slice(0, 19).replace('T', ' '), talk || null, call.id);
+      // Who took it: whoever claimed it on screen; else, when only one person who answers phones was on shift, them.
+      if (!call.agent_id) later('who answered', () => attributeAgent(db, call), call.practice_id);
       publish(call.practice_id, { type: 'call', event: 'ended', call_id: call.id });
       return send(res, '<Hangup/>');
     }
     const practice = await db.get('SELECT * FROM practices WHERE id = ?', call.practice_id);
-    await db.run("UPDATE calls SET outcome = 'missed' WHERE id = ?", call.id);
+    // The caller hung up while it rang ("canceled") is an abandoned call; otherwise it rang out.
+    await db.run("UPDATE calls SET outcome = 'missed', desk_result = ?, ring_seconds = ? WHERE id = ?", status === 'canceled' ? 'abandoned' : 'missed', elapsed, call.id);
     publish(call.practice_id, { type: 'call', event: 'missed', call_id: call.id });
     later('text-back', () => textBack(db, messenger, call, practice, config.appUrl), practice.id);
     if (receptionist(practice) && ['missed', 'always'].includes(practice.ai_receptionist)) {
@@ -113,7 +142,7 @@ export function phoneWebhooks({ db, config, messenger, storage, transcriber, fet
   r.post('/api/webhooks/twilio/voice/recording', form, guard, async (req, res) => {
     const call = await callOf(req);
     if (call && req.body.RecordingUrl && (req.body.RecordingStatus || 'completed') === 'completed') {
-      later('recording', () => processRecording(db, { storage, transcriber, config, fetchImpl }, call.id, String(req.body.RecordingUrl)), call.practice_id);
+      later('recording', () => processRecording(db, { storage, transcriber, config, fetchImpl, messenger }, call.id, String(req.body.RecordingUrl)), call.practice_id);
     }
     res.status(204).end();
   });

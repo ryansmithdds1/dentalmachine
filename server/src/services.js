@@ -3,7 +3,7 @@ import { requireHuman } from './aiguard.js';
 import { raiseIssue, resolveIssue, failed } from './issues.js';
 import { insert, practiceNow, recorded, isRealDate } from './util.js';
 import { benefitYear, deductibleMet, estimateCoverage } from './benefits.js';
-import { resetRecalls } from './recalls.js';
+import { resetRecalls, undoRecallResets } from './recallsync.js';
 import { applyMemberBenefit } from './memberships.js';
 import { useSupplies } from './inventory.js';
 
@@ -323,6 +323,8 @@ export async function voidLedgerEntry(db, entry, { userId, reason }) {
       if (claim) throw new HttpError(409, `The procedure is on claim #${claim.id} — void that claim first`);
       await recorded(db, 'procedures', entry.procedure_id, () => db.run("UPDATE procedures SET status = 'planned', completed_at = NULL WHERE id = ? AND status = 'completed'", entry.procedure_id));
       await db.run("UPDATE tooth_conditions SET voided_at = datetime('now') WHERE procedure_id = ? AND voided_at IS NULL", entry.procedure_id);
+      // The recall it reset goes back to how it was (recallsync.js).
+      await undoRecallResets(db, { procedureId: entry.procedure_id }, String(reason).trim().slice(0, 300));
       // The plan discount given for it goes too.
       const discounts = await db.all("SELECT * FROM ledger_entries WHERE procedure_id = ? AND adjustment_type = 'Treatment plan discount' AND voided_at IS NULL AND reverses_id IS NULL", entry.procedure_id);
       for (const d of discounts) await reverseEntry(db, d, { userId, reason: 'Procedure charge voided', date });

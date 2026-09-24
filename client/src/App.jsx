@@ -28,7 +28,7 @@ import { pendingCount } from './offline/index.js';
 import { ClockButton } from './components/TimeClock.jsx';
 import { useLiveEvents } from './live.js';
 import MfaSetup from './components/MfaSetup.jsx';
-import { Sun, CalendarDays, Users, MessageSquare, Inbox as InboxIcon, PhoneCall, Megaphone, Receipt, ListChecks, ChartColumn, Landmark, Settings as SettingsIcon, Search, PanelLeftClose, PanelLeftOpen, LogOut, Keyboard, Monitor, Moon, Sparkles, Phone, Building2, Star, HelpCircle, AlertTriangle, BookOpen, Clock, Banknote, Gauge, Repeat, ShieldCheck, FolderOpen, CalendarRange, ClipboardCheck, PackageCheck, Send, BadgeCheck } from 'lucide-react';
+import { Sun, CalendarDays, Users, MessageSquare, Inbox as InboxIcon, PhoneCall, Megaphone, Receipt, ListChecks, ChartColumn, Landmark, Settings as SettingsIcon, Search, PanelLeftClose, PanelLeftOpen, LogOut, Keyboard, Monitor, Moon, Sparkles, Phone, Building2, Star, HelpCircle, AlertTriangle, BookOpen, Clock, Banknote, Gauge, Repeat, ShieldCheck, FolderOpen, CalendarRange, ClipboardCheck, CircleDollarSign, PackageCheck, Send, BadgeCheck, Headset } from 'lucide-react';
 import { getThemePref, setThemePref, watchTheme } from './theme.js';
 
 // Pages load on demand so the first screen appears quickly.
@@ -90,6 +90,9 @@ const PaperworkPage = lazy(() => import('./pages/public/Paperwork.jsx'));
 const FormsKiosk = lazy(() => import('./pages/public/Kiosk.jsx'));
 const EduPage = lazy(() => import('./pages/public/EduPage.jsx'));
 const Recall = lazy(() => import('./pages/Recall.jsx'));
+const BillPay = lazy(() => import('./pages/public/BillPay.jsx'));
+const Phones = lazy(() => import('./pages/Phones.jsx'));
+const Verification = lazy(() => import('./pages/Verification.jsx'));
 const Metrics = lazy(() => import('./pages/Metrics.jsx'));
 const ChartAudit = lazy(() => import('./pages/ChartAudit.jsx'));
 const OfficeDocuments = lazy(() => import('./pages/OfficeDocuments.jsx'));
@@ -121,6 +124,7 @@ export default function App() {
         <Route path="/unsubscribe-news/:token" element={<NewsUnsubscribe />} />
         <Route path="/u/:token" element={<UnsubscribePage />} />
         <Route path="/pay/:result" element={<PayResult />} />
+        <Route path="/billpay/:slug" element={<BillPay />} />
         <Route path="/tp/:token" element={<CaseAcceptance />} />
         <Route path="/scan/:token" element={<PhoneUpload />} />
         <Route path="/portal/:key" element={<Portal />} />
@@ -268,7 +272,9 @@ function StaffApp() {
     ['/insurance-autopilot', BadgeCheck, 'Insurance autopilot', can('billing:read')],
     ['/campaigns', Megaphone, 'Campaigns', can('patients:write')],
     ['/reputation', Star, 'Reviews', can('patients:read')],
+    ['/phones', Headset, 'Phones', can('patients:read')],
     ['/claims', Receipt, 'Billing', can('billing:read')],
+    ['/verification', BadgeCheck, 'Insurance verification', can('billing:read')],
     ['/office', ListChecks, 'To-do & labs', true],
     ['/checklists', ClipboardCheck, 'Checklists', true],
     ['/timeclock', Clock, 'Time clock', true],
@@ -455,6 +461,8 @@ function Shell({ nav }) {
             <Route path="/patients/:id/statement" element={<Statement />} />
             <Route path="/followups" element={<Followups />} />
             <Route path="/recall" element={<Recall />} />
+            <Route path="/verification" element={<Verification />} />
+            <Route path="/phones" element={<Phones />} />
             <Route path="/metrics" element={<Metrics />} />
             <Route path="/chart-audit" element={<ChartAudit />} />
             <Route path="/documents" element={<OfficeDocuments />} />

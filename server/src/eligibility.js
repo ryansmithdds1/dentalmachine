@@ -1,10 +1,11 @@
 import { HttpError } from './auth.js';
 import { raiseIssue, resolveIssue } from './issues.js';
 import { insert, practiceNow, localNow, audit } from './util.js';
-import { withActor } from './actor.js';
+import { withActor, currentActor } from './actor.js';
 import { build270, parse271, x12Type } from './x12.js';
 import { benefitsUsed, benefitYear } from './services.js';
 import { DEFAULT_FREQUENCIES, savePolicy, withPlan } from './benefits.js';
+import { planIdentity, evidenceOf, recordElectronicBreakdown } from './planverify.js';
 
 // Eligibility (270/271): one policy on demand, or a whole day's patients — the office runs tomorrow's list,
 // and it runs by itself each evening when a real-time clearinghouse is connected.
@@ -100,7 +101,11 @@ export function createEligibility({ db, config = {}, clearinghouse: ch = null })
       await db.run("UPDATE insurance_plans SET verified_at = datetime('now'), verified_source = 'eligibility' WHERE id = ?", plan.id);
     });
     const after = pickFields(await db.get('SELECT * FROM patient_insurance WHERE id = ?', policy.id), row);
-    return { check: e, summary: s, policy, fields: Object.keys(row), before, after };
+    // The rest of the breakdown the payer sent (per-category percentages, waiting periods, ortho, clauses, the
+    // patient's used and remaining amounts) and the verification record — planverify.js. A person pressing
+    // "Apply" has decided past the plan-identity guard; the automatic path hasn't.
+    const breakdown = await recordElectronicBreakdown(db, e, { sandbox: !!s.sandbox, force: currentActor()?.source === 'human' });
+    return { check: e, summary: s, policy, fields: Object.keys(row), before, after, breakdown };
   }
 
   // A response that came back: applied to the policy on its own when it's clean; anything that needs a
@@ -114,6 +119,11 @@ export function createEligibility({ db, config = {}, clearinghouse: ch = null })
     const { plan } = await withPlan(db, policy);
     const today = (await practiceNow(db, e.practice_id)).slice(0, 10);
     const reasons = eligibilityProblems(s, { plan, today });
+    // Plan-wide numbers change everyone on the plan, so only when the plan on file is certainly this patient's.
+    if (!reasons.length) {
+      const identity = await planIdentity(db, policy, evidenceOf(e));
+      if (!identity.ok) reasons.push(...identity.reasons.map((r) => `the plan on file may not be theirs: ${r}`));
+    }
     const key = `eligibility-review:${policy.id}`;
     const patient = await db.get('SELECT first_name, last_name FROM patients WHERE id = ?', e.patient_id);
     if (reasons.length) {

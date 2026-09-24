@@ -221,7 +221,7 @@ export function classifyTypes(types, recallTypeRows, targets = DEFAULT_TARGETS) 
   const recallMinutes = {};
   for (const rt of recallTypeRows.filter((r) => r.active !== 0)) {
     const codes = parseList(rt.codes);
-    if (XRAY_ONLY(codes)) continue;
+    if (XRAY_ONLY(codes) || rt.bundle) continue; // x-rays, exam and fluoride come with the cleaning
     const t = (rt.appointment_type_id && byId.get(rt.appointment_type_id))
       || active.find((x) => x.id !== newPatient?.id && x.provider_type === 'hygienist' && parseList(x.procedure_codes).some((c) => codes.includes(c)))
       || null;

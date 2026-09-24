@@ -1,0 +1,11 @@
+/* The two insurance statuses (components/VerifyBadge.jsx). Theme tokens only, so dark mode follows. */
+.vf-pills { display: inline-flex; gap: 4px; align-items: center; flex-wrap: nowrap; }
+.vf-pill { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; font-weight: 600; line-height: 1; padding: 3px 7px; border-radius: 999px; white-space: nowrap; border: 1px solid transparent; }
+.vf-pill.ok { background: var(--ok-soft); color: var(--ok); }
+.vf-pill.warn { background: var(--warn-soft); color: var(--warn); }
+.vf-pill.bad { background: var(--danger-soft); color: var(--danger); border-color: color-mix(in srgb, var(--danger) 30%, transparent); }
+.vf-pill.none { background: var(--subtle); color: var(--muted); }
+.vf-pill-icon { font-size: 10px; font-weight: 800; letter-spacing: -0.02em; }
+.vf-badge { display: inline-flex; align-items: center; gap: 8px; }
+.vf-badge-carrier { display: inline-flex; align-items: center; gap: 4px; font-size: 12.5px; color: var(--text-2); }
+.vf-badge-carrier svg { color: var(--muted); }

@@ -8,6 +8,7 @@ import { runAutopay } from '../payments.js';
 import { autoReceipt } from '../receipts.js';
 import { refreshTerminalPayment } from './terminal.js';
 import { finishBooking } from '../onlinebooking.js';
+import { postOnlinePayment, afterOnlinePayment, paymentFailed } from '../billpay.js';
 import { sendMessage, preferredChannel, sendAppointmentReminder } from '../messaging.js';
 
 // Online card payments via Stripe Checkout, cards on file and payment-plan autopay.
@@ -192,22 +193,20 @@ export function stripeWebhook({ db, config, payments, messenger }) {
     } else if (event.type === 'checkout.session.completed' || event.type === 'checkout.session.async_payment_succeeded') {
       const session = event.data.object;
       if (session.payment_status === 'paid') {
-        const posted = await db.tx(async () => {
-          // Mark it paid first, conditionally: of two deliveries of the same event (Stripe retries, and
-          // sends completed + async_payment_succeeded), only the one that flips the status posts it.
-          const flipped = await db.run("UPDATE payment_requests SET status = 'paid', paid_at = datetime('now') WHERE session_id = ? AND status <> 'paid'", session.id);
-          if (!flipped.changes) return null; // unknown session or already applied
-          const pr = await db.get('SELECT * FROM payment_requests WHERE session_id = ?', session.id);
-          const entryId = await insert(db, 'ledger_entries', {
-            practice_id: pr.practice_id, patient_id: pr.patient_id, type: 'payment', amount: -session.amount_total,
-            description: 'Online card payment', method: 'credit_card', reference: session.payment_intent || session.id,
-            entry_date: (await practiceNow(db, pr.practice_id)).slice(0, 10),
-          });
-          await db.run('UPDATE payment_requests SET ledger_entry_id = ? WHERE id = ?', entryId, pr.id);
-          await audit(db, { ip: req.ip, user: { practice_id: pr.practice_id, id: null } }, 'payment.online', 'ledger_entries', entryId, { amount: session.amount_total });
-          return entryId;
-        });
-        if (posted) await autoReceipt(db, messenger, posted);
+        // Marked paid first, conditionally: of two deliveries of the same event (Stripe retries, and sends
+        // completed + async_payment_succeeded) — or the patient coming back first — only one posts it (billpay.js).
+        const posted = await postOnlinePayment(db, session);
+        if (session.metadata?.source === 'portal' || session.metadata?.source === 'billpay') await afterOnlinePayment(db, payments, messenger, session, posted);
+        else if (posted) await autoReceipt(db, messenger, posted);
+      }
+    } else if (event.type === 'checkout.session.async_payment_failed') {
+      // A bank (ACH) payment that bounced after the patient finished: nothing was posted; billing hears about it.
+      const session = event.data.object;
+      const pr = await db.get("SELECT * FROM payment_requests WHERE session_id = ? AND status = 'pending'", session.id);
+      if (pr) {
+        await db.run("UPDATE payment_requests SET status = 'cancelled' WHERE id = ?", pr.id);
+        const payer = await db.get('SELECT * FROM patients WHERE id = ?', pr.patient_id);
+        await paymentFailed(db, { practiceId: pr.practice_id, payer, amount: pr.amount, reason: 'The bank payment didn’t clear', source: session.metadata?.source });
       }
     } else if (event.type === 'payment_intent.succeeded' && event.data.object.metadata?.terminal_payment_id) {
       // A card-reader payment: post it even if nobody's screen is still checking.

@@ -1,47 +1,60 @@
 import { HttpError } from './auth.js';
-import { insert, localNow, addMonths } from './util.js';
+import { localNow } from './util.js';
 import { sendMessage, preferredChannel, withinSendHours } from './messaging.js';
 import { renderTemplate, templatesFor, patientLang, fixedText, subjectFor } from './templates.js';
 
-// The recall types a practice starts with. X-ray recalls start switched off; offices that track
-// them separately turn them on.
+// The recall types a practice starts with: [key, name, months, codes, active, rules]. Codes are prefixes that reset
+// the type when completed (the first is the one booked). rules: age_until + adult_key (a child type until that
+// age, then the adult one: applied on completion and by the nightly age check), retires (types this one
+// replaces — perio maintenance retires the prophy), bundle (x-rays, exam and fluoride ride along with the
+// hygiene visit: tracked and suggested when booking, but no reminders of their own). Intervals match the
+// opportunity finder and the usual plan limits (BWX yearly, FMX/pano every 5 years). The office-defined starters
+// (ortho check, implant maintenance, sleep appliance check) start switched off.
 export const DEFAULT_RECALL_TYPES = [
-  ['prophy', 'Prophy', 6, ['D1110', 'D1120', 'D4346'], 1],
-  ['perio_maint', 'Perio maintenance', 3, ['D4910'], 1],
-  ['bwx', 'Bitewings', 12, ['D0272', 'D0273', 'D0274'], 0],
-  ['fmx', 'Full-mouth x-rays', 36, ['D0210'], 0],
-  ['pano', 'Panoramic x-ray', 60, ['D0330'], 0],
+  ['prophy', 'Prophy', 6, ['D1110', 'D4346'], 1, { retires: ['child_prophy'] }],
+  ['child_prophy', 'Child prophy', 6, ['D1120'], 1, { age_until: 14, adult_key: 'prophy', retires: ['prophy'] }],
+  ['perio_maint', 'Perio maintenance', 3, ['D4910'], 1, { retires: ['prophy', 'child_prophy'] }],
+  ['exam', 'Periodic exam', 6, ['D0120', 'D0150', 'D0180'], 1, { bundle: 1 }],
+  ['bwx', 'Bitewings', 12, ['D0274', 'D0272', 'D0270', 'D0273', 'D0277'], 1, { bundle: 1 }],
+  ['fmx', 'Full-mouth x-rays or pano', 60, ['D0210', 'D0330'], 1, { bundle: 1 }],
+  ['fluoride', 'Fluoride', 6, ['D1206', 'D1208'], 1, { bundle: 1, age_until: 19 }],
+  ['ortho_check', 'Ortho check', 6, ['D8660', 'D8680'], 0, {}],
+  ['implant_maint', 'Implant maintenance', 6, ['D6080', 'D6081'], 0, {}],
+  ['sleep_check', 'Sleep appliance check', 12, ['D9947', 'D9948'], 0, {}],
 ];
 
 // Automated recall messages: days relative to the due date (negative = before it).
 export const DEFAULT_RECALL_STEPS = [{ days: -14 }, { days: 0 }, { days: 30 }, { days: 90 }];
 
-export async function recallTypes(db, practiceId) {
-  let rows = await db.all('SELECT * FROM recall_types WHERE practice_id = ? ORDER BY interval_months, name', practiceId);
-  if (!rows.length) {
-    for (const [key, name, months, codes, active] of DEFAULT_RECALL_TYPES) {
-      await db.run(
-        'INSERT INTO recall_types (practice_id, key, name, interval_months, codes, active) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (practice_id, key) DO NOTHING',
-        practiceId, key, name, months, JSON.stringify(codes), active,
-      );
-    }
-    rows = await db.all('SELECT * FROM recall_types WHERE practice_id = ? ORDER BY interval_months, name', practiceId);
+const parseList = (v) => {
+  try {
+    const list = JSON.parse(v || '[]');
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
   }
-  return rows.map((t) => ({ ...t, codes: JSON.parse(t.codes || '[]') }));
+};
+const seedRow = async (db, practiceId, [key, name, months, codes, active, rules = {}], activeOverride = null) => db.run(
+  'INSERT INTO recall_types (practice_id, key, name, interval_months, codes, active, age_until, adult_key, retires, bundle) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (practice_id, key) DO NOTHING',
+  practiceId, key, name, months, JSON.stringify(codes), activeOverride ?? active, rules.age_until ?? null, rules.adult_key ?? null, rules.retires ? JSON.stringify(rules.retires) : null, rules.bundle ? 1 : 0,
+);
+
+// A practice's recall types. A new practice gets the defaults; a practice set up before a default type existed
+// gets it added switched off (its own setup is never changed behind its back — an administrator turns it on).
+export async function recallTypes(db, practiceId) {
+  const sql = 'SELECT * FROM recall_types WHERE practice_id = ? ORDER BY interval_months, name';
+  let rows = await db.all(sql, practiceId);
+  const have = new Set(rows.map((r) => r.key));
+  const missing = DEFAULT_RECALL_TYPES.filter(([key]) => !have.has(key));
+  if (missing.length) {
+    for (const t of missing) await seedRow(db, practiceId, t, rows.length ? 0 : null);
+    rows = await db.all(sql, practiceId);
+  }
+  return rows.map((t) => ({ ...t, codes: parseList(t.codes), retires: parseList(t.retires), bundle: t.bundle ? 1 : 0 }));
 }
 
 // The active recall types a procedure code resets (e.g. D1110 → prophy, D0274 → bitewings).
 export const typesForCode = (types, code) => types.filter((t) => t.active && t.codes.some((c) => String(code).startsWith(c)));
-
-// Completing a recall procedure sets the next due date for each type it resets.
-export async function resetRecalls(db, procedure, today) {
-  for (const type of typesForCode(await recallTypes(db, procedure.practice_id), procedure.code)) {
-    const existing = await db.get('SELECT * FROM recalls WHERE practice_id = ? AND patient_id = ? AND type = ?', procedure.practice_id, procedure.patient_id, type.key);
-    const due = addMonths(today, existing?.interval_months ?? type.interval_months);
-    if (existing) await db.run("UPDATE recalls SET due_date = ?, status = 'due', appointment_id = NULL WHERE id = ?", due, existing.id);
-    else await insert(db, 'recalls', { practice_id: procedure.practice_id, patient_id: procedure.patient_id, type: type.key, interval_months: type.interval_months, due_date: due });
-  }
-}
 
 export function recallSteps(practice) {
   try {
@@ -74,6 +87,8 @@ export async function runRecallSequences(db, messenger, { appUrl, now = new Date
   for (const practice of await db.all('SELECT * FROM practices WHERE recall_auto = 1 AND recall_cadence = 0')) {
     const steps = recallSteps(practice);
     if (!steps.length) continue;
+    // X-rays, exam and fluoride ride along with the cleaning: they go in a message the cleaning sends, never alone.
+    const bundled = new Set((await recallTypes(db, practice.id)).filter((t) => t.bundle).map((t) => t.key));
     const nowLocal = localNow(practice.timezone, now);
     if (!withinSendHours(practice, nowLocal)) continue;
     const today = nowLocal.slice(0, 10);
@@ -98,7 +113,7 @@ export async function runRecallSequences(db, messenger, { appUrl, now = new Date
         const step = [...steps].reverse().find((st) => st.days <= daysBetween(r.due_date, today));
         if (step && !(await db.get('SELECT 1 AS x FROM recall_contacts WHERE recall_id = ? AND step >= ?', r.id, step.days))) pending.push({ r, step });
       }
-      if (!pending.length) continue;
+      if (!pending.length || pending.every((p) => bundled.has(p.r.type))) continue;
       // One message covers all of the patient's due recalls.
       const { r, step } = pending[0];
       const target = preferredChannel(r, step.channel === 'auto' ? undefined : step.channel);

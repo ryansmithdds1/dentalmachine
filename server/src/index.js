@@ -18,6 +18,9 @@ import { runMembershipBilling } from './memberships.js';
 import { runCampaigns } from './campaigns.js';
 import { deliverWebhooks, scanPayments } from './webhooks.js';
 import { createEligibility, runEligibilityBatches } from './eligibility.js';
+import { runVerificationAutomation } from './verification.js';
+import { runRecallAgeRules } from './recallsync.js';
+import { runMissedCallCheck } from './phonecoach.js';
 import { runScheduledReports } from './savedreports.js';
 import { runSurveys } from './surveys.js';
 import { runOrthoBilling } from './ortho.js';
@@ -219,6 +222,30 @@ if (app.locals.payments.enabled && process.env.AUTOPAY !== 'off') {
     setInterval(run, 60 * 60 * 1000).unref();
     setTimeout(run, 90_000).unref();
   }
+}
+// Insurance verification (IV2): eligibility a few days before every visit and again the morning of, every
+// 30 minutes; each policy, visit day and window once (verification_runs). Off with VERIFICATION_AUTOMATION=off.
+{
+  const eligibility = createEligibility({ db, config, clearinghouse: ch });
+  if (eligibility.automatic && process.env.VERIFICATION_AUTOMATION !== 'off') {
+    const run = () => runExclusive('verification', 25 * 60 * 1000, () => runVerificationAutomation(db, eligibility, { messenger, appUrl: config.appUrl }))
+      .then((r) => r?.length && log.info(`Insurance verification: ${r.map((x) => `${x.checked} checked, ${x.failed} failed`).join('; ')}`))
+      .catch(jobFailed('Insurance verification'));
+    setInterval(run, 30 * 60 * 1000).unref();
+    setTimeout(run, 95_000).unref();
+  }
+}
+// Recall age rule (child prophy -> adult prophy) nightly-ish; also applied when a chart is opened.
+if (process.env.RECALL_AGE !== 'off') {
+  const age = () => runExclusive('recall-age', 30 * 60 * 1000, () => runRecallAgeRules(db)).catch(jobFailed('Recall age rule'));
+  setInterval(age, 6 * 60 * 60 * 1000).unref();
+  setTimeout(age, 100_000).unref();
+}
+// Missed-call rate check (PH7): alerts when a day goes over the office's missed-call target.
+if (process.env.MISSED_CALL_CHECK !== 'off') {
+  const run = () => runExclusive('missed-calls', 10 * 60 * 1000, () => runMissedCallCheck(db, { messenger })).catch(jobFailed('Missed-call check'));
+  setInterval(run, 15 * 60 * 1000).unref();
+  setTimeout(run, 110_000).unref();
 }
 // Payment-plan late fees: an installment still unpaid after the plan's grace days gets its fee once.
 if (process.env.PLAN_LATE_FEES !== 'off') {

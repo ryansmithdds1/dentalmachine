@@ -70,6 +70,7 @@ export const PERMISSION_CATALOG = {
   'officedocs:read': 'See office documents (contracts, licences, policies, invoices)',
   'officedocs:write': 'Add and file office documents',
   'checklists:manage': 'Set up checklists by position, see the checklist dashboard and compliance log, resolve checklist flags',
+  'phones:coach': 'Phones: see everyone’s call scores and missed calls, coach and rate calls, edit phone protocols',
   'reviews:manage': 'Handle private patient feedback, review-request settings and team shout-outs',
   'chartaudit:manage': 'See everyone’s chart audit findings and tune the checks',
   'deposits:manage': 'Verify deposits and cash drawers, reopen deposits, approve cash voids, refunds and discounts',

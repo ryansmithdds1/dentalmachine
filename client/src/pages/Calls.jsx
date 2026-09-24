@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { PhoneIncoming, PhoneOutgoing, Bot, Voicemail, MessageSquare } from 'lucide-react';
 import { api, getToken } from '../api.js';
 import { useApi } from '../hooks.js';
@@ -7,6 +7,8 @@ import { useLiveEvents } from '../live.js';
 import { useAuth } from '../auth.jsx';
 import { fmtDateTime } from '../format.js';
 import { ErrorBox, Modal } from '../components/ui.jsx';
+import CallCoach from '../components/phones/CallCoach.jsx';
+import NoBookReason from '../components/phones/NoBookReason.jsx';
 
 // The office phone line: every call, who it was, what happened, and — for recorded calls, voicemails and
 // the AI receptionist — a transcript and a short summary.
@@ -21,8 +23,15 @@ export default function Calls() {
   const { can } = useAuth();
   const [filter, setFilter] = useState('');
   const [days, setDays] = useState(30);
-  const { data, reload, error } = useApi(filter === 'sources' ? null : `/calls?days=${days}${filter ? `&filter=${filter}` : ''}`);
-  const [open, setOpen] = useState(null);
+  const [q, setQ] = useState('');
+  const [params, setParams] = useSearchParams();
+  const since = new Date(Date.now() - (days - 1) * 86400_000).toISOString().slice(0, 10);
+  // Searching (a topic, a word said on the call) looks through summaries and transcripts too.
+  const search = q.trim().length >= 2;
+  const { data, reload, error } = useApi(['sources', 'no_book'].includes(filter) ? null : search ? `/phones/calls?q=${encodeURIComponent(q.trim())}&from=${since}` : `/calls?days=${days}${filter ? `&filter=${filter}` : ''}`);
+  // A link to one call (from a phone alert in chat, or the chart): /calls?open=123.
+  const [open, setOpenState] = useState(() => Number(params.get('open')) || null);
+  const setOpen = (id) => { setOpenState(id); if (!id && params.get('open')) { params.delete('open'); setParams(params, { replace: true }); } };
   useLiveEvents((e) => e.type === 'call' && reload());
   const s = data?.stats;
   return (
@@ -45,12 +54,15 @@ export default function Calls() {
       )}
       <div className="inline" style={{ margin: '12px 0', gap: 8 }}>
         <div className="tabs" style={{ margin: 0 }}>
-          {[['', 'All'], ['missed', 'Missed'], ['follow_up', 'Needs follow-up'], ['sources', 'Sources']].map(([k, l]) => <button key={k} className={filter === k ? 'active' : ''} onClick={() => setFilter(k)}>{l}</button>)}
+          {[['', 'All'], ['missed', 'Missed'], ['follow_up', 'Needs follow-up'], ['no_book', 'Didn’t book'], ['sources', 'Sources']].map(([k, l]) => <button key={k} className={filter === k ? 'active' : ''} onClick={() => setFilter(k)}>{l}</button>)}
         </div>
+        <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search calls (a word said, a topic)" aria-label="Search calls" style={{ maxWidth: 260 }} />
+        {can('patients:read') && <Link to="/phones" className="small">Coaching and missed calls →</Link>}
         <select value={days} onChange={(e) => setDays(Number(e.target.value))} aria-label="Period"><option value={7}>7 days</option><option value={30}>30 days</option><option value={90}>90 days</option></select>
       </div>
       {filter === 'sources' && <Sources days={days} />}
-      {filter !== 'sources' && <div className="card" style={{ padding: 0 }}>
+      {filter === 'no_book' && <NoBookQueue canWrite={can('patients:write')} onOpen={setOpen} />}
+      {!['sources', 'no_book'].includes(filter) && <div className="card" style={{ padding: 0 }}>
         <div className="table-wrap">
           <table>
             <thead><tr><th>When</th><th /><th>Who</th><th>What happened</th><th>Summary</th><th className="num">Length</th><th /></tr></thead>
@@ -106,6 +118,7 @@ function CallDetail({ id, canWrite, onClose }) {
       {c.transcript && (
         <div style={{ marginTop: 10, maxHeight: 360, overflow: 'auto', fontSize: 13, whiteSpace: 'pre-wrap', background: 'var(--surface-2, transparent)', padding: 10, borderRadius: 6 }}>{c.transcript}</div>
       )}
+      <CallCoach callId={id} canWrite={canWrite} />
     </Modal>
   );
 }
@@ -131,6 +144,26 @@ function Sources({ days }) {
         </table>
         {data.sources.length === 0 && <div className="empty">No calls yet. Add tracking numbers in Settings → Phone line.</div>}
       </div>
+    </div>
+  );
+}
+
+// Calls that ended without a booking and still need their reason (PH4): the AI's suggestion is one click away.
+function NoBookQueue({ canWrite, onOpen }) {
+  const { data, reload } = useApi('/phones/no-book/pending');
+  if (!data) return <div className="empty">Loading…</div>;
+  return (
+    <div className="card">
+      <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>Calls that ended without a booking. Pick why (the AI’s guess is dashed) — Phones → Why they didn’t book counts them over time.</p>
+      {data.map((n) => (
+        <div key={n.id} style={{ padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+          <button type="button" className="link" onClick={() => onOpen(n.call_id)}>{n.first_name ? `${n.first_name} ${n.last_name}` : (n.caller_name || n.from_number)}</button>
+          <span className="muted" style={{ fontSize: 12 }}> · {fmtDateTime(n.call_at)}{n.summary ? ` · ${n.summary}` : ''}</span>
+          {n.suggested_quote && <div className="muted" style={{ fontSize: 12, fontStyle: 'italic' }}>“{n.suggested_quote}”</div>}
+          {canWrite && <NoBookReason callId={n.call_id} suggested={n.suggested_reason} quote={n.suggested_quote} onSaved={() => setTimeout(reload, 600)} />}
+        </div>
+      ))}
+      {!data.length && <div className="empty">Nothing waiting — every call without a booking has its reason.</div>}
     </div>
   );
 }

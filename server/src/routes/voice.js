@@ -117,6 +117,10 @@ export function voiceWebhooks({ db, config }) {
     if (!signed(req)) return reject(res);
     const sid = String(req.body.CallSid || '');
     if (sid) {
+      // A caller who hangs up while the office phone is still ringing abandoned the call (the dial never finished).
+      if (req.body.CallStatus === 'completed') {
+        await db.run("UPDATE calls SET desk_result = 'abandoned', outcome = COALESCE(outcome, 'hung_up') WHERE provider_id = ? AND direction = 'inbound' AND purpose = 'inbound' AND status = 'ringing' AND desk_result IS NULL AND outcome IS NULL", sid);
+      }
       await db.run("UPDATE calls SET status = ?, duration = COALESCE(?, duration), answered_by = COALESCE(answered_by, ?), ended_at = CASE WHEN ? IN ('completed','busy','failed','no-answer','canceled') THEN datetime('now') ELSE ended_at END WHERE provider_id = ?",
         String(req.body.CallStatus || 'unknown'), req.body.CallDuration ? Number(req.body.CallDuration) : null, req.body.AnsweredBy || null, String(req.body.CallStatus || ''), sid);
       // An inbound call that ended: a missed one shows as missed, and an AI receptionist call the caller hung up on still gets its summary.

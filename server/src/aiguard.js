@@ -31,13 +31,14 @@ export const HIGH_RISK = [
   ['POST', /^\/fin-agreements\/\d+\/(prepay|reverse-discount|cancel)$/, 'prepayments, discounts and payment agreements'],
   ['PUT', /^\/fin-options\/settings$/, 'discount and financing rules'],
   ['POST', /^\/referral-tracker\/matches\/\d+\/confirm$/, 'confirming a specialist report for a referral'],
+  ['POST', /^\/daily-deposits(\/\d+\/(verify|reopen|bank-note))?$/, 'deposits'],
+  ['POST', /^\/cash\/(sessions\/\d+\/(count|verify)|drawers(\/\d+\/open)?)$/, 'cash drawers'],
+  ['POST', /^\/patients\/\d+\/insurance-card\/confirm$/, 'insurance'],
   // Insurance autopilot: posting remittances, a person's decisions on them, and the owner's auto-post/billing switches.
   ['POST', /^\/(era\/import|clearinghouse\/responses)$/, 'posting insurance payments'],
   ['POST', /^\/eob-autopilot\/(post-ready|paper\/\d+\/post|lines\/\d+\/\w+|claims\/\d+\/send-secondary)$/, 'posting insurance payments and claims'],
   ['PUT', /^\/eob-autopilot\/settings$/, 'insurance auto-posting and patient billing rules'],
-  ['POST', /^\/daily-deposits(\/\d+\/(verify|reopen|bank-note))?$/, 'deposits'],
-  ['POST', /^\/cash\/(sessions\/\d+\/(count|verify)|drawers(\/\d+\/open)?)$/, 'cash drawers'],
-  ['POST', /^\/patients\/\d+\/insurance-card\/confirm$/, 'insurance'],
+  ['POST', /^\/verification\/(policies\/\d+\/phone|reads\/\d+\/confirm|reviews\/\d+\/apply)$/, 'insurance benefits for everyone on a plan'],
   ['DELETE', /./, 'removing records'],
 ];
 

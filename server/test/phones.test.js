@@ -62,7 +62,8 @@ test('an answered call: screen pop, recorded both sides, transcribed and summari
   assert.ok(done, 'summarized');
   assert.deepEqual([done.outcome, done.duration, done.reason, done.follow_up], ['answered', 95, 'reschedule', 1]);
   assert.match(done.transcript, /^Caller: Hi, I need to move my cleaning/);
-  assert.match(seen.at(-1).messages[0].content, /Jane Doe \(patient\)/);
+  // (The summary request; the call's coaching review, PH3, may follow it.)
+  assert.ok(seen.some((r) => /Jane Doe \(patient\)/.test(r.messages[0].content)), 'the summary request names the patient');
   const tasks = (await api.get('/tasks')).data;
   assert.ok((tasks.tasks || tasks).some((t) => /Call from Jane Doe: Move Jane’s cleaning/.test(t.title)));
   const audio = await fetch(`${h.origin}/api/calls/${call.id}/recording`, { headers: { Authorization: `Bearer ${token}` } });

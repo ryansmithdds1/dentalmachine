@@ -47,7 +47,7 @@ const date = (d) => (d ? new Date(`${d.slice(0, 10)}T12:00:00Z`).toLocaleDateStr
 
 // A one-to-two page letter-size statement. The top-left of page 1 is left clear for the
 // mailing address window (the mail service prints the address there).
-export function statementHtml({ practice, account, entries, previousBalance, balance, pendingInsurance = 0, pendingWriteOff = 0, portalUrl, statementDate, aging = null, plans = [] }) {
+export function statementHtml({ practice, account, entries, previousBalance, balance, pendingInsurance = 0, pendingWriteOff = 0, portalUrl, statementDate, aging = null, plans = [], payCode = null, billpayPage = null }) {
   const due = Math.max(0, balance - pendingInsurance - pendingWriteOff);
   const rows = entries.map((e) => `<tr><td>${esc(date(e.entry_date))}</td><td>${esc(e.patient_first_name || '')}</td><td>${esc(e.description || e.type)}</td><td class="n">${e.amount > 0 ? money(e.amount) : ''}</td><td class="n">${e.amount < 0 ? money(-e.amount) : ''}</td></tr>`).join('');
   return `<!doctype html><html><head><meta charset="utf-8"><style>
@@ -79,11 +79,12 @@ export function statementHtml({ practice, account, entries, previousBalance, bal
       <tr class="sum"><td colspan="3">Account balance</td><td class="n" colspan="2">${money(balance)}</td></tr></tbody></table>
     ${aging && balance > 0 ? `<table class="aging"><thead><tr><th>Current</th><th>31–60 days</th><th>61–90 days</th><th>Over 90 days</th></tr></thead><tbody><tr><td>${money(aging.current)}</td><td>${money(aging.d31_60)}</td><td>${money(aging.d61_90)}</td><td>${money(aging.d90_plus)}</td></tr></tbody></table>` : ''}
     ${plans.map((p) => `<div class="pay">Payment plan: ${money(p.remaining)} left${p.next_due_date ? ` · next payment ${money(p.next_due_amount)} due ${esc(date(p.next_due_date))}` : ''}${p.past_due > 0 ? ` · <b>${money(p.past_due)} past due</b>` : ''}</div>`).join('')}
+    ${payCode && billpayPage ? `<div class="pay"><b>Pay online in under a minute:</b> go to ${esc(billpayPage)} and enter your statement code <b style="font-family: monospace; font-size: 12pt">${esc(payCode)}</b></div>` : ''}
     <div class="pay"><b>Ways to pay:</b> ${portalUrl ? `online at ${esc(portalUrl)} · ` : ''}by phone at ${esc(practice.phone || 'the office')} · or at your next visit.
       Questions about your bill? Call us — we're happy to help or set up a payment plan.</div>
     <div class="stub">
       <div><b>Please detach and return this part with your payment</b><br>Make checks payable to ${esc(practice.name)}<br>${esc(practice.address)}<br>${esc(practice.city)}, ${esc(practice.state)} ${esc(practice.zip)}</div>
-      <div>Account #${account.id} · ${esc(account.first_name)} ${esc(account.last_name)}<div class="box">Amount due: <b>${money(due)}</b></div><div class="box">Amount enclosed: $</div></div>
+      <div>Account #${account.id} · ${esc(account.first_name)} ${esc(account.last_name)}${payCode ? `<br>Statement code ${esc(payCode)}` : ''}<div class="box">Amount due: <b>${money(due)}</b></div><div class="box">Amount enclosed: $</div></div>
     </div>
   </div></body></html>`;
 }

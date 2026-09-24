@@ -1,0 +1,32 @@
+/* Phones: the call screen's "Next openings", reason chips, and the coaching page. */
+.next-openings { margin-top: 8px; border-top: 1px solid var(--border); padding-top: 8px; font-size: 13px; }
+.next-openings-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.next-openings-head strong { display: inline-flex; align-items: center; gap: 4px; }
+.next-openings-head .muted { font-size: 11px; text-align: right; }
+.next-openings-heard { font-size: 12px; margin-top: 4px; color: var(--muted); display: flex; align-items: center; gap: 4px; }
+.next-openings-heard.is-heard { color: var(--text); }
+.next-openings-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.chip { font-size: 11px; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface, transparent); color: var(--text); cursor: pointer; }
+.chip.on { background: var(--primary); border-color: var(--primary); color: #fff; }
+.chip:focus-visible, .slot:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+.next-openings-list { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.slot { display: flex; justify-content: space-between; align-items: center; gap: 6px; text-align: left; padding: 5px 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface, transparent); cursor: pointer; font-size: 13px; }
+.slot:hover:not(:disabled) { border-color: var(--primary); }
+.slot.first { border-color: var(--primary); }
+.slot:disabled { cursor: not-allowed; opacity: 0.7; }
+.small-note { font-size: 12px; margin-top: 4px; }
+.reason-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; align-items: center; font-size: 12px; }
+.reason-chips .chip.suggested { border-style: dashed; border-color: var(--primary); }
+.ai-label { font-size: 11px; padding: 1px 6px; border-radius: 4px; background: var(--subtle); color: var(--muted); border: 1px solid var(--border); }
+.coach-steps { list-style: none; padding: 0; margin: 8px 0; }
+.coach-steps li { padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+.coach-steps .met { color: var(--ok, #15803d); }
+.coach-steps .unmet { color: var(--danger, #dc2626); }
+.coach-steps blockquote { margin: 4px 0 0 18px; font-style: italic; color: var(--muted); }
+.heatmap { border-collapse: collapse; font-size: 11px; }
+.heatmap td, .heatmap th { width: 26px; height: 22px; text-align: center; padding: 0; border: 1px solid var(--border); }
+.heatmap th { font-weight: 500; color: var(--muted); }
+.bar { height: 8px; background: var(--primary); border-radius: 4px; min-width: 2px; }
+.phones-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 12px; }
+.protocol-step { display: grid; grid-template-columns: 1fr 70px 90px 28px; gap: 6px; align-items: center; margin-bottom: 4px; }
+@media (max-width: 640px) { .protocol-step { grid-template-columns: 1fr 60px; } }
