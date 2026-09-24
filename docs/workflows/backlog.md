@@ -159,7 +159,9 @@ F6. **Compare options by voice, shown on the patient's screen (asked for):** the
     picture), number of visits and total time, cost to the patient after insurance, monthly with financing, what
     comes later (e.g. extraction → implant or bridge later, with that future cost shown as "likely next step"),
     typical longevity and plain pros/cons the office can edit per procedure; the patient taps the option they choose,
-    which flows into accept/sign (F4). Works with 2–3 options.
+    which flows into accept/sign (F4). Works with 2–3 options. Owner's choices: after an extraction show both the
+    implant and the bridge path with their costs; starter longevity/pros-cons text is written for the office and fully
+    editable; the patient screen is a second monitor on the same computer (a second window placed full-screen on it).
 ## Online scheduling that beats the others (asked for, high priority)
 Builds on the booking widget (public booking requests), public availability, provider patterns/blocks, the recall
 self-booking link (RC2) and intake forms. Parity target: Open Dental Web Sched (new patient, recall, ASAP, existing
