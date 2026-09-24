@@ -37,6 +37,7 @@ export default function Assistant() {
   const [pending, setPending] = useState(null);
   const [busy, setBusy] = useState(false);
   const [text, setText] = useState('');
+  const noLocal = useRef(false);
   const [listening, setListening] = useState(false);
   const [interim, setInterim] = useState('');
   const [toasts, setToasts] = useState([]);
@@ -217,6 +218,10 @@ export default function Assistant() {
   const submitRef = useRef(submit);
   submitRef.current = submit;
 
+  // Every way listening ends goes through finish(), once: the browser's onend, an error, the stop button, Esc,
+  // or the safety timers. Some browsers never send onend after stop() (on-device recognition, a mic error),
+  // which used to leave "Listening…" on screen with no way out.
+  const finishRef = useRef(null);
   const startListening = useCallback(() => {
     if (!SR) { setOpen(true); setTimeout(() => inputRef.current?.focus(), 50); return; }
     if (rec.current) return;
@@ -225,10 +230,37 @@ export default function Assistant() {
     r.lang = navigator.language || 'en-US';
     r.interimResults = true;
     r.continuous = false;
-    if ('processLocally' in r) r.processLocally = true; // on-device recognition where the browser offers it
+    // On-device recognition where the browser offers it (keeps speech on the computer); skipped once it has failed.
+    if ('processLocally' in r && !noLocal.current) r.processLocally = true;
     let final = '';
+    let done = false;
+    let hardStop = null;
+    const cap = setTimeout(() => stop(), 60_000); // never listen forever
+    const finish = ({ send = true } = {}) => {
+      if (done) return;
+      done = true;
+      clearTimeout(cap);
+      clearTimeout(hardStop);
+      if (rec.current === r) rec.current = null;
+      finishRef.current = null;
+      setListening(false);
+      setInterim('');
+      if (send && final.trim()) submitRef.current(final);
+      else chime('stop');
+    };
+    const stop = () => {
+      if (done) return;
+      try { r.stop(); } catch { /* already stopped */ }
+      // The browser should answer with onend; if it doesn't within a second, cancel it ourselves.
+      hardStop = setTimeout(() => {
+        try { r.abort(); } catch { /* already gone */ }
+        finish();
+      }, 1000);
+    };
+    finishRef.current = { stop, cancel: () => { try { r.abort(); } catch { /* gone */ } finish({ send: false }); } };
     r.onresult = (e) => {
       let now = '';
+      final = '';
       for (const res of e.results) {
         if (res.isFinal) final += res[0].transcript;
         else now += res[0].transcript;
@@ -236,21 +268,19 @@ export default function Assistant() {
       setInterim(final + now);
     };
     r.onerror = (e) => {
-      if (e.error === 'not-allowed') toast({ kind: 'error', text: 'Microphone access was blocked — allow it in the address bar.' });
+      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') toast({ kind: 'error', text: 'Microphone access was blocked — allow it in the address bar.' });
+      else if (e.error === 'language-not-supported' && r.processLocally) { noLocal.current = true; toast({ kind: 'error', text: 'On-device speech isn’t available here — tap the mic again to use the browser’s speech service.' }); }
+      else if (e.error === 'audio-capture') toast({ kind: 'error', text: 'No microphone was found — check that one is plugged in and selected.' });
+      else if (e.error === 'network') toast({ kind: 'error', text: 'Speech recognition needs the internet — type your request instead.' });
+      if (e.error !== 'no-speech' && e.error !== 'aborted') finish({ send: false });
     };
-    r.onend = () => {
-      rec.current = null;
-      setListening(false);
-      setInterim('');
-      if (final.trim()) submitRef.current(final);
-      else chime('stop');
-    };
+    r.onend = () => finish();
     rec.current = r;
     setListening(true);
     chime('listen');
-    try { r.start(); } catch { rec.current = null; setListening(false); }
+    try { r.start(); } catch { finish({ send: false }); }
   }, [toast]);
-  const stopListening = () => rec.current?.stop();
+  const stopListening = () => finishRef.current?.stop();
 
   // Hold the talk key to speak, let go to send. With a change waiting, a quick tap says yes.
   useEffect(() => {
@@ -298,6 +328,14 @@ export default function Assistant() {
     return () => { window.removeEventListener('keydown', down, true); window.removeEventListener('keyup', up, true); };
   }, [status, talkKey, learning, open, startListening]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Esc while listening cancels (nothing is sent).
+  useEffect(() => {
+    if (!listening) return undefined;
+    const esc = (e) => { if (e.key === 'Escape') { e.preventDefault(); finishRef.current?.cancel(); } };
+    window.addEventListener('keydown', esc, true);
+    return () => window.removeEventListener('keydown', esc, true);
+  }, [listening]);
+
   const reset = () => {
     history.current = [];
     carry.current = [];
@@ -323,8 +361,8 @@ export default function Assistant() {
           </div>
         ))}
       </div>
-      <button type="button" className={`assist-fab${listening ? ' live' : ''}${busy ? ' busy' : ''}`} onClick={() => setOpen(!open)}
-        title={status.enabled ? `Assistant — hold ${keyLabel} and speak` : 'Assistant (not set up)'} aria-label="Assistant">
+      <button type="button" className={`assist-fab${listening ? ' live' : ''}${busy ? ' busy' : ''}`} onClick={() => (listening ? stopListening() : setOpen(!open))}
+        title={listening ? 'Stop listening (Esc cancels)' : status.enabled ? `Assistant — hold ${keyLabel} and speak` : 'Assistant (not set up)'} aria-label={listening ? 'Stop listening' : 'Assistant'}>
         {listening ? <Mic size={22} /> : <Sparkles size={22} />}
       </button>
       {open && (
