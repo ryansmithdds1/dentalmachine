@@ -201,3 +201,53 @@ test('a new patient from first visit to paid claim and statement', async () => {
 
   assert.deepEqual(errors, [], 'no errors in the page');
 });
+
+/* global document, window */
+// Chairside on an iPad and a phone: the chart stacks, a tapped tooth brings its panel up, dictation types
+// into the note, and nothing scrolls sideways.
+test('chairside on a tablet and a phone', async () => {
+  for (const [label, viewport] of [['ipad', { width: 820, height: 1180 }], ['phone', { width: 390, height: 844 }]]) {
+    const ctx = await browser.newContext({ viewport, isMobile: true, hasTouch: true });
+    const tab = await ctx.newPage();
+    tab.setDefaultTimeout(15_000);
+    tab.on('pageerror', (e) => errors.push(`${label} pageerror: ${e.message}`));
+    try {
+      await tab.goto(base);
+      await tab.fill('input[autocomplete=username]', 'admin@demo.dentalmachine.app');
+      await tab.fill('input[type=password]', 'demo-password-123');
+      await tab.click('button.primary');
+      await tab.waitForSelector('.app-shell, .sidebar, .topbar', { state: 'attached' });
+      const patients = await tab.evaluate(async () => (await fetch('/api/patients?limit=1', { headers: { Authorization: `Bearer ${sessionStorage.getItem('dm_token')}` } })).json());
+      const pid = (patients.rows || patients)[0].id;
+      const sideways = () => tab.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+
+      await tab.goto(`${base}/patients/${pid}?tab=chart`);
+      await tab.waitForSelector('.odontogram');
+      while (await tab.locator('.modal-backdrop').count()) { await tab.keyboard.press('Escape'); await tab.waitForTimeout(150); }
+      assert.equal(await sideways(), 0, `${label}: chart scrolls sideways`);
+      const teeth = await tab.locator('.chart-layout > .card').first().boundingBox();
+      const panel = await tab.locator('.chart-layout > div').nth(1).boundingBox();
+      assert.ok(panel.y > teeth.y + teeth.height - 1, `${label}: the entry panel sits under the teeth`);
+      await tab.locator('.odontogram .tooth', { hasText: '30' }).first().tap();
+      await tab.getByText('Tooth #30').first().waitFor();
+      await tab.waitForTimeout(600);
+      const heading = await tab.getByText('Tooth #30').first().boundingBox();
+      assert.ok(heading.y >= 0 && heading.y < viewport.height, `${label}: the tapped tooth's panel is on screen`);
+
+      await tab.click('button:has-text("Dictate today")');
+      await tab.waitForSelector('.note-composer');
+      await tab.fill('.dictate-type input', 'patient tolerated well');
+      await tab.press('.dictate-type input', 'Enter');
+      await tab.waitForFunction(() => /tolerated/i.test(document.querySelector('.note-composer textarea')?.value || ''));
+      assert.equal(await sideways(), 0, `${label}: dictation scrolls sideways`);
+      await tab.keyboard.press('Escape');
+
+      await tab.goto(`${base}/schedule`);
+      await tab.waitForTimeout(800);
+      assert.equal(await sideways(), 0, `${label}: schedule scrolls sideways`);
+    } finally {
+      await ctx.close();
+    }
+  }
+  assert.deepEqual(errors, []);
+});

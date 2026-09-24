@@ -230,7 +230,15 @@ export default function PerioTab({ patient }) {
     window.addEventListener('dm:perio-voice', begin);
     return () => window.removeEventListener('dm:perio-voice', begin);
   }, [exams]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { if (voice) focus(path[voice.cursor]); }, [voice]); // eslint-disable-line react-hooks/exhaustive-deps
+  // With voice on, the next site is highlighted and kept in view. On a touch screen it isn't focused, so the
+  // on-screen keyboard doesn't cover the chart.
+  const touch = typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches;
+  useEffect(() => {
+    if (!voice) return;
+    const el = refs.current[`${row}:${path[voice.cursor]}`];
+    if (touch) el?.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+    else focus(path[voice.cursor]);
+  }, [voice]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const { submit, busy, error } = useSubmit(async () => {
     const clean = {};
@@ -284,7 +292,7 @@ export default function PerioTab({ patient }) {
     if (!editable) return <span key={i} className="perio-site" style={style} title={title}>{d === '' ? '·' : d}</span>;
     return (
       <input
-        key={i} ref={(el) => { refs.current[`${key}:${t}:${i}`] = el; }} className="perio-site" value={d} readOnly={!!marker} inputMode="numeric" title={title}
+        key={i} ref={(el) => { refs.current[`${key}:${t}:${i}`] = el; }} className={`perio-site${voice && key === row && path[voice.cursor] === `${t}:${i}` ? ' voice-next' : ''}`} value={d} readOnly={!!marker} inputMode="numeric" title={title}
         onKeyDown={onKey(t, i, key)}
         onChange={(e) => {
           const raw = e.target.value.trim();

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { api } from '../../api.js';
 import { useApi, useLookup } from '../../hooks.js';
 import { useAuth } from '../../auth.jsx';
@@ -20,6 +20,7 @@ const defaultDentition = (dob) => {
 
 export default function ChartTab({ patient, onChange }) {
   const { can, practice } = useAuth();
+  const panelRef = useRef(null);
   const [asOf, setAsOf] = useState('');
   const { data, reload } = useApi(`/patients/${patient.id}/chart${asOf ? `?as_of=${asOf}` : ''}`);
   const { data: plans, reload: reloadPlans } = useApi(`/patients/${patient.id}/treatment-plans`);
@@ -41,6 +42,11 @@ export default function ChartTab({ patient, onChange }) {
   };
 
   if (!data) return <div className="empty">Loading chart…</div>;
+  // On a tablet or phone the entry panel sits under the teeth: bring it up after a tap.
+  const pickTooth = (t) => {
+    setTooth(t);
+    if (t && window.matchMedia?.('(max-width: 1100px)').matches) setTimeout(() => panelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+  };
   const openPlans = (plans || []).filter((p) => ['proposed', 'accepted'].includes(p.status));
   const conditions = data.conditions.filter((c) => !tooth || c.tooth === tooth);
   const procs = data.procedures.filter((p) => !tooth || p.tooth === tooth);
@@ -51,7 +57,7 @@ export default function ChartTab({ patient, onChange }) {
   });
 
   return (
-    <div className="grid" style={{ gridTemplateColumns: 'minmax(0, 2fr) minmax(300px, 1fr)' }}>
+    <div className="chart-layout">
       <div className="card" style={{ overflowX: 'auto' }}>
         <div className="chart-toolbar no-print">
           <div className="tabs">
@@ -73,9 +79,10 @@ export default function ChartTab({ patient, onChange }) {
           <button className="small" onClick={() => window.print()} style={write ? undefined : { marginLeft: 'auto' }}>Print</button>
         </div>
         {asOf && <div className="public-notice" style={{ marginBottom: 8 }}>Showing the chart as it was on {fmtDate(asOf)}: conditions recorded and work completed by then. Planned treatment isn’t shown.</div>}
-        <Odontogram conditions={data.conditions} procedures={data.procedures} selected={tooth} onSelect={setTooth} dentition={dentition} />
+        <Odontogram conditions={data.conditions} procedures={data.procedures} selected={tooth} onSelect={pickTooth} dentition={dentition} />
       </div>
 
+      <div ref={panelRef} style={{ minWidth: 0 }}>
       {write ? (
         <EntryPanel patient={patient} tooth={tooth} plans={openPlans} onDone={(res) => {
           refresh();
@@ -84,6 +91,7 @@ export default function ChartTab({ patient, onChange }) {
       ) : (
         <div className="card"><h2>{tooth ? `Tooth #${tooth}` : 'Chart'}</h2><p className="muted">{asOf ? 'Past charts are read-only.' : 'View only.'}</p></div>
       )}
+      </div>
 
       <div className="card" style={{ gridColumn: '1 / -1' }}>
         <div className="inline" style={{ justifyContent: 'space-between' }}>

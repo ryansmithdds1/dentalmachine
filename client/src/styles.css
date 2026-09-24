@@ -1341,3 +1341,16 @@ button.assist-fab.busy { animation: assist-busy 1.4s ease-in-out infinite; }
 .viewer-ai-row { display: flex; align-items: center; gap: 8px; }
 .viewer-ai-row i { width: 10px; height: 10px; border-radius: 2px; flex: none; }
 .viewer-ai-row.rejected span:first-of-type { text-decoration: line-through; opacity: 0.6; }
+
+/* Chart: teeth beside the entry panel on a wide screen; stacked on a tablet or phone. */
+.chart-layout { display: grid; gap: 16px; grid-template-columns: minmax(0, 2fr) minmax(300px, 1fr); }
+.chart-layout > * { min-width: 0; }
+@media (max-width: 1100px) { .chart-layout { grid-template-columns: minmax(0, 1fr); } }
+/* Fingers need bigger targets than a mouse. */
+@media (pointer: coarse) {
+  .tooth { padding: 6px 1px; }
+  .perio-site { min-height: 30px; font-size: 16px; }
+  button.small, .btn.small { min-height: 36px; }
+  .dictate-btn { min-height: 44px; }
+}
+.perio-site.voice-next { outline: 3px solid var(--primary); outline-offset: 1px; background: var(--primary-soft); }
