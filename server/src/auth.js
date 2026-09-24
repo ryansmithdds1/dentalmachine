@@ -67,6 +67,8 @@ export const PERMISSION_CATALOG = {
   'reports:read': 'See all practice reports', 'reports:own': 'See their own production',
   'timeclock:manage': 'See and fix everyone’s timesheets, export payroll',
   'timeclock:rates': 'See and set staff pay rates and labor cost',
+  'business:view': 'See the business view: margins, profit per hour, labor vs production (owner)',
+  'business:manage': 'Set procedure costs, provider pay plans and business view thresholds',
   'officedocs:read': 'See office documents (contracts, licences, policies, invoices)',
   'officedocs:write': 'Add and file office documents',
   'checklists:manage': 'Set up checklists by position, see the checklist dashboard and compliance log, resolve checklist flags',

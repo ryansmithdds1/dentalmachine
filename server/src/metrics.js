@@ -9,8 +9,9 @@
 // both should call one function — see the note in docs/metrics.md.
 import { agingReport } from './aging.js';
 import { allocationsForRange } from './allocation.js';
-import { utcRange } from './util.js';
+import { utcRange, addMonths, practiceNow } from './util.js';
 import { hoursFor, providerHoursOn } from './hours.js';
+import { loadDiagnoses, summarize, diagnosisPatients, EXAM_TYPES, EXAM_CODES, ROUTINE_EXAMS, classifyExam, examRules } from './diagnosis.js';
 
 export const addDays = (d, n) => new Date(Date.parse(`${d}T12:00:00Z`) + n * 86400_000).toISOString().slice(0, 10);
 export const pct = (a, b) => (b ? Math.round((a / b) * 1000) / 10 : null);
@@ -36,6 +37,8 @@ export const METRICS = {
   collection_rate: { label: 'Collection rate', unit: 'percent', better: 'higher', kind: 'period', goal: 'rate', scopes: ['provider', 'location'], drill: true },
   new_patients: { label: 'New patients', unit: 'count', better: 'higher', kind: 'period', goal: 'month', scopes: ['location'], drill: true },
   case_acceptance: { label: 'Case acceptance', unit: 'percent', better: 'higher', kind: 'period', goal: 'rate', scopes: ['provider', 'location'], drill: true },
+  // Treatment diagnosed at exams (diagnosis.js; the funnel after it is on the Diagnosis & conversion tab).
+  diagnosed: { label: 'Treatment diagnosed', unit: 'money', better: 'higher', kind: 'period', goal: 'month', scopes: ['provider', 'location'], drill: true },
   hygiene_reappointment: { label: 'Hygiene reappointment', unit: 'percent', better: 'higher', kind: 'period', goal: 'rate', scopes: ['provider', 'location'], drill: true },
   broken_appointments: { label: 'Broken appointments', unit: 'count', better: 'lower', kind: 'period', goal: 'month', scopes: ['provider', 'location'], drill: true },
   broken_rate: { label: 'No-show & cancel rate', unit: 'percent', better: 'lower', kind: 'period', goal: 'rate', scopes: ['provider', 'location'], drill: true },
@@ -337,6 +340,10 @@ export async function computeMetrics(db, pid, o) {
     const c = await caseAcceptance(db, pid, opts);
     set('case_acceptance', pct(Number(c.accepted), Number(c.presented)), { presented: Number(c.presented), accepted: Number(c.accepted), plans: Number(c.plans), accepted_plans: Number(c.accepted_plans) });
   }
+  if (want('diagnosed')) {
+    const d = summarize(await loadDiagnoses(db, pid, opts), { providerId: opts.providerId || null }).totals;
+    set('diagnosed', d.diagnosed, { expected: d.expected, exams: d.exams, per_exam: d.per_exam, scheduled: d.scheduled, completed: d.completed });
+  }
   if (want('hygiene_reappointment')) {
     const h = await hygieneReappointment(db, pid, opts);
     set('hygiene_reappointment', pct(Number(h.reappointed), Number(h.visits)), { visits: Number(h.visits), reappointed: Number(h.reappointed) });
@@ -589,6 +596,11 @@ export async function metricRows(db, pid, key, o, { limit = 500 } = {}) {
       );
       return cap(rows, ['created_at', 'patient', 'name', 'status', 'presented', 'accepted']);
     }
+    case 'diagnosed': {
+      const { rows } = await diagnosisPatients(db, pid, opts, { stage: 'all' });
+      return cap(rows.map((r) => ({ ...person(r), date: r.exam_date, exam_type: r.exam_type.replace('_', ' '), provider_name: r.provider_name, amount: r.diagnosed, completed: r.completed, open: r.open, stage: r.stage })),
+        ['date', 'patient', 'exam_type', 'provider_name', 'amount', 'completed', 'open', 'stage'], { note: 'One row per exam: the treatment diagnosed at it (office fees), what has been completed since, and what is still open.' });
+    }
     case 'hygiene_reappointment': {
       const s = scope(opts, { provider: 'a.provider_id = ?', location: 'a.location_id' });
       const rows = await db.all(
@@ -661,3 +673,157 @@ export async function metricRows(db, pid, key, o, { limit = 500 } = {}) {
   }
 }
 
+
+// ---- Diagnosed so far (DX1): today, this week and this month, against the monthly goal ----
+// o: { today, providerId?, locationId? }. The week starts on Monday; goals are the `diagnosed` goal (per month,
+// prorated by open office days like every monthly goal). A provider or office never borrows the practice's goal.
+export async function diagnosisRunning(db, pid, o) {
+  const monday = addDays(o.today, -((new Date(`${o.today}T12:00:00Z`).getUTCDay() + 6) % 7));
+  const monthStart = `${o.today.slice(0, 7)}-01`;
+  const periods = [['today', 'Today', o.today], ['week', 'This week', monday], ['month', 'This month', monthStart]];
+  const start = monday < monthStart ? monday : monthStart;
+  const loaded = await loadDiagnoses(db, pid, { from: start, to: o.today, providerId: o.providerId || null, locationId: o.locationId || null });
+  const slice = (from) => {
+    const events = loaded.events.filter((e) => e.date >= from);
+    const keys = new Set(events.map((e) => e.key));
+    return summarize({ ...loaded, events, findings: loaded.findings.filter((f) => keys.has(f.exam_key)) }, { providerId: o.providerId || null });
+  };
+  const out = [];
+  const perProvider = new Map();
+  for (const [key, label, from] of periods) {
+    const s = slice(from);
+    const g = (await goalsFor(db, pid, { from, to: o.today, providerId: o.providerId || null, locationId: o.locationId || null })).diagnosed || null;
+    out.push({
+      key, label, from, to: o.today, diagnosed: s.totals.diagnosed, expected: s.totals.expected, exams: s.totals.exams, per_exam: s.totals.per_exam,
+      scheduled: s.totals.scheduled, completed: s.totals.completed,
+      goal: g?.goal ?? null, goal_source: g?.source ?? null, standing: standing('diagnosed', s.totals.diagnosed, g?.goal ?? null),
+    });
+    if (o.perProvider) {
+      for (const p of s.providers) {
+        const row = perProvider.get(p.provider_id) || { provider_id: p.provider_id, name: p.name, type: p.type };
+        row[key] = { diagnosed: p.total.diagnosed, expected: p.total.expected, exams: p.total.exams };
+        perProvider.set(p.provider_id, row);
+      }
+    }
+  }
+  const providers = [];
+  for (const row of perProvider.values()) {
+    const g = (await goalsFor(db, pid, { from: monthStart, to: o.today, providerId: row.provider_id })).diagnosed || null;
+    const zero = { diagnosed: 0, expected: 0, exams: 0 };
+    providers.push({ ...row, today: row.today || zero, week: row.week || zero, month: row.month || zero, month_goal: g?.goal ?? null, standing: standing('diagnosed', row.month?.diagnosed ?? 0, g?.goal ?? null) });
+  }
+  providers.sort((a, b) => b.month.diagnosed - a.month.diagnosed || a.name.localeCompare(b.name));
+  return { today: o.today, provider_id: o.providerId || null, location_id: o.locationId || null, periods: out, ...(o.perProvider ? { providers } : {}) };
+}
+
+// ---- The value of an exam (EX2): learned from the practice's own cohorts, or the owner's own number ----
+// For a horizon of H months (1, 3 or 5): the exams of the 12 months that ended H months ago (e.g. for 5 months,
+// exams from 17 to 5 months before today), so every exam has had its full H months. Learned value = the office
+// fees of the treatment diagnosed at those exams that was completed within H months of the exam, divided by the
+// number of exams (exams with nothing diagnosed count, as $0). Per exam type, and per provider when asked (the
+// examining provider or the hygienist of the visit, as in the funnel). The owner can set their own value per exam
+// type and horizon (exam_values); `used` is theirs when set, otherwise the learned one.
+export const EXAM_VALUE_HORIZONS = [1, 3, 5];
+export const EXAM_VALUE_MIN_EXAMS = 10; // fewer exams than this in the window: shown, but flagged low_sample
+export function examValueWindow(today, horizon) {
+  return { from: addMonths(today, -(horizon + 12)), to: addDays(addMonths(today, -horizon), -1) };
+}
+
+// Owner overrides. The exam_values table is added by db.js; until a database has it there are simply none.
+export async function examValueOverrides(db, pid, horizon = null) {
+  let rows;
+  try {
+    rows = await db.all(`SELECT exam_type, horizon_months, value_cents FROM exam_values WHERE practice_id = ?${horizon ? ' AND horizon_months = ?' : ''}`, pid, ...(horizon ? [horizon] : []));
+  } catch (err) {
+    if (/exam_values/.test(String(err?.message))) return []; // table not created on this database yet
+    throw err;
+  }
+  return rows.map((r) => ({ exam_type: r.exam_type, horizon_months: Number(r.horizon_months), value_cents: Number(r.value_cents) }));
+}
+
+// { [exam type]: { learned, override, used, diagnosed_per_exam, exams, low_sample, window } } for one horizon.
+export async function examValues(db, pid, { providerId = null, locationId = null, horizon = 5, today = null } = {}) {
+  if (!EXAM_VALUE_HORIZONS.includes(Number(horizon))) throw new Error(`horizon must be one of ${EXAM_VALUE_HORIZONS.join(', ')} months`);
+  const h = Number(horizon);
+  const day = today || (await practiceNow(db, pid)).slice(0, 10);
+  const window = examValueWindow(day, h);
+  const loaded = await loadDiagnoses(db, pid, { ...window, providerId, locationId });
+  const acc = Object.fromEntries(Object.keys(EXAM_TYPES).map((t) => [t, { exams: 0, diagnosed: 0, completed: 0 }]));
+  for (const ev of loaded.events) acc[ev.exam_type].exams += 1;
+  const examDate = new Map(loaded.events.map((ev) => [ev.key, ev.date]));
+  for (const f of loaded.findings) {
+    const a = acc[f.exam_type];
+    a.diagnosed += f.fee;
+    if (f.completed_on && f.completed_on <= addMonths(examDate.get(f.exam_key), h)) a.completed += f.fee;
+  }
+  const overrides = new Map((await examValueOverrides(db, pid, h)).map((o) => [o.exam_type, o.value_cents]));
+  const out = {};
+  for (const [t, a] of Object.entries(acc)) {
+    const learned = a.exams ? Math.round(a.completed / a.exams) : null;
+    const override = overrides.has(t) ? overrides.get(t) : null;
+    out[t] = {
+      learned, override, used: override ?? learned, horizon_months: h,
+      diagnosed_per_exam: a.exams ? Math.round(a.diagnosed / a.exams) : null, exams: a.exams, low_sample: a.exams < EXAM_VALUE_MIN_EXAMS, window,
+    };
+  }
+  return out;
+}
+
+// ---- Exams on a day (EX1): from the codes on the day's visits ----
+// Visits on the date that aren't cancelled or missed; each patient's exam codes that day — procedures on those
+// visits (planned or done), else the visit type's codes — plus exams charted done that day without a visit. One
+// exam per patient per day, typed like the funnel. Returns { date, total, by_type, completed, patients }.
+export async function examsForDay(db, pid, date, { locationId = null, providerId = null } = {}) {
+  const rules = await examRules(db, pid);
+  const codes = Object.keys(EXAM_CODES);
+  const next = addDays(date, 1);
+  const visits = await db.all(
+    `SELECT a.id, a.patient_id, a.status, t.procedure_codes AS type_codes FROM appointments a LEFT JOIN appointment_types t ON t.id = a.appointment_type_id
+     WHERE a.practice_id = ? AND a.start_time >= ? AND a.start_time < ? AND a.status NOT IN ('cancelled','no_show')${locationId ? ' AND a.location_id = ?' : ''}${providerId ? ' AND a.provider_id = ?' : ''}`,
+    pid, date, next, ...(locationId ? [locationId] : []), ...(providerId ? [providerId] : []),
+  );
+  const ids = visits.map((v) => v.id);
+  const onVisits = [];
+  for (let i = 0; i < ids.length; i += 500) {
+    const chunk = ids.slice(i, i + 500);
+    onVisits.push(...await db.all(`SELECT appointment_id, patient_id, code, status FROM procedures WHERE appointment_id IN (${IN(chunk)}) AND status != 'cancelled' AND code IN (${IN(codes)})`, ...chunk, ...codes));
+  }
+  const walkIns = await db.all(
+    `SELECT patient_id, code, status FROM procedures WHERE practice_id = ? AND appointment_id IS NULL AND status = 'completed' AND code IN (${IN(codes)}) AND completed_at >= ? AND completed_at < ?${locationId ? ' AND location_id = ?' : ''}${providerId ? ' AND provider_id = ?' : ''}`,
+    pid, ...codes, date, next, ...(locationId ? [locationId] : []), ...(providerId ? [providerId] : []),
+  );
+  const byPatient = new Map();
+  const add = (patientId, code, done) => {
+    const x = byPatient.get(patientId) || { codes: new Set(), done: false };
+    x.codes.add(code);
+    x.done = x.done || done;
+    byPatient.set(patientId, x);
+  };
+  const withProcs = new Set(onVisits.map((r) => r.appointment_id));
+  for (const r of onVisits) add(r.patient_id, r.code, r.status === 'completed');
+  for (const v of visits) {
+    if (withProcs.has(v.id) || !v.type_codes) continue;
+    let list = [];
+    try { list = JSON.parse(v.type_codes); } catch { list = []; } // an unreadable visit type just adds no codes
+    for (const code of Array.isArray(list) ? list : []) if (EXAM_CODES[code]) add(v.patient_id, code, v.status === 'completed');
+  }
+  for (const r of walkIns) add(r.patient_id, r.code, true);
+  // 'first_exam' rules: whether the patient had a routine exam here before this day.
+  const seenBefore = new Set();
+  if (Object.values(rules).includes('first_exam') && byPatient.size) {
+    const pids = [...byPatient.keys()];
+    for (let i = 0; i < pids.length; i += 500) {
+      const chunk = pids.slice(i, i + 500);
+      for (const r of await db.all(`SELECT DISTINCT patient_id FROM procedures WHERE patient_id IN (${IN(chunk)}) AND status = 'completed' AND code IN (${IN(ROUTINE_EXAMS)}) AND completed_at < ?`, ...chunk, ...ROUTINE_EXAMS, date)) seenBefore.add(r.patient_id);
+    }
+  }
+  const byType = Object.fromEntries(Object.keys(EXAM_TYPES).map((t) => [t, 0]));
+  const completed = { ...byType };
+  for (const [patientId, x] of byPatient) {
+    const t = classifyExam([...x.codes], rules, !seenBefore.has(patientId));
+    if (!t) continue;
+    byType[t] += 1;
+    if (x.done) completed[t] += 1;
+  }
+  return { date, total: Object.values(byType).reduce((a, b) => a + b, 0), by_type: byType, completed, patients: byPatient.size };
+}

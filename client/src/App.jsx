@@ -99,6 +99,7 @@ const ChartAudit = lazy(() => import('./pages/ChartAudit.jsx'));
 const OfficeDocuments = lazy(() => import('./pages/OfficeDocuments.jsx'));
 const Capacity = lazy(() => import('./pages/Capacity.jsx'));
 const Checklists = lazy(() => import('./pages/Checklists.jsx'));
+const Business = lazy(() => import('./pages/Business.jsx'));
 const LabCheckin = lazy(() => import('./pages/LabCheckin.jsx'));
 const ReviewsDashboard = lazy(() => import('./pages/ReviewsDashboard.jsx'));
 const Referrals = lazy(() => import('./pages/Referrals.jsx'));
@@ -268,6 +269,7 @@ function StaffApp() {
     ['/recall', Repeat, 'Recall autopilot', can('schedule:read')],
     ['/metrics', Gauge, 'Metrics', can('reports:read') || can('reports:own')],
     ['/capacity', CalendarRange, 'Capacity', can('schedule:read')],
+    ['/business', CircleDollarSign, 'Business', can('business:view') || can('timeclock:manage')],
     ['/lab-checkin', PackageCheck, 'Lab check-in', can('clinical:write')],
     ['/referrals', Send, 'Referrals', can('patients:read')],
     ['/insurance-autopilot', BadgeCheck, 'Insurance autopilot', can('billing:read')],
@@ -477,6 +479,7 @@ function Shell({ nav }) {
             <Route path="/messages" element={<Inbox />} />
             <Route path="/office" element={<Office />} />
             <Route path="/checklists/*" element={<Checklists />} />
+            <Route path="/business" element={<Business />} />
             <Route path="/lab-checkin" element={<LabCheckin />} />
             <Route path="/reviews" element={<ReviewsDashboard />} />
             <Route path="/referrals" element={<Referrals />} />

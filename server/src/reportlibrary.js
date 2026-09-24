@@ -16,6 +16,7 @@ import { allocationsForRange } from './allocation.js';
 import { providerHoursFor, officeHours, weekday } from './hours.js';
 import { REPORTS as SAVED_REPORTS, rangeFor } from './savedreports.js';
 import { MARKETING_LIBRARY_REPORT } from './marketing.js';
+import { diagnosisFunnel } from './diagnosis.js';
 
 export const MAX_ROWS = 5000;
 const MAX_RANGE_DAYS = 3 * 366 + 1;
@@ -953,6 +954,33 @@ def({
     }
     const rows = [...by.values()].map(({ planSet, ...x }) => ({ ...x, plans: planSet.size, acceptance_pct: pct(x.accepted, x.presented), unscheduled: Math.max(0, x.accepted - x.scheduled - x.completed) })).sort((a, b) => b.presented - a.presented);
     return { rows, totals: { acceptance_pct: pct(rows.reduce((s, r) => s + r.accepted, 0), rows.reduce((s, r) => s + r.presented, 0)) }, note: 'By the date each plan was presented (or created). A plan with work by two providers counts for each.' };
+  },
+});
+
+// Diagnosis & conversion (DX2): the one definition in diagnosis.js (docs/metrics.md), by provider and exam type.
+def({
+  id: 'diagnosis-conversion', name: 'Diagnosis & conversion by provider', category: 'Treatment',
+  description: 'Treatment diagnosed at new patient, recall and emergency exams, and how much was presented, accepted, scheduled and completed since.',
+  params: ['range', 'provider', 'office'], range: 'month',
+  columns: [col('provider', 'Provider'), col('exam_type', 'Exam type'), count('exams', 'Exams'), money('diagnosed', 'Diagnosed'), money('expected', 'Expected after PPO'),
+    money('presented', 'Presented'), money('accepted', 'Accepted'), money('scheduled', 'Scheduled'), money('completed', 'Completed'),
+    col('scheduled_pct', 'Scheduled % of diagnosed', 'pct'), col('completed_pct', 'Completed % of diagnosed', 'pct'), col('days_to_schedule', 'Median days to schedule', 'int'), col('days_to_complete', 'Median days to complete', 'int')],
+  async run(ctx) {
+    const out = await diagnosisFunnel(ctx.db, ctx.pid, { from: ctx.from, to: ctx.to, providerId: ctx.providerId, locationIds: ctx.officeIds });
+    const line = (provider, providerId, t) => ({
+      provider, provider_id: providerId, exam_type: t.label, exams: t.exams, diagnosed: t.diagnosed, expected: t.expected, presented: t.presented, accepted: t.accepted,
+      scheduled: t.scheduled, completed: t.completed, scheduled_pct: t.of_diagnosed_pct.scheduled, completed_pct: t.of_diagnosed_pct.completed,
+      days_to_schedule: t.median_days_to_schedule, days_to_complete: t.median_days_to_complete,
+    });
+    const rows = out.providers.flatMap((p) => p.by_exam_type.filter((t) => t.exams).map((t) => line(p.name, p.provider_id, t)));
+    const tot = out.totals;
+    // A treatment found at a hygiene visit counts for the examining provider and the hygienist, so the totals are
+    // the practice's (each exam once), not the sum of the rows.
+    return {
+      rows,
+      totals: { exams: tot.exams, diagnosed: tot.diagnosed, expected: tot.expected, presented: tot.presented, accepted: tot.accepted, scheduled: tot.scheduled, completed: tot.completed, scheduled_pct: tot.of_diagnosed_pct.scheduled, completed_pct: tot.of_diagnosed_pct.completed, days_to_schedule: tot.median_days_to_schedule, days_to_complete: tot.median_days_to_complete },
+      note: 'By exam date: work done later is credited to the exam where it was diagnosed. Office fees; "expected" caps each fee at the patient’s PPO fee schedule (an estimate). Treatment found at a hygiene visit counts for the doctor and the hygienist; the totals count each exam once.',
+    };
   },
 });
 

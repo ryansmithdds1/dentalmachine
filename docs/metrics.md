@@ -31,6 +31,7 @@ together.
 | `collection_rate` | Collection rate | `collections / production_net × 100`, one decimal. |
 | `new_patients` | New patients | Patients whose **first completed visit** falls in the range: the earliest of a `completed` appointment's date or a live charge for a completed procedure. A chart made without a visit (an import, a phone enquiry) isn't a new patient; merged duplicates (`merged_into_id`) don't count. Office: the patient's home office. Not tracked per provider. Also split by `referral_source`. |
 | `case_acceptance` | Case acceptance | For treatment plans **created** in the range: fees of their non-cancelled procedures on plans now `accepted` or `completed`, over fees of all their non-cancelled procedures. Provider/office: the procedure's. |
+| `diagnosed` | Treatment diagnosed | The office fees of the treatment **diagnosed at exams** whose date is in the range — the exact rule is in *Diagnosis & conversion* below (`diagnosis.js`). Provider: the examining provider, or the hygienist of the visit. Office: the exam's. Also the PPO-expected amount and the number of exams. |
 | `hygiene_reappointment` | Hygiene reappointment | `completed` visits with a hygienist in the range where the patient already had a later, live visit **booked by the day of the visit**; over all such visits. |
 | `broken_appointments` | Broken appointments | Visits in the range (up to today) with status `no_show` or `cancelled`. |
 | `broken_rate` | No-show & cancel rate | Broken over kept (`completed`, `checked_in`, `in_chair`) + broken. |
@@ -55,6 +56,91 @@ every evening (`metric_snapshots`, derived data). A/R is recalculated exactly fo
 > **Scheduled production** is calculated here with the same rule as the schedule screen. The perfect-day /
 > block scheduling work (`production.js`, day templates with goals) computes production per schedule column; when
 > it lands, both should call one function (move the rule into one module and have the other import it).
+
+## Diagnosis & conversion (DX1–DX2)
+One definition, in `server/src/diagnosis.js`; the `diagnosed` KPI, the running totals (`diagnosisRunning` in
+`metrics.js`), Reports → Metrics → *Diagnosis & conversion*, the report library's *Diagnosis & conversion by
+provider*, and the emails all call it. `server/test/diagnosis.test.js` pins each rule.
+
+**Exams.** A completed procedure (`status = 'completed'`, dated by its practice-local `completed_at`) with an exam
+code, for a patient who isn't a merged duplicate. **One exam per patient per day**; when a day has several exam
+codes the type is the first of: new patient, perio, recall, emergency. The exam's provider is the procedure's
+`provider_id` (else the visit's), its office the procedure's `location_id` (else the visit's, else the patient's
+home office). An exam whose charge is voided goes back to planned, so it is no longer an exam.
+
+| Code | Exam type |
+|---|---|
+| D0150 comprehensive | **new patient** (configurable: or recall, or "first exam" — new patient only when it is the patient's first D0150/D0180/D0120/D0145 here) |
+| D0120 periodic, D0145 under 3 | **recall** |
+| D0180 comprehensive periodontal | **perio** (configurable: new patient, recall or "first exam") |
+| D0140 limited, D0160 detailed problem-focused, D0170 re-evaluation, D9110 palliative | **emergency** |
+
+The configurable choices are read through `examRules()` (defaults for now; see the spec for the settings table).
+
+**Diagnosed.** A procedure is diagnosed at an exam when it is **treatment** — any category except `diagnostic`
+and `preventive` (so not exams, x-rays, cleanings, fluoride or sealants) — charted for the patient on the exam's
+practice-local date (`created_at`, converted from UTC), and not `cancelled`. Treatment charted on a day without a
+completed exam is not "from an exam" and is not counted.
+- **No double counting.** Procedures with the same patient, code, tooth, surfaces (in any order) and area are one
+  *finding*. A later copy joins the earlier finding unless the earlier one had already been completed before the
+  copy was charted (then the tooth needs the work again: a new finding). A finding counts once, for the exam where
+  it was **first** charted, at the first copy's fee; if any copy is booked or done, the finding is.
+- **Alternative options** (treatment plans sharing an `option_group`): only one option is diagnosed work — the
+  accepted (or signed) one, else the first option offered. Declined options' work is cancelled on acceptance.
+- **Money** is the office fee on the procedure (integer cents). **Expected after PPO** caps each fee at the
+  patient's active primary policy's fee schedule (the plan's, else the carrier's) via `resolveFee` on the day the
+  work was done (else the day it was diagnosed) — an estimate, labelled as one; no insurance percentages.
+
+**The funnel** — each step for a finding, *as it stands now*. Each later step implies the earlier ones (work
+that was booked was accepted and presented), so the steps never go up:
+1. **Presented**: on a treatment plan (the same rule as case acceptance, where making a plan is presenting it).
+2. **Accepted**: its plan is `accepted` or `completed`, or was signed (`signed_at`).
+3. **Scheduled**: on a visit that isn't cancelled or a no-show, or already completed.
+4. **Completed**: `status = 'completed'` (its charge is live; voiding the charge un-completes it).
+
+**Cohorts.** Everything is by **exam date**: work finished months later is credited to the exam where it was
+diagnosed, never to the month it was done, so a recent month's conversion keeps rising. Conversion % is shown both
+as a share of the step before (`step_pct`) and of everything diagnosed (`of_diagnosed_pct`). **Days to schedule**:
+from the diagnosis date to the day the visit was booked (the appointment's `created_at`, local; not before the
+diagnosis), or to the completion day for work done without a booked visit; **days to complete**: diagnosis to
+completion. Both are medians over the findings that got there.
+
+**Who gets the credit.** The examining provider; and when the exam happened at a **hygiene visit** (the visit's
+provider is a hygienist other than the examiner), the hygienist too ("hygiene-generated treatment", shown
+separately as `at_hygiene_visits`). Provider rows can therefore add up to more than the practice total, which
+counts each exam once. A provider filter keeps the exams they examined or hosted. `reports:own` users only ever
+see their own provider's numbers.
+
+**Running totals (DX1).** Today, this week (from Monday) and this month so far, against the `diagnosed` goal
+(`metric_goals`, per month, prorated by open office days like every monthly goal; a provider never borrows the
+practice's goal). `GET /api/diagnosis/running` (the signed-in provider's own numbers when their login is linked,
+`scope=practice` for the practice, `per_provider=1` for a row per provider with `reports:read`).
+
+**Endpoints.** `GET /api/diagnosis/funnel` (`period` = the usual ones or `last_3_months` / `last_6_months` /
+`last_12_months`, or `from`/`to`; `provider_id`, `location_id`, `exam_type`; `format=csv` downloads it and is
+audited as `diagnosis.export`); `GET /api/diagnosis/patients` (one row per patient exam with what is still open;
+`stage` = open, all, or the step the work stopped at; audited as a drill-down).
+
+**Emails.** End of day: diagnosed today / this week / this month, per provider with their goal. Weekly and monthly:
+the funnel for the period's exams, by exam type and by provider. Totals only — no patient names. Owner, office
+manager and hygienist audiences (a hygienist's is her own); not the billing digest.
+
+## The value of an exam (EX1–EX2)
+**Learned value** (`examValues(db, practiceId, { providerId, horizon })` in `metrics.js`) — per exam type, for a
+horizon of **1, 3 or 5 months** (default 5): take the exams (as above) from the **12 months that ended H months
+ago** — for 5 months, exams from 17 to 5 months before today; for 3 months, 15 to 3; for 1 month, 13 to 1 — so
+every exam has had its full H months. Value = the office fees of the treatment diagnosed at those exams **and
+completed within H months of the exam date**, divided by the number of exams (an exam with nothing diagnosed counts
+as $0). Also returned: diagnosed per exam, the number of exams, the window, and `low_sample` (fewer than 10 exams).
+With a provider: the exams they examined or hosted (as in the funnel). **Override:** the owner may set their own
+value per exam type and horizon (`exam_values`, `PUT /api/exam-values`, administrators, audited as
+`exam_value.set/change/clear`); `used` = the override when set, else the learned value. `GET /api/exam-values`
+shows all three for each horizon.
+
+**Exams on a day** (`examsForDay(db, practiceId, date, { locationId })`): the day's visits that aren't cancelled
+or missed; each patient's exam codes from the procedures on those visits (planned or done), or — for a visit with
+none — its visit type's codes, plus exams charted done that day without a visit. One exam per patient, typed as
+above. Returns the count per type and how many are already done.
 
 ## Goals and benchmarks
 Goals live in `metric_goals`, one per metric and scope: the whole practice, one office, or one provider

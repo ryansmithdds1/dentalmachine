@@ -26,6 +26,7 @@ import { useDayOpportunities, OpportunityTotal } from '../components/opportuniti
 import { useDayReadiness } from '../components/readiness/ReadinessBadge.jsx';
 import { OptimizerLauncher } from '../components/optimizer/OptimizerPanel.jsx';
 import { useOptimizer } from '../components/optimizer/useOptimizer.js';
+import { useBusinessView, BusinessToggle, BusinessPanel, BusinessOverlay } from '../components/business/ScheduleBusiness.jsx';
 
 // "Fit" sizes the grid so the whole office day fits the screen without scrolling; S/M/L are fixed sizes.
 const ZOOMS = [{ label: 'Fit', px: 0 }, { label: 'S', px: 1 }, { label: 'M', px: 1.5 }, { label: 'L', px: 2.2 }];
@@ -211,6 +212,8 @@ export default function Schedule() {
   // ---- Production (S5) and the day's blocks (S2): fetched for the same days, refreshed whenever the schedule's
   // own data changes (booked, moved, completed, cancelled — here or live from another screen). ----
   const prodData = useProduction({ date: from, days: view === 'week' ? 7 : 1, kind: prodKind, office, version: data, enabled: !!data });
+  // Owner's business view (margin colors, labor, staff lanes): only for people allowed to see it.
+  const biz = useBusinessView({ date: from, days: view === 'week' ? 7 : 1, office, version: data });
 
   // ---- Late patients and running behind (S7): the practice's thresholds; recalculated as the clock moves. ----
   const [lateRaw, setLateRaw] = useState(null);
@@ -827,6 +830,7 @@ export default function Schedule() {
             </div>
           )}
           {view === 'day' && <OptimizerLauncher date={date} locationId={getLocationId()} />}
+          {biz.allowed && <BusinessToggle on={biz.on} onToggle={biz.toggle} />}
           <button onClick={() => setShowAsap(!showAsap)} className={`icon-btn wide${showAsap ? ' active' : ''}`} title="Waitlist and ASAP list"><Hourglass size={16} /> Waitlist</button>
           {can('schedule:write') && <button className="icon-btn" onClick={() => setModal({ type: 'block', defaults: { date } })} title="Block time"><Ban size={16} /></button>}
           {can('schedule:write') && <button className="primary" onClick={() => setModal({ type: 'new', defaults: { date } })} title="New appointment (N)"><Plus size={16} strokeWidth={2.5} /> Appointment</button>}
@@ -841,6 +845,7 @@ export default function Schedule() {
           onMove={(a) => { setPlacing(a); pickUp(a); }} />
       )}
       {prodSum && <ProductionBar title={prodHeading} sum={prodSum} unscheduled={prodData.unscheduled} kind={prodKind} onKind={rememberKind} now={nowStamp} />}
+      {biz.on && <BusinessPanel biz={biz} date={date} office={office} view={view} />}
       {opps.totals?.count > 0 && <OpportunityTotal count={opps.totals.count} fee={opps.totals.fee} />}
       {override && <OverrideBanner message={override.message} name={`${override.appt.first_name} ${override.appt.last_name}`} onAnswer={answerOverride} />}
       {carry && (() => {
@@ -895,6 +900,7 @@ export default function Schedule() {
             now={nowStamp} late={lateCfg}
             onReorderColumn={view === 'day' && mode === 'operatory' ? (from, to) => moveChair(from.chairId, to.chairId) : undefined}
           />
+          {biz.on && <BusinessOverlay biz={biz} columns={gridColumns} />}
           </>
         )}
 

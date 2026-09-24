@@ -14,7 +14,8 @@ import { raiseIssue, resolveIssue } from './issues.js';
 import { log } from './monitoring.js';
 import { hoursFor, weekday } from './hours.js';
 import { aiClient, structured } from './ai.js';
-import { METRICS, compareMetrics, computeMetrics, metricRows, recordSnapshots, addDays } from './metrics.js';
+import { METRICS, compareMetrics, computeMetrics, metricRows, recordSnapshots, addDays, diagnosisRunning } from './metrics.js';
+import { diagnosisFunnel } from './diagnosis.js';
 import { renderEmail } from './email/layout.js';
 import { sendStaffEmail } from './email/send.js';
 import { shortName } from './email/templates.js';
@@ -30,7 +31,7 @@ export const defaultAudience = (role) => ({ admin: 'owner', dentist: 'owner', hy
 export const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 // What each digest shows, per audience.
-const PERIOD_ALL = ['production_gross', 'production_net', 'collections', 'collection_rate', 'new_patients', 'case_acceptance', 'hygiene_reappointment', 'broken_rate', 'unscheduled_treatment', 'recall_overdue', 'ar_over_90', 'claims_over_30'];
+const PERIOD_ALL = ['production_gross', 'production_net', 'collections', 'collection_rate', 'new_patients', 'case_acceptance', 'diagnosed', 'hygiene_reappointment', 'broken_rate', 'unscheduled_treatment', 'recall_overdue', 'ar_over_90', 'claims_over_30'];
 export const CONTENT = {
   huddle: {
     owner: ['scheduled_production', 'visits', 'open_gaps', 'unconfirmed', 'insurance_to_verify', 'balances_due'],
@@ -39,14 +40,14 @@ export const CONTENT = {
     billing: ['visits', 'insurance_to_verify', 'balances_due', 'claims_over_30', 'scheduled_production'],
   },
   end_of_day: {
-    owner: ['production_gross', 'collections', 'new_patients', 'case_acceptance', 'broken_appointments'],
-    office_manager: ['production_gross', 'collections', 'new_patients', 'case_acceptance', 'broken_appointments'],
+    owner: ['production_gross', 'collections', 'new_patients', 'case_acceptance', 'diagnosed', 'broken_appointments'],
+    office_manager: ['production_gross', 'collections', 'new_patients', 'case_acceptance', 'diagnosed', 'broken_appointments'],
     hygienist: ['production_gross', 'hygiene_reappointment', 'broken_appointments', 'recall_overdue'],
     billing: ['production_gross', 'collections', 'collection_rate', 'claims_over_30', 'ar_over_90'],
   },
   weekly: {
     owner: PERIOD_ALL, office_manager: PERIOD_ALL,
-    hygienist: ['production_gross', 'hygiene_reappointment', 'broken_rate', 'recall_overdue', 'recall_current_rate', 'unscheduled_treatment'],
+    hygienist: ['production_gross', 'hygiene_reappointment', 'broken_rate', 'recall_overdue', 'recall_current_rate', 'unscheduled_treatment', 'diagnosed'],
     billing: ['production_net', 'collections', 'collection_rate', 'adjustments', 'ar_total', 'ar_over_90', 'claims_over_30'],
   },
 };
@@ -202,7 +203,43 @@ const ACTIONS = {
   open_gaps: { rows: 'open_gaps', title: 'Open time on the schedule', item: (r, n, days) => gapText(r, days), tip: 'Offer open times to the ASAP list.' },
   scheduled_production: { rows: 'open_gaps', title: 'Open time on the schedule', item: (r, n, days) => gapText(r, days), tip: 'Fill gaps from the ASAP list and unscheduled treatment.' },
   new_patients: { tip: 'Ask happy patients for reviews and referrals; check where new patients came from.' },
+  diagnosed: { rows: 'unscheduled_treatment', title: 'Patients with treatment to schedule', item: (r, n) => `${n(r)} · ${r.procedures} procedure${Number(r.procedures) === 1 ? '' : 's'}`, tip: 'Chart what you find during each exam the same day, so it counts and can be presented before the patient leaves.' },
 };
+
+// ---- Diagnosis & conversion (DX1–DX2) in the emails: totals only, never a patient ----
+// End of day: diagnosed today / this week / this month per provider against their goal. Weekly and monthly: the
+// funnel for the exams in the period, by exam type and by provider.
+const pctText = (v) => (v == null ? '—' : `${Math.round(v)}%`);
+export async function diagnosisBlocks(db, o) {
+  const blocks = [];
+  const scope = { providerId: o.providerId || null, locationId: o.locationId || null };
+  const link = `${String(o.appUrl || '').replace(/\/$/, '')}/metrics?tab=diagnosis`;
+  if (o.digest === 'end_of_day') {
+    const run = await diagnosisRunning(db, o.practiceId, { today: o.date, ...scope, perProvider: !scope.providerId });
+    const [day, week, month] = run.periods;
+    blocks.push({ type: 'heading', text: 'Treatment diagnosed at exams' });
+    const goal = month.goal ? ` — ${Math.round((month.diagnosed / month.goal) * 100)}% of the ${dollars(month.goal)} goal so far` : '';
+    blocks.push({ type: 'text', text: `Today ${dollars(day.diagnosed)} from ${day.exams} exam${day.exams === 1 ? '' : 's'} · this week ${dollars(week.diagnosed)} · this month ${dollars(month.diagnosed)}${goal}.` });
+    const items = (run.providers || []).filter((p) => p.month.exams).map((p) => `${p.name}: today ${dollars(p.today.diagnosed)} · week ${dollars(p.week.diagnosed)} · month ${dollars(p.month.diagnosed)}${p.month_goal ? ` of ${dollars(p.month_goal)}` : ''}`);
+    if (items.length) blocks.push({ type: 'list', title: 'By provider', items: items.slice(0, 12), more: items.length > 12 ? `…and ${items.length - 12} more in Dental Machine.` : null });
+    return blocks;
+  }
+  if (o.digest !== 'weekly' && o.digest !== 'monthly') return blocks;
+  const f = await diagnosisFunnel(db, o.practiceId, { from: o.from, to: o.to, ...scope });
+  if (!f.totals.exams) return blocks;
+  const t = f.totals;
+  blocks.push({ type: 'heading', text: 'Diagnosis & conversion' });
+  blocks.push({ type: 'text', text: `${t.exams} exam${t.exams === 1 ? '' : 's'}, ${dollars(t.diagnosed)} of treatment diagnosed (${dollars(t.per_exam || 0)} per exam). So far ${pctText(t.of_diagnosed_pct.accepted)} accepted, ${pctText(t.of_diagnosed_pct.scheduled)} scheduled and ${pctText(t.of_diagnosed_pct.completed)} completed; ${dollars(t.still_open)} still to do.` });
+  const types = f.by_exam_type.filter((x) => x.exams).map((x) => `${x.label}: ${x.exams} · ${dollars(x.diagnosed)} diagnosed · ${pctText(x.of_diagnosed_pct.scheduled)} scheduled · ${pctText(x.of_diagnosed_pct.completed)} completed${x.median_days_to_schedule != null ? ` · booked in ${x.median_days_to_schedule} days (median)` : ''}`);
+  if (types.length) blocks.push({ type: 'list', title: 'By exam type', items: types });
+  if (!scope.providerId) {
+    const provs = f.providers.filter((p) => p.total.exams).map((p) => `${p.name}: ${p.total.exams} exam${p.total.exams === 1 ? '' : 's'} · ${dollars(p.total.diagnosed)} diagnosed (${dollars(p.total.per_exam || 0)} per exam) · ${pctText(p.total.of_diagnosed_pct.scheduled)} scheduled`);
+    if (provs.length) blocks.push({ type: 'list', title: 'By provider', items: provs.slice(0, 12), more: provs.length > 12 ? `…and ${provs.length - 12} more in Dental Machine.` : null });
+  }
+  blocks.push({ type: 'text', text: 'Work finished later still counts for the exam where it was found, so these numbers keep growing after the period ends.', muted: true });
+  blocks.push({ type: 'button', text: 'See diagnosis & conversion', url: link });
+  return blocks;
+}
 
 export async function areasForImprovement(db, pid, cmp, { o, appUrl = '', max = 3, names = 'short', vs = 'the period before', listSize = 8 }) {
   const visits = cmp.metrics.find((m) => m.key === 'visits')?.value || 0;
@@ -325,6 +362,11 @@ export async function buildDigest(db, o) {
     const { values } = await computeMetrics(db, o.practiceId, { from: tomorrow, to: tomorrow, today, keys: ['visits', 'scheduled_production', 'unconfirmed'], ...scope });
     blocks.push({ type: 'heading', text: `Tomorrow (${dayName(tomorrow)})` });
     blocks.push({ type: 'text', text: `${values.visits} visit${values.visits === 1 ? '' : 's'} booked, ${fmt('scheduled_production', values.scheduled_production)} scheduled, ${values.unconfirmed} still to confirm.` });
+  }
+
+  // Diagnosis totals and the conversion funnel for the people who act on them (not the billing team's email).
+  if (['owner', 'office_manager', 'hygienist'].includes(o.audience) && o.digest !== 'huddle') {
+    blocks.push(...await diagnosisBlocks(db, { practiceId: o.practiceId, digest: o.digest, date: range.to, from: range.from, to: range.to, ...scope, appUrl: o.appUrl }));
   }
 
   if (areas.length) {

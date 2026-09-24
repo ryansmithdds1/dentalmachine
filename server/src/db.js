@@ -4492,6 +4492,106 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_mk_campaign_utm ON marketing_campaigns(pra
 CREATE UNIQUE INDEX IF NOT EXISTS idx_mk_campaign_promo ON marketing_campaigns(practice_id, promo_code) WHERE promo_code IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_mk_touches_patient ON marketing_touches(patient_id, occurred_at);
 CREATE INDEX IF NOT EXISTS idx_mk_touches_lead ON marketing_touches(practice_id, lead, occurred_at);
+-- Owner's business view (businessdata.js): procedure costs, provider pay, staff roles, exam targets.
+-- Business view (PM1-PM4, BD1-BD4; business.js, businessdata.js, routes/business.js, docs/business-view.md).
+-- The owner's settings: color thresholds, fixed costs, labor target. One row per practice; changes are audited.
+CREATE TABLE IF NOT EXISTS business_settings (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL UNIQUE REFERENCES practices(id),
+  basis TEXT NOT NULL DEFAULT 'chair' CHECK (basis IN ('chair','doctor')),
+  overhead_mode TEXT NOT NULL DEFAULT 'auto' CHECK (overhead_mode IN ('auto','manual')),
+  overhead_per_hour_cents INTEGER,
+  fixed_costs_month_cents INTEGER,
+  work_days_month INTEGER NOT NULL DEFAULT 18,
+  red_below_cents INTEGER,
+  green_from_cents INTEGER,
+  gold_from_cents INTEGER,
+  labor_target_low_bp INTEGER NOT NULL DEFAULT 2500,
+  labor_target_high_bp INTEGER NOT NULL DEFAULT 3000,
+  patient_collect_bp INTEGER NOT NULL DEFAULT 10000,
+  default_merchant_bp INTEGER NOT NULL DEFAULT 250,
+  assistants_per_doctor_chair_bp INTEGER NOT NULL DEFAULT 10000,
+  idle_gap_minutes INTEGER NOT NULL DEFAULT 20,
+  updated_by INTEGER REFERENCES users(id),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- Direct costs of a procedure code or a whole category (supplies, lab, card fee, provider pay override). Never
+-- edited or deleted: every change is a new version from a date; a version with active = 0 retires the profile.
+CREATE TABLE IF NOT EXISTS business_cost_profiles (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  scope TEXT NOT NULL CHECK (scope IN ('code','category')),
+  scope_key TEXT NOT NULL,
+  version_no INTEGER NOT NULL,
+  effective_from TEXT NOT NULL,
+  active INTEGER NOT NULL DEFAULT 1,
+  supplies_cents INTEGER NOT NULL DEFAULT 0,
+  lab_mode TEXT NOT NULL DEFAULT 'none' CHECK (lab_mode IN ('none','fixed','case')),
+  lab_cents INTEGER NOT NULL DEFAULT 0,
+  merchant_bp INTEGER,
+  pay_pct_bp INTEGER,
+  note TEXT,
+  source TEXT NOT NULL DEFAULT 'manual',
+  created_by INTEGER REFERENCES users(id),
+  actor_source TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (practice_id, scope, scope_key, version_no)
+);
+-- How each provider is paid for their work (associates, hygienists), versioned the same way.
+CREATE TABLE IF NOT EXISTS business_provider_pay (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  provider_id INTEGER NOT NULL REFERENCES providers(id),
+  version_no INTEGER NOT NULL,
+  effective_from TEXT NOT NULL,
+  basis TEXT NOT NULL CHECK (basis IN ('none','production_pct','collections_pct','hourly')),
+  pct_bp INTEGER NOT NULL DEFAULT 0,
+  hourly_cents INTEGER,
+  lab_deducted INTEGER NOT NULL DEFAULT 0,
+  note TEXT,
+  created_by INTEGER REFERENCES users(id),
+  actor_source TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (practice_id, provider_id, version_no)
+);
+-- Who each person on the clock works with, for the staff lanes (doctor / hygienist = their own visits; assistant =
+-- their providers' or chairs' visits, or the shared pool; admin = front office). Missing rows are worked out from roles.
+CREATE TABLE IF NOT EXISTS business_staff_roles (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  user_id INTEGER NOT NULL UNIQUE REFERENCES users(id),
+  kind TEXT NOT NULL CHECK (kind IN ('doctor','hygienist','assistant','admin')),
+  provider_ids TEXT,
+  operatory_ids TEXT,
+  updated_by INTEGER REFERENCES users(id),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- The owner's daily exam targets by type (EX1) and their own value per exam (EX2), used when the practice's history
+-- can't say yet. Configuration: one row per type, changes audited.
+CREATE TABLE IF NOT EXISTS business_exam_targets (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  exam_type TEXT NOT NULL,
+  daily_target INTEGER,
+  value_cents INTEGER,
+  updated_by INTEGER REFERENCES users(id),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (practice_id, exam_type)
+);
+-- The owner's own value of an exam (EX2), per exam type and horizon; overrides the learned value. Configuration:
+-- set, changed and removed by administrators, each audited (exam_value.set / change / clear).
+CREATE TABLE IF NOT EXISTS exam_values (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  exam_type TEXT NOT NULL CHECK (exam_type IN ('new_patient','recall','perio','emergency')),
+  horizon_months INTEGER NOT NULL CHECK (horizon_months IN (1,3,5)),
+  value_cents INTEGER NOT NULL,
+  set_by INTEGER REFERENCES users(id),
+  set_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (practice_id, exam_type, horizon_months)
+);
+CREATE INDEX IF NOT EXISTS idx_business_cost_profiles ON business_cost_profiles(practice_id, scope, scope_key);
+CREATE INDEX IF NOT EXISTS idx_business_provider_pay ON business_provider_pay(practice_id, provider_id);
 `;
 
 // Columns added after the first release. SQLite has no ADD COLUMN IF NOT EXISTS, so check first.

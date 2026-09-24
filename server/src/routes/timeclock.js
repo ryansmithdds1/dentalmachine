@@ -970,8 +970,10 @@ export function timeclockKioskRoutes({ db }) {
 }
 
 // ======================= Shared helpers =======================
+// practiceRules, staffList, computeHours and shiftsFor are also used by the business view (businessdata.js), so the
+// labor there is the same hours, breaks, rounding and overtime as the payroll.
 
-async function practiceRules(db, practiceId) {
+export async function practiceRules(db, practiceId) {
   const p = await db.get('SELECT timezone FROM practices WHERE id = ?', practiceId);
   const row = await db.get('SELECT * FROM timeclock_settings WHERE practice_id = ?', practiceId);
   const settings = { ...DEFAULT_SETTINGS };
@@ -983,7 +985,7 @@ async function practiceRules(db, practiceId) {
 
 const STAFF_SQL = `SELECT u.id, u.name, u.role, u.active, u.location_ids, s.id AS staff_id, s.on_clock, s.payroll_id, s.pay_type, s.overtime_exempt, s.hourly_rate_cents, s.pto_eligible,
   s.holiday_eligible, s.pin_locked_until, CASE WHEN s.pin_hash IS NULL THEN 0 ELSE 1 END AS has_pin FROM users u LEFT JOIN timeclock_staff s ON s.user_id = u.id`;
-const staffList = (db, practiceId) => db.all(`${STAFF_SQL} WHERE u.practice_id = ? ORDER BY u.name`, practiceId);
+export const staffList = (db, practiceId) => db.all(`${STAFF_SQL} WHERE u.practice_id = ? ORDER BY u.name`, practiceId);
 const staffRow = (db, userId) => db.get('SELECT * FROM timeclock_staff WHERE user_id = ?', userId);
 
 async function saveStaff(db, practiceId, userId, row, by) {
@@ -1048,7 +1050,7 @@ const summaryRow = (p) => ({
 
 // Everyone's hours for a range: punches (with corrections, breaks and rounding), classified into regular /
 // overtime / double time over whole workweeks, plus approved time off and holidays.
-async function computeHours(db, practiceId, { from, to, userIds = null, tz, settings, nowMs = Date.now(), staff }) {
+export async function computeHours(db, practiceId, { from, to, userIds = null, tz, settings, nowMs = Date.now(), staff }) {
   if (!tz || !settings) ({ tz, settings } = await practiceRules(db, practiceId));
   staff ??= await staffList(db, practiceId);
   const wFrom = weekStart(from, settings.week_start_day);
@@ -1160,7 +1162,7 @@ async function periodReview(db, practiceId, { period, settings, tz, today, nowMs
 }
 
 // Effective shifts per `${userId}:${date}`: that date's override (a shift or a day off), else the usual week.
-async function shiftsFor(db, practiceId, from, to, userIds = null) {
+export async function shiftsFor(db, practiceId, from, to, userIds = null) {
   const only = userIds ? ` AND user_id IN (${userIds.map(() => '?').join(',')})` : '';
   const overrides = await db.all(`SELECT * FROM staff_shifts WHERE practice_id = ? AND date >= ? AND date <= ?${only}`, practiceId, from, to, ...(userIds || []));
   const templates = await db.all(`SELECT * FROM staff_shift_templates WHERE practice_id = ? AND active = 1${only}`, practiceId, ...(userIds || []));

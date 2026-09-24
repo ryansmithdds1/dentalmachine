@@ -27,6 +27,8 @@ export const HIGH_RISK = [
   ['POST', /^\/checklists\/(flags\/\d+\/resolve|occurrences\/\d+\/correct)$/, 'checklist corrective actions and corrections'],
   ['POST', /^\/optimizer\/\d+\/(act|undo)$/, 'booking, changing visits or texting patients from the schedule optimizer'],
   ['POST', /^\/lab-checkin(\/\d+\/lab-message)?$/, 'checking in lab work and asking the lab for a remake'],
+  ['POST', /^\/business\/(cost-profiles(\/bulk)?|provider-pay)$/, 'procedure costs and provider pay plans'],
+  ['PUT', /^\/business\/(settings|staff-roles\/\d+|exam-targets)$/, 'business view settings'],
   ['POST', /^\/treatment-plans\/\d+\/fin-accept$/, 'accepting a payment option (payment plans, discounts, financing)'],
   ['POST', /^\/fin-agreements\/\d+\/(prepay|reverse-discount|cancel)$/, 'prepayments, discounts and payment agreements'],
   ['PUT', /^\/fin-options\/settings$/, 'discount and financing rules'],

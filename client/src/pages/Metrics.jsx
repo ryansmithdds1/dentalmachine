@@ -7,6 +7,7 @@ import { useAuth } from '../auth.jsx';
 import { money, fmtDate, fmtDateTime, label as labelize } from '../format.js';
 import { useCommands } from '../shortcuts.js';
 import { ErrorBox } from '../components/ui.jsx';
+import DiagnosisConversion from '../components/metrics/DiagnosisConversion.jsx';
 import './metrics.css';
 
 // Reports → Metrics: every KPI from the one shared definition (server/src/metrics.js, docs/metrics.md), with its
@@ -14,7 +15,7 @@ import './metrics.css';
 const PERIODS = [['today', 'Today'], ['week', 'This week'], ['last_week', 'Last week'], ['month', 'This month'], ['last_month', 'Last month'], ['ytd', 'Year to date']];
 const GROUPS = [
   ['Money', ['production_gross', 'production_net', 'adjustments', 'collections', 'collection_rate']],
-  ['Patients & visits', ['new_patients', 'case_acceptance', 'hygiene_reappointment', 'broken_appointments', 'broken_rate']],
+  ['Patients & visits', ['new_patients', 'case_acceptance', 'diagnosed', 'hygiene_reappointment', 'broken_appointments', 'broken_rate']],
   ['Right now', ['unscheduled_treatment', 'ar_total', 'ar_over_90', 'claims_over_30', 'recall_due', 'recall_overdue', 'recall_current_rate']],
   ['Booked on the schedule', ['scheduled_production', 'visits', 'unconfirmed', 'insurance_to_verify', 'open_gaps', 'balances_due']],
 ];
@@ -27,6 +28,7 @@ const ABOUT = {
   collection_rate: 'Collections as a share of net production.',
   new_patients: 'Patients whose first completed visit was in these dates.',
   case_acceptance: 'Dollars accepted out of treatment presented, for plans made in these dates.',
+  diagnosed: 'Treatment charted on the day of a completed exam, at office fees (the same work charted again counts once). The Diagnosis & conversion tab follows it to completion.',
   hygiene_reappointment: 'Hygiene visits where the patient left with the next visit already booked.',
   broken_appointments: 'No-shows and cancellations for visits in these dates (up to today).',
   broken_rate: 'Broken visits out of kept plus broken visits.',
@@ -49,9 +51,9 @@ const COLS = {
   source: 'Came from', created_at: 'Made', name: 'Plan', status: 'Status', presented: 'Presented', accepted: 'Accepted', start_time: 'Visit', reappointed: 'Next visit booked',
   broken_reason: 'Reason', rebooked_for: 'Rebooked for', procedures: 'Procedures', oldest: 'Planned since', balance: 'Balance', d90_plus: 'Over 90 days',
   insurance_pending: 'Insurance expected', patient_portion: 'Patient owes', claim_id: 'Claim', carrier: 'Insurance', submitted_at: 'Sent', days: 'Days waiting',
-  estimated_amount: 'Expected', due_date: 'Due', last_contacted_at: 'Last contacted', production: 'Scheduled', date: 'Date', start: 'From', end: 'To', minutes: 'Minutes',
+  estimated_amount: 'Expected', due_date: 'Due', exam_type: 'Exam', completed: 'Completed', open: 'Still open', stage: 'Next step', last_contacted_at: 'Last contacted', production: 'Scheduled', date: 'Date', start: 'From', end: 'To', minutes: 'Minutes',
 };
-const MONEY_COLS = new Set(['amount', 'presented', 'accepted', 'balance', 'd90_plus', 'insurance_pending', 'patient_portion', 'estimated_amount', 'production']);
+const MONEY_COLS = new Set(['amount', 'presented', 'accepted', 'balance', 'd90_plus', 'insurance_pending', 'patient_portion', 'estimated_amount', 'production', 'completed', 'open']);
 
 const whole = (c) => money(c).replace(/\.00$/, '');
 export function fmtMetric(m, v = m.value) {
@@ -200,7 +202,8 @@ export default function Metrics() {
     if (filters.location_id) q.set('location_id', filters.location_id);
     return q.toString();
   }, [period, params, filters.provider_id, filters.location_id]);
-  const { data, error, reload } = useApi(`/metrics?${query}`);
+  const tab = params.get('tab') === 'diagnosis' ? 'diagnosis' : 'numbers';
+  const { data, error, reload } = useApi(tab === 'numbers' ? `/metrics?${query}` : null);
   const open = params.get('metric');
   const set = (patch) => {
     const next = new URLSearchParams(params);
@@ -208,7 +211,10 @@ export default function Metrics() {
     setParams(next, { replace: true });
   };
   const byKey = useMemo(() => new Map((data?.metrics || []).map((m) => [m.key, m])), [data]);
-  useCommands(PERIODS.map(([k, l]) => ({ id: `metrics-${k}`, label: `Metrics: ${l}`, hint: 'Practice numbers', run: () => set({ period: k, from: '', to: '' }) })));
+  useCommands([
+    ...PERIODS.map(([k, l]) => ({ id: `metrics-${k}`, label: `Metrics: ${l}`, hint: 'Practice numbers', run: () => set({ tab: '', period: k, from: '', to: '' }) })),
+    { id: 'metrics-diagnosis', label: 'Metrics: Diagnosis & conversion', hint: 'Treatment diagnosed at exams, and how much gets done', run: () => set({ tab: 'diagnosis', metric: '' }) },
+  ]);
   const canSetGoal = user?.role === 'admin';
   const current = open ? byKey.get(open) : null;
 
@@ -218,13 +224,15 @@ export default function Metrics() {
         <div>
           <h1 style={{ margin: 0 }}>Practice metrics</h1>
           <div className="muted" style={{ fontSize: 13 }}>
-            {data ? `${fmtDate(data.from)}${data.to !== data.from ? ` – ${fmtDate(data.to)}` : ''} · compared with ${fmtDate(data.previous.from)}${data.previous.to !== data.previous.from ? ` – ${fmtDate(data.previous.to)}` : ''} and last year` : 'Loading…'}
+            {tab === 'diagnosis' ? 'Treatment diagnosed at exams, and how much of it gets done' : data ? `${fmtDate(data.from)}${data.to !== data.from ? ` – ${fmtDate(data.to)}` : ''} · compared with ${fmtDate(data.previous.from)}${data.previous.to !== data.previous.from ? ` – ${fmtDate(data.previous.to)}` : ''} and last year` : 'Loading…'}
           </div>
         </div>
         <div className="mx-filters">
-          <div className="mx-seg" role="group" aria-label="Dates">
-            {PERIODS.map(([k, l]) => <button key={k} type="button" className={period === k ? 'active' : ''} aria-pressed={period === k} onClick={() => set({ period: k, from: '', to: '' })}>{l}</button>)}
-          </div>
+          {tab === 'numbers' && (
+            <div className="mx-seg" role="group" aria-label="Dates">
+              {PERIODS.map(([k, l]) => <button key={k} type="button" className={period === k ? 'active' : ''} aria-pressed={period === k} onClick={() => set({ period: k, from: '', to: '' })}>{l}</button>)}
+            </div>
+          )}
           {offices.length > 1 && (
             <select aria-label="Office" value={filters.location_id} onChange={(e) => set({ location_id: e.target.value })}>
               <option value="">All offices</option>
@@ -239,6 +247,11 @@ export default function Metrics() {
           )}
         </div>
       </div>
+      <div className="mx-seg" role="tablist" aria-label="Metrics view" style={{ alignSelf: 'flex-start' }}>
+        <button type="button" role="tab" aria-selected={tab === 'numbers'} className={tab === 'numbers' ? 'active' : ''} onClick={() => set({ tab: '' })}>Practice numbers</button>
+        <button type="button" role="tab" aria-selected={tab === 'diagnosis'} className={tab === 'diagnosis' ? 'active' : ''} onClick={() => set({ tab: 'diagnosis', metric: '' })}>Diagnosis &amp; conversion</button>
+      </div>
+      {tab === 'diagnosis' ? <DiagnosisConversion /> : (<>
       <ErrorBox error={error} />
 
       {data?.areas?.length > 0 && (
@@ -267,8 +280,9 @@ export default function Metrics() {
         </section>
       ))}
       {data && <p className="muted mx-foot">The same numbers appear in the metric emails and on Reports → Practice KPIs. Open any number to see what it counts and the rows behind it.</p>}
+      </>)}
 
-      {current && <Drill m={current} query={query} filters={filters} canSetGoal={canSetGoal} onGoal={reload} onClose={() => set({ metric: '' })} />}
+      {tab === 'numbers' && current && <Drill m={current} query={query} filters={filters} canSetGoal={canSetGoal} onGoal={reload} onClose={() => set({ metric: '' })} />}
     </div>
   );
 }

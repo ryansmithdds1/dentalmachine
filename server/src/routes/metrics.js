@@ -1,8 +1,9 @@
 import { Router } from 'express';
 import { can, HttpError } from '../auth.js';
 import { restricted } from '../officeaccess.js';
-import { audit, findOr404, practiceNow } from '../util.js';
-import { METRICS, BENCHMARKS, compareMetrics, metricRows, goalToValue, isDate, addDays, previousRange } from '../metrics.js';
+import { audit, findOr404, practiceNow, toCsv } from '../util.js';
+import { METRICS, BENCHMARKS, compareMetrics, metricRows, goalToValue, isDate, addDays, previousRange, diagnosisRunning, examValues, EXAM_VALUE_HORIZONS } from '../metrics.js';
+import { diagnosisFunnel, diagnosisPatients, EXAM_TYPES, STAGES } from '../diagnosis.js';
 import { areasForImprovement } from '../digests.js';
 
 const requireAdmin = (req, _res, next) => (req.user.role === 'admin' ? next() : next(new HttpError(403, 'Administrator access required')));
@@ -84,6 +85,132 @@ export default function metricRoutes({ db }) {
     // Seeing who is behind the numbers is looking at patients' records: logged like any other report view.
     await audit(db, req, 'metrics.drill_down', 'metrics', null, { metric: req.params.key, from: range.from, to: range.to, rows: out.count, ...s });
     res.json({ ...out, from: range.from, to: range.to });
+  });
+
+  // ---- Diagnosis & conversion (DX1–DX2; diagnosis.js, docs/metrics.md) ----
+  // Longer look-backs for the funnel (cohorts need time to convert); the rest are the usual periods.
+  async function funnelRange(req) {
+    const m = /^last_(3|6|12)_months$/.exec(String(req.query.period || ''));
+    if (!m) return rangeFor(req);
+    const today = (await practiceNow(db, req.user.practice_id)).slice(0, 10);
+    const d = new Date(`${today.slice(0, 7)}-15T12:00:00Z`);
+    d.setUTCMonth(d.getUTCMonth() - (Number(m[1]) - 1));
+    return { from: `${d.toISOString().slice(0, 7)}-01`, to: today, today, period: req.query.period };
+  }
+  const examTypeOf = (req) => {
+    const t = req.query.exam_type ? String(req.query.exam_type) : null;
+    if (t && !EXAM_TYPES[t]) throw new HttpError(400, `exam_type must be ${Object.keys(EXAM_TYPES).join(', ')}`);
+    return t;
+  };
+
+  // Diagnosed so far today, this week and this month, against the goal. Without provider_id it shows the signed-in
+  // provider's own numbers when their login is linked to one (the chip on the schedule); scope=practice (or no
+  // linked provider) shows the practice, and per_provider=1 adds a row per provider (reports:read only).
+  r.get('/diagnosis/running', async (req, res) => {
+    const pid = req.user.practice_id;
+    const s = await scopeFor(req);
+    if (!req.query.provider_id && req.query.scope !== 'practice' && !s.providerId) {
+      const mine = await db.get('SELECT id FROM providers WHERE practice_id = ? AND user_id = ? AND active = 1', pid, req.user.id);
+      if (mine) s.providerId = mine.id;
+    }
+    const today = (await practiceNow(db, pid)).slice(0, 10);
+    const perProvider = !!req.query.per_provider && can(req.user, 'reports:read') && !s.providerId;
+    const out = await diagnosisRunning(db, pid, { today, ...s, perProvider });
+    const provider = s.providerId ? await db.get('SELECT id, name, type FROM providers WHERE id = ?', s.providerId) : null;
+    res.json({ ...out, provider });
+  });
+
+  // The funnel: exams → diagnosed → presented → accepted → scheduled → completed, by provider, exam type and month.
+  // ?format=csv downloads it (audited, like every export).
+  r.get('/diagnosis/funnel', async (req, res) => {
+    const pid = req.user.practice_id;
+    const s = await scopeFor(req);
+    const range = await funnelRange(req);
+    const examType = examTypeOf(req);
+    const out = await diagnosisFunnel(db, pid, { from: range.from, to: range.to, examType, ...s });
+    if (req.query.format === 'csv') {
+      const rows = [];
+      const push = (provider, type, x) => rows.push({ provider, type, ...x });
+      for (const p of out.providers) {
+        for (const t of p.by_exam_type) if (t.exams) push(p.name, t.label, t);
+        push(p.name, 'All exams', p.total);
+      }
+      for (const t of out.by_exam_type) if (t.exams) push('Whole practice (each exam once)', t.label, t);
+      push('Whole practice (each exam once)', 'All exams', out.totals);
+      const d = (c) => (c == null ? '' : (c / 100).toFixed(2));
+      const csv = toCsv(rows, [
+        ['Provider', (x) => x.provider], ['Exam type', (x) => x.type], ['Exams', (x) => x.exams], ['Patients', (x) => x.patients],
+        ['Diagnosed (office fee)', (x) => d(x.diagnosed)], ['Expected after PPO (estimate)', (x) => d(x.expected)], ['Diagnosed per exam', (x) => d(x.per_exam)],
+        ['Presented', (x) => d(x.presented)], ['Accepted', (x) => d(x.accepted)], ['Scheduled', (x) => d(x.scheduled)], ['Completed', (x) => d(x.completed)], ['Still open', (x) => d(x.still_open)],
+        ['Presented % of diagnosed', (x) => x.step_pct.presented ?? ''], ['Accepted % of presented', (x) => x.step_pct.accepted ?? ''], ['Scheduled % of accepted', (x) => x.step_pct.scheduled ?? ''],
+        ['Completed % of scheduled', (x) => x.step_pct.completed ?? ''], ['Completed % of diagnosed', (x) => x.of_diagnosed_pct.completed ?? ''],
+        ['Median days to schedule', (x) => x.median_days_to_schedule ?? ''], ['Median days to complete', (x) => x.median_days_to_complete ?? ''],
+      ]);
+      await audit(db, req, 'diagnosis.export', 'metrics', null, { from: range.from, to: range.to, rows: rows.length, exam_type: examType, ...s });
+      res.set('Content-Type', 'text/csv; charset=utf-8');
+      res.set('Content-Disposition', `attachment; filename="diagnosis-conversion-${range.from}-to-${range.to}.csv"`);
+      return res.send(csv);
+    }
+    res.json({ ...out, period: range.period, today: range.today, provider_id: s.providerId, location_id: s.locationId, exam_type: examType });
+  });
+
+  // The patients behind the funnel: each exam with what was diagnosed and what is still open (stage=open, the
+  // default), everything (all), or the work stopped at one step (diagnosed, presented, accepted, scheduled).
+  r.get('/diagnosis/patients', async (req, res) => {
+    const pid = req.user.practice_id;
+    const s = await scopeFor(req);
+    const range = await funnelRange(req);
+    const examType = examTypeOf(req);
+    const stage = String(req.query.stage || 'open');
+    if (!['open', 'all', ...STAGES].includes(stage)) throw new HttpError(400, 'stage must be open, all or one of the steps');
+    const out = await diagnosisPatients(db, pid, { from: range.from, to: range.to, examType, ...s }, { stage });
+    const limit = Math.min(Number(req.query.limit) || 500, 2000);
+    await audit(db, req, 'metrics.drill_down', 'metrics', null, { metric: 'diagnosis', stage, from: range.from, to: range.to, rows: out.count, exam_type: examType, ...s });
+    res.json({ ...out, rows: out.rows.slice(0, limit), from: range.from, to: range.to });
+  });
+
+  // ---- The value of an exam (EX2): learned per exam type and horizon, with the owner's own values ----
+  r.get('/exam-values', async (req, res) => {
+    const pid = req.user.practice_id;
+    const s = await scopeFor(req);
+    const horizons = req.query.horizon ? [Number(req.query.horizon)] : EXAM_VALUE_HORIZONS;
+    if (!horizons.every((x) => EXAM_VALUE_HORIZONS.includes(x))) throw new HttpError(400, `horizon must be ${EXAM_VALUE_HORIZONS.join(', ')} (months)`);
+    const today = (await practiceNow(db, pid)).slice(0, 10);
+    const out = {};
+    for (const hz of horizons) out[hz] = await examValues(db, pid, { ...s, horizon: hz, today });
+    res.json({ today, exam_types: EXAM_TYPES, horizons, provider_id: s.providerId, location_id: s.locationId, values: out });
+  });
+
+  // The owner's own value for an exam type and horizon (cents), or null to go back to the learned value.
+  r.put('/exam-values', requireAdmin, async (req, res) => {
+    const pid = req.user.practice_id;
+    const b = req.body || {};
+    if (!EXAM_TYPES[b.exam_type]) throw new HttpError(400, `exam_type must be ${Object.keys(EXAM_TYPES).join(', ')}`);
+    const horizon = Number(b.horizon_months);
+    if (!EXAM_VALUE_HORIZONS.includes(horizon)) throw new HttpError(400, `horizon_months must be ${EXAM_VALUE_HORIZONS.join(', ')}`);
+    const clear = b.value_cents === null;
+    const value = Number(b.value_cents);
+    if (!clear && (!Number.isInteger(value) || value < 0 || value > 10_000_000)) throw new HttpError(400, 'value_cents must be whole cents from 0 to $100,000');
+    try {
+      await db.get('SELECT 1 FROM exam_values WHERE 1 = 0');
+    } catch (err) {
+      if (/exam_values/.test(String(err?.message))) throw new HttpError(503, 'Exam values can’t be saved yet: the database needs its latest update');
+      throw err;
+    }
+    const before = await db.get('SELECT * FROM exam_values WHERE practice_id = ? AND exam_type = ? AND horizon_months = ?', pid, b.exam_type, horizon);
+    if (clear) {
+      // Configuration: taking an override away deletes it (audited with what it was).
+      if (before) await db.run('DELETE FROM exam_values WHERE id = ?', before.id);
+    } else if (before) {
+      await db.run("UPDATE exam_values SET value_cents = ?, set_by = ?, set_at = datetime('now') WHERE id = ?", value, req.user.id, before.id);
+    } else {
+      await db.run('INSERT INTO exam_values (practice_id, exam_type, horizon_months, value_cents, set_by) VALUES (?, ?, ?, ?, ?)', pid, b.exam_type, horizon, value, req.user.id);
+    }
+    const after = clear ? null : await db.get('SELECT * FROM exam_values WHERE practice_id = ? AND exam_type = ? AND horizon_months = ?', pid, b.exam_type, horizon);
+    await audit(db, req, clear ? 'exam_value.clear' : before ? 'exam_value.change' : 'exam_value.set', 'exam_values', after?.id ?? before?.id ?? null,
+      { exam_type: b.exam_type, horizon_months: horizon, reason: b.reason ? String(b.reason).slice(0, 300) : undefined },
+      { before: before ? { value_cents: before.value_cents } : undefined, after: after ? { value_cents: after.value_cents } : undefined });
+    res.json({ exam_type: b.exam_type, horizon_months: horizon, value_cents: after?.value_cents ?? null });
   });
 
   // ---- Goals ----

@@ -7,6 +7,7 @@ import { useLiveEvents } from '../live.js';
 import { money, fmtTime, shiftDate, practiceToday } from '../format.js';
 import { Badge } from '../components/ui.jsx';
 import OpportunityDay from '../components/opportunities/OpportunityDay.jsx';
+import DiagnosisChip from '../components/DiagnosisChip.jsx';
 import ReadinessHuddle from '../components/readiness/ReadinessHuddle.jsx';
 import ReferralHuddle from '../components/referrals/ReferralHuddle.jsx';
 import MomentsCard from '../components/MomentsCard.jsx';
@@ -91,6 +92,7 @@ export default function Dashboard() {
         </div>
       )}
 
+      <DiagnosisChip />
       {can('schedule:read') && <HuddlePlanCard date={date} locationId={getLocationId()} />}
       {can('clinical:read') && <div style={{ marginTop: 16 }}><OpportunityDay date={date} locationId={getLocationId()} /></div>}
       {can('clinical:read') && <ReadinessHuddle date={date} />}
