@@ -600,8 +600,8 @@ XR3. **Patient education:** the overlay (with the dentist's accepted findings on
 EX1. The business view and huddle show today's exams by type: new patient, recall/periodic, emergency/limited, perio
      (from the codes on today's visits), vs a daily target per type.
 EX2. **Value of an exam, learned from the practice's own history:** for each exam type (and provider), the average
-     production diagnosed and actually completed within 3, 6 and 12 months after the exam (from the diagnosis &
-     conversion funnel, DX) — e.g. "a new patient exam is worth $1,840 over 12 months; recall $610; emergency $1,120".
+     production diagnosed and actually completed within 1, 3 and 5 months after the exam (from the diagnosis &
+     conversion funnel, DX) — e.g. "a new patient exam is worth $1,840 within 5 months; recall $610; emergency $1,120".
      The owner can override with their own values.
 EX3. **Enough exams to support production:** today's (and this week's/month's) exams × value = the future production
      they're likely to generate, compared with the production goal for the coming months — "This month's exams
