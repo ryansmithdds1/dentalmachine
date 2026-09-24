@@ -9,6 +9,7 @@ import {
   utcToLocal, localToUtc, unpaidBreakMinutes, workedMinutes, classifyPunches, clockInCheck, clockOutCheck, fmt12, periodFor, previousPeriod, nextPeriod,
   summarize, ptoDays, ptoAccrual, pinProblem, usHolidays, buildExport, reconcile, detailHash,
 } from '../timeclock.js';
+import { bonusesForPayroll, withBonuses } from '../bonuspay.js';
 
 // Time clock, staff schedules and payroll (TC1–TC5; docs/workflows/specs/TC-timeclock.md).
 //
@@ -822,18 +823,23 @@ export default function timeclockRoutes({ db }) {
     const review = await periodReview(db, req.user.practice_id, { period, settings, tz, today, nowMs: nowMs(req) });
     const waiting = review.people.filter((p) => !p.approval && p.minutes.total > 0);
     if (waiting.length && req.query.partial !== '1') throw new HttpError(409, `Approve everyone’s hours first — waiting: ${waiting.map((p) => p.name).join(', ')}`, { waiting: waiting.map((p) => p.user_id) });
-    const people = review.people.filter((p) => p.approval).map((p) => ({ user_id: p.user_id, name: p.name, payroll_id: p.payroll_id, ...JSON.parse(p.approval.detail) }));
+    // Approved team bonuses for this pay period ride along as their own pay type (bonuspay.js).
+    const bonus = await bonusesForPayroll(db, req.user.practice_id, period.start);
+    const people = withBonuses(review.people.filter((p) => p.approval).map((p) => ({ user_id: p.user_id, name: p.name, payroll_id: p.payroll_id, ...JSON.parse(p.approval.detail) })), bonus);
     if (!people.length) throw new HttpError(409, 'No approved hours in this pay period yet');
     const file = buildExport(format, { people, start: period.start, end: period.end, settings });
     const check = reconcile(people, file.lines);
     if (!check.ok) throw new HttpError(500, 'The export didn’t match the approved hours — nothing was downloaded', check);
+    const bonusCents = file.money.reduce((t, m) => t + m.cents, 0);
+    if (bonusCents !== bonus.total_cents) throw new HttpError(500, 'The export didn’t match the approved bonuses — nothing was downloaded', { approved_cents: bonus.total_cents, exported_cents: bonusCents });
     const detail = {};
     for (const l of file.lines) detail[l.user_id] = { ...(detail[l.user_id] || {}), [l.type]: ((detail[l.user_id] || {})[l.type] || 0) + l.minutes };
     const id = await insert(db, 'payroll_exports', {
       practice_id: req.user.practice_id, period_start: period.start, period_end: period.end, format, filename: file.filename, content_hash: file.hash,
       people: people.length, total_minutes: check.exported_minutes, detail: JSON.stringify(detail), partial: waiting.length ? 1 : 0, created_by: req.user.id,
+      bonus_cents: bonusCents, bonus_detail: bonus.approval_ids.length ? JSON.stringify({ approval_ids: bonus.approval_ids, by_user: Object.fromEntries(file.money.map((m) => [m.user_id, m.cents])) }) : null,
     });
-    await audit(db, req, 'timeclock.export', 'payroll_exports', id, { format, period_start: period.start, period_end: period.end, people: people.length, total_minutes: check.exported_minutes, content_hash: file.hash });
+    await audit(db, req, 'timeclock.export', 'payroll_exports', id, { format, period_start: period.start, period_end: period.end, people: people.length, total_minutes: check.exported_minutes, content_hash: file.hash, ...(bonusCents ? { bonus_cents: bonusCents, bonus_approval_ids: bonus.approval_ids } : {}) });
     res.set({ 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="${file.filename}"`, 'X-Export-Id': String(id), 'X-Content-Hash': file.hash }).send(file.csv);
   });
   r.get('/timeclock/exports', async (req, res) => {

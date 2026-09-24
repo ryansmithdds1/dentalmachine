@@ -72,6 +72,7 @@ export const PERMISSION_CATALOG = {
   'officedocs:read': 'See office documents (contracts, licences, policies, invoices)',
   'officedocs:write': 'Add and file office documents',
   'checklists:manage': 'Set up checklists by position, see the checklist dashboard and compliance log, resolve checklist flags',
+  'bonus:manage': 'Set up team bonus plans, see everyone’s bonus numbers, approve and reopen bonus periods',
   'fees:manage': 'Change fees: raise fees, approve payer fee schedules, schedule and cancel fee changes',
   'phones:coach': 'Phones: see everyone’s call scores and missed calls, coach and rate calls, edit phone protocols',
   'reviews:manage': 'Handle private patient feedback, review-request settings and team shout-outs',

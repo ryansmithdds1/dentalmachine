@@ -25,6 +25,7 @@ import insuranceRoutes from './routes/insurance.js';
 import verificationRoutes from './routes/verification.js';
 import feeScheduleRoutes from './routes/feeschedules.js';
 import marketingRoutes from './routes/marketing.js';
+import bonusRoutes from './routes/bonus.js';
 import cardRoutes from './routes/cards.js';
 import doctorNoteRoutes from './routes/doctornotes.js';
 import officeMoveRoutes from './routes/officemoves.js';
@@ -419,6 +420,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(savedReportRoutes({ db, messenger }));
   api.use(surveyRoutes({ db, messenger, config }));
   api.use(timeclockRoutes({ db }));
+  api.use(bonusRoutes({ db }));
   api.use(businessRoutes({ db }));
   api.use(inventoryRoutes({ db }));
   api.use(queryBuilderRoutes({ db }));

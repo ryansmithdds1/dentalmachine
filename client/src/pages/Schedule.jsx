@@ -27,6 +27,7 @@ import { useDayReadiness } from '../components/readiness/ReadinessBadge.jsx';
 import { OptimizerLauncher } from '../components/optimizer/OptimizerPanel.jsx';
 import { useOptimizer } from '../components/optimizer/useOptimizer.js';
 import { useBusinessView, BusinessToggle, BusinessPanel, BusinessOverlay } from '../components/business/ScheduleBusiness.jsx';
+import BonusBar from '../components/bonus/BonusBar.jsx';
 
 // "Fit" sizes the grid so the whole office day fits the screen without scrolling; S/M/L are fixed sizes.
 const ZOOMS = [{ label: 'Fit', px: 0 }, { label: 'S', px: 1 }, { label: 'M', px: 1.5 }, { label: 'L', px: 2.2 }];
@@ -746,6 +747,7 @@ export default function Schedule() {
 
   return (
     <div className="schedule-page">
+      <BonusBar />
       <div className="sched-toolbar">
         <div className="sched-nav">
           <button className="icon-btn" onClick={() => go({ date: shiftDate(date, view === 'week' ? -7 : -1) })} aria-label="Previous" title="Previous (←)"><ChevronLeft size={18} /></button>

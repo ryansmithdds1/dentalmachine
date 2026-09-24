@@ -4864,6 +4864,92 @@ CREATE TABLE IF NOT EXISTS xray_ai_reads (
 );
 CREATE INDEX IF NOT EXISTS idx_xray_ai_reads_doc ON xray_ai_reads(document_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_xray_ai_reads_practice ON xray_ai_reads(practice_id, created_at);
+-- Team bonus module (BN1-BN3: bonus.js, routes/bonus.js, docs/workflows/specs/BN-bonus.md). Off until the owner
+-- turns it on. Configuration: one row per practice, changes audited.
+CREATE TABLE IF NOT EXISTS bonus_settings (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL UNIQUE REFERENCES practices(id),
+  enabled INTEGER NOT NULL DEFAULT 0,
+  show_dashboard INTEGER NOT NULL DEFAULT 1,
+  show_schedule INTEGER NOT NULL DEFAULT 1,
+  pay_type_label TEXT NOT NULL DEFAULT 'Bonus',
+  updated_by INTEGER REFERENCES users(id),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- A bonus plan (one of the plan types). Never deleted: status active / off / archived. Its rules live in versions.
+CREATE TABLE IF NOT EXISTS bonus_plans (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  type TEXT NOT NULL CHECK (type IN ('team_collections','daily_goal','spiff','provider_pct','scorecard','front_desk')),
+  name TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'off' CHECK (status IN ('active','off','archived')),
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_by INTEGER REFERENCES users(id),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- Each change to a plan's rules is a new, never-edited version with the date it takes effect from. A period uses
+-- the newest version in effect on its first day.
+CREATE TABLE IF NOT EXISTS bonus_plan_versions (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  plan_id INTEGER NOT NULL REFERENCES bonus_plans(id),
+  version INTEGER NOT NULL,
+  effective_from TEXT NOT NULL,
+  config TEXT NOT NULL,
+  reason TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (plan_id, version)
+);
+-- The owner's approval of one plan's period: the whole calculation as it stood (detail + hash), the pay period
+-- whose payroll export carries it, and who approved. Reopened (with a reason), never deleted; at most one live
+-- approval per plan and period (partial unique index), so approving twice is harmless.
+CREATE TABLE IF NOT EXISTS bonus_approvals (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  plan_id INTEGER NOT NULL REFERENCES bonus_plans(id),
+  plan_version_id INTEGER NOT NULL REFERENCES bonus_plan_versions(id),
+  period_start TEXT NOT NULL,
+  period_end TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'approved' CHECK (status IN ('approved','reopened')),
+  earned_cents INTEGER NOT NULL DEFAULT 0,
+  cap_cut_cents INTEGER NOT NULL DEFAULT 0,
+  clawback_cents INTEGER NOT NULL DEFAULT 0,
+  total_cents INTEGER NOT NULL DEFAULT 0,
+  people INTEGER NOT NULL DEFAULT 0,
+  detail TEXT,
+  detail_hash TEXT,
+  payroll_period_start TEXT,
+  approved_by INTEGER REFERENCES users(id),
+  approved_at TEXT,
+  reopened_by INTEGER REFERENCES users(id),
+  reopened_at TEXT,
+  reopen_reason TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- One person's line in an approval: earned, cut by a cap, taken back for earlier periods (clawbacks: JSON
+-- [{ approval_id, cents }]) and what is paid. Never edited.
+CREATE TABLE IF NOT EXISTS bonus_payout_lines (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  approval_id INTEGER NOT NULL REFERENCES bonus_approvals(id),
+  plan_id INTEGER NOT NULL REFERENCES bonus_plans(id),
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  period_start TEXT NOT NULL,
+  earned_cents INTEGER NOT NULL DEFAULT 0,
+  cap_cut_cents INTEGER NOT NULL DEFAULT 0,
+  clawback_cents INTEGER NOT NULL DEFAULT 0,
+  net_cents INTEGER NOT NULL DEFAULT 0,
+  clawbacks TEXT,
+  detail TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (approval_id, user_id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_bonus_approval_once ON bonus_approvals(plan_id, period_start) WHERE status = 'approved';
+CREATE INDEX IF NOT EXISTS idx_bonus_approvals_payroll ON bonus_approvals(practice_id, payroll_period_start, status);
+CREATE INDEX IF NOT EXISTS idx_bonus_lines_user ON bonus_payout_lines(practice_id, user_id);
+CREATE INDEX IF NOT EXISTS idx_bonus_versions_plan ON bonus_plan_versions(plan_id, effective_from);
 `;
 
 // Columns added after the first release. SQLite has no ADD COLUMN IF NOT EXISTS, so check first.
@@ -5439,6 +5525,9 @@ const COLUMNS = [
   ['tooth_conditions', 'xray_finding_id', 'INTEGER REFERENCES xray_findings(id)'],
   ['documents', 'ai_engine', 'TEXT'],
   ['documents', 'ai_vendor_ref', 'TEXT'],
+  // Team bonus module (bonus.js): approved bonuses carried by a payroll file (a separate pay type, in cents).
+  ['payroll_exports', 'bonus_cents', 'INTEGER NOT NULL DEFAULT 0'],
+  ['payroll_exports', 'bonus_detail', 'TEXT'],
 ];
 
 // CHECK constraints widened after release: [table, constraint name on Postgres, old text, new text].

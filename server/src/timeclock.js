@@ -310,21 +310,32 @@ const ADP_CODES = { doubletime: 'DT', pto: 'V', holiday: 'H' };
 const PAYCHEX_COMPONENTS = { regular: 'Hourly', overtime: 'Overtime', doubletime: 'Double Time', pto: 'PTO', holiday: 'Holiday' };
 const QB_ITEMS = { regular: 'Hourly', overtime: 'Overtime Hourly', doubletime: 'Double Overtime Hourly', pto: 'Paid Time Off', holiday: 'Holiday Pay' };
 
+// Approved team bonuses (bonus_cents on a person, from bonuspay.js) travel as their own pay type in money, not
+// hours: a Bonus column (Gusto, plain CSV), an earnings code line (ADP, "B"), a Bonus pay component (Paychex) or a
+// Bonus line (QuickBooks), each with the amount in dollars. Without bonuses the file is exactly as before.
+export const BONUS_PAY_TYPE = 'bonus';
+const dollarsOf = (cents) => (cents / 100).toFixed(2);
+
 export function buildExport(format, { people, start, end, settings = {} }) {
   if (!EXPORT_FORMATS[format]) throw new Error(`Unknown export format ${format}`);
   const lines = [];
   const note = (user_id, type, minutes) => { if (minutes) lines.push({ user_id, type, minutes }); };
+  const money = [];
+  const bonusOf = (p) => Math.round(p.bonus_cents || 0);
+  const noteBonus = (p) => { if (bonusOf(p)) money.push({ user_id: p.user_id, type: BONUS_PAY_TYPE, cents: bonusOf(p) }); };
+  const anyBonus = people.some((p) => bonusOf(p));
   const sorted = [...people].sort((a, b) => String(a.name).localeCompare(String(b.name)));
   let rows;
   let columns;
   if (format === 'gusto') {
     rows = sorted.map((p) => {
       for (const t of PAY_TYPES) note(p.user_id, t, p.minutes[t]);
+      noteBonus(p);
       return { ...splitName(p.name), ...p };
     });
     columns = [['last_name', (r) => r.last], ['first_name', (r) => r.first], ['employee_id', (r) => r.payroll_id || ''], ['regular_hours', (r) => hours(r.minutes.regular)],
       ['overtime_hours', (r) => hours(r.minutes.overtime)], ['double_overtime_hours', (r) => hours(r.minutes.doubletime)], ['pto_hours', (r) => hours(r.minutes.pto)],
-      ['holiday_hours', (r) => hours(r.minutes.holiday)]];
+      ['holiday_hours', (r) => hours(r.minutes.holiday)], ...(anyBonus ? [['bonus', (r) => dollarsOf(bonusOf(r))]] : [])];
   } else if (format === 'adp') {
     // ADP Workforce Now pay data import (EPI): regular and overtime on one line, each other kind of hours on its own line with its code.
     const batch = `DM${start.replace(/-/g, '').slice(2)}`;
@@ -338,38 +349,58 @@ export function buildExport(format, { people, start, end, settings = {} }) {
         rows.push({ p, reg: null, ot: null, code: ADP_CODES[t], amount: p.minutes[t] });
         note(p.user_id, t, p.minutes[t]);
       }
+      if (bonusOf(p)) {
+        rows.push({ p, reg: null, ot: null, code: '', amount: null, bonus: bonusOf(p) });
+        noteBonus(p);
+      }
     }
     columns = [['Co Code', () => settings.adp_company_code || ''], ['Batch ID', () => batch], ['File #', (r) => r.p.payroll_id || ''], ['Employee Name', (r) => r.p.name],
-      ['Reg Hours', (r) => (r.reg == null ? '' : hours(r.reg))], ['O/T Hours', (r) => (r.ot == null ? '' : hours(r.ot))], ['Hours 3 Code', (r) => r.code], ['Hours 3 Amount', (r) => (r.amount == null ? '' : hours(r.amount))]];
+      ['Reg Hours', (r) => (r.reg == null ? '' : hours(r.reg))], ['O/T Hours', (r) => (r.ot == null ? '' : hours(r.ot))], ['Hours 3 Code', (r) => r.code], ['Hours 3 Amount', (r) => (r.amount == null ? '' : hours(r.amount))],
+      ...(anyBonus ? [['Earnings 3 Code', (r) => (r.bonus ? 'B' : '')], ['Earnings 3 Amount', (r) => (r.bonus ? dollarsOf(r.bonus) : '')]] : [])];
   } else if (format === 'paychex') {
     rows = [];
-    for (const p of sorted) for (const t of PAY_TYPES) {
-      if (!p.minutes[t]) continue;
-      rows.push({ p, t, m: p.minutes[t] });
-      note(p.user_id, t, p.minutes[t]);
+    for (const p of sorted) {
+      for (const t of PAY_TYPES) {
+        if (!p.minutes[t]) continue;
+        rows.push({ p, t, m: p.minutes[t] });
+        note(p.user_id, t, p.minutes[t]);
+      }
+      if (bonusOf(p)) {
+        rows.push({ p, t: BONUS_PAY_TYPE, m: null, bonus: bonusOf(p) });
+        noteBonus(p);
+      }
     }
-    columns = [['Client ID', () => settings.paychex_client_id || ''], ['Worker ID', (r) => r.p.payroll_id || ''], ['Worker Name', (r) => r.p.name], ['Pay Component', (r) => PAYCHEX_COMPONENTS[r.t]],
-      ['Hours', (r) => hours(r.m)], ['Period Start', () => start], ['Period End', () => end]];
+    columns = [['Client ID', () => settings.paychex_client_id || ''], ['Worker ID', (r) => r.p.payroll_id || ''], ['Worker Name', (r) => r.p.name], ['Pay Component', (r) => (r.bonus ? 'Bonus' : PAYCHEX_COMPONENTS[r.t])],
+      ['Hours', (r) => (r.m == null ? '' : hours(r.m))], ['Period Start', () => start], ['Period End', () => end], ...(anyBonus ? [['Amount', (r) => (r.bonus ? dollarsOf(r.bonus) : '')]] : [])];
   } else if (format === 'quickbooks') {
     // QuickBooks time activities: one line per person, day and pay item, with the duration as hh:mm (exact to the minute).
     rows = [];
-    for (const p of sorted) for (const d of p.days || []) for (const t of PAY_TYPES) {
-      if (!d[t]) continue;
-      rows.push({ p, d, t });
-      note(p.user_id, t, d[t]);
+    for (const p of sorted) {
+      for (const d of p.days || []) for (const t of PAY_TYPES) {
+        if (!d[t]) continue;
+        rows.push({ p, d, t });
+        note(p.user_id, t, d[t]);
+      }
+      if (bonusOf(p)) {
+        rows.push({ p, d: { date: end }, t: BONUS_PAY_TYPE, bonus: bonusOf(p) });
+        noteBonus(p);
+      }
     }
-    columns = [['Date', (r) => r.d.date], ['Employee', (r) => r.p.name], ['Employee ID', (r) => r.p.payroll_id || ''], ['Pay Item', (r) => QB_ITEMS[r.t]],
-      ['Duration', (r) => hhmm(r.d[r.t])], ['Hours', (r) => hours(r.d[r.t])], ['Description', () => `Time clock ${start} to ${end}`]];
+    columns = [['Date', (r) => r.d.date], ['Employee', (r) => r.p.name], ['Employee ID', (r) => r.p.payroll_id || ''], ['Pay Item', (r) => (r.bonus ? 'Bonus' : QB_ITEMS[r.t])],
+      ['Duration', (r) => (r.bonus ? '' : hhmm(r.d[r.t]))], ['Hours', (r) => (r.bonus ? '' : hours(r.d[r.t]))], ['Description', (r) => (r.bonus ? `Team bonus paid with ${start} to ${end}` : `Time clock ${start} to ${end}`)],
+      ...(anyBonus ? [['Amount', (r) => (r.bonus ? dollarsOf(r.bonus) : '')]] : [])];
   } else {
     rows = sorted.map((p) => {
       for (const t of PAY_TYPES) note(p.user_id, t, p.minutes[t]);
+      noteBonus(p);
       return p;
     });
     columns = [['Employee', (r) => r.name], ['Payroll ID', (r) => r.payroll_id || ''], ['Period start', () => start], ['Period end', () => end],
-      ...PAY_TYPES.map((t) => [`${PAY_TYPE_LABELS[t]} hours`, (r) => hours(r.minutes[t])]), ['Total hours', (r) => hours(PAY_TYPES.reduce((s, t) => s + r.minutes[t], 0))]];
+      ...PAY_TYPES.map((t) => [`${PAY_TYPE_LABELS[t]} hours`, (r) => hours(r.minutes[t])]), ['Total hours', (r) => hours(PAY_TYPES.reduce((s, t) => s + r.minutes[t], 0))],
+      ...(anyBonus ? [['Bonus ($)', (r) => dollarsOf(bonusOf(r))]] : [])];
   }
   const csv = toCsv(rows, columns);
-  return { csv, lines, filename: `payroll-${format}-${start}-to-${end}.csv`, hash: createHash('sha256').update(csv).digest('hex') };
+  return { csv, lines, money, filename: `payroll-${format}-${start}-to-${end}.csv`, hash: createHash('sha256').update(csv).digest('hex') };
 }
 
 // Approved minutes vs the minutes in an export, by person and pay type. ok when every one matches.

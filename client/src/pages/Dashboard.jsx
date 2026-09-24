@@ -8,6 +8,7 @@ import { money, fmtTime, shiftDate, practiceToday } from '../format.js';
 import { Badge } from '../components/ui.jsx';
 import OpportunityDay from '../components/opportunities/OpportunityDay.jsx';
 import DiagnosisChip from '../components/DiagnosisChip.jsx';
+import BonusCard from '../components/bonus/BonusCard.jsx';
 import ReadinessHuddle from '../components/readiness/ReadinessHuddle.jsx';
 import ReferralHuddle from '../components/referrals/ReferralHuddle.jsx';
 import MomentsCard from '../components/MomentsCard.jsx';
@@ -99,6 +100,7 @@ export default function Dashboard() {
       {can('patients:read') && <ReferralHuddle date={date} />}
       {can('schedule:read') && <MomentsCard date={date} />}
       <div style={{ marginTop: 16 }}><CapacityWidget locationId={getLocationId()} /></div>
+      <BonusCard />
       <div className="card" style={{ marginTop: 16, padding: 0 }}>
         <div className="page-header" style={{ padding: '14px 16px', marginBottom: 0 }}>
           <h2 style={{ margin: 0 }}>Patients {date === today ? 'today' : 'this day'}</h2>

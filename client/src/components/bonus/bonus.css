@@ -1,0 +1,78 @@
+/* Team bonus module (BN1–BN3). Only the app's colour tokens are used, so dark mode follows the theme. */
+.bn-muted { color: var(--muted); }
+.bn-small { font-size: 12.5px; }
+.bn-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.bn-grow { flex: 1 1 auto; min-width: 0; }
+.bn-pill { display: inline-flex; align-items: center; gap: 4px; padding: 1px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 700; background: var(--subtle); color: var(--muted); border: 1px solid var(--border); }
+.bn-pill.ok { background: var(--ok-soft); color: var(--ok); border-color: transparent; }
+.bn-pill.warn { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
+.bn-pill.info { background: var(--info-soft); color: var(--info); border-color: transparent; }
+.bn-pill.danger { background: var(--danger-soft); color: var(--danger); border-color: transparent; }
+
+/* Progress meter */
+.bn-meter { position: relative; height: 8px; border-radius: 999px; background: var(--border); overflow: hidden; }
+.bn-meter > i { position: absolute; inset: 0 auto 0 0; background: var(--primary); border-radius: 999px; }
+.bn-meter > b { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--text); opacity: 0.45; }
+.bn-meter.hit > i { background: var(--ok); }
+.bn-meter.behind > i { background: var(--warn); }
+
+/* Dashboard card */
+.bn-card { margin-top: 16px; }
+.bn-card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.bn-card-head strong { display: inline-flex; align-items: center; gap: 6px; }
+.bn-card-head a { font-size: 13px; display: inline-flex; align-items: center; gap: 3px; color: var(--primary-ink); }
+.bn-plan { padding: 10px 0; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 6px; }
+.bn-plan:first-of-type { border-top: none; padding-top: 0; }
+.bn-plan .name { font-size: 12px; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase; color: var(--muted); }
+.bn-plan .headline { font-size: 14.5px; color: var(--text); }
+.bn-plan .mine { font-size: 13px; color: var(--muted); }
+.bn-plan .mine.ok { color: var(--ok); }
+
+/* Schedule bar */
+.bn-bar { display: flex; align-items: center; gap: 14px; padding: 5px 12px; margin: 0 0 8px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--panel); font-size: 13px; color: var(--text); min-height: 32px; overflow: hidden; }
+.bn-bar .item { display: inline-flex; align-items: center; gap: 8px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bn-bar .item .bn-meter { width: 90px; flex: none; height: 6px; }
+.bn-bar .me { color: var(--muted); }
+.bn-bar .me.ok { color: var(--ok); }
+.bn-bar a { margin-left: auto; color: var(--primary-ink); white-space: nowrap; font-size: 12.5px; }
+@media (max-width: 720px) { .bn-bar .item:nth-of-type(n+2) { display: none; } }
+
+/* My bonus */
+.bn-page { max-width: 900px; }
+.bn-page h1 { margin: 0 0 4px; font-size: 22px; display: flex; align-items: center; gap: 8px; }
+.bn-mine-plan { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; }
+.bn-big { font-size: 26px; font-weight: 700; color: var(--text); }
+.bn-detail { margin: 0; padding-left: 18px; color: var(--muted); font-size: 13px; }
+.bn-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.bn-table th { text-align: left; font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.03em; color: var(--muted); font-weight: 700; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+.bn-table td { padding: 7px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.bn-table td.num, .bn-table th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.bn-table tr.muted td { color: var(--faint); }
+
+/* Settings */
+.bn-settings { display: flex; flex-direction: column; gap: 16px; }
+.bn-switch { display: flex; align-items: center; gap: 10px; font-weight: 600; }
+.bn-switch input { width: 18px; height: 18px; }
+.bn-types { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.bn-type { border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; background: var(--subtle); display: flex; flex-direction: column; gap: 8px; }
+.bn-type h3 { margin: 0; font-size: 15px; }
+.bn-type ul { margin: 0; padding-left: 18px; font-size: 13px; color: var(--muted); }
+.bn-example { font-size: 13px; background: var(--panel); border: 1px dashed var(--border-strong); border-radius: var(--radius-sm); padding: 8px 10px; }
+.bn-example strong { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin-bottom: 2px; }
+.bn-type button { align-self: flex-start; }
+.bn-planrow { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 0; border-top: 1px solid var(--border); }
+.bn-planrow:first-child { border-top: none; }
+.bn-editor { border: 1px solid var(--primary); box-shadow: var(--ring); border-radius: var(--radius); padding: 16px; background: var(--panel); display: flex; flex-direction: column; gap: 12px; }
+.bn-fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px 14px; }
+.bn-fields label, .bn-field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+.bn-fields input, .bn-fields select { font-size: 14px; }
+.bn-checks { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13.5px; }
+.bn-checks label { display: inline-flex; align-items: center; gap: 6px; color: var(--text); flex-direction: row; }
+.bn-lines { display: flex; flex-direction: column; gap: 6px; }
+.bn-line { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)) auto; gap: 8px; align-items: end; }
+.bn-line label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
+.bn-sub { font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); margin: 4px 0 0; }
+.bn-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.bn-notes { margin: 0; padding: 8px 12px 8px 28px; background: var(--warn-soft); color: var(--warn); border-radius: var(--radius-sm); font-size: 13px; }
+.bn-kpis { display: flex; flex-wrap: wrap; gap: 6px; }

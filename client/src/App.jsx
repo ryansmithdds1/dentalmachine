@@ -93,6 +93,7 @@ const Recall = lazy(() => import('./pages/Recall.jsx'));
 const BillPay = lazy(() => import('./pages/public/BillPay.jsx'));
 const Marketing = lazy(() => import('./pages/Marketing.jsx'));
 const XrayReviewPage = lazy(() => import('./pages/XrayReview.jsx'));
+const MyBonus = lazy(() => import('./components/bonus/MyBonus.jsx'));
 const Phones = lazy(() => import('./pages/Phones.jsx'));
 const Verification = lazy(() => import('./pages/Verification.jsx'));
 const Metrics = lazy(() => import('./pages/Metrics.jsx'));
@@ -487,6 +488,7 @@ function Shell({ nav }) {
             <Route path="/referrals" element={<Referrals />} />
             <Route path="/insurance-autopilot" element={<EobAutopilot />} />
             <Route path="/timeclock" element={<TimeClockPage />} />
+            <Route path="/bonus" element={<MyBonus />} />
             <Route path="/deposits" element={<Deposits />} />
             <Route path="/claims" element={<Claims />} />
             <Route path="/claims/:id" element={<ClaimDetail />} />

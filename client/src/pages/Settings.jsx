@@ -23,6 +23,7 @@ import SensorTest from '../components/imaging/SensorTest.jsx';
 import BridgeSetup from '../components/imaging/BridgeSetup.jsx';
 import DayTemplates from '../components/settings/DayTemplates.jsx';
 import FeeScheduleManager from '../components/settings/FeeScheduleManager.jsx';
+import BonusSettings from '../components/bonus/BonusSettings.jsx';
 import ScheduleCardSettings from '../components/cards/ScheduleCardSettings.jsx';
 import OpportunityRules from '../components/opportunities/OpportunityRules.jsx';
 import Digests from '../components/settings/Digests.jsx';
@@ -68,6 +69,7 @@ const RESOURCES = {
 // What each section contains, so the search box finds "lock date" or "two-factor" as well as section names.
 // Fields of the simple list sections (providers, carriers…) are added from their definitions.
 const KEYWORDS = {
+  bonus: 'team bonus incentive spiff collections goal scorecard payroll clawback',
   cards: 'appointment cards card layout customize fields age production preferences urgent flag strikes moved by us doctor notes labels',
   chartshortcuts: 'chart shortcuts quick buttons hotkeys alt aliases bundles crown implant new patient srp bridge denture night guard sealants treatment entry voice',
   journeys: 'patient journeys welcome new patient birthday thank you card post-op check-in anniversary milestone certificate we miss you reactivation referral newsletter holiday cards survey nps delight',
@@ -104,7 +106,7 @@ export default function Settings() {
   const admin = user.role === 'admin';
   const groups = [
     ['You', [['account', 'My account', true]]],
-    ['Practice', [['practice', 'Practice & security', admin], ['users', 'Users & roles', admin], ['locations', 'Offices', admin], ['providers', 'Providers', true], ['operatories', 'Operatories', true], ['types', 'Appointment types', true], ['daytemplates', 'Perfect day & late patients', can('schedule:read')], ['cards', 'Appointment cards', can('schedule:read')], ['import', 'Import from another system', admin]]],
+    ['Practice', [['practice', 'Practice & security', admin], ['users', 'Users & roles', admin], ['locations', 'Offices', admin], ['providers', 'Providers', true], ['operatories', 'Operatories', true], ['types', 'Appointment types', true], ['daytemplates', 'Perfect day & late patients', can('schedule:read')], ['cards', 'Appointment cards', can('schedule:read')], ['bonus', 'Team bonus', admin || can('bonus:manage')], ['import', 'Import from another system', admin]]],
     ['Clinical', [['templates', 'Note templates', can('clinical:write')], ['forms', 'Forms & consents', can('patients:read')], ['labs', 'Labs', can('clinical:read')], ['education', 'Patient education', can('patients:read')], ['referrals', 'Referral contacts', can('patients:read')], ['opportunities', 'Opportunities', can('clinical:read')], ['chartshortcuts', 'Chart shortcuts & bundles', can('clinical:read')]]],
     ['Billing', [['codes', 'Fee schedule', true], ['ppo', 'Fee schedules', can('billing:read')], ['fees', 'Fee updates & history', can('billing:read')], ['carriers', 'Insurance carriers', can('billing:read')], ['memberships', 'Membership plans', can('billing:read')]]],
     ['Patients', [['messaging', 'Messages & reviews', admin], ['digests', 'Metric emails', admin], ['phone', 'Phone line', admin], ['checkin', 'Mobile check-in', admin], ['journeys', 'Patient journeys', can('patients:read')], ['booking', 'Online booking links', admin], ['custom', 'Custom patient fields', admin], ['duplicates', 'Duplicate charts', admin]]],
@@ -165,6 +167,7 @@ export default function Settings() {
       {tab === 'ppo' && <FeeSchedules admin={admin} />}
       {tab === 'fees' && <FeeScheduleManager />}
       {tab === 'cards' && <ScheduleCardSettings />}
+      {tab === 'bonus' && <BonusSettings />}
       {tab === 'messaging' && <Messaging />}
       {tab === 'phone' && <PhoneLineSettings />}
       {tab === 'education' && <EducationSettings />}
