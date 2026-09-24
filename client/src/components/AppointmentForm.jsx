@@ -72,6 +72,14 @@ export default function AppointmentForm({ appointment, defaults = {}, patient: i
   useEffect(() => {
     if (!form.provider_id && providers.length) setForm((f) => ({ ...f, provider_id: providers[0].id }));
   }, [providers, form.provider_id]);
+  // A type handed in (booking a recall at checkout, a plan phase) sets the length once the types load, unless a
+  // length or a dragged time range came with it.
+  useEffect(() => {
+    if (appointment || !defaults.appointment_type_id || defaults.duration || defaults.end || !types.length) return;
+    const t = types.find((x) => String(x.id) === String(defaults.appointment_type_id));
+    if (t) setForm((f) => ({ ...f, duration: lengthFor(t, f.provider_id) }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [types.length]);
 
   useEffect(() => {
     if (!patient || appointment) return;
