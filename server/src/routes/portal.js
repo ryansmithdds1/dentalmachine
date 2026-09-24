@@ -466,7 +466,7 @@ export function portalRoutes({ db, secret, config, payments, messenger, storage 
     const session = await payments.stripe('POST', 'checkout/sessions', {
       mode: 'payment', 'line_items[0][quantity]': '1', 'line_items[0][price_data][currency]': 'usd', 'line_items[0][price_data][unit_amount]': String(amount),
       'line_items[0][price_data][product_data][name]': `${practice.name} - account payment`, client_reference_id: String(id),
-      'metadata[payment_request_id]': String(id), 'metadata[practice_id]': String(practice.id),
+      'metadata[payment_request_id]': String(id), 'metadata[practice_id]': String(practice.id), 'payment_intent_data[metadata][practice_id]': String(practice.id),
       success_url: `${config.appUrl}/portal/${portalKey(practice)}?paid=1`, cancel_url: `${config.appUrl}/portal/${portalKey(practice)}`,
       ...(payer.email ? { customer_email: payer.email } : {}),
     });

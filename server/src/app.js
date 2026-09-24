@@ -37,6 +37,7 @@ import askRoutes, { mcpRoutes } from './routes/ask.js';
 import orgRoutes from './routes/org.js';
 import claimAiRoutes from './routes/claimai.js';
 import issueRoutes from './routes/issues.js';
+import reconciliationRoutes from './routes/reconciliation.js';
 import labRxRoutes, { labPublicRoutes } from './routes/labrx.js';
 import patientCareRoutes, { learnPublicRoutes } from './routes/patientcare.js';
 import checkinRoutes, { checkinPublicRoutes } from './routes/checkin.js';
@@ -276,6 +277,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(claimAiRoutes({ db, config }));
   api.use(labRxRoutes({ db, messenger, config }));
   api.use(issueRoutes({ db }));
+  api.use(reconciliationRoutes({ db, payments }));
   api.use(patientCareRoutes({ db, messenger, config }));
   api.use(checkinRoutes({ db, messenger }));
   api.use(lenderRoutes({ db, messenger }));

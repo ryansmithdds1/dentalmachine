@@ -187,7 +187,7 @@ export default function publicRoutes({ db, storage, payments, messenger, config,
       const session = await payments.stripe('POST', 'checkout/sessions', {
         mode: 'payment', 'line_items[0][quantity]': '1', 'line_items[0][price_data][currency]': 'usd',
         'line_items[0][price_data][unit_amount]': String(deposit), 'line_items[0][price_data][product_data][name]': `${p.name} — deposit for ${reason.label}`,
-        'metadata[booking_request_id]': String(id), 'metadata[practice_id]': String(p.id), client_reference_id: `booking-${id}`,
+        'metadata[booking_request_id]': String(id), 'metadata[practice_id]': String(p.id), 'payment_intent_data[metadata][practice_id]': String(p.id), client_reference_id: `booking-${id}`,
         ...(b.email ? { customer_email: String(b.email) } : {}),
         expires_at: String(Math.floor(Date.now() / 1000) + 31 * 60), success_url: `${back}?deposit=paid`, cancel_url: `${back}?deposit=cancelled`,
       });

@@ -104,6 +104,8 @@ export default function paymentRoutes({ db, config, messenger, payments, mailer 
       client_reference_id: String(id),
       'metadata[payment_request_id]': String(id),
       'metadata[practice_id]': String(req.user.practice_id),
+      // On the payment itself too, so reconciliation can find this practice's charges at the processor.
+      'payment_intent_data[metadata][practice_id]': String(req.user.practice_id),
       success_url: `${config.appUrl}/pay/success`,
       cancel_url: `${config.appUrl}/pay/cancelled`,
       ...(patient.email ? { customer_email: patient.email } : {}),

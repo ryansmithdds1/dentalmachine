@@ -97,7 +97,23 @@ export function createPayments({ config, fetchImpl = globalThis.fetch }) {
         // Test mode only: acts as if a card was tapped on the (simulated) reader.
         simulate: config.stripeSecretKey.startsWith('sk_test_') ? async (row, readerId) => { await stripe('POST', `test_helpers/terminal/readers/${readerId}/present_payment_method`, {}); } : null,
       },
-      async charge({ method, amount, description, idempotencyKey, metadata = {} }) {
+      // This practice's successful card payments at Stripe between two instants (for reconciliation).
+      async listCharges({ practiceId, fromTs, toTs }) {
+        const out = [];
+        let page = null;
+        for (let i = 0; i < 50; i++) {
+          const res = await stripe('GET', 'payment_intents/search', {
+            query: `metadata['practice_id']:'${Number(practiceId)}' AND status:'succeeded' AND created>=${fromTs} AND created<${toTs}`, limit: '100', ...(page ? { page } : {}),
+          });
+          for (const pi of res.data || []) out.push({ id: pi.id, amount: pi.amount_received ?? pi.amount, created: pi.created, description: pi.description || null });
+          if (!res.has_more || !res.next_page) break;
+          page = res.next_page;
+        }
+        return out;
+      },
+      async charge({ method, amount, description, idempotencyKey, metadata: extra = {} }) {
+        // Every charge names its practice, so reconciliation can list a practice's charges at Stripe.
+        const metadata = { practice_id: method.practice_id, ...extra };
         try {
           const pi = await stripe('POST', 'payment_intents', {
             amount: String(amount), currency: 'usd', customer: method.customer_id, payment_method: method.payment_method_id,
