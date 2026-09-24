@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { requirePermission, HttpError } from '../auth.js';
-import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, toCents, practiceNow, mapSeq, publicPractice, validTooth, paged, pageArgs, recorded } from '../util.js';
+import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, toCents, practiceNow, mapSeq, publicPractice, validTooth, paged, pageArgs, recorded, isRealDate } from '../util.js';
 import { estimateCoverage, postClaimPayment, benefitYear, deductibleMet, reverseEntry, createClaim, checkPostingDate } from '../services.js';
 import { savePolicy, validatePlan, syncPlan, PLAN_BENEFITS, DEFAULT_FREQUENCIES, planFor } from '../benefits.js';
 
@@ -19,10 +19,18 @@ function validatePolicy(row) {
   requireOneOf(row.priority, ['primary', 'secondary'], 'priority');
   requireOneOf(row.relationship, ['self', 'spouse', 'child', 'other'], 'relationship');
   for (const k of ['pct_preventive', 'pct_basic', 'pct_major']) {
-    if (row[k] != null && (row[k] < 0 || row[k] > 100)) throw new HttpError(400, `${k} must be 0-100`);
+    if (row[k] === '') row[k] = null;
+    if (row[k] != null && !(Number.isInteger(Number(row[k])) && Number(row[k]) >= 0 && Number(row[k]) <= 100)) throw new HttpError(400, `${k} must be a whole percent, 0-100`);
+    if (row[k] != null) row[k] = Number(row[k]);
   }
   for (const k of ['annual_max', 'deductible', 'deductible_met']) {
     if (row[k] != null) row[k] = toCents(row[k], k);
+    if (row[k] != null && row[k] < 0) throw new HttpError(400, `${k} can't be negative`);
+  }
+  if (row.deductible_met != null && row.deductible != null && row.deductible_met > row.deductible) throw new HttpError(400, "The deductible met can't be more than the deductible");
+  for (const k of ['subscriber_dob', 'effective_date']) {
+    if (row[k] === '') row[k] = null;
+    if (row[k] != null && !isRealDate(row[k])) throw new HttpError(400, `${k} must be a real date (YYYY-MM-DD)`);
   }
   if (row.benefit_month != null) {
     row.benefit_month = Number(row.benefit_month);
@@ -52,7 +60,7 @@ export default function insuranceRoutes({ db }) {
 
   r.post('/carriers', requirePermission('billing:write'), async (req, res) => {
     const row = pick(req.body, ['name', 'payer_id', 'phone', 'address', 'timely_filing_days']);
-    if (row.timely_filing_days === '' ) row.timely_filing_days = null;
+    if (row.timely_filing_days !== undefined) row.timely_filing_days = Number(row.timely_filing_days) > 0 ? Math.min(3650, Math.round(Number(row.timely_filing_days))) : null;
     requireFields(row, ['name']);
     const id = await insert(db, 'insurance_carriers', { ...row, practice_id: req.user.practice_id });
     await audit(db, req, 'carrier.create', 'insurance_carriers', id);
@@ -268,7 +276,8 @@ export default function insuranceRoutes({ db }) {
   };
 
   r.post('/claims/:cid/submit', requirePermission('billing:write'), transition(['draft', 'denied'], 'submitted', () => ({ submitted_at: new Date().toISOString(), denial_reason: null })));
-  r.post('/claims/:cid/deny', requirePermission('billing:write'), transition(['submitted'], 'denied', (req) => ({ denial_reason: req.body?.reason ?? null })));
+  r.post('/claims/:cid/deny', requirePermission('billing:write'), (req, _res, next) => (String(req.body?.reason || '').trim() ? next() : next(new HttpError(400, 'Say why the payer denied it'))),
+    transition(['submitted'], 'denied', (req) => ({ denial_reason: String(req.body.reason).trim().slice(0, 300) })));
   r.post('/claims/:cid/void', requirePermission('billing:write'), transition(['draft', 'denied'], 'void'));
 
   // Records the carrier's payment (EOB) and optionally writes off the contractual difference.
@@ -286,8 +295,10 @@ export default function insuranceRoutes({ db }) {
       throw new HttpError(400, `Payment plus write-off can't exceed the $${(claim.total_fee / 100).toFixed(2)} billed (already posted: $${((claim.paid_amount + posted) / 100).toFixed(2)})`);
     }
     const final = req.body?.final !== false;
+    const method = req.body?.method || 'check';
+    requireOneOf(method, ['check', 'eft', 'credit_card', 'virtual_card', 'ach', 'other'], 'method');
     await postClaimPayment(db, claim, {
-      amount, writeOff, final, method: req.body?.method || 'check', reference: req.body?.reference ?? null,
+      amount, writeOff, final, method, reference: req.body?.reference != null ? String(req.body.reference).slice(0, 50) : null,
       userId: req.user.id, date: (await practiceNow(db, req.user.practice_id)).slice(0, 10),
     });
     await audit(db, req, 'claim.payment', 'claims', claim.id, { amount, write_off: writeOff });
@@ -458,6 +469,12 @@ export default function insuranceRoutes({ db }) {
         const posted = -(await db.get("SELECT COALESCE(SUM(amount), 0) AS n FROM ledger_entries WHERE claim_id = ? AND type = 'adjustment'", claim.id)).n;
         if (claim.paid_amount + posted + paid + writeOff > claim.total_fee) throw new HttpError(400, `Claim #${claim.id}: payment plus write-off is more than was billed`);
         const lines = Array.isArray(x.lines) ? x.lines.map((l) => ({ claim_item_id: Number(l.claim_item_id), paid: toCents(l.paid ?? 0), write_off: toCents(l.write_off ?? 0), patient_resp: l.patient_resp != null ? toCents(l.patient_resp) : undefined })) : null;
+        if (lines?.length) {
+          // Line by line, the amounts can't be negative and must add up to the claim's.
+          if (lines.some((l) => l.paid < 0 || l.write_off < 0 || (l.patient_resp ?? 0) < 0)) throw new HttpError(400, `Claim #${claim.id}: line amounts can't be negative`);
+          const sum = (k) => lines.reduce((s, l) => s + l[k], 0);
+          if (sum('paid') !== paid || sum('write_off') !== writeOff) throw new HttpError(400, `Claim #${claim.id}: the lines add up to $${(sum('paid') / 100).toFixed(2)} paid and $${(sum('write_off') / 100).toFixed(2)} written off, not the claim's $${(paid / 100).toFixed(2)} and $${(writeOff / 100).toFixed(2)}`);
+        }
         await postClaimPayment(db, claim, {
           amount: paid, writeOff, final: x.final !== false, method: b.method === 'eft' ? 'eft' : 'check', reference: b.check_number || null,
           userId: req.user.id, date, lines, checkId: id, deductible: x.deductible != null ? toCents(x.deductible) : null,

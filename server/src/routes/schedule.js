@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { openSlotLater } from '../fill.js';
 import { requirePermission, HttpError, can } from '../auth.js';
-import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, normalizeDateTime, practiceNow, mapSeq, paged, recorded } from '../util.js';
+import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, normalizeDateTime, practiceNow, mapSeq, paged, recorded, isRealDate } from '../util.js';
 import { hoursFor, providerHours, providerHoursFor, providerHoursOn, validateHours } from '../hours.js';
 import { publish, eventStream } from '../events.js';
 import { emitAppointment } from '../webhooks.js';
@@ -226,9 +226,9 @@ const stamp = (dt) => Date.parse(`${dt.slice(0, 10)}T${dt.slice(11, 16)}:00Z`);
 const minutesBetween = (a, b) => Math.round((stamp(b) - stamp(a)) / 60_000);
 const shiftMinutes = (dt, minutes) => new Date(stamp(dt) + minutes * 60_000).toISOString().slice(0, 16).replace('T', ' ');
 
-const datesBetween = (from, to) => {
+const datesBetween = (from, to, max = 62) => {
   const out = [];
-  for (let d = from; d <= to && out.length < 62; d = new Date(Date.parse(`${d}T12:00:00Z`) + 86400_000).toISOString().slice(0, 10)) out.push(d);
+  for (let d = from; d <= to && out.length < max; d = new Date(Date.parse(`${d}T12:00:00Z`) + 86400_000).toISOString().slice(0, 10)) out.push(d);
   return out;
 };
 
@@ -534,8 +534,9 @@ export default function scheduleRoutes({ db }) {
   r.post('/providers/:pid/exceptions', requirePermission('schedule:write'), async (req, res) => {
     const provider = await findOr404(db, 'providers', req.params.pid, req.user.practice_id, 'Provider');
     const { from, to = from, off = true, hours = [], reason = null } = req.body || {};
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(from || '') || !/^\d{4}-\d{2}-\d{2}$/.test(to || '') || to < from) throw new HttpError(400, 'from/to must be YYYY-MM-DD');
-    const days = datesBetween(from, to);
+    if (!isRealDate(from) || !isRealDate(to) || to < from) throw new HttpError(400, 'from/to must be real dates (YYYY-MM-DD), from first');
+    // Counted in full, so a long leave is refused rather than quietly cut short.
+    const days = datesBetween(from, to, 367);
     if (days.length > 366) throw new HttpError(400, 'Choose a range of a year or less');
     const ranges = off ? [] : validateHours({ 0: hours })[0];
     if (!off && !ranges.length) throw new HttpError(400, 'Give the hours they will work, or mark them off');
@@ -767,6 +768,11 @@ export default function scheduleRoutes({ db }) {
     const existing = await findOr404(db, 'recalls', req.params.id, req.user.practice_id, 'Recall');
     const row = pick(req.body, ['status', 'due_date', 'interval_months', 'notes']);
     requireOneOf(row.status, ['due', 'scheduled', 'contacted', 'completed', 'inactive'], 'status');
+    // "Scheduled" means booked: that comes from booking the visit, not from typing the status.
+    if (row.status === 'scheduled' && !existing.appointment_id) throw new HttpError(400, 'Book the recall visit to mark it scheduled');
+    if (row.due_date != null && !isRealDate(row.due_date)) throw new HttpError(400, 'due_date must be a real date (YYYY-MM-DD)');
+    if (row.interval_months != null && !(Number.isInteger(Number(row.interval_months)) && Number(row.interval_months) >= 1 && Number(row.interval_months) <= 120)) throw new HttpError(400, 'interval_months must be 1-120');
+    if (row.notes != null) row.notes = String(row.notes).slice(0, 1000);
     if (row.status === 'contacted') row.last_contacted_at = new Date().toISOString();
     await update(db, 'recalls', existing.id, req.user.practice_id, row);
     await audit(db, req, 'recall.update', 'recalls', existing.id);

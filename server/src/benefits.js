@@ -40,12 +40,14 @@ const json = (v, fallback) => {
 
 export function validatePlan(row) {
   for (const k of ['pct_preventive', 'pct_basic', 'pct_major', 'ortho_pct']) {
-    if (row[k] != null && (Number(row[k]) < 0 || Number(row[k]) > 100)) throw new HttpError(400, `${k} must be 0-100`);
+    if (row[k] === '') row[k] = null;
+    if (row[k] != null && !(Number.isInteger(Number(row[k])) && Number(row[k]) >= 0 && Number(row[k]) <= 100)) throw new HttpError(400, `${k} must be a whole percent, 0-100`);
+    if (row[k] != null) row[k] = Number(row[k]);
   }
   for (const k of ['annual_max', 'deductible', 'family_deductible', 'ortho_max']) {
     if (row[k] != null) {
       row[k] = Math.round(Number(row[k]));
-      if (!Number.isFinite(row[k]) || row[k] < 0) throw new HttpError(400, `${k} must be a positive amount`);
+      if (!Number.isFinite(row[k]) || row[k] < 0 || row[k] > 1_000_000_000) throw new HttpError(400, `${k} must be a positive amount`);
     }
   }
   for (const k of ['wait_basic_months', 'wait_major_months', 'ortho_age_limit']) if (row[k] != null && row[k] !== '') row[k] = Math.max(0, Math.round(Number(row[k]) || 0));

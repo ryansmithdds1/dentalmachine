@@ -1,7 +1,7 @@
 import { Router } from 'express';
-import { requirePermission, HttpError } from '../auth.js';
+import { requirePermission, HttpError, can } from '../auth.js';
 import {
-  pick, requireFields, requireOneOf, insert, update, findOr404, audit, validTooth, normalizeSurfaces, mapSeq, codeArea, QUADRANTS, ARCHES, practiceNow, recorded } from '../util.js';
+  pick, requireFields, requireOneOf, insert, update, findOr404, audit, validTooth, normalizeSurfaces, mapSeq, codeArea, QUADRANTS, ARCHES, practiceNow, recorded, MAX_CENTS } from '../util.js';
 import { completeProcedure, estimateCoverage, primaryPolicy, voidLedgerEntry } from '../services.js';
 import { signedVersion } from './casepres.js';
 import { memberSavings } from '../memberships.js';
@@ -74,6 +74,15 @@ export default function clinicalRoutes({ db }) {
   });
 
   // ---- Procedures ----
+  // Charging something other than the fee schedule is a billing decision, not a charting one.
+  const feeOverride = (req) => {
+    if (req.user.role !== 'admin' && !can(req.user, 'billing:write')) throw new HttpError(403, 'Changing a fee from the fee schedule needs billing permission');
+  };
+  const checkPriority = (row) => {
+    if (row.priority == null || row.priority === '') { delete row.priority; return; }
+    if (!(Number.isInteger(Number(row.priority)) && Number(row.priority) >= 1 && Number(row.priority) <= 999)) throw new HttpError(400, 'priority must be a whole number, 1-999');
+    row.priority = Number(row.priority);
+  };
   async function buildProcedure(req, patientId, input) {
     const row = normalizeToothFields(pick(input, ['code_id', 'code', 'tooth', 'surfaces', 'area', 'fee', 'provider_id', 'treatment_plan_id', 'appointment_id', 'priority', 'phase']));
     const pid = req.user.practice_id;
@@ -90,9 +99,11 @@ export default function clinicalRoutes({ db }) {
       const plan = await findOr404(db, 'treatment_plans', row.treatment_plan_id, pid, 'Treatment plan');
       if (plan.patient_id !== patientId) throw new HttpError(400, 'Treatment plan belongs to another patient');
     }
-    const fee = row.fee != null ? Math.round(Number(row.fee))
-      : await officeFee(db, pid, code, { patientId, providerId: row.provider_id, locationId: req.location_id });
-    if (!Number.isFinite(fee) || fee < 0) throw new HttpError(400, 'fee must be a non-negative number of cents');
+    const scheduled = await officeFee(db, pid, code, { patientId, providerId: row.provider_id, locationId: req.location_id });
+    const fee = row.fee != null && row.fee !== '' ? Math.round(Number(row.fee)) : scheduled;
+    if (!Number.isFinite(fee) || fee < 0 || fee > MAX_CENTS) throw new HttpError(400, 'fee must be a non-negative number of cents');
+    if (fee !== scheduled) feeOverride(req);
+    checkPriority(row);
     return {
       practice_id: pid, patient_id: patientId, code_id: code.id, code: code.code, description: code.description, category: code.category,
       tooth: row.tooth ?? null, surfaces: row.surfaces ?? null, area: row.area ?? null, fee, provider_id: row.provider_id ?? null,
@@ -158,8 +169,10 @@ export default function clinicalRoutes({ db }) {
     }
     if (row.fee != null) {
       row.fee = Math.round(Number(row.fee));
-      if (!Number.isFinite(row.fee) || row.fee < 0) throw new HttpError(400, 'fee must be a non-negative number of cents');
+      if (!Number.isFinite(row.fee) || row.fee < 0 || row.fee > MAX_CENTS) throw new HttpError(400, 'fee must be a non-negative number of cents');
+      if (row.fee !== existing.fee) feeOverride(req);
     }
+    checkPriority(row);
     await update(db, 'procedures', existing.id, req.user.practice_id, row);
     await audit(db, req, 'procedure.update', 'procedures', existing.id);
     res.json(await db.get('SELECT * FROM procedures WHERE id = ?', existing.id));
@@ -405,6 +418,7 @@ export default function clinicalRoutes({ db }) {
     const patient = await patientOr404(req);
     const row = pick(req.body, ['body', 'appointment_id', 'provider_id']);
     requireFields(row, ['body']);
+    if (String(row.body).length > 20000) throw new HttpError(400, 'A note can be at most 20,000 characters — split it, or add an addendum');
     if (row.provider_id) await findOr404(db, 'providers', row.provider_id, req.user.practice_id, 'Provider');
     if (row.appointment_id && (await findOr404(db, 'appointments', row.appointment_id, req.user.practice_id, 'Appointment')).patient_id !== patient.id) throw new HttpError(400, "That visit is another patient's");
     const id = await insert(db, 'clinical_notes', { ...row, patient_id: patient.id, practice_id: req.user.practice_id, author_id: req.user.id });
@@ -418,6 +432,7 @@ export default function clinicalRoutes({ db }) {
     if (existing.author_id !== req.user.id && req.user.role !== 'admin') throw new HttpError(403, 'Only the author can edit this note');
     const row = pick(req.body, ['body', 'appointment_id']);
     if (row.body !== undefined) requireFields(row, ['body']);
+    if (row.body != null && String(row.body).length > 20000) throw new HttpError(400, 'A note can be at most 20,000 characters — split it, or add an addendum');
     if (row.appointment_id) {
       const appt = await findOr404(db, 'appointments', row.appointment_id, req.user.practice_id, 'Appointment');
       if (appt.patient_id !== existing.patient_id) throw new HttpError(400, "That visit is another patient's");

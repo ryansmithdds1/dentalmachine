@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { HttpError, can } from '../auth.js';
-import { insert, findOr404, audit, practiceNow, toCsv } from '../util.js';
+import { insert, findOr404, audit, practiceNow, toCsv, isRealDateTime } from '../util.js';
 
 // Time clock. Punches are practice-local wall-clock times ("YYYY-MM-DD HH:MM"). Everyone clocks themselves
 // in and out; people with timeclock:manage see everyone's time, fix punches (audited) and export payroll.
@@ -90,7 +90,7 @@ export default function timeclockRoutes({ db }) {
     const row = {};
     for (const k of ['clock_in', 'clock_out']) {
       if (b[k] === undefined) continue;
-      if (b[k] !== null && !TIME.test(String(b[k]).replace('T', ' ').slice(0, 16))) throw new HttpError(400, `${k} must be YYYY-MM-DD HH:MM`);
+      if (b[k] !== null && !(TIME.test(String(b[k]).replace('T', ' ').slice(0, 16)) && isRealDateTime(String(b[k]).replace('T', ' ').slice(0, 16)))) throw new HttpError(400, `${k} must be a real date and time (YYYY-MM-DD HH:MM)`);
       row[k] = b[k] === null ? null : String(b[k]).replace('T', ' ').slice(0, 16);
     }
     if (b.break_minutes !== undefined) row.break_minutes = Math.max(0, Math.min(600, Math.round(Number(b.break_minutes) || 0)));

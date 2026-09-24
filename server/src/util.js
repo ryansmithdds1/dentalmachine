@@ -28,10 +28,30 @@ export function requireOneOf(value, allowed, name) {
   }
 }
 
+// Money is whole cents, and never more than $10 million in one amount (Postgres stores 32-bit integers;
+// a typo of a few extra zeros is refused rather than posted).
+export const MAX_CENTS = 1_000_000_000;
 export function toCents(value, name = 'amount') {
   const n = Number(value);
   if (!Number.isFinite(n)) throw new HttpError(400, `${name} must be a number`);
+  if (Math.abs(n) > MAX_CENTS) throw new HttpError(400, `${name} is too large`);
   return Math.round(n);
+}
+
+// Real calendar dates and times, not just the right shape ("2026-02-31" and "25:99" are refused).
+export function isRealDate(value) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value ?? ''));
+  if (!m) return false;
+  const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+  return d.getUTCFullYear() === +m[1] && d.getUTCMonth() === +m[2] - 1 && d.getUTCDate() === +m[3] && +m[1] >= 1900 && +m[1] <= 2200;
+}
+export function isRealDateTime(value) {
+  const m = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}):(\d{2})/.exec(String(value ?? ''));
+  return !!m && isRealDate(m[1]) && +m[2] < 24 && +m[3] < 60;
+}
+export function requireDate(value, name) {
+  if (!isRealDate(value)) throw new HttpError(400, `${name} must be a real date (YYYY-MM-DD)`);
+  return value;
 }
 
 // Names (first_name, carrier name, subscriber_name…) are one line of plain text wherever they're saved:
@@ -256,7 +276,7 @@ export async function practiceNow(db, practiceId) {
 
 export function normalizeDateTime(value, name) {
   const m = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})/.exec(String(value ?? ''));
-  if (!m) throw new HttpError(400, `${name} must be 'YYYY-MM-DD HH:MM'`);
+  if (!m || !isRealDateTime(`${m[1]} ${m[2]}`)) throw new HttpError(400, `${name} must be a real date and time ('YYYY-MM-DD HH:MM')`);
   return `${m[1]} ${m[2]}`;
 }
 

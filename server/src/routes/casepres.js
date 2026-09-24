@@ -230,7 +230,11 @@ export default function casePresentationRoutes({ db, messenger, config, erx, sec
     requireFields(row, ['provider_id', 'drug', 'sig', 'quantity']);
     const provider = await findOr404(db, 'providers', row.provider_id, req.user.practice_id, 'Provider');
     if (provider.type === 'hygienist') throw new HttpError(400, 'Prescriptions must be written by a dentist or specialist');
-    row.refills = Math.max(0, Math.min(11, Number(row.refills) || 0));
+    // A real, countable quantity (a prescription is dispensed from it, controlled ones especially), whole refills.
+    if (!/[1-9]/.test(String(row.quantity)) || /^\s*-/.test(String(row.quantity)) || String(row.quantity).length > 40) throw new HttpError(400, 'quantity must be a positive amount, e.g. 20 or "20 tablets"');
+    if (row.refills != null && row.refills !== '' && !(Number.isInteger(Number(row.refills)) && Number(row.refills) >= 0 && Number(row.refills) <= 11)) throw new HttpError(400, 'refills must be a whole number, 0-11');
+    row.refills = Number(row.refills) || 0;
+    for (const [k, n] of [['drug', 200], ['strength', 100], ['sig', 500], ['notes', 1000]]) if (row[k] != null) row[k] = String(row[k]).slice(0, n);
     // Surface allergies at the moment of prescribing.
     const allergy = allergyWarning(patient.allergies, `${row.drug} ${row.strength || ''}`);
     if (allergy && !req.body.override_allergy) throw new HttpError(409, allergy, { allergy_warning: true });

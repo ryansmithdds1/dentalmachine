@@ -1,7 +1,7 @@
 import { HttpError } from './auth.js';
 import { requireHuman } from './aiguard.js';
 import { raiseIssue, resolveIssue, failed } from './issues.js';
-import { insert, practiceNow, recorded } from './util.js';
+import { insert, practiceNow, recorded, isRealDate } from './util.js';
 import { benefitYear, deductibleMet, estimateCoverage } from './benefits.js';
 import { resetRecalls } from './recalls.js';
 import { applyMemberBenefit } from './memberships.js';
@@ -282,7 +282,7 @@ export async function createSecondaryClaim(db, primaryClaimId, { userId = null }
 export async function checkPostingDate(db, practiceId, date) {
   const today = (await practiceNow(db, practiceId)).slice(0, 10);
   if (!date) return today;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date))) throw new HttpError(400, 'entry_date must be YYYY-MM-DD');
+  if (!isRealDate(date)) throw new HttpError(400, 'entry_date must be a real date (YYYY-MM-DD)');
   if (date > today) throw new HttpError(400, "Entries can't be dated in the future");
   const lock = (await db.get('SELECT lock_date FROM practices WHERE id = ?', practiceId))?.lock_date;
   if (lock && date <= lock) throw new HttpError(400, `The books are closed through ${lock} — date it after that, or ask an administrator to move the lock date`);

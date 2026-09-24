@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { requirePermission, HttpError } from '../auth.js';
-import { insert, findOr404, audit, practiceNow } from '../util.js';
+import { insert, findOr404, audit, practiceNow, isRealDate } from '../util.js';
 import { orthoEstimate, runOrthoBilling } from '../ortho.js';
 import { addInterval } from '../memberships.js';
 
@@ -30,7 +30,7 @@ export default function orthoRoutes({ db, payments }) {
   const terms = (b) => {
     const total = Math.round(Number(b.total_fee));
     const months = Math.round(Number(b.months));
-    if (!Number.isFinite(total) || total <= 0) throw new HttpError(400, 'Enter the treatment fee');
+    if (!Number.isFinite(total) || total <= 0 || total > 1_000_000_000) throw new HttpError(400, 'Enter the treatment fee');
     if (!Number.isInteger(months) || months < 1 || months > 60) throw new HttpError(400, 'Monthly payments: 1 to 60 months');
     const down = Math.round(Number(b.down_payment) || 0);
     if (down < 0 || down > total) throw new HttpError(400, 'The down payment can’t be more than the fee');
@@ -47,11 +47,13 @@ export default function orthoRoutes({ db, payments }) {
     const b = req.body || {};
     const t = terms(b);
     const est = await orthoEstimate(db, req.user.practice_id, p, t);
+    if (b.insurance_estimate != null && !Number.isFinite(Number(b.insurance_estimate))) throw new HttpError(400, 'insurance_estimate must be a number');
+    if (b.est_months != null && b.est_months !== '' && !(Number.isInteger(Number(b.est_months)) && Number(b.est_months) >= 1 && Number(b.est_months) <= 120)) throw new HttpError(400, 'est_months must be 1-120');
     const insurance = b.insurance_estimate != null ? Math.max(0, Math.min(t.total_fee, Math.round(Number(b.insurance_estimate)))) : est.insurance_estimate;
     const financed = Math.max(0, t.total_fee - insurance - t.down_payment);
     const today = (await practiceNow(db, req.user.practice_id)).slice(0, 10);
     const start = b.start_date || today;
-    if (!DATE.test(start)) throw new HttpError(400, 'start_date must be YYYY-MM-DD');
+    if (!DATE.test(start) || !isRealDate(start)) throw new HttpError(400, 'start_date must be a real date (YYYY-MM-DD)');
     if (b.provider_id) await findOr404(db, 'providers', b.provider_id, req.user.practice_id, 'Provider');
     const appliance = APPLIANCES.includes(b.appliance) ? b.appliance : 'brackets';
     let methodId = null;
@@ -107,7 +109,8 @@ export default function orthoRoutes({ db, payments }) {
     const c = await findOr404(db, 'ortho_cases', req.params.cid, req.user.practice_id, 'Ortho case');
     const b = req.body || {};
     const date = b.visit_date || (await practiceNow(db, req.user.practice_id)).slice(0, 10);
-    if (!DATE.test(date)) throw new HttpError(400, 'visit_date must be YYYY-MM-DD');
+    if (!DATE.test(date) || !isRealDate(date)) throw new HttpError(400, 'visit_date must be a real date (YYYY-MM-DD)');
+    if (b.next_weeks != null && b.next_weeks !== '' && !(Number.isInteger(Number(b.next_weeks)) && Number(b.next_weeks) >= 1 && Number(b.next_weeks) <= 52)) throw new HttpError(400, 'next_weeks must be 1-52');
     const clip = (v) => (v ? String(v).trim().slice(0, 120) || null : null);
     const row = { upper_wire: clip(b.upper_wire), lower_wire: clip(b.lower_wire), elastics: clip(b.elastics), aligner: clip(b.aligner), notes: b.notes ? String(b.notes).slice(0, 2000) : null };
     if (!Object.values(row).some(Boolean)) throw new HttpError(400, 'Record what was done');

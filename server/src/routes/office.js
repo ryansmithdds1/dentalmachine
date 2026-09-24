@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { requirePermission, HttpError, can } from '../auth.js';
-import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, toCents, practiceNow } from '../util.js';
+import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, toCents, practiceNow, isRealDate } from '../util.js';
 
 const LAB_STATUSES = ['sent', 'received', 'returned_for_adjustment', 'delivered', 'cancelled'];
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -11,12 +11,17 @@ export default function officeRoutes({ db }) {
 
   // ---- Lab cases ----
   const LAB_FIELDS = ['patient_id', 'provider_id', 'appointment_id', 'lab_id', 'procedure_id', 'lab_name', 'description', 'tooth', 'shade', 'status', 'sent_date', 'due_date', 'received_date', 'cost', 'notes'];
-  const validateLab = async (req, row) => {
+  const validateLab = async (req, row, existing = null) => {
+    // The visit and procedure must be this case's patient's (on an edit, the patient may not be in the body).
+    const patientId = Number(row.patient_id ?? existing?.patient_id) || null;
     requireOneOf(row.status, LAB_STATUSES, 'status');
-    for (const k of ['sent_date', 'due_date', 'received_date']) if (row[k] && !DATE.test(row[k])) throw new HttpError(400, `${k} must be YYYY-MM-DD`);
+    for (const k of ['sent_date', 'due_date', 'received_date']) if (row[k] && !(DATE.test(row[k]) && isRealDate(row[k]))) throw new HttpError(400, `${k} must be a real date (YYYY-MM-DD)`);
     if (row.patient_id) await findOr404(db, 'patients', row.patient_id, req.user.practice_id, 'Patient');
     if (row.provider_id) await findOr404(db, 'providers', row.provider_id, req.user.practice_id, 'Provider');
-    if (row.appointment_id) await findOr404(db, 'appointments', row.appointment_id, req.user.practice_id, 'Appointment');
+    if (row.appointment_id) {
+      const appt = await findOr404(db, 'appointments', row.appointment_id, req.user.practice_id, 'Appointment');
+      if (patientId && appt.patient_id !== patientId) throw new HttpError(400, 'That visit belongs to another patient');
+    }
     if (row.cost != null) row.cost = toCents(row.cost, 'cost');
     if (row.lab_id) {
       const lab = await findOr404(db, 'labs', row.lab_id, req.user.practice_id, 'Lab');
@@ -26,7 +31,7 @@ export default function officeRoutes({ db }) {
     }
     if (row.procedure_id) {
       const p = await findOr404(db, 'procedures', row.procedure_id, req.user.practice_id, 'Procedure');
-      if (row.patient_id && p.patient_id !== Number(row.patient_id)) throw new HttpError(400, 'Procedure belongs to another patient');
+      if (patientId && p.patient_id !== patientId) throw new HttpError(400, 'Procedure belongs to another patient');
       row.tooth ??= p.tooth;
       row.description ??= `${p.code} ${p.description}`;
     }
@@ -68,7 +73,7 @@ export default function officeRoutes({ db }) {
     const existing = await findOr404(db, 'lab_cases', req.params.lid, req.user.practice_id, 'Lab case');
     const row = pick(req.body, LAB_FIELDS);
     if (row.status === 'received' && existing.received_date) row.received_date ??= existing.received_date;
-    await validateLab(req, row);
+    await validateLab(req, row, existing);
     await update(db, 'lab_cases', existing.id, req.user.practice_id, row);
     await audit(db, req, 'lab_case.update', 'lab_cases', existing.id, row.status ? { status: row.status } : undefined);
     res.json(await db.get(`${LAB_SELECT} WHERE l.id = ?`, existing.id));

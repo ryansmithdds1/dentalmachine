@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { requirePermission, HttpError, can } from '../auth.js';
-import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, practiceNow, recorded } from '../util.js';
+import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, practiceNow, recorded, isRealDate } from '../util.js';
 import { schemaInfo } from '../db.js';
 import { emitPatient } from '../webhooks.js';
 import { patientBalance, primaryPolicy } from '../services.js';
@@ -30,7 +30,11 @@ async function checkFeeSchedule(db, row, req) {
 
 function validate(row) {
   requireOneOf(row.status, ['active', 'inactive', 'archived'], 'status');
-  if (row.dob && !/^\d{4}-\d{2}-\d{2}$/.test(row.dob)) throw new HttpError(400, 'dob must be YYYY-MM-DD');
+  if (row.dob && (!isRealDate(row.dob) || row.dob > new Date().toISOString().slice(0, 10))) throw new HttpError(400, 'dob must be a real date of birth (YYYY-MM-DD), not in the future');
+  // Free text has sensible limits (a chart field isn't a document store).
+  const LIMITS = { first_name: 100, last_name: 100, preferred_name: 100, gender: 40, address: 200, city: 100, state: 40, zip: 20, emergency_contact: 300, referral_source: 200,
+    medical_alerts: 2000, allergies: 2000, medications: 4000, medical_conditions: 4000, notes: 10000, office_alert: 500 };
+  for (const [k, n] of Object.entries(LIMITS)) if (typeof row[k] === 'string' && row[k].length > n) throw new HttpError(400, `${k.replace(/_/g, ' ')} can be at most ${n} characters`);
   if (row.email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(row.email)) throw new HttpError(400, 'Invalid email');
   requireOneOf(row.asa_class || undefined, ['I', 'II', 'III', 'IV', 'V', 'VI'], 'asa_class');
   requireOneOf(row.preferred_contact || undefined, ['text', 'call', 'email'], 'preferred_contact');

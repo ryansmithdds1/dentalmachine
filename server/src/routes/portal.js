@@ -454,10 +454,10 @@ export function portalRoutes({ db, secret, config, payments, messenger, storage 
     if (!Number.isFinite(amount) || amount < 50) throw new HttpError(400, 'Enter an amount of at least $0.50');
     if (!payments.enabled) throw new HttpError(409, `Online payments aren't available — please call ${practice.phone || 'the office'}`);
     const today = (await practiceNow(db, practice.id)).slice(0, 10);
+    // Patients pay what the family owes, not more (a credit balance is something the office sets up, not a typo).
+    const owed = Number((await db.get('SELECT COALESCE(SUM(l.amount), 0) AS n FROM ledger_entries l JOIN patients p ON p.id = l.patient_id WHERE p.id = ? OR p.guarantor_id = ?', payer.id, payer.id)).n);
+    if (amount > owed) throw new HttpError(400, owed > 0 ? `The most you can pay is $${(owed / 100).toFixed(2)}` : 'There is nothing to pay right now');
     if (payments.mode === 'sandbox') {
-      // Simulated payments can't exceed what the account owes (no credit balances from the demo).
-      const owed = (await db.get('SELECT COALESCE(SUM(l.amount), 0) AS n FROM ledger_entries l JOIN patients p ON p.id = l.patient_id WHERE p.id = ? OR p.guarantor_id = ?', payer.id, payer.id)).n;
-      if (amount > owed) throw new HttpError(400, owed > 0 ? `The most you can pay is $${(owed / 100).toFixed(2)}` : 'There is nothing to pay right now');
       await insert(db, 'ledger_entries', { practice_id: practice.id, patient_id: payer.id, type: 'payment', amount: -amount, description: 'Online payment (patient portal, sandbox)', method: 'credit_card', reference: `sbx_portal_${Date.now().toString(36)}`, entry_date: today });
       await pAudit(req, 'portal.payment', 'patients', payer.id, { amount, sandbox: true });
       return res.status(201).json({ paid: true });

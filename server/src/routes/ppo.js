@@ -48,6 +48,7 @@ export default function ppoRoutes({ db, config }) {
           if (!/^D\d{4}$/.test(code)) throw new HttpError(400, `Invalid code ${it.code}`);
           const old = (await db.get('SELECT fee FROM fee_schedule_items WHERE fee_schedule_id = ? AND code = ?', fs.id, code))?.fee ?? null;
           const fee = it.fee === null || it.fee === '' ? null : toCents(it.fee, 'fee');
+          if (fee != null && fee < 0) throw new HttpError(400, `The fee for ${code} can't be negative`);
           await recordFeeChange(db, { practiceId: req.user.practice_id, scheduleId: fs.id, code, oldFee: old, newFee: fee, userId: req.user.id });
           if (fee === null) await db.run('DELETE FROM fee_schedule_items WHERE fee_schedule_id = ? AND code = ?', fs.id, code);
           else await db.run('INSERT INTO fee_schedule_items (fee_schedule_id, code, fee) VALUES (?, ?, ?) ON CONFLICT(fee_schedule_id, code) DO UPDATE SET fee = excluded.fee', fs.id, code, fee);

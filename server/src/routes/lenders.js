@@ -1,10 +1,17 @@
 import express, { Router } from 'express';
 import { setActor } from '../actor.js';
 import { requirePermission, HttpError } from '../auth.js';
-import { findOr404, insert, audit, practiceNow } from '../util.js';
+import { findOr404, insert, audit, practiceNow, MAX_CENTS } from '../util.js';
 import { LENDERS, STATUSES, applicationLink, verifyLenderSignature } from '../lenders.js';
 import { sendMessage, recipientFor } from '../messaging.js';
 import { publish } from '../events.js';
+import { raiseIssue } from '../issues.js';
+
+// Dollars from a form or a lender to cents: a positive, finite amount under the money limit, else null.
+const dollarsToCents = (v) => {
+  const n = Math.round(Number(v) * 100);
+  return Number.isFinite(n) && n > 0 && n <= MAX_CENTS ? n : null;
+};
 
 // Patient financing: send an application, follow it to approval and funding, and post the money.
 async function markFunded(db, app, amount, userId) {
@@ -39,8 +46,13 @@ export default function lenderRoutes({ db, messenger }) {
     const p = await findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient');
     const lender = String(req.body?.lender || '');
     if (!LENDERS[lender]) throw new HttpError(400, `lender must be one of: ${Object.keys(LENDERS).join(', ')}`);
-    const amount = Math.round(Number(req.body.amount) * 100);
-    if (!(amount > 0)) throw new HttpError(400, 'Enter the amount to finance');
+    const amount = dollarsToCents(req.body.amount);
+    if (!amount) throw new HttpError(400, 'Enter the amount to finance');
+    // A plan named here must be this patient's.
+    if (req.body.treatment_plan_id) {
+      const plan = await findOr404(db, 'treatment_plans', req.body.treatment_plan_id, req.user.practice_id, 'Treatment plan');
+      if (plan.patient_id !== p.id) throw new HttpError(400, 'That treatment plan belongs to another patient');
+    }
     const practice = await db.get('SELECT * FROM practices WHERE id = ?', req.user.practice_id);
     const link = applicationLink(practice.financing, lender, amount);
     if (!link) throw new HttpError(400, `Add your ${LENDERS[lender].name} application link in Settings → Practice → Financing first`);
@@ -68,12 +80,12 @@ export default function lenderRoutes({ db, messenger }) {
     if (!STATUSES.includes(status)) throw new HttpError(400, `status must be one of: ${STATUSES.join(', ')}`);
     if (app.status === 'funded') throw new HttpError(409, 'Already funded — reverse the payment on the ledger to undo');
     if (status === 'funded') {
-      const amount = Math.round(Number(req.body.funded_amount ?? (app.approved_amount ?? app.amount) / 100) * 100);
-      if (!(amount > 0)) throw new HttpError(400, 'Enter the amount funded');
+      const amount = dollarsToCents(req.body.funded_amount ?? (app.approved_amount ?? app.amount) / 100);
+      if (!amount) throw new HttpError(400, 'Enter the amount funded');
       await markFunded(db, app, amount, req.user.id);
     } else {
       await db.run("UPDATE financing_applications SET status = ?, approved_amount = COALESCE(?, approved_amount), plan = COALESCE(?, plan), external_id = COALESCE(?, external_id), updated_at = datetime('now') WHERE id = ?",
-        status, req.body.approved_amount != null ? Math.round(Number(req.body.approved_amount) * 100) : null, req.body.plan ? String(req.body.plan).slice(0, 120) : null, req.body.external_id ? String(req.body.external_id).slice(0, 80) : null, app.id);
+        status, req.body.approved_amount != null ? dollarsToCents(req.body.approved_amount) : null, req.body.plan ? String(req.body.plan).slice(0, 120) : null, req.body.external_id ? String(req.body.external_id).slice(0, 80) : null, app.id);
     }
     await audit(db, req, 'financing.update', 'financing_applications', app.id, { status });
     res.json(await db.get('SELECT * FROM financing_applications WHERE id = ?', app.id));
@@ -99,9 +111,16 @@ export function lenderWebhooks({ db }) {
     const status = String(b.status || '').toLowerCase();
     if (!STATUSES.includes(status)) return res.status(400).json({ error: 'Unknown status' });
     if (app.status === 'funded') return res.json({ ok: true, already: true });
-    if (status === 'funded') await markFunded(db, { ...app, external_id: app.external_id || b.external_id || null }, Math.round(Number(b.funded_amount ?? b.approved_amount ?? app.amount / 100) * 100), null);
-    else await db.run("UPDATE financing_applications SET status = ?, approved_amount = COALESCE(?, approved_amount), plan = COALESCE(?, plan), external_id = COALESCE(?, external_id), updated_at = datetime('now') WHERE id = ?",
-      status, b.approved_amount != null ? Math.round(Number(b.approved_amount) * 100) : null, b.plan ? String(b.plan).slice(0, 120) : null, b.external_id ? String(b.external_id).slice(0, 80) : null, app.id);
+    if (status === 'funded') {
+      // A funded amount that isn't a sensible positive number is never posted: someone checks it instead.
+      const funded = dollarsToCents(b.funded_amount ?? b.approved_amount ?? app.amount / 100);
+      if (!funded) {
+        await raiseIssue(db, { practiceId: app.practice_id, kind: 'payment', key: `financing-amount:${app.id}`, role: 'billing', severity: 'high', entity: 'financing_applications', entityId: app.id, patientId: app.patient_id, title: `${LENDERS[lender].name} reported financing funded with an unusable amount — check the lender portal and post it by hand`, detail: `Amount sent: ${JSON.stringify(b.funded_amount ?? b.approved_amount ?? null)}` });
+        return res.status(422).json({ error: 'funded_amount must be a positive number of dollars' });
+      }
+      await markFunded(db, { ...app, external_id: app.external_id || b.external_id || null }, funded, null);
+    } else await db.run("UPDATE financing_applications SET status = ?, approved_amount = COALESCE(?, approved_amount), plan = COALESCE(?, plan), external_id = COALESCE(?, external_id), updated_at = datetime('now') WHERE id = ?",
+      status, b.approved_amount != null ? dollarsToCents(b.approved_amount) : null, b.plan ? String(b.plan).slice(0, 120) : null, b.external_id ? String(b.external_id).slice(0, 80) : null, app.id);
     const p = await db.get('SELECT first_name, last_name FROM patients WHERE id = ?', app.patient_id);
     if (['approved', 'declined', 'funded'].includes(status)) {
       await insert(db, 'tasks', {

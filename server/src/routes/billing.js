@@ -55,8 +55,8 @@ export default function billingRoutes({ db, payments = { enabled: false }, confi
     const id = await insert(db, 'ledger_entries', {
       payment_plan_id: plan?.id ?? null,
       practice_id: req.user.practice_id, location_id: req.location_id, patient_id: patient.id, type: 'payment', amount: -amount,
-      description: row.description || `Patient payment (${row.method.replace('_', ' ')})`, method: row.method,
-      reference: row.reference ?? null, entry_date: await checkPostingDate(db, req.user.practice_id, row.entry_date), created_by: req.user.id,
+      description: row.description ? String(row.description).slice(0, 300) : `Patient payment (${row.method.replace('_', ' ')})`, method: row.method,
+      reference: row.reference != null ? String(row.reference).slice(0, 50) : null, entry_date: await checkPostingDate(db, req.user.practice_id, row.entry_date), created_by: req.user.id,
     });
     await audit(db, req, 'ledger.payment', 'ledger_entries', id, { amount });
     if (plan && (await planStatus(db, plan, '9999-12-31')).remaining === 0) await db.run("UPDATE payment_plans SET status = 'completed' WHERE id = ?", plan.id);
@@ -116,7 +116,7 @@ export default function billingRoutes({ db, payments = { enabled: false }, confi
     const id = await insert(db, 'ledger_entries', {
       adjustment_type: row.adjustment_type || null,
       practice_id: req.user.practice_id, location_id: req.location_id, patient_id: patient.id, type: 'adjustment', amount,
-      description: row.description, entry_date: await checkPostingDate(db, req.user.practice_id, row.entry_date), created_by: req.user.id,
+      description: String(row.description).slice(0, 300), entry_date: await checkPostingDate(db, req.user.practice_id, row.entry_date), created_by: req.user.id,
     });
     await audit(db, req, 'ledger.adjustment', 'ledger_entries', id, { amount });
     res.status(201).json({ entry: await db.get('SELECT * FROM ledger_entries WHERE id = ?', id), balance: await patientBalance(db, req.user.practice_id, patient.id) });
@@ -165,6 +165,10 @@ export default function billingRoutes({ db, payments = { enabled: false }, confi
     if (from.id === to.id || head(from) !== head(to)) throw new HttpError(400, 'Transfers are between members of the same family');
     const amount = toCents(req.body?.amount);
     if (amount === 0) throw new HttpError(400, 'Enter an amount');
+    // Only what the account actually has can move: its balance (positive) or its credit (negative).
+    const balance = Number(await patientBalance(db, req.user.practice_id, from.id));
+    if (amount > 0 && amount > balance) throw new HttpError(400, `${from.first_name} owes $${(Math.max(0, balance) / 100).toFixed(2)} — that's the most that can be moved`);
+    if (amount < 0 && -amount > -balance) throw new HttpError(400, `${from.first_name} has $${(Math.max(0, -balance) / 100).toFixed(2)} of credit — that's the most that can be moved`);
     const note = String(req.body?.note || '').trim().slice(0, 200);
     const date = (await practiceNow(db, req.user.practice_id)).slice(0, 10);
     const transfer = `T${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;

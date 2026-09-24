@@ -1,6 +1,6 @@
 import express, { Router } from 'express';
 import { HttpError, rateLimit, signToken, verifyToken } from '../auth.js';
-import { insert, update, hashToken, practiceNow, normalizeDateTime, audit, mapSeq, publicPractice, friendlyDateTime, recorded } from '../util.js';
+import { insert, update, hashToken, practiceNow, normalizeDateTime, audit, mapSeq, publicPractice, friendlyDateTime, recorded, isRealDate } from '../util.js';
 import { MEDICAL_CONDITIONS, parseMedicalHistory, contactUpdatesFromHistory } from '../forms.js';
 import { fillFields, checkAnswers, formPdf } from '../formtemplates.js';
 import { patientLang } from '../templates.js';
@@ -170,6 +170,9 @@ export default function publicRoutes({ db, storage, payments, messenger, config,
     if (!free.includes(start)) throw new HttpError(409, 'That time was just taken. Please pick another.');
     const deposit = reason.deposit > 0 ? reason.deposit : 0;
     const clip = (v, n) => (v ? String(v).trim().slice(0, n) || null : null);
+    // The details become the new patient's chart: a real email and date of birth, or none.
+    if (b.email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(b.email).trim())) throw new HttpError(400, 'Please check your email address');
+    if (b.dob && (!isRealDate(b.dob) || b.dob > new Date().toISOString().slice(0, 10))) throw new HttpError(400, 'Please check your date of birth');
     const id = await insert(db, 'booking_requests', {
       practice_id: p.id, first_name: first.slice(0, 80), last_name: last.slice(0, 80), dob: b.dob || null,
       phone: clip(b.phone, 30), email: clip(b.email, 200),
