@@ -30,6 +30,7 @@ import { runDigests } from './digests.js';
 import { depositWatchAll } from './deposits.js';
 import { runCapacitySnapshots } from './capacity.js';
 import { runChecklistJobs } from './checklists.js';
+import { runPaperworkSafely } from './paperwork.js';
 import { loggedFetch } from './issues.js';
 import { runChartAudits } from './chartaudit.js';
 import { createNoteComparer } from './ai/notecompare.js';
@@ -66,7 +67,7 @@ process.on('unhandledRejection', (err) => {
 
 // Appointment reminders every 10 minutes. With Redis, only one server runs each pass (REMINDERS=off disables).
 if (process.env.REMINDERS !== 'off') {
-  const tick = () => runExclusive('reminders', 5 * 60 * 1000, async () => (await runReminders(db, messenger, { appUrl: config.appUrl })) + (await runRecallSequences(db, messenger, { appUrl: config.appUrl })) + (await runFormSends(db, messenger, { appUrl: config.appUrl })) + (await runCampaigns(db, messenger, { appUrl: config.appUrl })) + (await runFillOffers(db, messenger)))
+  const tick = () => runExclusive('reminders', 5 * 60 * 1000, async () => (await runReminders(db, messenger, { appUrl: config.appUrl })) + (await runRecallSequences(db, messenger, { appUrl: config.appUrl })) + (await runFormSends(db, messenger, { appUrl: config.appUrl })) + ((await runPaperworkSafely(db, messenger, { appUrl: config.appUrl })).sent || 0) + (await runCampaigns(db, messenger, { appUrl: config.appUrl })) + (await runFillOffers(db, messenger)))
     .then((n) => n && log.info(`Sent ${n} appointment reminder(s)`))
     .catch(jobFailed('Reminder job'));
   setInterval(tick, 10 * 60 * 1000).unref();

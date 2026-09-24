@@ -3305,6 +3305,289 @@ CREATE TABLE IF NOT EXISTS checklist_settings (
   updated_by INTEGER REFERENCES users(id),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+-- Consents and paperwork (consents.js, paperwork.js; docs/workflows/specs/C-consents.md).
+-- Every wording of a form the office ever used: a signed form points at the exact version it was signed against.
+-- Written when a template is created or edited and never changed afterwards.
+CREATE TABLE IF NOT EXISTS form_template_versions (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  template_id INTEGER NOT NULL REFERENCES form_templates(id),
+  version INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  fields TEXT NOT NULL,
+  fields_es TEXT,
+  content_hash TEXT NOT NULL,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (template_id, version)
+);
+-- One consent a patient needs for some treatment (a visit, a plan or chosen procedures): needed -> sent ->
+-- signed or declined; superseded when a new version must be signed instead (the old row is kept). Once signed
+-- or declined, the wording, signer, time, device and witness never change (database trigger in GUARDS).
+CREATE TABLE IF NOT EXISTS consents (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  location_id INTEGER REFERENCES locations(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  template_id INTEGER NOT NULL REFERENCES form_templates(id),
+  context_key TEXT NOT NULL,
+  appointment_id INTEGER REFERENCES appointments(id),
+  treatment_plan_id INTEGER REFERENCES treatment_plans(id),
+  procedure_ids TEXT NOT NULL DEFAULT '[]',
+  status TEXT NOT NULL DEFAULT 'needed' CHECK (status IN ('needed','sent','signed','declined','superseded')),
+  form_request_id INTEGER REFERENCES form_requests(id),
+  version_id INTEGER REFERENCES form_template_versions(id),
+  template_version INTEGER,
+  lang TEXT,
+  content TEXT,
+  content_hash TEXT,
+  patient_form_id INTEGER REFERENCES patient_forms(id),
+  document_id INTEGER REFERENCES documents(id),
+  signer_name TEXT,
+  signer_relationship TEXT,
+  signed_at TEXT,
+  signed_via TEXT,
+  ip TEXT,
+  device TEXT,
+  witness_user_id INTEGER REFERENCES users(id),
+  witness_name TEXT,
+  witness_signature TEXT,
+  declined_at TEXT,
+  declined_reason TEXT,
+  declined_by INTEGER REFERENCES users(id),
+  superseded_at TEXT,
+  superseded_by INTEGER REFERENCES users(id),
+  superseded_reason TEXT,
+  replaced_by_id INTEGER,
+  source TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- Links to a packet of forms (a text, an email, a QR code at the desk, a hand-off on the office device). Each send
+-- and each reminder is its own link; only the hash of the token is kept.
+CREATE TABLE IF NOT EXISTS paperwork_links (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  packet_id INTEGER NOT NULL REFERENCES form_requests(id),
+  appointment_id INTEGER REFERENCES appointments(id),
+  token_hash TEXT NOT NULL UNIQUE,
+  channel TEXT NOT NULL CHECK (channel IN ('sms','email','qr','handoff')),
+  purpose TEXT NOT NULL DEFAULT 'send' CHECK (purpose IN ('send','auto','reminder','qr','handoff')),
+  message_id INTEGER REFERENCES messages(id),
+  expires_at TEXT NOT NULL,
+  dob_failures INTEGER NOT NULL DEFAULT 0,
+  opened_at TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- What the paperwork autopilot sent (or tried to), claimed before sending so a restart or a second server never
+-- sends the same thing twice: 'appt:12:initial', 'packet:40:reminder:1'.
+CREATE TABLE IF NOT EXISTS paperwork_sends (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  send_key TEXT NOT NULL,
+  appointment_id INTEGER REFERENCES appointments(id),
+  packet_id INTEGER REFERENCES form_requests(id),
+  link_id INTEGER REFERENCES paperwork_links(id),
+  status TEXT NOT NULL DEFAULT 'sending' CHECK (status IN ('sending','sent','failed','skipped')),
+  error TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (practice_id, send_key)
+);
+-- Office iPads in kiosk mode for forms (front desk or an operatory). Only the token hash is kept; revoked,
+-- never deleted.
+CREATE TABLE IF NOT EXISTS forms_kiosks (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  location_id INTEGER REFERENCES locations(id),
+  operatory_id INTEGER REFERENCES operatories(id),
+  name TEXT NOT NULL,
+  token_hash TEXT NOT NULL UNIQUE,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  last_seen_at TEXT,
+  revoked_at TEXT,
+  revoked_by INTEGER REFERENCES users(id)
+);
+-- A patient's turn on a kiosk iPad: the forms (or an education page) staff loaded for them. Ends when they
+-- finish, go idle, or staff cancel it; the iPad then clears itself.
+CREATE TABLE IF NOT EXISTS kiosk_sessions (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  location_id INTEGER REFERENCES locations(id),
+  kiosk_id INTEGER NOT NULL REFERENCES forms_kiosks(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  appointment_id INTEGER REFERENCES appointments(id),
+  packet_id INTEGER REFERENCES form_requests(id),
+  mode TEXT NOT NULL DEFAULT 'forms' CHECK (mode IN ('forms','education')),
+  education_delivery_id INTEGER,
+  status TEXT NOT NULL DEFAULT 'waiting' CHECK (status IN ('waiting','active','completed','cancelled','expired')),
+  page INTEGER NOT NULL DEFAULT 0,
+  total INTEGER NOT NULL DEFAULT 0,
+  lang TEXT,
+  created_by INTEGER NOT NULL REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  started_at TEXT,
+  last_activity_at TEXT,
+  completed_at TEXT,
+  expires_at TEXT NOT NULL,
+  ended_reason TEXT
+);
+-- Each wording of an education page that was shown or sent (built-in or the office's own), so the record says
+-- exactly what the patient saw.
+CREATE TABLE IF NOT EXISTS education_versions (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  slug TEXT NOT NULL,
+  version INTEGER NOT NULL,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  video_url TEXT,
+  postop TEXT,
+  content_hash TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (practice_id, slug, version)
+);
+-- Proof education was given: who, what version, how (shown in the chair or on the iPad, emailed, texted), when,
+-- and when the patient opened a take-home link. Appears in the consent record and the visit's note.
+CREATE TABLE IF NOT EXISTS education_deliveries (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  location_id INTEGER REFERENCES locations(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  appointment_id INTEGER REFERENCES appointments(id),
+  consent_id INTEGER REFERENCES consents(id),
+  slug TEXT NOT NULL,
+  title TEXT NOT NULL,
+  version INTEGER NOT NULL,
+  version_id INTEGER REFERENCES education_versions(id),
+  how TEXT NOT NULL CHECK (how IN ('shown_chair','shown_ipad','emailed','texted')),
+  postop INTEGER NOT NULL DEFAULT 0,
+  operatory_id INTEGER REFERENCES operatories(id),
+  kiosk_session_id INTEGER REFERENCES kiosk_sessions(id),
+  token_hash TEXT UNIQUE,
+  message_id INTEGER REFERENCES messages(id),
+  opened_at TEXT,
+  open_count INTEGER NOT NULL DEFAULT 0,
+  source TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- Illustrations and short videos an office adds to an education page (general information, no patient data).
+-- Removed ones are marked, not deleted.
+CREATE TABLE IF NOT EXISTS education_media (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  slug TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('image','video')),
+  filename TEXT NOT NULL,
+  mime TEXT NOT NULL,
+  size INTEGER NOT NULL,
+  storage_key TEXT NOT NULL,
+  encrypted INTEGER NOT NULL DEFAULT 0,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  removed_at TEXT
+);
+-- Online scheduling (OS1–OS5, onlinesched.js, docs/workflows/specs/OS-online-scheduling.md).
+-- The practice's online scheduling page: branding, who hears about bookings, and which slots are "no-show prone".
+-- Configuration: edited in place (audited), one row per practice.
+CREATE TABLE IF NOT EXISTS online_sched_settings (
+  practice_id INTEGER PRIMARY KEY REFERENCES practices(id),
+  brand_color TEXT,
+  logo_mime TEXT,
+  logo TEXT,
+  headline TEXT,
+  headline_es TEXT,
+  notify_chat INTEGER NOT NULL DEFAULT 1,
+  notify_sms_to TEXT,
+  family_max INTEGER NOT NULL DEFAULT 4,
+  embed_origins TEXT,
+  risky_weekdays TEXT,
+  risky_before TEXT,
+  risky_after TEXT,
+  updated_by INTEGER REFERENCES users(id),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- What patients can book online (new patient, emergency, hygiene, consults…): the rules the public page and the
+-- slot search follow. Linked to an appointment type for the schedule. Retired (active = 0), never deleted.
+CREATE TABLE IF NOT EXISTS online_visit_types (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  kind TEXT NOT NULL DEFAULT 'other' CHECK (kind IN ('new_patient','emergency','hygiene','consult','other')),
+  label TEXT NOT NULL,
+  label_es TEXT,
+  blurb TEXT,
+  blurb_es TEXT,
+  appointment_type_id INTEGER REFERENCES appointment_types(id),
+  duration INTEGER NOT NULL DEFAULT 60,
+  provider_ids TEXT NOT NULL DEFAULT '[]',
+  location_ids TEXT NOT NULL DEFAULT '[]',
+  lead_minutes INTEGER NOT NULL DEFAULT 120,
+  max_days INTEGER NOT NULL DEFAULT 60,
+  buffer_minutes INTEGER NOT NULL DEFAULT 0,
+  booking_mode TEXT NOT NULL DEFAULT 'instant' CHECK (booking_mode IN ('instant','request')),
+  who TEXT NOT NULL DEFAULT 'anyone' CHECK (who IN ('new','existing','anyone')),
+  family INTEGER NOT NULL DEFAULT 0,
+  questions TEXT NOT NULL DEFAULT '[]',
+  deposit INTEGER NOT NULL DEFAULT 0,
+  deposit_rule TEXT NOT NULL DEFAULT 'never' CHECK (deposit_rule IN ('never','new_patients','always','risky_slots')),
+  card_rule TEXT NOT NULL DEFAULT 'never' CHECK (card_rule IN ('never','new_patients','always','risky_slots')),
+  active INTEGER NOT NULL DEFAULT 1,
+  sort INTEGER NOT NULL DEFAULT 0,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (practice_id, label)
+);
+-- One online booking as submitted (one person, or a family back-to-back): its idempotency key, where it came
+-- from (source / UTM — no personal details), what needs a person, and who at the office has seen it. The people
+-- are booking_requests rows (online_booking_id); their visits carry appointments.online_booking_id.
+CREATE TABLE IF NOT EXISTS online_bookings (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  location_id INTEGER REFERENCES locations(id),
+  visit_type_id INTEGER REFERENCES online_visit_types(id),
+  submit_key TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'processing' CHECK (status IN ('processing','booked','requested','awaiting_deposit','declined','cancelled')),
+  people INTEGER NOT NULL DEFAULT 1,
+  first_start TEXT,
+  new_patients INTEGER NOT NULL DEFAULT 0,
+  urgent INTEGER NOT NULL DEFAULT 0,
+  flags TEXT NOT NULL DEFAULT '[]',
+  triage TEXT,
+  insurance_status TEXT,
+  source TEXT,
+  utm_source TEXT,
+  utm_medium TEXT,
+  utm_campaign TEXT,
+  referrer_host TEXT,
+  variant TEXT,
+  language TEXT,
+  asap INTEGER NOT NULL DEFAULT 0,
+  result TEXT,
+  chat_message_id INTEGER REFERENCES chat_messages(id),
+  seen_by INTEGER REFERENCES users(id),
+  seen_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (practice_id, submit_key)
+);
+-- Conversion analytics for the public page: one row per anonymous page session and step reached. No names,
+-- contact details, IP addresses or free text — only the step, the kind of visit, the channel and the copy variant.
+CREATE TABLE IF NOT EXISTS online_booking_events (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  session_key TEXT NOT NULL,
+  step TEXT NOT NULL CHECK (step IN ('view','office','reason','time','details','booked','requested','taken','bot')),
+  visit_kind TEXT,
+  source TEXT,
+  variant TEXT,
+  day TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (practice_id, session_key, step)
+);
 `;
 
 // Columns added after the first release. SQLite has no ADD COLUMN IF NOT EXISTS, so check first.
@@ -3738,6 +4021,45 @@ const COLUMNS = [
   ['bridge_agents', 'scanner_info', 'TEXT'],
   ['practices', 'document_ai', 'INTEGER NOT NULL DEFAULT 1'],
   ['practices', 'capacity_targets', 'TEXT'],
+  ['form_templates', 'library_key', 'TEXT'],
+  ['form_templates', 'fields_es', 'TEXT'],
+  ['form_templates', 'procedure_categories', 'TEXT'],
+  ['form_templates', 'witness', 'INTEGER NOT NULL DEFAULT 0'],
+  ['form_templates', 'due_rule', 'TEXT'],
+  ['form_templates', 'legal_review', 'INTEGER NOT NULL DEFAULT 0'],
+  ['form_templates', 'education_slugs', 'TEXT'],
+  ['form_requests', 'consent_id', 'INTEGER REFERENCES consents(id)'],
+  ['form_requests', 'kiosk_session_id', 'INTEGER REFERENCES kiosk_sessions(id)'],
+  ['patient_forms', 'version_id', 'INTEGER REFERENCES form_template_versions(id)'],
+  ['patient_forms', 'content_hash', 'TEXT'],
+  ['patient_forms', 'lang', 'TEXT'],
+  ['patient_forms', 'signer_relationship', 'TEXT'],
+  ['patient_forms', 'witness_user_id', 'INTEGER REFERENCES users(id)'],
+  ['patient_forms', 'witness_name', 'TEXT'],
+  ['patient_forms', 'signed_via', 'TEXT'],
+  ['patient_forms', 'device', 'TEXT'],
+  ['patient_forms', 'appointment_id', 'INTEGER REFERENCES appointments(id)'],
+  ['patient_forms', 'consent_id', 'INTEGER REFERENCES consents(id)'],
+  ['patient_forms', 'kiosk_session_id', 'INTEGER REFERENCES kiosk_sessions(id)'],
+  ['procedures', 'consent_id', 'INTEGER REFERENCES consents(id)'],
+  ['procedures', 'consented_at', 'TEXT'],
+  ['practices', 'paperwork_autopilot', 'INTEGER NOT NULL DEFAULT 0'],
+  ['practices', 'paperwork_days', 'INTEGER NOT NULL DEFAULT 3'],
+  ['practices', 'paperwork_reminders', 'INTEGER NOT NULL DEFAULT 2'],
+  ['practices', 'paperwork_remind_hours', 'INTEGER NOT NULL DEFAULT 24'],
+  ['practices', 'history_renew_months', 'INTEGER NOT NULL DEFAULT 12'],
+  ['education_articles', 'topic', 'TEXT'],
+  ['education_articles', 'video_url', 'TEXT'],
+  ['education_articles', 'postop', 'TEXT'],
+  ['booking_requests', 'online_booking_id', 'INTEGER REFERENCES online_bookings(id)'],
+  ['booking_requests', 'visit_type_id', 'INTEGER REFERENCES online_visit_types(id)'],
+  ['booking_requests', 'possible_duplicate_id', 'INTEGER REFERENCES patients(id)'],
+  ['booking_requests', 'operatory_id', 'INTEGER REFERENCES operatories(id)'],
+  ['booking_requests', 'urgent', 'INTEGER NOT NULL DEFAULT 0'],
+  ['booking_requests', 'answers', 'TEXT'],
+  ['booking_requests', 'card_files', 'TEXT'],
+  ['booking_requests', 'asap', 'INTEGER NOT NULL DEFAULT 0'],
+  ['appointments', 'online_booking_id', 'INTEGER REFERENCES online_bookings(id)'],
 ];
 
 // CHECK constraints widened after release: [table, constraint name on Postgres, old text, new text].
@@ -3766,6 +4088,14 @@ BEGIN SELECT RAISE(ABORT, 'The audit log cannot be changed'); END;
 CREATE TRIGGER IF NOT EXISTS ledger_amount_fixed BEFORE UPDATE OF amount, type ON ledger_entries
 WHEN OLD.amount IS NOT NEW.amount OR OLD.type IS NOT NEW.type
 BEGIN SELECT RAISE(ABORT, 'Ledger amounts cannot be edited: void or reverse the entry'); END;
+CREATE TRIGGER IF NOT EXISTS consent_record_fixed BEFORE UPDATE OF content, content_hash, template_version, lang, signer_name, signer_relationship, signed_at, signed_via, ip, device, witness_name, witness_signature, declined_at, declined_reason ON consents
+WHEN (OLD.signed_at IS NOT NULL OR OLD.declined_at IS NOT NULL) AND (OLD.content IS NOT NEW.content OR OLD.content_hash IS NOT NEW.content_hash OR OLD.template_version IS NOT NEW.template_version OR OLD.lang IS NOT NEW.lang
+  OR OLD.signer_name IS NOT NEW.signer_name OR OLD.signer_relationship IS NOT NEW.signer_relationship OR OLD.signed_at IS NOT NEW.signed_at OR OLD.signed_via IS NOT NEW.signed_via OR OLD.ip IS NOT NEW.ip
+  OR OLD.device IS NOT NEW.device OR OLD.witness_name IS NOT NEW.witness_name OR OLD.witness_signature IS NOT NEW.witness_signature OR OLD.declined_at IS NOT NEW.declined_at OR OLD.declined_reason IS NOT NEW.declined_reason)
+BEGIN SELECT RAISE(ABORT, 'A signed consent cannot be changed: a new version needs a new signature'); END;
+CREATE TRIGGER IF NOT EXISTS patient_form_signed_fixed BEFORE UPDATE OF data, fields, signature_name, signature_image, signed_at, content_hash ON patient_forms
+WHEN OLD.data IS NOT NEW.data OR OLD.fields IS NOT NEW.fields OR OLD.signature_name IS NOT NEW.signature_name OR OLD.signature_image IS NOT NEW.signature_image OR OLD.signed_at IS NOT NEW.signed_at OR OLD.content_hash IS NOT NEW.content_hash
+BEGIN SELECT RAISE(ABORT, 'A signed form cannot be changed'); END;
 `;
 const GUARDS_PG = [
   `CREATE OR REPLACE FUNCTION dm_audit_append_only() RETURNS trigger LANGUAGE plpgsql AS $f$ BEGIN RAISE EXCEPTION 'The audit log cannot be changed'; END $f$`,
@@ -3776,6 +4106,13 @@ const GUARDS_PG = [
   `CREATE OR REPLACE FUNCTION dm_ledger_fixed() RETURNS trigger LANGUAGE plpgsql AS $f$ BEGIN RAISE EXCEPTION 'Ledger amounts cannot be edited: void or reverse the entry'; END $f$`,
   'DROP TRIGGER IF EXISTS ledger_amount_fixed ON ledger_entries',
   'CREATE TRIGGER ledger_amount_fixed BEFORE UPDATE OF amount, type ON ledger_entries FOR EACH ROW WHEN (OLD.amount IS DISTINCT FROM NEW.amount OR OLD.type IS DISTINCT FROM NEW.type) EXECUTE FUNCTION dm_ledger_fixed()',
+  // Signed consents and signed forms keep their wording, signer, time and device (consents.js).
+  `CREATE OR REPLACE FUNCTION dm_consent_fixed() RETURNS trigger LANGUAGE plpgsql AS $f$ BEGIN RAISE EXCEPTION 'A signed consent cannot be changed: a new version needs a new signature'; END $f$`,
+  'DROP TRIGGER IF EXISTS consent_record_fixed ON consents',
+  'CREATE TRIGGER consent_record_fixed BEFORE UPDATE ON consents FOR EACH ROW WHEN ((OLD.signed_at IS NOT NULL OR OLD.declined_at IS NOT NULL) AND (OLD.content IS DISTINCT FROM NEW.content OR OLD.content_hash IS DISTINCT FROM NEW.content_hash OR OLD.template_version IS DISTINCT FROM NEW.template_version OR OLD.lang IS DISTINCT FROM NEW.lang OR OLD.signer_name IS DISTINCT FROM NEW.signer_name OR OLD.signer_relationship IS DISTINCT FROM NEW.signer_relationship OR OLD.signed_at IS DISTINCT FROM NEW.signed_at OR OLD.signed_via IS DISTINCT FROM NEW.signed_via OR OLD.ip IS DISTINCT FROM NEW.ip OR OLD.device IS DISTINCT FROM NEW.device OR OLD.witness_name IS DISTINCT FROM NEW.witness_name OR OLD.witness_signature IS DISTINCT FROM NEW.witness_signature OR OLD.declined_at IS DISTINCT FROM NEW.declined_at OR OLD.declined_reason IS DISTINCT FROM NEW.declined_reason)) EXECUTE FUNCTION dm_consent_fixed()',
+  `CREATE OR REPLACE FUNCTION dm_form_fixed() RETURNS trigger LANGUAGE plpgsql AS $f$ BEGIN RAISE EXCEPTION 'A signed form cannot be changed'; END $f$`,
+  'DROP TRIGGER IF EXISTS patient_form_signed_fixed ON patient_forms',
+  'CREATE TRIGGER patient_form_signed_fixed BEFORE UPDATE ON patient_forms FOR EACH ROW WHEN (OLD.data IS DISTINCT FROM NEW.data OR OLD.fields IS DISTINCT FROM NEW.fields OR OLD.signature_name IS DISTINCT FROM NEW.signature_name OR OLD.signature_image IS DISTINCT FROM NEW.signature_image OR OLD.signed_at IS DISTINCT FROM NEW.signed_at OR OLD.content_hash IS DISTINCT FROM NEW.content_hash) EXECUTE FUNCTION dm_form_fixed()',
 ];
 
 const INDEXES = `

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { onToast } from '../toast.js';
 import { isMac, typingIn } from '../shortcuts.js';
+import OnlineBookingAlerts from './OnlineBookingAlerts.jsx';
 
 // Bottom-of-screen notices. The newest with an Undo also answers Ctrl/⌘+Z (when you're not typing in a box).
 export default function Toasts() {
@@ -26,16 +27,21 @@ export default function Toasts() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
-  if (!list.length) return null;
+  // Online bookings announce themselves here (Toasts is on every signed-in screen); it stays mounted either way.
   return (
-    <div className="toasts no-print" role="status" aria-live="polite">
-      {list.map((t) => (
-        <div key={t.id} className={`toast ${t.tone}`}>
-          <span>{t.message}</span>
-          {t.undo && <button type="button" className="toast-undo" onClick={() => run(t)}>Undo <kbd>{isMac ? '⌘' : 'Ctrl'} Z</kbd></button>}
-          <button type="button" className="toast-x" aria-label="Dismiss" onClick={() => setList((l) => l.filter((x) => x.id !== t.id))}>×</button>
+    <>
+      <OnlineBookingAlerts />
+      {list.length > 0 && (
+        <div className="toasts no-print" role="status" aria-live="polite">
+          {list.map((t) => (
+            <div key={t.id} className={`toast ${t.tone}`}>
+              <span>{t.message}</span>
+              {t.undo && <button type="button" className="toast-undo" onClick={() => run(t)}>Undo <kbd>{isMac ? '⌘' : 'Ctrl'} Z</kbd></button>}
+              <button type="button" className="toast-x" aria-label="Dismiss" onClick={() => setList((l) => l.filter((x) => x.id !== t.id))}>×</button>
+            </div>
+          ))}
         </div>
-      ))}
-    </div>
+      )}
+    </>
   );
 }

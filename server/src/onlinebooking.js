@@ -5,6 +5,19 @@ import { findDuplicates } from './routes/patients.js';
 import { savePolicy } from './benefits.js';
 import { emitAppointment } from './webhooks.js';
 
+// Which chart an online booking is for. An existing patient booking online shouldn't become a second chart, but
+// anyone can type a name into a public form: it joins a chart only when the birth date and the phone or email on
+// file all match (sure). A near miss (same name, or same birthday and last name…) is never merged: it gets a new
+// chart and a task to merge it if it's the same person.
+export async function matchPatient(db, practiceId, b) {
+  const digits = (s) => String(s || '').replace(/\D/g, '').slice(-10);
+  const found = (await findDuplicates(db, practiceId, { first_name: b.first_name, last_name: b.last_name, dob: b.dob, phone: b.phone, email: b.email }))
+    .filter((m) => m.status !== 'archived' && m.last_name.toLowerCase() === String(b.last_name || '').toLowerCase());
+  const sure = found.find((m) => b.dob && m.dob === b.dob
+    && ((digits(b.phone).length === 10 && digits(m.phone) === digits(b.phone)) || (b.email && m.email && m.email.toLowerCase() === String(b.email).toLowerCase())));
+  return { sure: sure ?? null, nearMiss: sure ? null : found[0] ?? null };
+}
+
 // Turns an online booking request into a real appointment: finds the patient (or adds them), adds
 // the insurance they entered, books the visit, and posts any deposit they paid. Used when the office
 // accepts a request, and straight away for instant booking.
@@ -18,18 +31,11 @@ export async function finishBooking(db, b, { providerId, start, duration, patien
     let pat = patientId;
     const chosen = !!patientId; // the office picked the chart
     const today = (await practiceNow(db, pid)).slice(0, 10);
-    // An existing patient booking online shouldn't become a second chart, but anyone can type a name into
-    // a public form: it joins a chart only when the birth date and the phone or email on file all match.
-    // A near miss gets a new chart and a task to merge it if it's the same person.
     let nearMiss = null;
     if (!pat) {
-      const digits = (s) => String(s || '').replace(/\D/g, '').slice(-10);
-      const found = (await findDuplicates(db, pid, { first_name: b.first_name, last_name: b.last_name, dob: b.dob, phone: b.phone, email: b.email }))
-        .filter((m) => m.status !== 'archived' && m.last_name.toLowerCase() === b.last_name.toLowerCase());
-      const sure = found.find((m) => b.dob && m.dob === b.dob
-        && ((digits(b.phone).length === 10 && digits(m.phone) === digits(b.phone)) || (b.email && m.email && m.email.toLowerCase() === String(b.email).toLowerCase())));
-      pat = sure?.id ?? null;
-      nearMiss = sure ? null : found[0] ?? null;
+      const m = await matchPatient(db, pid, b);
+      pat = m.sure?.id ?? null;
+      nearMiss = m.nearMiss;
     }
     const existing = !!pat;
     if (!pat) {
@@ -63,12 +69,35 @@ export async function finishBooking(db, b, { providerId, start, duration, patien
         await insert(db, 'tasks', { practice_id: pid, patient_id: pat, priority: 'normal', due_date: today, title: `Verify insurance from online booking: ${carrierName} ${b.insurance_member_id}` });
       }
     }
+    // Insurance card photos sent with an online booking are filed in the chart and wait, with anything typed,
+    // for the office to read and confirm them (Insurance tab); nothing becomes a policy without a person.
+    const cards = b.card_files ? JSON.parse(b.card_files) : [];
+    if (cards.length) {
+      const docIds = [];
+      for (const [i, c] of cards.entries()) {
+        docIds.push(await insert(db, 'documents', {
+          practice_id: pid, patient_id: pat, category: 'insurance_card', filename: `Insurance card ${i ? 'back' : 'front'} (online booking).${c.mime === 'image/png' ? 'png' : 'jpg'}`,
+          mime: c.mime, size: c.size, storage_key: c.storage_key, encrypted: c.encrypted ? 1 : 0, notes: 'Sent when booking online',
+        }));
+      }
+      const typed = b.insurance_carrier && b.insurance_member_id && existing && !chosen;
+      if (typed) {
+        await db.run("UPDATE insurance_updates SET document_ids = ? WHERE id = (SELECT MAX(id) FROM insurance_updates WHERE patient_id = ? AND status = 'pending')", JSON.stringify(docIds), pat);
+      } else {
+        await insert(db, 'insurance_updates', {
+          practice_id: pid, patient_id: pat, carrier_name: b.insurance_carrier ? String(b.insurance_carrier).trim() : null, member_id: b.insurance_member_id || null,
+          subscriber_name: b.insurance_subscriber || null, document_ids: JSON.stringify(docIds), note: 'Card photo sent when booking online',
+        });
+      }
+    }
+    operatoryId = operatoryId || b.operatory_id || null;
     const [h, m] = start.slice(11, 16).split(':').map(Number);
     const endMin = h * 60 + m + duration;
     const row = {
       patient_id: pat, provider_id: providerId, operatory_id: operatoryId ? Number(operatoryId) : null,
       start_time: start, end_time: `${start.slice(0, 10)} ${String(Math.floor(endMin / 60)).padStart(2, '0')}:${String(endMin % 60).padStart(2, '0')}`,
       status: 'scheduled', reason: b.reason, notes: b.notes, location_id: b.location_id ?? null,
+      ...(b.online_booking_id ? { online_booking_id: b.online_booking_id } : {}), ...(b.asap ? { asap: 1 } : {}),
     };
     const type = await db.get('SELECT id, pattern FROM appointment_types WHERE practice_id = ? AND name = ?', pid, b.reason);
     row.appointment_type_id = type?.id ?? null;
@@ -84,8 +113,8 @@ export async function finishBooking(db, b, { providerId, start, duration, patien
       });
     }
     await db.run(
-      "UPDATE booking_requests SET status = 'accepted', patient_id = ?, appointment_id = ?, deposit_entry_id = ?, handled_by = ?, handled_at = datetime('now') WHERE id = ?",
-      pat, apptId, entryId ?? null, userId, b.id,
+      "UPDATE booking_requests SET status = 'accepted', patient_id = ?, appointment_id = ?, deposit_entry_id = ?, possible_duplicate_id = ?, handled_by = ?, handled_at = datetime('now') WHERE id = ?",
+      pat, apptId, entryId ?? null, nearMiss?.id ?? null, userId, b.id,
     );
     return apptId;
   }).then(async (apptId) => {

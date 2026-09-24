@@ -293,8 +293,10 @@ export async function seedDemo(db) {
       ['Diego', 'Ramirez', '1981-11-03', '(512) 555-0177', null, 'Tooth pain / emergency', 30, 1, '16:00', 'Lower left molar sensitive to cold.'],
     ];
     for (const [first_name, last_name, dob, phone, email, reason, duration, offset, time, notes] of requests) {
-      let day = dayOffset(offset);
-      while ([0, 6].includes(new Date(`${day}T12:00:00Z`).getUTCDay())) day = dayOffset(++offset);
+      // A request that would land on a weekend moves to the next weekday (a local copy: the loop's values are const).
+      let off = offset;
+      let day = dayOffset(off);
+      while ([0, 6].includes(new Date(`${day}T12:00:00Z`).getUTCDay())) day = dayOffset(++off);
       await insert(db, 'booking_requests', {
         practice_id: practiceId, first_name, last_name, dob, phone, email, reason, duration, provider_id: drRivera,
         requested_start: `${day} ${time}`, notes, ip: '203.0.113.7',

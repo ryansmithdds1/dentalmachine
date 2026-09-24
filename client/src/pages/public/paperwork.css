@@ -1,0 +1,82 @@
+/* Patient paperwork, consents and the kiosk iPad (Paperwork.jsx, Kiosk.jsx). Big, calm, finger-sized: every
+   target is at least 52px tall. Colors come from the :root tokens, so the dark theme follows. */
+.pw { width: 100%; max-width: 760px; margin: 0 auto; font-size: 18px; line-height: 1.55; color: var(--text); }
+.pw h1 { font-size: 28px; letter-spacing: -0.02em; }
+.pw-hero { text-align: center; padding: 32px 8px; display: flex; flex-direction: column; align-items: center; gap: 14px; }
+.pw-hero-icon { width: 88px; height: 88px; border-radius: 50%; display: grid; place-items: center; background: var(--primary-soft); color: var(--primary-ink); }
+.pw-hero-icon.ok { background: var(--ok-soft); color: var(--ok); }
+.pw-lead { font-size: 20px; color: var(--text-2); margin: 0; }
+.pw-lead.strong { font-weight: 650; color: var(--text); }
+.pw-card { background: var(--panel); border: 1px solid var(--border); border-radius: 18px; padding: 22px 20px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 14px; margin-bottom: 16px; }
+.pw-title { font-size: 26px; margin: 0; }
+.pw-h { font-size: 19px; margin: 10px 0 0; display: flex; align-items: center; gap: 8px; }
+.pw-p { margin: 0; white-space: pre-wrap; color: var(--text); }
+.pw-hint { margin: 0; color: var(--warn); font-weight: 550; }
+.pw-req { color: var(--danger); margin-left: 4px; }
+.pw-q { display: flex; flex-direction: column; gap: 8px; }
+.pw-qlabel { font-weight: 600; display: flex; align-items: center; gap: 6px; }
+.pw-field { display: flex; flex-direction: column; gap: 6px; }
+.pw-field input, .pw-field textarea, .pw-initials input {
+  font: inherit; font-size: 19px; min-height: 54px; padding: 12px 14px; border-radius: 12px; border: 1.5px solid var(--border-strong);
+  background: var(--panel); color: var(--text);
+}
+.pw-field input:focus, .pw-field textarea:focus, .pw-initials input:focus { outline: none; border-color: var(--primary); box-shadow: var(--ring); }
+.pw-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.pw-check { display: flex; gap: 14px; align-items: flex-start; padding: 14px 16px; border-radius: 14px; border: 1.5px solid var(--border-strong); cursor: pointer; min-height: 56px; }
+.pw-check.on { border-color: var(--primary); background: var(--primary-soft); }
+.pw-check input { width: 28px; height: 28px; margin: 0; flex: none; accent-color: var(--primary); }
+.pw-initials { display: flex; gap: 14px; align-items: center; }
+.pw-initials input { width: 96px; text-align: center; text-transform: uppercase; }
+.pw-seg, .pw-choices, .pw-lang { display: flex; flex-wrap: wrap; gap: 10px; }
+.pw-seg button, .pw-choices button, .pw-lang button, .pw-chips button {
+  font: inherit; font-size: 18px; min-height: 54px; min-width: 110px; padding: 10px 20px; border-radius: 14px; border: 1.5px solid var(--border-strong);
+  background: var(--panel); color: var(--text); cursor: pointer;
+}
+.pw-seg button.on, .pw-choices button.on, .pw-lang button.on, .pw-chips button.on { border-color: var(--primary); background: var(--primary); color: #fff; font-weight: 600; }
+:root[data-theme='dark'] .pw-seg button.on, :root[data-theme='dark'] .pw-choices button.on, :root[data-theme='dark'] .pw-lang button.on, :root[data-theme='dark'] .pw-chips button.on { color: #04201d; }
+.pw-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.pw-chips button { min-width: 0; font-size: 16px; min-height: 48px; }
+.pw-sign .signature-pad { height: 200px; border-radius: 14px; }
+.pw-sign button.small { min-height: 44px; font-size: 16px; }
+.pw-photo { max-width: 100%; max-height: 260px; border-radius: 12px; border: 1px solid var(--border); object-fit: contain; }
+.pw-camera { position: relative; overflow: hidden; }
+.pw-camera input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.pw-actions { display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; margin-top: 6px; }
+.pw-primary, .pw-secondary, .pw-danger {
+  font: inherit; font-size: 20px; font-weight: 650; min-height: 60px; padding: 12px 26px; border-radius: 16px; display: inline-flex; align-items: center;
+  justify-content: center; gap: 10px; cursor: pointer; border: 1.5px solid transparent; text-decoration: none;
+}
+.pw-primary { background: var(--primary); color: #fff; margin-left: auto; min-width: 220px; }
+:root[data-theme='dark'] .pw-primary { color: #04201d; }
+.pw-primary:disabled { opacity: 0.45; cursor: default; }
+.pw-secondary { background: var(--panel); color: var(--text); border-color: var(--border-strong); }
+.pw-danger { background: var(--danger-soft); color: var(--danger); border-color: var(--danger); }
+.pw-danger:disabled { opacity: 0.5; }
+.pw-steps { margin: 0 0 14px; }
+.pw-step-label { font-size: 16px; color: var(--muted); margin-bottom: 6px; font-weight: 550; }
+.pw-bar { height: 10px; background: var(--border); border-radius: 99px; overflow: hidden; }
+.pw-bar span { display: block; height: 100%; background: var(--primary); border-radius: 99px; transition: width 0.3s; }
+.pw-lang { justify-content: center; }
+/* Education */
+.edu.big { font-size: 21px; }
+.edu p { margin: 0; }
+.edu ul { margin: 0; padding-left: 26px; display: flex; flex-direction: column; gap: 6px; }
+.edu-img { width: 100%; max-height: 420px; object-fit: contain; border-radius: 14px; background: var(--subtle); }
+.edu-video { width: 100%; border-radius: 14px; background: #000; }
+.edu-postop { border-top: 1px dashed var(--border-strong); padding-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+/* The kiosk iPad */
+.kiosk { min-height: 100vh; background: var(--bg); padding: 24px 16px 40px; box-sizing: border-box; user-select: none; -webkit-user-select: none; }
+.kiosk input, .kiosk textarea { user-select: text; -webkit-user-select: text; }
+.kiosk-home { min-height: 80vh; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 16px; color: var(--text); max-width: 640px; margin: 0 auto; }
+.kiosk-home h1 { font-size: 44px; letter-spacing: -0.02em; margin: 0; }
+.kiosk-practice { font-size: 22px; color: var(--primary-ink); font-weight: 650; }
+.kiosk-name { font-size: 14px; color: var(--faint); }
+.kiosk-setup { display: flex; flex-direction: column; gap: 14px; width: 100%; text-align: left; font-size: 18px; }
+.kiosk-warn { position: fixed; inset: 0; background: color-mix(in srgb, var(--bg) 92%, transparent); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; z-index: 50; text-align: center; font-size: 20px; color: var(--text); }
+.kiosk-warn .pw-primary { margin-left: 0; }
+@media (max-width: 520px) {
+  .pw { font-size: 17px; }
+  .pw-primary { min-width: 0; width: 100%; }
+  .pw-actions { flex-direction: column-reverse; }
+  .pw-secondary, .pw-danger { width: 100%; }
+}

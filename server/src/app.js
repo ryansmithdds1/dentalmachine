@@ -28,6 +28,10 @@ import cadenceRoutes from './routes/cadence.js';
 import recallBookRoutes, { recallVoiceWebhooks } from './routes/recallbook.js';
 import chatRoutes from './routes/chat.js';
 import checklistRoutes from './routes/checklists.js';
+import onlineSchedPublicRoutes, { onlineSchedRoutes, onlineSchedEmbedRoutes } from './routes/onlinesched.js';
+import consentRoutes from './routes/consents.js';
+import paperworkRoutes from './routes/paperwork.js';
+import paperworkPublicRoutes from './routes/paperworkpublic.js';
 import chartAuditRoutes from './routes/chartaudit.js';
 import { docBridgeRoutes, docMediaRoutes } from './routes/docbridge.js';
 import longRecordingRoutes from './routes/longrecording.js';
@@ -217,8 +221,8 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   // (after the body is read, below) repeats of a request with the same Idempotency-Key aren't done twice
   // Large bodies from the public form page are rate-limited before they're read (no sign-in there).
   const bigPublicBody = rateLimit({ windowMs: 60_000, max: 12, name: 'public-big-body' });
-  app.use((req, res, next) => (/^\/api\/public\/forms\/[^/]+\/\d+$/.test(req.path) ? bigPublicBody(req, res, next) : next()));
-  app.use((req, res, next) => (/^\/api\/public\/forms\/[^/]+\/\d+$|^\/api\/insurance-plans\/\d+\/read-benefits$|^\/api\/eobs\/read$|^\/api\/patients\/\d+\/insurance-card\/read$/.test(req.path) ? formBody : jsonBody)(req, res, next));
+  app.use((req, res, next) => (/^\/api\/public\/forms\/[^/]+\/\d+$|^\/api\/public\/(papers\/[^/]+|forms-kiosk\/sessions\/\d+)\/(history|forms\/\d+)$/.test(req.path) ? bigPublicBody(req, res, next) : next()));
+  app.use((req, res, next) => (/^\/api\/public\/forms\/[^/]+\/\d+$|^\/api\/insurance-plans\/\d+\/read-benefits$|^\/api\/eobs\/read$|^\/api\/patients\/\d+\/insurance-card\/read$|^\/api\/public\/(papers\/[^/]+|forms-kiosk\/sessions\/\d+)\/(history|forms\/\d+)$|^\/api\/public\/os\/[^/]+\/book$/.test(req.path) ? formBody : jsonBody)(req, res, next));
   app.use('/api', idempotency(db, secret));
   app.use((req, res, next) => {
     // Patient data isn't left in the browser's or a proxy's disk cache.
@@ -247,7 +251,8 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   app.use('/api/public', (_req, res, next) => {
     res.set('Cache-Control', 'no-store');
     next();
-  }, publicRoutes({ db, storage, payments, messenger, config, secret, fetchImpl }), publicCasePresentation({ db, storage, secret }), portalPublicRoutes({ db, secret, messenger }), campaignPublicRoutes({ db }), surveyPublicRoutes({ db }), labPublicRoutes({ db, storage }), learnPublicRoutes({ db }), checkinPublicRoutes({ db }));
+  }, publicRoutes({ db, storage, payments, messenger, config, secret, fetchImpl }), publicCasePresentation({ db, storage, secret }), portalPublicRoutes({ db, secret, messenger }), campaignPublicRoutes({ db }), surveyPublicRoutes({ db }), labPublicRoutes({ db, storage }), learnPublicRoutes({ db }), checkinPublicRoutes({ db }), paperworkPublicRoutes({ db, storage, secret }));
+  app.use('/api/public', onlineSchedPublicRoutes({ db, messenger, payments, storage, config, fetchImpl }));
   app.use('/api/portal', portalRoutes({ db, secret, config, payments, messenger, storage }));
   app.use('/api/v1', apiV1Routes({ db }));
   app.use('/api/mcp', (_req, res, next) => { res.set('Cache-Control', 'no-store'); next(); }, mcpRoutes({ db }));
@@ -311,6 +316,9 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(importRoutes({ db }));
   api.use(backupRoutes({ db, storage, config }));
   api.use(formRoutes({ db, messenger, config }));
+  api.use(consentRoutes({ db, storage }));
+  api.use(paperworkRoutes({ db, messenger, storage, config }));
+  api.use(onlineSchedRoutes({ db, config }));
   api.use(membershipRoutes({ db, payments, messenger }));
   api.use(campaignRoutes({ db, messenger, config }));
   api.use(developerRoutes({ db, fetchImpl }));
@@ -377,6 +385,8 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(imagingRoutes({ db, storage }));
   api.use(bridgePackageRoutes({ db, config }));
   api.use(systemRoutes({ db, config, messenger, storage, payments, clearinghouse, erx, mailer }));
+  // The website booking embed (/embed.js) and the embeddable booking page's framing rules.
+  app.use(onlineSchedEmbedRoutes({ db }));
   app.use('/api', api);
   app.use('/api', (_req, _res, next) => next(new HttpError(404, 'Not found')));
 

@@ -3,6 +3,7 @@ import { requirePermission, HttpError, can as allowed } from '../auth.js';
 import { findOr404, audit } from '../util.js';
 import { patientScope, canSeePatient } from '../officeaccess.js';
 import { historyChanges } from '../forms.js';
+import { paperworkExceptions } from '../paperwork.js';
 
 // Intake worklist: what patients sent in online that a person still has to look at, across every patient —
 // health histories waiting for review, new insurance sent from the portal, and insurance card photos from
@@ -78,8 +79,11 @@ export default function intakeReviewRoutes({ db }) {
       items.push(...byPatient.values());
     }
 
+    // Paperwork that needs a person (P5): declined consents, forms that couldn't be sent, visits soon with forms still not done.
+    items.push(...await paperworkExceptions(db, req.user, { scopeSql: s.sql, scopeArgs: s.args }));
+
     items.sort((a, b) => String(a.at).localeCompare(String(b.at)));
-    res.json({ items, counts: { history: items.filter((i) => i.kind === 'history').length, insurance_update: items.filter((i) => i.kind === 'insurance_update').length, card: items.filter((i) => i.kind === 'card').length } });
+    res.json({ items, counts: { history: items.filter((i) => i.kind === 'history').length, insurance_update: items.filter((i) => i.kind === 'insurance_update').length, card: items.filter((i) => i.kind === 'card').length, paperwork: items.filter((i) => /^(consent_declined|paperwork_)/.test(i.kind)).length } });
   });
 
   // "Nothing to enter" for card photos (a duplicate, or the policy is already right): off the list, on the record.
@@ -93,6 +97,18 @@ export default function intakeReviewRoutes({ db }) {
       await audit(db, req, 'intake.card_done', 'documents', d.id, { patient_id: d.patient_id }, { reason: typeof req.body?.reason === 'string' ? req.body.reason.slice(0, 300) : 'Nothing to enter' });
     }
     res.json({ ok: true, done: ids.length });
+  });
+
+  // A paperwork item handled another way (talked it through, called the patient): off the list, on the record.
+  r.post('/intake/paperwork/done', requirePermission('patients:write'), async (req, res) => {
+    const entity = req.body?.entity;
+    const id = Number(req.body?.id);
+    if (!['consents', 'paperwork_sends'].includes(entity) || !Number.isInteger(id)) throw new HttpError(400, 'entity and id are required');
+    const row = await findOr404(db, entity, id, req.user.practice_id, 'Item');
+    const patientId = row.patient_id ?? (await db.get('SELECT patient_id FROM appointments WHERE id = ?', row.appointment_id))?.patient_id;
+    if (!(await canSeePatient(db, req.user, patientId))) throw new HttpError(404, 'Item not found');
+    await audit(db, req, 'intake.paperwork_done', entity, id, { patient_id: patientId }, { reason: typeof req.body?.reason === 'string' ? req.body.reason.slice(0, 300) : 'Handled' });
+    res.json({ ok: true });
   });
 
   return r;

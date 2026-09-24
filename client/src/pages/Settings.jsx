@@ -16,6 +16,7 @@ import ImportData from '../components/ImportData.jsx';
 import Backups from '../components/Backups.jsx';
 import Developer from '../components/Developer.jsx';
 import FormTemplates from '../components/FormTemplates.jsx';
+import ConsentSettings from '../components/consents/ConsentSettings.jsx';
 import { MembershipPlans } from '../components/Memberships.jsx';
 import MfaSetup from '../components/MfaSetup.jsx';
 import SensorTest from '../components/imaging/SensorTest.jsx';
@@ -150,7 +151,7 @@ export default function Settings() {
       {tab === 'providers' && <TimeOff canWrite={can('schedule:write')} />}
       {tab === 'codes' && admin && <CodeImport />}
       {tab === 'templates' && <NoteTemplates />}
-      {tab === 'forms' && <FormTemplates />}
+      {tab === 'forms' && <><ConsentSettings /><FormTemplates /></>}
       {tab === 'memberships' && <MembershipPlans />}
       {tab === 'labs' && <Labs canWrite={can('clinical:write')} />}
       {tab === 'ppo' && <FeeSchedules admin={admin} />}

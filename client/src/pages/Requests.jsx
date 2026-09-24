@@ -1,15 +1,19 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../api.js';
 import { useApi, useLookup } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
 import { fmtDateTime, fmtDate, label } from '../format.js';
 import { Badge, ErrorBox, Modal, useSubmit } from '../components/ui.jsx';
+import OnlineBookings from '../components/OnlineBookings.jsx';
 
 export default function Requests() {
   const { can, practice } = useAuth();
-  const [status, setStatus] = useState('pending');
-  const { data: requests, reload } = useApi(`/booking-requests?status=${status}`);
+  // The first tab is every online booking (booked or waiting); the others are the requests waiting for a yes.
+  const [params, setParams] = useSearchParams();
+  const status = params.get('tab') || 'online';
+  const setStatus = (s) => setParams({ tab: s }, { replace: true });
+  const { data: requests, reload } = useApi(status === 'online' ? null : `/booking-requests?status=${status}`);
   const { data: messages } = useApi('/messages?limit=50');
   const [accepting, setAccepting] = useState(null);
   const [err, setErr] = useState(null);
@@ -40,10 +44,11 @@ export default function Requests() {
         </div>
       </div>
       <div className="tabs">
-        {['pending', 'accepted', 'declined', 'all'].map((s) => <button key={s} className={status === s ? 'active' : ''} onClick={() => setStatus(s)}>{label(s)}</button>)}
+        {['online', 'pending', 'accepted', 'declined', 'all'].map((s) => <button key={s} className={status === s ? 'active' : ''} onClick={() => setStatus(s)}>{s === 'online' ? 'Online bookings' : label(s)}</button>)}
       </div>
       <ErrorBox error={err} />
-      <div className="card" style={{ padding: 0 }}>
+      {status === 'online' && <OnlineBookings />}
+      <div className="card" style={{ padding: 0, display: status === 'online' ? 'none' : undefined }}>
         <div className="table-wrap">
           <table>
             <thead><tr><th>Requested time</th><th>Name</th><th>Contact</th><th>Reason</th><th>Provider</th><th>Received</th><th>Status</th><th /></tr></thead>

@@ -3,6 +3,7 @@ import { requirePermission, HttpError } from '../auth.js';
 import { findOr404, audit } from '../util.js';
 import { mintHandoff, HANDOFF_MINUTES } from '../handoff.js';
 import { cleanFields, cleanCodes, seedTemplates, createPacket, templateMatches, procContext, FORM_KINDS } from '../formtemplates.js';
+import { currentVersion } from '../consents.js';
 
 // Form templates (consents, policies, intake) and sending them to patients.
 export default function formRoutes({ db, messenger, config }) {
@@ -45,6 +46,8 @@ export default function formRoutes({ db, messenger, config }) {
     if (!row.name || !row.fields) throw new HttpError(400, 'A form needs a name and fields');
     const keys = Object.keys(row);
     const { id } = await db.run(`INSERT INTO form_templates (practice_id, ${keys.join(', ')}) VALUES (?, ${keys.map(() => '?').join(', ')})`, req.user.practice_id, ...Object.values(row));
+    // Every wording is kept (form_template_versions): a signed form points at the exact version it was signed against.
+    await currentVersion(db, id, req.user.id);
     await audit(db, req, 'form_template.create', 'form_templates', id);
     res.status(201).json(view(await db.get('SELECT * FROM form_templates WHERE id = ?', id)));
   });
@@ -56,6 +59,7 @@ export default function formRoutes({ db, messenger, config }) {
     if (Object.keys(row).length) {
       await db.run(`UPDATE form_templates SET ${Object.keys(row).map((k) => `${k} = ?`).join(', ')}, updated_at = datetime('now') WHERE id = ?`, ...Object.values(row), existing.id);
     }
+    await currentVersion(db, existing.id, req.user.id);
     await audit(db, req, 'form_template.update', 'form_templates', existing.id, row.version ? { version: row.version } : undefined);
     res.json(view(await db.get('SELECT * FROM form_templates WHERE id = ?', existing.id)));
   });

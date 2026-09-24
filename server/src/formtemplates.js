@@ -289,7 +289,8 @@ async function formsDue(db, patientId, templates, today) {
 // they haven't signed (or that have lapsed) and consents for the procedures booked on that visit.
 export async function runFormSends(db, messenger, { appUrl }) {
   let sent = 0;
-  for (const { id: practiceId } of await db.all('SELECT DISTINCT practice_id AS id FROM form_templates WHERE auto_send = 1 AND active = 1')) {
+  // Practices on the paperwork autopilot (paperwork.js runPaperwork) get their forms from it instead, so nobody gets two texts.
+  for (const { id: practiceId } of await db.all('SELECT DISTINCT t.practice_id AS id FROM form_templates t JOIN practices p ON p.id = t.practice_id WHERE t.auto_send = 1 AND t.active = 1 AND COALESCE(p.paperwork_autopilot, 0) = 0')) {
     const templates = await db.all('SELECT * FROM form_templates WHERE practice_id = ? AND auto_send = 1 AND active = 1', practiceId);
     const now = await practiceNow(db, practiceId);
     if (!withinSendHours(await db.get('SELECT send_from, send_until FROM practices WHERE id = ?', practiceId), now)) continue;

@@ -11,6 +11,7 @@ import CommandPalette from './components/CommandPalette.jsx';
 import IntranetCommands from './components/intranet/IntranetCommands.jsx';
 import DocumentCommands from './components/docs/DocumentCommands.jsx';
 import ChecklistCommands, { ChecklistBadge } from './components/checklists/ChecklistCommands.jsx';
+import PaperworkCommands from './components/consents/PaperworkCommands.jsx';
 import QuickCommands, { TaskBadge } from './components/QuickCommands.jsx';
 import ChatPanel from './components/chat/ChatPanel.jsx';
 import ChatBadge from './components/chat/ChatBadge.jsx';
@@ -83,6 +84,9 @@ const PayResult = lazy(() => import('./pages/public/PayResult.jsx'));
 const LabCasePage = lazy(() => import('./pages/public/LabCasePage.jsx'));
 const LearnPage = lazy(() => import('./pages/public/LearnPage.jsx'));
 const RecallBook = lazy(() => import('./pages/public/RecallBook.jsx'));
+const PaperworkPage = lazy(() => import('./pages/public/Paperwork.jsx'));
+const FormsKiosk = lazy(() => import('./pages/public/Kiosk.jsx'));
+const EduPage = lazy(() => import('./pages/public/EduPage.jsx'));
 const Recall = lazy(() => import('./pages/Recall.jsx'));
 const Metrics = lazy(() => import('./pages/Metrics.jsx'));
 const ChartAudit = lazy(() => import('./pages/ChartAudit.jsx'));
@@ -114,6 +118,9 @@ export default function App() {
         <Route path="/portal/:key" element={<Portal />} />
         <Route path="/timeclock/kiosk" element={<TimeClockKiosk />} />
         <Route path="/rb/:token" element={<RecallBook />} />
+        <Route path="/p/:token" element={<PaperworkPage />} />
+        <Route path="/kiosk" element={<FormsKiosk />} />
+        <Route path="/e/:token" element={<EduPage />} />
         <Route path="*" element={<StaffApp />} />
       </Routes>
     </Suspense>
@@ -378,6 +385,7 @@ function Shell({ nav }) {
       <DocumentCommands />
       <ChecklistCommands />
       <QuickCommands />
+      <PaperworkCommands />
       <KeyboardHelp />
       <Toasts />
       <Assistant />
