@@ -530,6 +530,26 @@ BN3. **Owner control and payroll:** plans are off by default, versioned, with ef
      (hours minimum, active status), clawbacks for refunds/voids (computed from the ledger), an approval step at the end
      of each period, audited; approved bonuses flow into the time-clock payroll export as a separate pay type.
 
+## Today's schedule optimizer (asked for, the most important one)
+Approach: a deterministic engine finds and prices every opportunity (fast, explainable, testable); AI only ranks and
+explains them in plain words and never changes the schedule itself. It runs each morning for the huddle and again
+whenever the schedule changes (live), so advice is always current.
+OPT1. **Goal gap per provider:** for each doctor/hygienist today: scheduled vs goal, the gap in $, open time and blocks.
+OPT2. **Opportunities found and priced**, each with the $ it adds and one-click action:
+      - patients already on today's schedule with unscheduled/planned treatment that fits in their visit or an
+        adjacent gap ("Maria's #30 crown prep fits after her cleaning with Dr. Chen at 10:40 — $1,150");
+      - opportunity-finder items for today's patients (sealants, fluoride, x-rays due, perio maintenance, SRP…);
+      - family members due for recall or with open treatment who could come with the patient already scheduled;
+      - ASAP-list and recall-due patients who fit an open gap (length, provider, type), with a one-tap text offer;
+      - appointments longer than the type's usual time that could be shortened to open room (and what fits in the
+        freed time); visits that could be combined; doctor exam timing clashes to fix;
+      - no-show-risk visits to double-confirm, and late-cancel gaps to fill instantly (fill offers).
+OPT3. **A clear plan to hit goal:** "3 moves get Dr. Chen to 104% of goal": ranked, non-conflicting combination of
+      opportunities, shown in the huddle, on the schedule (a slim optimizer panel and markers on the gaps/visits) and
+      in the morning huddle email; each accepted/declined/done is tracked, with $ captured per day and per person.
+OPT4. **Rules:** never double-books against patterns/blocks, respects patient preferences and insurance frequency,
+      nothing is booked or texted without a person's click (AI recommends; people approve), every action audited.
+
 ## Then: remaining workflow batches
 9. Batch 4 (32–44): new patient setup, ERA/EOB posting, prescriptions, lab cases, huddle actions, recall lists,
    pre-auths, financing, adjustments, referrals, end-of-day, review requests (fix the count bug), clock in/out.
