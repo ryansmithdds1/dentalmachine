@@ -4,6 +4,9 @@ import { useApi } from '../../hooks.js';
 import { useAuth } from '../../auth.jsx';
 import { money, fmtDate, fmtDateTime } from '../../format.js';
 import { ErrorBox, Modal } from '../ui.jsx';
+import { useShortcut, useCommands } from '../../shortcuts.js';
+import { toast } from '../../toast.js';
+import '../insurance-intake.css';
 
 const hasOon = (s) => !!s.out_of_network && (s.out_of_network.annual_max != null || s.out_of_network.deductible != null || Object.keys(s.out_of_network.coinsurance || {}).length > 0);
 const lastDone = (history = [], codes) => history.filter((h) => h.codes.some((c) => codes.includes(c))).map((h) => h.date).sort().at(-1) || null;
@@ -14,7 +17,17 @@ const addMonths = (date, n) => {
 };
 const today = new Date().toISOString().slice(0, 10);
 
-// Real-time (sandbox) or clearinghouse-file (manual) insurance eligibility checks.
+// What happened to a response: applied on its own, waiting for a person, or looked at already.
+export function outcomeOf(s) {
+  if (!s) return null;
+  if (s.review && !s.review.resolved_at) return { tone: 'look', text: 'Needs a look', reasons: s.review.reasons };
+  if (s.review?.outcome === 'kept') return { tone: 'done', text: `Kept what's on file (${s.review.resolved_by})` };
+  if (s.applied) return { tone: 'done', text: s.applied.auto ? 'Applied to the policy automatically' : `Applied to the policy${s.applied.by ? ` by ${s.applied.by}` : ''}` };
+  return null;
+}
+
+// Real-time (sandbox) or clearinghouse-file (manual) insurance eligibility checks. A clean answer is applied
+// to the policy by the server as soon as it comes back; only problems ask for a person.
 export default function Eligibility({ patient, policies, onApplied }) {
   const { can } = useAuth();
   const { data: checks, reload } = useApi(can('billing:read') ? `/patients/${patient.id}/eligibility` : null);
@@ -23,7 +36,7 @@ export default function Eligibility({ patient, policies, onApplied }) {
   const [importing, setImporting] = useState(null);
   const [text, setText] = useState('');
   const active = (policies || []).filter((p) => p.active);
-  if (!can('billing:read') || !active.length) return null;
+  const primary = active.find((p) => p.priority === 'primary') || active[0];
 
   const run = async (policyId) => {
     setBusy(true);
@@ -31,13 +44,21 @@ export default function Eligibility({ patient, policies, onApplied }) {
     try {
       const r = await api.post(`/insurance/${policyId}/eligibility`);
       if (r.mode === 'manual') setImporting(r.id);
+      else if (r.applied) toast(`${r.status === 'active' ? 'Coverage active' : 'Checked'} — applied to the policy`);
+      else if (r.reasons?.length) toast(`Insurance needs a look: ${r.reasons[0]}`, { tone: 'error' });
       reload();
+      if (r.applied) onApplied?.();
     } catch (e) {
       setErr(e);
+      toast(`Couldn’t check insurance: ${e.message}`, { tone: 'error' });
     } finally {
       setBusy(false);
     }
   };
+  const ok = can('billing:read') && !!primary;
+  useShortcut('e', () => !busy && run(primary.id), { label: 'Check eligibility (primary insurance)', section: 'Insurance', enabled: ok });
+  useCommands(ok ? [{ id: 'check-eligibility', label: `Check eligibility: ${primary.carrier_name}`, hint: 'E', run: () => run(primary.id) }] : []);
+  if (!ok) return null;
   const download270 = async (id) => {
     const res = await fetch(`/api/eligibility/${id}/270`, { headers: { Authorization: `Bearer ${getToken()}` } });
     const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(await res.blob()), download: `eligibility-${id}.270` });
@@ -56,8 +77,25 @@ export default function Eligibility({ patient, policies, onApplied }) {
     }
   };
   const apply = async (id) => {
-    await api.post(`/eligibility/${id}/apply`);
-    onApplied?.();
+    setErr(null);
+    try {
+      await api.post(`/eligibility/${id}/apply`);
+      toast('Applied to the policy');
+      reload();
+      onApplied?.();
+    } catch (e) {
+      setErr(e);
+    }
+  };
+  const keep = async (id) => {
+    setErr(null);
+    try {
+      await api.post(`/eligibility/${id}/keep`);
+      toast('Kept what’s on file');
+      reload();
+    } catch (e) {
+      setErr(e);
+    }
   };
 
   return (
@@ -65,13 +103,16 @@ export default function Eligibility({ patient, policies, onApplied }) {
       <div className="page-header" style={{ marginBottom: 8 }}>
         <h2 style={{ margin: 0 }}>Eligibility & benefits</h2>
         <div className="actions">
-          {active.map((p) => <button key={p.id} className="primary" disabled={busy} onClick={() => run(p.id)}>{busy ? 'Checking…' : `Verify ${p.carrier_name}`}</button>)}
+          {active.map((p) => <button key={p.id} className={p.id === primary.id ? 'primary' : ''} disabled={busy} onClick={() => run(p.id)} title={p.id === primary.id ? 'Shortcut: E' : undefined}>{busy ? 'Checking…' : `Check ${p.carrier_name}`}{p.id === primary.id && <kbd className="elig-kbd">E</kbd>}</button>)}
         </div>
       </div>
       <ErrorBox error={err} />
       {checks?.length === 0 && <div className="muted">Not verified yet. Verify before each visit to catch terminated coverage and remaining maximums.</div>}
-      {checks?.map((c) => {
+      {checks?.map((c, i) => {
         const s = c.summary;
+        const outcome = outcomeOf(s);
+        // The newest check per policy is the one that counts; older ones are history.
+        const latest = checks.findIndex((x) => x.patient_insurance_id === c.patient_insurance_id) === i;
         return (
           <div key={c.id} className="elig">
             <div className="inline" style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
@@ -82,9 +123,15 @@ export default function Eligibility({ patient, policies, onApplied }) {
               </span>
               <span className="inline">
                 {c.status === 'pending' && <><button className="small" onClick={() => download270(c.id)}>Download 270</button><button className="small" onClick={() => setImporting(c.id)}>Import 271</button></>}
-                {s && can('billing:write') && <button className="small" onClick={() => apply(c.id)}>Apply to policy</button>}
+                {s && can('billing:write') && outcome?.tone === 'look' && latest && <button className="small" onClick={() => keep(c.id)}>Keep what’s on file</button>}
+                {s && can('billing:write') && (!outcome || outcome.tone === 'look') && <button className="small" onClick={() => apply(c.id)}>{outcome?.tone === 'look' ? 'Apply anyway' : 'Apply to policy'}</button>}
               </span>
             </div>
+            {outcome && (
+              <div className={`elig-outcome ${outcome.tone}`}>
+                <strong>{outcome.text}</strong>{outcome.reasons?.length > 0 && <>: {outcome.reasons.join('; ')}</>}
+              </div>
+            )}
             {s && (
               <div className="elig-grid">
                 {s.plan_name && <div><span className="muted">Plan</span>{s.plan_name}</div>}

@@ -1,7 +1,9 @@
 import { searchPatients } from '../patientsearch.js';
 import { Router } from 'express';
 import { requirePermission, HttpError, can } from '../auth.js';
-import { pick, requireFields, insert, update, findOr404, audit, practiceNow, mapSeq, friendlyDateTime, recorded } from '../util.js';
+import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, practiceNow, mapSeq, friendlyDateTime, recorded, isRealDate } from '../util.js';
+import { publish } from '../events.js';
+import { emitAppointment } from '../webhooks.js';
 import { sendMessage, preferredChannel, recipientFor } from '../messaging.js';
 import { messageText, patientLang, subjectFor } from '../templates.js';
 import { primaryPolicy, patientBalance, estimateCoverage, completeProcedure } from '../services.js';
@@ -329,7 +331,8 @@ export default function frontDeskRoutes({ db, messenger }) {
     const now = await practiceNow(db, pid);
     const since = addDays(now.slice(0, 10), -Number(req.query.days || 90));
     const rows = await mapSeq((await db.all(
-      `SELECT a.id, a.patient_id, a.start_time, a.status, a.reason, p.first_name, p.last_name, p.phone, p.email, pv.name AS provider_name,
+      `SELECT a.id, a.patient_id, a.start_time, a.end_time, a.status, a.reason, a.broken_reason, a.broken_note, a.appointment_type_id, a.provider_id,
+         p.first_name, p.last_name, p.phone, p.email, pv.name AS provider_name,
          (SELECT COALESCE(SUM(fee),0) FROM procedures x WHERE x.patient_id = a.patient_id AND x.status = 'planned') AS planned_amount
        FROM appointments a JOIN patients p ON p.id = a.patient_id JOIN providers pv ON pv.id = a.provider_id
        WHERE a.practice_id = ? AND a.status IN ('no_show','cancelled') AND a.start_time >= ? AND p.status = 'active'
@@ -350,13 +353,18 @@ export default function frontDeskRoutes({ db, messenger }) {
     const pid = req.user.practice_id;
     const now = await practiceNow(db, pid);
     const days = Math.min(Math.max(Number(req.query.days) || 2, 1), 14);
+    // ?date= narrows it to one day (the schedule's "N unconfirmed" links here for the day it shows).
+    if (req.query.date && !isRealDate(req.query.date)) throw new HttpError(400, 'date must be a real date (YYYY-MM-DD)');
+    const from = req.query.date && `${req.query.date} 00:00` > now ? `${req.query.date} 00:00` : now;
+    const until = req.query.date ? `${req.query.date} 23:59` : `${addDays(now.slice(0, 10), days)} 23:59`;
+    const scope = appointmentScope(req.user);
     const rows = await db.all(
       `SELECT a.id, a.patient_id, a.start_time, a.end_time, a.reason, a.confirmed_via, a.reminder_sent_at, a.location_id, pv.name AS provider_name,
          p.first_name, p.last_name, p.preferred_name, p.phone, p.email, p.preferred_contact, p.language, p.dob, p.guarantor_id, p.practice_id,
          p.sms_opt_in, p.email_opt_in, p.sms_bad_at, p.sms_bad_reason, p.email_bad_at, p.email_bad_reason
        FROM appointments a JOIN patients p ON p.id = a.patient_id JOIN providers pv ON pv.id = a.provider_id
-       WHERE a.practice_id = ? AND a.status = 'scheduled' AND a.start_time > ? AND a.start_time <= ? ORDER BY a.start_time, a.id`,
-      pid, now, `${addDays(now.slice(0, 10), days)} 23:59`,
+       WHERE a.practice_id = ? AND a.status = 'scheduled' AND a.start_time >= ? AND a.start_time <= ?${scope.sql} ORDER BY a.start_time, a.id`,
+      pid, from, until, ...scope.args,
     );
     res.json(await mapSeq(rows, async (a) => {
       const to = await recipientFor(db, { ...a, id: a.patient_id });
@@ -382,6 +390,39 @@ export default function frontDeskRoutes({ db, messenger }) {
         messages, last_reply: reply || null,
       };
     }));
+  });
+
+  // Confirm several visits at once from the unconfirmed list (workflow 13): one row or a whole selection.
+  // Only visits still waiting for a confirmation change; the rest are reported as skipped, so a double
+  // click or a retry changes nothing twice. { undo: true } puts them back to unconfirmed (and "left a
+  // message" where the list showed it), for the list's Undo; the audit trail shows both.
+  r.post('/followups/unconfirmed/confirm', requirePermission('schedule:write'), async (req, res) => {
+    const pid = req.user.practice_id;
+    const b = req.body || {};
+    const ids = [...new Set((Array.isArray(b.ids) ? b.ids : []).map(Number))];
+    if (!ids.length || ids.length > 200 || ids.some((x) => !Number.isInteger(x) || x <= 0)) throw new HttpError(400, 'Choose 1 to 200 visits');
+    const undo = b.undo === true;
+    const via = b.confirmed_via ?? 'phone';
+    requireOneOf(via, ['phone', 'text', 'email', 'in_person'], 'confirmed_via');
+    const leftMessage = new Set((Array.isArray(b.left_message_ids) ? b.left_message_ids : []).map(Number));
+    const scope = appointmentScope(req.user);
+    const rows = await db.all(`SELECT a.* FROM appointments a WHERE a.practice_id = ? AND a.id IN (${ids.map(() => '?').join(',')})${scope.sql}`, pid, ...ids, ...scope.args);
+    if (rows.length !== ids.length) throw new HttpError(404, 'Appointment not found');
+    const done = [];
+    const skipped = [];
+    for (const a of rows) {
+      if (a.status !== (undo ? 'confirmed' : 'scheduled')) {
+        skipped.push({ id: a.id, status: a.status });
+        continue;
+      }
+      if (undo) await recorded(db, 'appointments', a.id, () => db.run("UPDATE appointments SET status = 'scheduled', confirmed_at = NULL, confirmed_via = ? WHERE id = ?", leftMessage.has(a.id) ? 'left_message' : null, a.id));
+      else await recorded(db, 'appointments', a.id, () => db.run("UPDATE appointments SET status = 'confirmed', confirmed_at = COALESCE(confirmed_at, datetime('now')), confirmed_via = ? WHERE id = ?", via, a.id));
+      await audit(db, req, 'appointment.status', 'appointments', a.id, { from: a.status, to: undo ? 'scheduled' : 'confirmed', ...(undo ? { undo: true } : { confirmed_via: via }), ...(ids.length > 1 ? { bulk: ids.length } : {}) });
+      await emitAppointment(db, a.id);
+      done.push(a.id);
+    }
+    if (done.length) publish(pid, { type: 'schedule', dates: [...new Set(rows.filter((a) => done.includes(a.id)).map((a) => a.start_time.slice(0, 10)))], by: req.user.id });
+    res.json({ [undo ? 'unconfirmed' : 'confirmed']: done, skipped });
   });
 
   // Cancellations offered automatically in the last month, and who took them.
@@ -480,11 +521,14 @@ export default function frontDeskRoutes({ db, messenger }) {
     res.json(await db.get('SELECT id, medical_alerts, allergies, medications, medical_reviewed_at FROM patients WHERE id = ?', form.patient_id));
   });
 
+  // "Reviewed today, no changes": the history was gone over with the patient and still stands. Only the
+  // review date moves (before/after recorded); pressing it twice is harmless.
   r.post('/patients/:id/medical-reviewed', requirePermission('clinical:write'), async (req, res) => {
     const patient = await findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient');
-    await db.run("UPDATE patients SET medical_reviewed_at = datetime('now') WHERE id = ?", patient.id);
-    await audit(db, req, 'patient.medical_reviewed', 'patients', patient.id);
-    res.json({ ok: true });
+    await recorded(db, 'patients', patient.id, () => db.run("UPDATE patients SET medical_reviewed_at = datetime('now') WHERE id = ?", patient.id));
+    const after = await db.get('SELECT medical_reviewed_at FROM patients WHERE id = ?', patient.id);
+    await audit(db, req, 'patient.medical_reviewed', 'patients', patient.id, { no_changes: true });
+    res.json({ ok: true, medical_reviewed_at: after.medical_reviewed_at, medical_review_due: false });
   });
 
   // Global quick search (command palette): patients by name/phone/DOB/ID, plus claims by number.

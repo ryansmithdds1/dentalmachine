@@ -1,0 +1,33 @@
+/* Eligibility exceptions (#20), the intake worklist (#30) and reading insurance cards (#31). */
+.elig-kbd { margin-left: 6px; font-size: 10px; padding: 0 4px; min-width: 0; opacity: 0.8; }
+.elig-outcome { margin: 6px 0 2px; padding: 6px 10px; border-radius: var(--radius-sm); font-size: 13px; }
+.elig-outcome.done { background: var(--ok-soft); color: var(--ok); }
+.elig-outcome.look { background: var(--warn-soft); color: var(--warn); }
+.elig-mini { font-size: 11px; margin-top: 2px; }
+.elig-mini.done { color: var(--ok); }
+.elig-mini.look { color: var(--warn); font-weight: 600; }
+.elig-exceptions { margin: 8px 0 14px; padding: 10px 12px; border: 1px solid var(--warn); border-radius: var(--radius-sm); background: var(--warn-soft); }
+.elig-exceptions h3 { margin: 0 0 6px; font-size: 14px; color: var(--warn); }
+.elig-exception { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 6px 0; border-top: 1px solid var(--border); flex-wrap: wrap; }
+.elig-exception:first-of-type { border-top: 0; }
+.elig-reasons { font-size: 13px; color: var(--muted); }
+
+.card-read-banner { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 10px; padding: 8px 10px; border-radius: var(--radius-sm); background: var(--info-soft); color: var(--info); font-size: 13px; }
+.card-read-banner.sandbox { background: var(--warn-soft); color: var(--warn); }
+.card-new-carrier { display: grid; grid-template-columns: 1fr 140px; gap: 8px; }
+.card-scan-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.card-busy { font-size: 13px; color: var(--muted); }
+
+.intake-list { display: flex; flex-direction: column; gap: 0; }
+.intake-item { display: grid; grid-template-columns: 110px 1fr auto; gap: 12px; align-items: start; padding: 10px 12px; border-top: 1px solid var(--border); cursor: pointer; outline: none; }
+.intake-item:first-child { border-top: 0; }
+.intake-item.current { background: var(--primary-soft); box-shadow: inset 3px 0 0 var(--primary); }
+.intake-kind { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; }
+.intake-detail { font-size: 13px; color: var(--muted); margin-top: 2px; }
+.intake-detail b { color: var(--text); font-weight: 600; }
+.intake-change { display: block; }
+.intake-keys { font-size: 12px; color: var(--muted); display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 6px; }
+@media (max-width: 640px) {
+  .intake-item { grid-template-columns: 1fr; }
+  .card-new-carrier { grid-template-columns: 1fr; }
+}

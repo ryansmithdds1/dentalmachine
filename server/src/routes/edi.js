@@ -6,12 +6,10 @@ import { build837D, build276, parse271, parse277, sandbox277, x12Type } from '..
 import { pollClearinghouse, processInbound } from '../clearinghouse.js';
 import { claimEvent } from '../era.js';
 import { runExclusive } from '../cluster.js';
-import { benefitYear } from '../services.js';
-import { savePolicy, withPlan } from '../benefits.js';
 import { importEra, parseControl } from '../era.js';
 import { attachmentHints } from '../attachments.js';
 import { adaForm } from '../adaform.js';
-import { createEligibility, mergeFrequencies } from '../eligibility.js';
+import { createEligibility } from '../eligibility.js';
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -288,9 +286,9 @@ export default function ediRoutes({ db, config, clearinghouse: ch }) {
 
   r.post('/insurance/:iid/eligibility', requirePermission('billing:read'), async (req, res) => {
     const policy = await findOr404(db, 'patient_insurance', req.params.iid, req.user.practice_id, 'Policy');
-    const { id, mode } = await eligibility.check(policy, { userId: req.user.id });
-    await audit(db, req, 'eligibility.check', 'eligibility_checks', id, { mode });
-    res.status(201).json({ ...eligView(await db.get('SELECT id, patient_insurance_id, status, summary, created_at FROM eligibility_checks WHERE id = ?', id)), mode });
+    const { id, mode, applied = false, reasons = [] } = await eligibility.check(policy, { userId: req.user.id });
+    await audit(db, req, 'eligibility.check', 'eligibility_checks', id, { mode, patient_id: policy.patient_id, applied });
+    res.status(201).json({ ...eligView(await db.get('SELECT id, patient_insurance_id, status, summary, created_at FROM eligibility_checks WHERE id = ?', id)), mode, applied, reasons });
   });
 
   // Tomorrow's (or any day's) patients: each one's primary insurance and when it was last checked.
@@ -305,7 +303,7 @@ export default function ediRoutes({ db, config, clearinghouse: ch }) {
     if (!date) throw new HttpError(400, 'date must be YYYY-MM-DD');
     if (!eligibility.automatic) throw new HttpError(409, 'Batch checks need a real-time clearinghouse connection (Settings → Integrations)');
     const out = await eligibility.batch(req.user.practice_id, date, { userId: req.user.id, maxAgeDays: Number(req.body?.max_age_days ?? 7) });
-    await audit(db, req, 'eligibility.batch', 'practices', req.user.practice_id, { date, checked: out.checked });
+    await audit(db, req, 'eligibility.batch', 'practices', req.user.practice_id, { date, checked: out.checked, applied: out.applied, needs_look: out.needs_look });
     res.json(out);
   });
 
@@ -327,31 +325,27 @@ export default function ediRoutes({ db, config, clearinghouse: ch }) {
       response_x12: req.body, summary: JSON.stringify(summary), status: summary.errors.length ? 'error' : summary.active ? 'active' : 'inactive',
     });
     await audit(db, req, 'eligibility.response', 'eligibility_checks', e.id);
+    await eligibility.settle(e.id, { source: 'integration' });
     res.json(eligView(await db.get('SELECT id, patient_insurance_id, status, summary, created_at FROM eligibility_checks WHERE id = ?', e.id)));
   });
 
-  // Copy verified benefits onto the policy so treatment estimates use them.
+  // Copy verified benefits onto the policy so treatment estimates use them. Clean responses are applied on
+  // their own when they come back; this is for the ones that needed a look (or to apply one again).
   r.post('/eligibility/:eid/apply', requirePermission('billing:write'), async (req, res) => {
     const e = await findOr404(db, 'eligibility_checks', req.params.eid, req.user.practice_id, 'Eligibility check');
-    const s = e.summary && JSON.parse(e.summary);
-    if (!s) throw new HttpError(409, 'No response to apply yet');
-    const row = {};
-    if (s.annual_max != null) row.annual_max = s.annual_max;
-    if (s.deductible != null) row.deductible = s.deductible;
-    if (s.deductible != null && s.deductible_remaining != null) row.deductible_met = Math.max(0, s.deductible - s.deductible_remaining);
-    for (const tier of ['preventive', 'basic', 'major']) if (s.coinsurance?.[tier] != null) row[`pct_${tier}`] = s.coinsurance[tier];
-    if (s.frequencies?.length) {
-      const { plan } = await withPlan(db, await db.get('SELECT * FROM patient_insurance WHERE id = ?', e.patient_insurance_id));
-      row.frequencies = mergeFrequencies(plan.frequencies ? JSON.parse(plan.frequencies) : null, s.frequencies);
-    }
-    if (row.deductible_met != null) {
-      const policy = await db.get('SELECT * FROM patient_insurance WHERE id = ?', e.patient_insurance_id);
-      row.deductible_year = benefitYear(policy, (await practiceNow(db, req.user.practice_id)).slice(0, 10)).start;
-    }
-    // Plan-wide numbers (max, deductible, percentages) update the shared plan; the deductible met is this patient's.
-    await db.tx(() => savePolicy(db, req.user.practice_id, e.patient_insurance_id, row));
-    await audit(db, req, 'eligibility.apply', 'patient_insurance', e.patient_insurance_id, { fields: Object.keys(row) });
+    const done = await eligibility.apply(e.id);
+    await eligibility.resolveReview(e.id, { applied: true, userName: req.user.name });
+    await audit(db, req, 'eligibility.apply', 'patient_insurance', e.patient_insurance_id, { fields: done.fields, check_id: e.id }, { before: done.before, after: done.after, patientId: e.patient_id });
     res.json(await db.get('SELECT * FROM patient_insurance WHERE id = ?', e.patient_insurance_id));
+  });
+
+  // "Keep what's on file": a person looked at the exception and the policy stays as it is.
+  r.post('/eligibility/:eid/keep', requirePermission('billing:write'), async (req, res) => {
+    const e = await findOr404(db, 'eligibility_checks', req.params.eid, req.user.practice_id, 'Eligibility check');
+    if (!e.summary) throw new HttpError(409, 'No response to review yet');
+    await eligibility.resolveReview(e.id, { applied: false, userName: req.user.name });
+    await audit(db, req, 'eligibility.keep_on_file', 'eligibility_checks', e.id, { patient_id: e.patient_id }, { reason: typeof req.body?.reason === 'string' ? req.body.reason.slice(0, 500) : null });
+    res.json(eligView(await db.get('SELECT id, patient_insurance_id, status, summary, created_at FROM eligibility_checks WHERE id = ?', e.id)));
   });
 
   // ---- ERA / 835 auto-posting ----

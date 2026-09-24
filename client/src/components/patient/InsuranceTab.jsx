@@ -1,12 +1,17 @@
-import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
+import { Camera, Sparkles } from 'lucide-react';
 import { api, getToken } from '../../api.js';
-import { useApi, useLookup } from '../../hooks.js';
+import { useApi, useLookup, invalidateLookup } from '../../hooks.js';
 import { useAuth } from '../../auth.jsx';
 import { money, fmtDate, toCents, fromCents } from '../../format.js';
 import { Badge, ErrorBox, Modal, useSubmit } from '../ui.jsx';
 import Eligibility from './Eligibility.jsx';
 import InsurancePlanForm from '../InsurancePlanForm.jsx';
+import { useShortcut, useCommands } from '../../shortcuts.js';
+import { toast } from '../../toast.js';
+import { readCard, storedCards } from '../cardRead.js';
+import '../insurance-intake.css';
 
 export default function InsuranceTab({ patient, onChange }) {
   const { can } = useAuth();
@@ -21,6 +26,40 @@ export default function InsuranceTab({ patient, onChange }) {
   const claimPolicy = active.find((p) => p.id === billTo) || active[0];
   const { data: unclaimed, reload: reloadUnclaimed } = useApi(can('billing:read') && claimPolicy ? `/patients/${patient.id}/unclaimed-procedures?patient_insurance_id=${claimPolicy.id}` : null);
   const refresh = () => { reload(); reloadClaims(); reloadUnclaimed(); onChange?.(); };
+
+  // Scan a card: a photo (front, and the back if picked too) is read by AI and the policy form opens filled in
+  // for a person to check. Card photos a patient already sent (?card=<document ids>, from the intake list)
+  // are read the same way.
+  const picker = useRef(null);
+  const [reading, setReading] = useState(false);
+  const [cardErr, setCardErr] = useState(null);
+  const [params, setParams] = useSearchParams();
+  const readFrom = async (files, { stored = null } = {}) => {
+    setReading(true);
+    setCardErr(null);
+    try {
+      const read = await readCard(patient.id, files);
+      setModal({ policy: null, card: { ...read, files: stored ? [] : files, stored } });
+    } catch (e) {
+      setCardErr(e);
+      toast(`Couldn’t read the card: ${e.message}`, { tone: 'error' });
+    } finally {
+      setReading(false);
+    }
+  };
+  const pickCard = () => picker.current?.click();
+  const canAdd = can('patients:write');
+  useShortcut('s', pickCard, { label: 'Scan an insurance card (photo → filled-in policy)', section: 'Insurance', enabled: canAdd && !reading });
+  useCommands(canAdd ? [{ id: 'scan-insurance-card', label: 'Scan an insurance card', hint: 'S', run: pickCard }] : []);
+  const cardParam = params.get('card');
+  useEffect(() => {
+    if (!cardParam || !canAdd) return;
+    const ids = cardParam.split(',').map(Number).filter(Boolean);
+    const next = new URLSearchParams(params);
+    next.delete('card');
+    setParams(next, { replace: true });
+    if (ids.length) storedCards(ids).then((blobs) => readFrom(blobs, { stored: ids }), (e) => setCardErr(e));
+  }, [cardParam]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const createClaim = async () => {
     setErr(null);
@@ -38,8 +77,17 @@ export default function InsuranceTab({ patient, onChange }) {
       <div className="card">
         <div className="page-header" style={{ marginBottom: 10 }}>
           <h2 style={{ margin: 0 }}>Coverage</h2>
-          {can('patients:write') && <button className="primary" onClick={() => setModal({ policy: null })}>+ Add policy</button>}
+          {canAdd && (
+            <div className="card-scan-row">
+              {reading && <span className="card-busy"><Sparkles size={14} /> Reading the card…</span>}
+              <button className="primary" disabled={reading} onClick={pickCard} title="Take or choose a photo of the card (front, and back if you have it)"><Camera size={15} /> Scan card <kbd className="elig-kbd">S</kbd></button>
+              <button onClick={() => setModal({ policy: null })}>+ Type it in</button>
+              <input ref={picker} type="file" accept="image/*,application/pdf" capture="environment" multiple hidden aria-label="Insurance card photo"
+                onChange={(e) => { const files = [...(e.target.files || [])]; e.target.value = ''; if (files.length) readFrom(files); }} />
+            </div>
+          )}
         </div>
+        <ErrorBox error={cardErr} />
         {policies?.length === 0 && <div className="muted">No insurance on file (self-pay).</div>}
         {policies?.length > 0 && (
           <table>
@@ -65,7 +113,7 @@ export default function InsuranceTab({ patient, onChange }) {
         )}
       </div>
 
-      <PortalInsuranceUpdates patient={patient} />
+      <PortalInsuranceUpdates patient={patient} onApplied={refresh} onRead={(blobs, ids) => readFrom(blobs, { stored: ids })} />
       <Eligibility patient={patient} policies={policies} onApplied={refresh} />
 
       {can('billing:read') && (
@@ -119,24 +167,45 @@ export default function InsuranceTab({ patient, onChange }) {
         </Modal>
       )}
       {modal && !modal.plan && (
-        <Modal title={modal.policy ? 'Edit policy' : 'Add insurance policy'} wide onClose={() => setModal(null)}>
-          <PolicyForm patient={patient} policy={modal.policy} onDone={() => { setModal(null); refresh(); }} />
+        <Modal title={modal.policy ? 'Edit policy' : modal.card ? 'Check the card and save' : 'Add insurance policy'} wide onClose={() => setModal(null)}>
+          <PolicyForm patient={patient} policy={modal.policy} card={modal.card} onDone={() => { setModal(null); refresh(); }} />
         </Modal>
       )}
     </>
   );
 }
 
-function PolicyForm({ patient, policy, onDone }) {
+// After a policy is saved from a card: the AI's part and the person's approval on record, the photos filed in
+// the chart, and the new coverage checked with the payer — none of it asks anything more of the person.
+async function afterCardSave({ patient, card, policyId, can }) {
+  await api.post(`/patients/${patient.id}/insurance-card/confirm`, { read_id: card.read_id, policy_id: policyId });
+  if (card.files?.length && can('clinical:write')) {
+    await Promise.all(card.files.slice(0, 2).map((f, i) => fetch(`/api/patients/${patient.id}/documents?category=insurance_card&filename=${encodeURIComponent(`Insurance card ${i ? 'back' : 'front'}.${(f.type.split('/')[1] || 'jpg').replace('jpeg', 'jpg')}`)}`, {
+      method: 'POST', headers: { Authorization: `Bearer ${getToken()}`, 'Content-Type': f.type || 'application/octet-stream' }, body: f,
+    }).then((r) => { if (!r.ok) throw new Error('Couldn’t file the card photo in Documents'); })));
+  }
+  if (can('billing:read')) {
+    const r = await api.post(`/insurance/${policyId}/eligibility`);
+    if (r.applied) toast(`Saved and checked: coverage ${r.status === 'active' ? 'active' : r.status}, benefits applied`);
+    else if (r.reasons?.length) toast(`Saved. Insurance needs a look: ${r.reasons[0]}`, { tone: 'error' });
+    else toast('Saved');
+  } else toast('Policy saved');
+}
+
+function PolicyForm({ patient, policy, card = null, onDone }) {
+  const { can } = useAuth();
   const carriers = useLookup('/carriers');
+  const fromCard = card?.proposed || {};
   const [form, setForm] = useState(() => ({
-    carrier_id: policy?.carrier_id || '',
+    carrier_id: policy?.carrier_id || card?.carrier?.id || (card?.new_carrier && can('billing:write') ? 'new' : ''),
+    new_carrier_name: card?.new_carrier?.name || '',
+    new_carrier_payer_id: card?.new_carrier?.payer_id || '',
     priority: policy?.priority || 'primary',
-    subscriber_name: policy?.subscriber_name || `${patient.first_name} ${patient.last_name}`,
-    subscriber_id: policy?.subscriber_id || '',
-    subscriber_dob: policy?.subscriber_dob || patient.dob || '',
-    relationship: policy?.relationship || 'self',
-    group_number: policy?.group_number || '',
+    subscriber_name: policy?.subscriber_name || fromCard.subscriber_name || `${patient.first_name} ${patient.last_name}`,
+    subscriber_id: policy?.subscriber_id || fromCard.subscriber_id || '',
+    subscriber_dob: policy?.subscriber_dob || fromCard.subscriber_dob || patient.dob || '',
+    relationship: policy?.relationship || fromCard.relationship || 'self',
+    group_number: policy?.group_number || fromCard.group_number || '',
     annual_max: fromCents(policy?.annual_max ?? 150000),
     deductible: fromCents(policy?.deductible ?? 5000),
     deductible_met: fromCents(policy?.deductible_met ?? 0),
@@ -146,10 +215,17 @@ function PolicyForm({ patient, policy, onDone }) {
     active: policy ? !!policy.active : true,
     benefit_month: policy?.benefit_month ?? 1,
     plan_id: policy?.plan_id ?? '',
-    effective_date: policy?.effective_date || '',
+    effective_date: policy?.effective_date || fromCard.effective_date || '',
   }));
+  // Read from a card: Enter saves (the Save button has focus once the form is up).
+  const saveBtn = useRef(null);
+  useEffect(() => {
+    if (!card) return undefined;
+    const t = setTimeout(() => saveBtn.current?.focus(), 0);
+    return () => clearTimeout(t);
+  }, [card]);
   // Existing plans for the carrier (employer groups): choosing one fills in its benefits.
-  const { data: plans } = useApi(form.carrier_id ? `/insurance-plans?carrier_id=${form.carrier_id}` : null);
+  const { data: plans } = useApi(form.carrier_id && form.carrier_id !== 'new' ? `/insurance-plans?carrier_id=${form.carrier_id}` : null);
   const pickPlan = (id) => {
     const pl = plans?.find((x) => String(x.id) === String(id));
     if (!pl) return setForm({ ...form, plan_id: '' });
@@ -161,28 +237,60 @@ function PolicyForm({ patient, policy, onDone }) {
   const chosenPlan = plans?.find((x) => String(x.id) === String(form.plan_id));
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value });
   const { submit, busy, error } = useSubmit(async () => {
+    // A carrier that isn't set up yet is added here, not in Settings.
+    let carrierId = form.carrier_id;
+    if (carrierId === 'new') {
+      if (!form.new_carrier_name.trim()) throw new Error('Enter the insurance company’s name');
+      const c = await api.post('/carriers', { name: form.new_carrier_name.trim(), payer_id: form.new_carrier_payer_id.trim() || null });
+      invalidateLookup('/carriers');
+      carrierId = c.id;
+      setForm((f) => ({ ...f, carrier_id: c.id }));
+    }
+    const { new_carrier_name: _n, new_carrier_payer_id: _p, ...rest } = form;
     const body = {
-      ...form, carrier_id: Number(form.carrier_id),
+      ...rest, carrier_id: Number(carrierId),
       annual_max: toCents(form.annual_max), deductible: toCents(form.deductible), deductible_met: toCents(form.deductible_met),
       pct_preventive: Number(form.pct_preventive), pct_basic: Number(form.pct_basic), pct_major: Number(form.pct_major), benefit_month: Number(form.benefit_month),
       plan_id: form.plan_id ? Number(form.plan_id) : null, effective_date: form.effective_date || null,
     };
     if (policy) await api.put(`/insurance/${policy.id}`, body);
-    else await api.post(`/patients/${patient.id}/insurance`, body);
+    else {
+      const saved = await api.post(`/patients/${patient.id}/insurance`, body);
+      if (card) {
+        onDone();
+        await afterCardSave({ patient, card, policyId: saved.id, can }).catch((e) => toast(`Policy saved, but: ${e.message}`, { tone: 'error' }));
+        return;
+      }
+    }
     onDone();
   });
   return (
     <form onSubmit={(e) => { e.preventDefault(); submit(); }}>
       <ErrorBox error={error} />
-      {carriers.length === 0 && <div className="error">No carriers set up yet — add one under Settings → Insurance carriers.</div>}
+      {card && (
+        <div className={`card-read-banner${card.sandbox ? ' sandbox' : ''}`}>
+          <Sparkles size={16} />
+          <div>
+            <strong>{card.sandbox ? 'Sandbox card reader' : 'Read by AI from the card'}</strong> — {card.reason}
+            {card.unclear?.length > 0 && <div>Check these closely: {card.unclear.join(', ')}.</div>}
+          </div>
+        </div>
+      )}
       <div className="form-grid">
         <label>
           Carrier *
           <select required value={form.carrier_id} onChange={set('carrier_id')}>
             <option value="">Select…</option>
             {carriers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            {can('billing:write') && <option value="new">{card?.new_carrier ? `+ New: ${card.new_carrier.name}` : '+ Add a new carrier…'}</option>}
           </select>
         </label>
+        {form.carrier_id === 'new' && (
+          <div className="full card-new-carrier">
+            <label>New carrier name *<input value={form.new_carrier_name} onChange={set('new_carrier_name')} /></label>
+            <label>Payer ID<input value={form.new_carrier_payer_id} onChange={set('new_carrier_payer_id')} placeholder="for e-claims" /></label>
+          </div>
+        )}
         <label>Priority<select value={form.priority} onChange={set('priority')}><option value="primary">Primary</option><option value="secondary">Secondary</option></select></label>
         {plans?.length > 0 && (
           <label className="full">
@@ -219,7 +327,7 @@ function PolicyForm({ patient, policy, onDone }) {
         <label>Major %<input type="number" min="0" max="100" value={form.pct_major} onChange={set('pct_major')} /></label>
         <label className="checkbox"><input type="checkbox" checked={form.active} onChange={set('active')} /> Active</label>
       </div>
-      <div className="form-actions"><button className="primary" disabled={busy}>Save policy</button></div>
+      <div className="form-actions"><button ref={saveBtn} className="primary" disabled={busy}>{busy ? 'Saving…' : 'Save policy'}</button></div>
     </form>
   );
 }
@@ -237,11 +345,33 @@ function CardPhoto({ id }) {
 }
 
 // New insurance the patient sent in from the portal, with their card photos, until someone enters it.
-function PortalInsuranceUpdates({ patient }) {
+// "Apply" enters it in one step; without a member ID typed in, the card photos are read instead.
+function PortalInsuranceUpdates({ patient, onApplied, onRead }) {
   const { can } = useAuth();
   const { data, reload } = useApi(can('billing:read') ? `/patients/${patient.id}/insurance-updates` : null);
+  const [replace, setReplace] = useState({});
+  const [err, setErr] = useState(null);
   const pending = (data || []).filter((u) => u.status === 'pending');
   if (!pending.length) return null;
+  const apply = async (u) => {
+    setErr(null);
+    try {
+      const r = await api.post(`/insurance-updates/${u.id}/apply`, replace[u.id] ? { replace: true } : {});
+      toast(r.already_on_file ? 'Already on file — marked done' : `Added ${r.policy.carrier_name}${r.carrier_created ? ' (new carrier)' : ''}${r.replaced_policy_id ? '; the old primary is now inactive' : ''}`);
+      reload();
+      onApplied?.();
+      if (!r.already_on_file && can('billing:read')) {
+        const e = await api.post(`/insurance/${r.policy.id}/eligibility`).catch((x) => ({ error: x }));
+        if (e.error) toast(`Couldn’t check the new insurance: ${e.error.message}`, { tone: 'error' });
+        else if (e.reasons?.length) toast(`Insurance needs a look: ${e.reasons[0]}`, { tone: 'error' });
+        onApplied?.();
+      }
+    } catch (e) {
+      if (e.status === 409 && e.details?.replaces) setReplace((x) => ({ ...x, [u.id]: e.details.replaces }));
+      else if (e.details?.needs_card_read && u.document_ids.length) onRead(await storedCards(u.document_ids), u.document_ids);
+      else setErr(e);
+    }
+  };
   const REL = { self: 'the patient', spouse: 'spouse', child: 'parent (patient is their child)', other: 'someone else' };
   return (
     <div className="card portal-ins-update">
@@ -257,10 +387,16 @@ function PortalInsuranceUpdates({ patient }) {
             <dt>Policyholder</dt><dd>{REL[u.relationship] || '—'}{u.subscriber_name ? ` · ${u.subscriber_name}` : ''}{u.subscriber_dob ? ` (born ${fmtDate(u.subscriber_dob)})` : ''}</dd>
             {u.note && <><dt>Note</dt><dd>{u.note}</dd></>}
           </dl>
-          {can('billing:write') && <button className="small" onClick={() => api.post(`/insurance-updates/${u.id}/reviewed`).then(reload)}>Entered — mark done</button>}
+          {can('billing:write') && (
+            <div className="inline" style={{ gap: 6, flexDirection: 'column', alignItems: 'stretch' }}>
+              <button className="primary small" onClick={() => apply(u)}>{replace[u.id] ? `Replace ${replace[u.id]} with this` : u.carrier_name && u.member_id ? 'Apply' : 'Read the card'}</button>
+              <button className="small" onClick={() => api.post(`/insurance-updates/${u.id}/reviewed`).then(reload, setErr)}>Entered — mark done</button>
+            </div>
+          )}
         </div>
       ))}
-      <p className="muted" style={{ fontSize: 13, margin: 0 }}>Add or edit the policy below (+ Add policy), verify eligibility, then mark this done.</p>
+      <ErrorBox error={err} />
+      <p className="muted" style={{ fontSize: 13, margin: 0 }}>Apply adds it as the primary policy (a missing carrier is added too) and checks it with the payer.</p>
     </div>
   );
 }

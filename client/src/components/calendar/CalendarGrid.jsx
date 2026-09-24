@@ -48,7 +48,7 @@ export const STATUS_COLORS = { scheduled: '#64748b', confirmed: '#16a34a', check
 
 export default function CalendarGrid({
   columns, appointments, range, pxPerMin, nowMin, onMove, onResize, onSelectRange, onOpen, onOpenBlockout, onPin,
-  placing, onPlace, selectedId, scrollKey, headerExtra, readOnly = false, step = 10, colorBy = 'type', onReorderColumn, onFocusAppt, onNext,
+  placing, onPlace, selectedId, scrollKey, headerExtra, readOnly = false, step = 10, colorBy = 'type', onReorderColumn, onFocusAppt, onNext, carry = null,
 }) {
   const [dragCol, setDragCol] = useState(null);
   const [overCol, setOverCol] = useState(null);
@@ -107,6 +107,11 @@ export default function CalendarGrid({
     const view = scroller.current.getBoundingClientRect();
     if (box.top < view.top + 40 || box.top > view.bottom - 40) scroller.current.scrollTop += box.top - view.top - 60;
   }, [selectedId, columns]);
+
+  // A visit being moved with the keyboard (M): keep its ghost in view as it goes.
+  useEffect(() => {
+    if (carry) scroller.current?.querySelector('.cal-ghost.carry')?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+  }, [carry?.col, carry?.s]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const geometry = useCallback((clientX, clientY) => {
     const rect = body.current.getBoundingClientRect();
@@ -304,7 +309,7 @@ export default function CalendarGrid({
                     </div>
                   )}
                   {perColumn[ci].map(({ appt: a, s, e, lane, lanes }) => {
-                    const dragging = drag?.appt?.id === a.id && drag.active;
+                    const dragging = (drag?.appt?.id === a.id && drag.active) || carry?.id === a.id;
                     const color = colorBy === 'provider' ? a.provider_color || '#64748b' : colorBy === 'status' ? STATUS_COLORS[a.status] || '#64748b' : a.type_color || a.provider_color || '#64748b';
                     const h = (e - s) * pxPerMin;
                     return (
@@ -320,7 +325,7 @@ export default function CalendarGrid({
                           else onOpen(a);
                         }}
                         onKeyDown={(ev) => {
-                          if (ev.target !== ev.currentTarget) return;
+                          if (ev.target !== ev.currentTarget || ev.defaultPrevented || carry) return;
                           if (ev.key === 'Enter') onOpen(a);
                           else if (ev.key.startsWith('Arrow') && !ev.altKey && !ev.ctrlKey && !ev.metaKey) moveFocus(ev, ci, a);
                         }}
@@ -368,6 +373,11 @@ export default function CalendarGrid({
                   {drag?.kind === 'move' && drag.active && drag.col === ci && (
                     <div className="cal-ghost" style={{ top: (drag.s2 - range.start) * pxPerMin, height: (drag.e2 - drag.s2) * pxPerMin - 2 }}>
                       {label12(drag.s2)}–{label12(drag.e2)}
+                    </div>
+                  )}
+                  {carry && carry.col === ci && (
+                    <div className="cal-ghost carry" aria-hidden="true" style={{ top: (carry.s - range.start) * pxPerMin, height: (carry.e - carry.s) * pxPerMin - 2 }}>
+                      {label12(carry.s)}–{label12(carry.e)}
                     </div>
                   )}
                   {drag?.kind === 'resize' && drag.col === ci && (

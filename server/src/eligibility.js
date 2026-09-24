@@ -1,9 +1,10 @@
 import { HttpError } from './auth.js';
 import { raiseIssue, resolveIssue } from './issues.js';
-import { insert, practiceNow, localNow } from './util.js';
+import { insert, practiceNow, localNow, audit } from './util.js';
+import { withActor } from './actor.js';
 import { build270, parse271, x12Type } from './x12.js';
-import { benefitsUsed } from './services.js';
-import { DEFAULT_FREQUENCIES } from './benefits.js';
+import { benefitsUsed, benefitYear } from './services.js';
+import { DEFAULT_FREQUENCIES, savePolicy, withPlan } from './benefits.js';
 
 // Eligibility (270/271): one policy on demand, or a whole day's patients — the office runs tomorrow's list,
 // and it runs by itself each evening when a real-time clearinghouse is connected.
@@ -71,7 +72,80 @@ export function createEligibility({ db, config = {}, clearinghouse: ch = null })
       row = { ...row, response_x12: response, summary: JSON.stringify({ ...summary, ...(live ? {} : { sandbox: true }) }), status: summary.errors.length ? 'error' : summary.active ? 'active' : 'inactive' };
     }
     const id = await insert(db, 'eligibility_checks', row);
-    return { id, status: row.status, mode: ch?.realtime ? 'realtime' : row.response_x12 ? 'sandbox' : 'manual' };
+    const mode = ch?.realtime ? 'realtime' : row.response_x12 ? 'sandbox' : 'manual';
+    const settled = row.response_x12 ? await settle(id, { source: live(mode) }) : null;
+    return { id, status: row.status, mode, ...(settled || {}) };
+  }
+  const live = (mode) => (mode === 'sandbox' ? 'automation' : 'integration');
+
+  // Copies a response's benefits onto the policy (and its plan) so estimates use them. What "Apply to policy"
+  // has always applied: max, deductible, deductible met this benefit year, percentages and frequency limits.
+  async function apply(checkId) {
+    const e = await db.get('SELECT * FROM eligibility_checks WHERE id = ?', checkId);
+    const s = e?.summary && JSON.parse(e.summary);
+    if (!s) throw new HttpError(409, 'No response to apply yet');
+    const policy = await db.get('SELECT * FROM patient_insurance WHERE id = ?', e.patient_insurance_id);
+    const row = {};
+    if (s.annual_max != null) row.annual_max = s.annual_max;
+    if (s.deductible != null) row.deductible = s.deductible;
+    if (s.deductible != null && s.deductible_remaining != null) row.deductible_met = Math.max(0, s.deductible - s.deductible_remaining);
+    for (const tier of ['preventive', 'basic', 'major']) if (s.coinsurance?.[tier] != null) row[`pct_${tier}`] = s.coinsurance[tier];
+    const { plan } = await withPlan(db, policy);
+    if (s.frequencies?.length) row.frequencies = mergeFrequencies(plan.frequencies ? JSON.parse(plan.frequencies) : null, s.frequencies);
+    if (row.deductible_met != null) row.deductible_year = benefitYear(policy, (await practiceNow(db, e.practice_id)).slice(0, 10)).start;
+    const before = pickFields(policy, row);
+    // Plan-wide numbers (max, deductible, percentages) update the shared plan; the deductible met is this patient's.
+    await db.tx(async () => {
+      await savePolicy(db, e.practice_id, policy.id, row);
+      await db.run("UPDATE insurance_plans SET verified_at = datetime('now'), verified_source = 'eligibility' WHERE id = ?", plan.id);
+    });
+    const after = pickFields(await db.get('SELECT * FROM patient_insurance WHERE id = ?', policy.id), row);
+    return { check: e, summary: s, policy, fields: Object.keys(row), before, after };
+  }
+
+  // A response that came back: applied to the policy on its own when it's clean; anything that needs a
+  // person (coverage not active, a payer error, numbers that disagree with a verified plan) goes to
+  // Needs attention instead, and nothing is changed.
+  async function settle(checkId, { source = 'integration' } = {}) {
+    const e = await db.get('SELECT * FROM eligibility_checks WHERE id = ?', checkId);
+    const s = e?.summary && JSON.parse(e.summary);
+    if (!s) return null;
+    const policy = await db.get('SELECT * FROM patient_insurance WHERE id = ?', e.patient_insurance_id);
+    const { plan } = await withPlan(db, policy);
+    const today = (await practiceNow(db, e.practice_id)).slice(0, 10);
+    const reasons = eligibilityProblems(s, { plan, today });
+    const key = `eligibility-review:${policy.id}`;
+    const patient = await db.get('SELECT first_name, last_name FROM patients WHERE id = ?', e.patient_id);
+    if (reasons.length) {
+      await saveSummary(e.id, { ...s, review: { reasons, at: new Date().toISOString() } });
+      await raiseIssue(db, {
+        practiceId: e.practice_id, kind: 'eligibility', key, role: 'front_desk', entity: 'patient_insurance', entityId: policy.id, patientId: e.patient_id,
+        title: `Insurance needs a look: ${patient.first_name} ${patient.last_name} — ${reasons[0]}`, detail: reasons.join('; '),
+      });
+      return { applied: false, reasons };
+    }
+    const actor = { source, actor: source === 'automation' ? 'Eligibility check (sandbox)' : 'Eligibility response from the payer', practiceId: e.practice_id };
+    const out = await withActor(actor, async () => {
+      const done = await apply(e.id);
+      await audit(db, null, 'eligibility.auto_apply', 'patient_insurance', policy.id, { check_id: e.id, fields: done.fields }, {
+        source, actor: actor.actor, before: done.before, after: done.after, patientId: e.patient_id, reason: 'The payer’s response matched the plan on file, so it was applied automatically',
+      });
+      return done;
+    });
+    await saveSummary(e.id, { ...s, applied: { at: new Date().toISOString(), auto: true, fields: out.fields } });
+    await resolveIssue(db, e.practice_id, key, 'Resolved automatically: a later insurance check came back clean and was applied');
+    return { applied: true, fields: out.fields };
+  }
+  const saveSummary = (id, s) => db.run('UPDATE eligibility_checks SET summary = ? WHERE id = ?', JSON.stringify(s), id);
+
+  // A person applied it anyway, or kept what's on file: the exception is closed either way.
+  async function resolveReview(checkId, { applied, userName }) {
+    const e = await db.get('SELECT * FROM eligibility_checks WHERE id = ?', checkId);
+    const s = e?.summary ? JSON.parse(e.summary) : null;
+    if (!s) return;
+    const at = new Date().toISOString();
+    await saveSummary(e.id, { ...s, ...(applied ? { applied: { at, auto: false, by: userName } } : {}), ...(s.review ? { review: { ...s.review, resolved_at: at, resolved_by: userName, outcome: applied ? 'applied' : 'kept' } } : {}) });
+    await resolveIssue(db, e.practice_id, `eligibility-review:${e.patient_insurance_id}`, applied ? `Applied to the policy by ${userName}` : `Kept what's on file (${userName})`);
   }
 
   // A day's booked patients with their primary policy and latest check.
@@ -93,7 +167,7 @@ export function createEligibility({ db, config = {}, clearinghouse: ch = null })
     const since = new Date(Date.now() - maxAgeDays * 86400_000).toISOString().slice(0, 19).replace('T', ' ');
     const rows = await forDay(practiceId, date);
     const seen = new Set();
-    const out = { date, checked: 0, skipped: 0, failed: [], results: [] };
+    const out = { date, checked: 0, applied: 0, needs_look: 0, skipped: 0, failed: [], results: [] };
     for (const r of rows) {
       if (!r.policy_id || seen.has(r.policy_id)) continue;
       seen.add(r.policy_id);
@@ -101,7 +175,9 @@ export function createEligibility({ db, config = {}, clearinghouse: ch = null })
       try {
         const done = await check(await db.get('SELECT * FROM patient_insurance WHERE id = ?', r.policy_id), { userId });
         out.checked++;
-        out.results.push({ patient_id: r.patient_id, status: done.status });
+        if (done.applied) out.applied++;
+        if (done.reasons?.length) out.needs_look++;
+        out.results.push({ patient_id: r.patient_id, status: done.status, applied: !!done.applied, reasons: done.reasons || [] });
       } catch (err) {
         out.failed.push({ patient_id: r.patient_id, error: err.message });
       }
@@ -109,7 +185,7 @@ export function createEligibility({ db, config = {}, clearinghouse: ch = null })
     return out;
   }
 
-  return { automatic, check, forDay, batch };
+  return { automatic, check, forDay, batch, apply, settle, resolveReview };
 }
 
 // Nightly: after 5pm practice time, check tomorrow's patients once.
@@ -122,7 +198,8 @@ export async function runEligibilityBatches(db, eligibility, now = new Date()) {
     const tomorrow = new Date(Date.parse(`${local.slice(0, 10)}T12:00:00Z`) + 86400_000).toISOString().slice(0, 10);
     if (p.eligibility_batch_date === tomorrow) continue;
     await db.run('UPDATE practices SET eligibility_batch_date = ? WHERE id = ?', tomorrow, p.id);
-    const out = await eligibility.batch(p.id, tomorrow);
+    // The evening run is the system's own work, so what it applies is recorded as automation.
+    const out = await withActor({ source: 'automation', actor: 'Nightly insurance check', practiceId: p.id }, () => eligibility.batch(p.id, tomorrow));
     done.push({ practice_id: p.id, ...out });
     // Patients whose insurance couldn't be checked are one item for the front desk, not a log line.
     const key = `eligibility:${tomorrow}`;
@@ -149,4 +226,31 @@ export function mergeFrequencies(current, fromPayer) {
     } else list.push({ label: f.codes.join(', '), codes: f.codes, ...rule });
   }
   return list;
+}
+
+const pickFields = (row, keys) => Object.fromEntries(Object.keys(keys).filter((k) => k !== 'frequencies' && k !== 'deductible_year').map((k) => [k, row?.[k] ?? null]));
+
+// Payer rejection codes (AAA03) the front desk can act on.
+const AAA = {
+  15: 'the payer needs more information', 42: 'the payer’s system is down — try again later', 43: 'the provider isn’t registered with this payer',
+  58: 'the date of birth doesn’t match', 72: 'the member ID isn’t right', 73: 'the name doesn’t match', 75: 'the payer can’t find this subscriber', 76: 'duplicate member ID',
+};
+const dollars = (c) => `$${(c / 100).toLocaleString('en-US', { minimumFractionDigits: c % 100 ? 2 : 0 })}`;
+
+// What in a 271 needs a person. Empty means it's clean and can be applied on its own. Plan-wide numbers only
+// count as a mismatch once someone has verified the plan: until then the payer's figures are the better ones.
+export function eligibilityProblems(s, { plan = null, today = null } = {}) {
+  const out = [];
+  if (s.errors?.length) out.push(`the payer couldn’t check it (${s.errors.map((e) => AAA[Number(e.code)] || `code ${e.code}`).join(', ')})`);
+  else if (s.active === false) out.push('coverage isn’t active');
+  else if (s.active == null) out.push('the payer didn’t say whether coverage is active');
+  if (s.plan_begin && today && s.plan_begin > today) out.push(`coverage doesn’t start until ${s.plan_begin}`);
+  if (plan?.verified_at && !out.length) {
+    const cmp = [['annual_max', 'annual max', s.annual_max, dollars], ['deductible', 'deductible', s.deductible, dollars],
+      ['pct_preventive', 'preventive', s.coinsurance?.preventive, (v) => `${v}%`], ['pct_basic', 'basic', s.coinsurance?.basic, (v) => `${v}%`], ['pct_major', 'major', s.coinsurance?.major, (v) => `${v}%`]];
+    for (const [k, label, payer, fmt] of cmp) {
+      if (payer != null && plan[k] != null && Number(payer) !== Number(plan[k])) out.push(`${label}: the payer says ${fmt(payer)}, the plan on file says ${fmt(plan[k])}`);
+    }
+  }
+  return out;
 }

@@ -14,3 +14,25 @@
 
 .drawer-next { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
 .drawer button kbd { font-size: 10px; opacity: 0.8; margin-left: 4px; }
+
+/* Booking (workflow 9): the patient being worked on, one click away; what the form filled in and the time it found. */
+.book-active-row { margin-top: -6px; }
+.book-suggest { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; padding: 8px 10px; border-radius: 8px;
+  background: var(--primary-soft, rgba(14, 165, 233, 0.08)); border: 1px solid var(--border); font-size: 13px; }
+.book-suggest .link { margin-left: auto; }
+
+/* Keyboard move (workflow 10) and the inline "move it into blocked time?" question. */
+.cal-ghost.carry { outline: 2px dashed var(--primary); outline-offset: -2px; z-index: 6; }
+.carry-banner kbd, .broken-picker kbd { font-size: 10px; padding: 0 4px; border: 1px solid var(--border); border-radius: 4px; background: var(--panel); }
+.override-banner { background: #fee2e2; color: #991b1b; }
+:root[data-theme='dark'] .override-banner { background: rgba(239, 68, 68, 0.14); color: #fecaca; }
+
+/* Cancel / no-show reasons (workflow 19). */
+.broken-reasons { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 8px; }
+.broken-reasons .reason { justify-content: flex-start; text-align: left; font-size: 13px; }
+.broken-reasons .reason:focus-visible { outline: 2px solid var(--primary); }
+.drawer-actions .danger.active { box-shadow: inset 0 0 0 2px currentColor; }
+
+/* The schedule's "N unconfirmed" goes to the list (workflow 13). */
+button.stat-pill.unconfirmed-link { cursor: pointer; font-size: inherit; min-height: 0; }
+button.stat-pill.unconfirmed-link:hover { text-decoration: underline; }

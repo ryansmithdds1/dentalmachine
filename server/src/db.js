@@ -1887,6 +1887,34 @@ CREATE TABLE IF NOT EXISTS org_members (
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE (organization_id, user_id)
 );
+-- DSO central billing office (orgbilling.js): who on the group's billing team is working which queue item.
+-- item_key names the item ('claim:12', 'era:5:2' = remittance 5 line 2, 'credit:33' = patient 33's credit);
+-- practice_id is looked up on the server from the item itself. Routing only — clearing an assignment is a
+-- status change (assigned_to NULL), and every change is audited.
+CREATE TABLE IF NOT EXISTS org_assignments (
+  id INTEGER PRIMARY KEY,
+  organization_id INTEGER NOT NULL REFERENCES organizations(id),
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  item_key TEXT NOT NULL,
+  assigned_to INTEGER REFERENCES users(id),
+  assigned_by INTEGER REFERENCES users(id),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (organization_id, item_key)
+);
+-- Group role templates ("Front desk", "Billing", "Dentist"): a built-in role plus a permission list that
+-- owners apply to people across the group's practices at once. Each practice gets its own custom role
+-- linked back here (custom_roles.org_template_id). Retired with active = 0, never deleted.
+CREATE TABLE IF NOT EXISTS org_role_templates (
+  id INTEGER PRIMARY KEY,
+  organization_id INTEGER NOT NULL REFERENCES organizations(id),
+  name TEXT NOT NULL,
+  base_role TEXT NOT NULL,
+  permissions TEXT NOT NULL DEFAULT '[]',
+  active INTEGER NOT NULL DEFAULT 1,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (organization_id, name)
+);
 `;
 
 // Columns added after the first release. SQLite has no ADD COLUMN IF NOT EXISTS, so check first.
@@ -2172,6 +2200,10 @@ const COLUMNS = [
   // missed-call text and when the AI receptionist answers ('off' | 'after_hours' | 'missed' | 'always').
   // A group of practices (a DSO or several offices under one owner): rollups and shared setup.
   ['practices', 'organization_id', 'INTEGER'],
+  // DSO central billing: a group member who works the billing queues and cross-practice patient lookup
+  // (owners always can). And the group role template a practice's custom role was made from.
+  ['org_members', 'billing', 'INTEGER NOT NULL DEFAULT 0'],
+  ['custom_roles', 'org_template_id', 'INTEGER'],
   ['practices', 'voice_number', 'TEXT'],
   ['practices', 'forward_to', 'TEXT'],
   ['practices', 'ring_seconds', 'INTEGER NOT NULL DEFAULT 20'],
@@ -2230,6 +2262,10 @@ const COLUMNS = [
   // when the patient in the chair became ready, and for whom ('doctor' for the exam, or 'checkout').
   ['appointments', 'ready_at', 'TEXT'],
   ['appointments', 'ready_for', 'TEXT'],
+  // Why a visit was cancelled or missed (workflow 19): a code from the short list (BROKEN_REASONS in
+  // routes/schedule.js) and, for "other", a few words. Cleared if the visit is put back on the schedule.
+  ['appointments', 'broken_reason', 'TEXT'],
+  ['appointments', 'broken_note', 'TEXT'],
   ['lab_cases', 'rx', 'TEXT'],
   ['lab_cases', 'document_ids', 'TEXT'],
   ['lab_cases', 'lab_token_hash', 'TEXT'],
@@ -2256,6 +2292,8 @@ const COLUMNS = [
   ['insurance_plans', 'benefit_notes', 'TEXT'],
   ['insurance_plans', 'verified_at', 'TEXT'],
   ['insurance_plans', 'verified_source', 'TEXT'],
+  // Who ticked a task off (workflow 28), next to completed_at; cleared again if it's reopened.
+  ['tasks', 'completed_by', 'INTEGER REFERENCES users(id)'],
 ];
 
 // CHECK constraints widened after release: [table, constraint name on Postgres, old text, new text].

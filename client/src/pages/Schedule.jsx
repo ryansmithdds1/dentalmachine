@@ -17,6 +17,8 @@ import BlockoutForm from '../components/calendar/BlockoutForm.jsx';
 import AppointmentDrawer from '../components/calendar/AppointmentDrawer.jsx';
 import CalendarGrid, { toMin, STATUS_COLORS } from '../components/calendar/CalendarGrid.jsx';
 import { planStep, nextKind, postsCharges, STEP_KEYS, READY_SHORT } from '../components/calendar/flow.js';
+import { brokenLabel } from '../components/calendar/BrokenPicker.jsx';
+import OverrideBanner from '../components/calendar/OverrideBanner.jsx';
 
 // "Fit" sizes the grid so the whole office day fits the screen without scrolling; S/M/L are fixed sizes.
 const ZOOMS = [{ label: 'Fit', px: 0 }, { label: 'S', px: 1 }, { label: 'M', px: 1.5 }, { label: 'L', px: 2.2 }];
@@ -198,19 +200,32 @@ export default function Schedule() {
   const [selectedId, setSelectedId] = useState(null);
   const [modal, setModal] = useState(null);
   const [placing, setPlacing] = useState(null);
+  // A move that landed on blocked time or outside hours, waiting for "move it there anyway" or "keep it".
+  const [override, setOverride] = useState(null);
+  const answerOverride = (yes) => { const o = override; setOverride(null); o?.resolve(yes); };
+  // Keyboard move (M): the visit being carried, where it would go (column index, start minute) and its length.
+  const [carry, setCarry] = useState(null);
+  // Cancel / no-show from the keyboard (X, Shift+X): which picker the drawer opens with.
+  const [brokenAsk, setBrokenAsk] = useState(null);
   // Keep today's list on this computer for when the internet is down (see offline.js).
   useEffect(() => {
     if (data && from <= today && to >= today) saveOfflineDay(practice, today, data.appointments, operatories, providers);
   }, [data]); // eslint-disable-line react-hooks/exhaustive-deps
-  // ?book=<patient id> (from quick search "Book for…"): open a new appointment for them.
+  // ?book=<patient id> (the command bar's "book <name>", Alt+B for the active patient): open a new appointment
+  // for them at their next open time, with Book focused so Enter books it. With a slot already dragged out
+  // and no patient picked yet, it fills in the patient and keeps the slot.
   useEffect(() => {
     const id = params.get('book');
     if (!id) return;
     const next = new URLSearchParams(params);
     next.delete('book');
     setParams(next, { replace: true });
-    if (id === 'new') setModal({ type: 'new', defaults: { date } });
-    else api.get(`/patients/${id}`).then((p) => setModal({ type: 'new', defaults: { date }, patient: p })).catch(() => {});
+    if (id === 'new') setModal((m) => (m?.type === 'new' ? m : { type: 'new', defaults: { date } }));
+    else {
+      api.get(`/patients/${id}`)
+        .then((p) => setModal((m) => (m?.type === 'new' && !m.patient ? { ...m, patient: p } : { type: 'new', defaults: { date }, patient: p })))
+        .catch((e) => toast(e.message, { error: true }));
+    }
   }, [params.get('book')]); // eslint-disable-line react-hooks/exhaustive-deps
   // Pinboard: appointments parked here (on this computer) to be placed on another day or time. Only their
   // ids are kept on the device; the details are fetched fresh, and the list is cleared at sign-out.
@@ -264,7 +279,10 @@ export default function Schedule() {
       return saved;
     } catch (err) {
       replaceAppt(before);
-      if (err.details?.can_override && confirm(`${err.message}. Book it there anyway?`)) return saveMove(appt, patch, { undoable, override: true });
+      // Blocked time or outside hours: ask inline (Enter = move it there, Esc = keep it) instead of a dialog.
+      if (err.details?.can_override) {
+        return new Promise((resolve) => setOverride({ appt, patch, message: err.message, resolve: (yes) => resolve(yes ? saveMove(appt, patch, { undoable, override: true }) : null) }));
+      }
       toast(err.message, { error: true });
       return null;
     }
@@ -278,11 +296,14 @@ export default function Schedule() {
     if (!can('schedule:write')) return;
     // A chair's usual provider is the default for visits booked into it.
     const chairDefault = col.assign.operatory_id ? operatories.find((o) => o.id === col.assign.operatory_id)?.default_provider_id : null;
-    setModal({ type: 'new', defaults: { date: col.date, time: start, end, ...col.assign, provider_id: col.assign.provider_id || (providerFilter ? Number(providerFilter) : undefined) || chairDefault || undefined } });
+    // The provider comes from the column or the filter; otherwise the patient's own provider (the form asks the
+    // server), falling back to the chair's usual one.
+    setModal({ type: 'new', defaults: { date: col.date, time: start, end, ...col.assign, provider_id: col.assign.provider_id || (providerFilter ? Number(providerFilter) : undefined), chair_provider_id: chairDefault || undefined } });
   }, [can, providerFilter, operatories]);
   const onPlace = useCallback((col, start) => {
     const appt = placing;
     setPlacing(null);
+    setCarry(null);
     const dur = toMin(appt.end_time) - toMin(appt.start_time);
     saveMove(appt, { start_time: `${col.date} ${start}`, end_time: `${col.date} ${hhmm(toMin(start) + dur)}`, ...col.assign })
       .then((saved) => saved && setPins((cur) => cur.filter((p) => p.id !== appt.id)));
@@ -300,9 +321,30 @@ export default function Schedule() {
         setSelectedId(null);
         reload({ silent: true });
       }
+      return updated;
     } catch (err) {
       replaceAppt(a);
       toast(err.message, { error: true });
+      return null;
+    }
+  };
+  // Cancel or no-show with its reason (workflow 19), then — unless they said not now — the booking form for the
+  // same patient, type, provider and length at the next open time after the broken one, with Book focused.
+  // The freed time is still offered to the ASAP list automatically (fill.js).
+  const breakVisit = async (a, status, { reason, note, scope, rebook }) => {
+    const done = await setStatus(a, status, scope, { broken_reason: reason, ...(note ? { broken_note: note } : {}) });
+    if (!done) return;
+    setBrokenAsk(null);
+    toast(`${a.first_name} ${a.last_name} ${status === 'no_show' ? 'marked as a no-show' : 'cancelled'} · ${brokenLabel(reason)}${note ? ` (${note})` : ''}`);
+    if (rebook) {
+      setModal({
+        type: 'new', rebook: true,
+        patient: { id: a.patient_id, first_name: a.first_name, last_name: a.last_name, preferred_name: a.preferred_name, dob: a.dob },
+        defaults: {
+          date: today, after: a.end_time, provider_id: a.provider_id, duration: toMin(a.end_time) - toMin(a.start_time),
+          appointment_type_id: a.appointment_type_id || undefined, reason: a.appointment_type_id ? undefined : a.reason || undefined,
+        },
+      });
     }
   };
 
@@ -354,6 +396,81 @@ export default function Schedule() {
     if (el) el.focus();
     else toast('No visits to go to on this day');
   };
+  // ---- Keyboard move (workflow 10) ----
+  // M picks up the focused visit (or, with none, the last one on the pinboard); ↑ ↓ move it by the grid step
+  // (Shift: an hour), ← → to the next column, Shift+← → or Page Up/Down to another day, Enter puts it down (with
+  // Undo), B parks it on the pinboard, Esc leaves it where it was. Nothing is saved until Enter.
+  const focusCard = (id, tries = 12) => {
+    const el = document.querySelector(`.cal [data-appt-id="${id}"]`);
+    if (el && !el.classList.contains('pending')) el.focus();
+    else if (tries > 0) setTimeout(() => focusCard(id, tries - 1), 120);
+  };
+  const pickUp = (a, fromPin = false) => {
+    if (!a) return toast('Pick a visit first: click it, or press F to jump to the one happening now');
+    if (['completed', 'cancelled', 'no_show'].includes(a.status)) return toast('Finished visits stay where they are');
+    if (view === 'agenda') go({ view: 'day' });
+    const at = columns.findIndex((c) => c.accepts(a));
+    const near = at >= 0 ? at : Math.max(0, columns.findIndex((c) => (c.assign.provider_id && c.assign.provider_id === a.provider_id) || (c.assign.operatory_id && c.assign.operatory_id === a.operatory_id)));
+    setSelectedId(null);
+    setCarry({ appt: a, col: near, s: toMin(a.start_time), dur: toMin(a.end_time) - toMin(a.start_time), fromPin });
+  };
+  const cancelCarry = () => {
+    const c = carry;
+    setCarry(null);
+    setPlacing(null);
+    if (c && !c.fromPin) focusCard(c.appt.id);
+  };
+  const dropCarry = () => {
+    const c = carry;
+    const col = c && columns[c.col];
+    setCarry(null);
+    setPlacing(null);
+    if (!col) return;
+    const start = `${col.date} ${hhmm(c.s)}`;
+    if (start === c.appt.start_time && col.accepts(c.appt)) {
+      focusCard(c.appt.id);
+      return toast('Left where it was');
+    }
+    saveMove(c.appt, { start_time: start, end_time: `${col.date} ${hhmm(c.s + c.dur)}`, ...col.assign }).then((saved) => {
+      if (!saved) return;
+      setPins((cur) => cur.filter((p) => p.id !== c.appt.id));
+      focusCard(saved.id);
+    });
+  };
+  useEffect(() => {
+    if (!carry) return undefined;
+    // Capture phase: while a visit is being carried, the arrows and letters belong to the move.
+    const onKey = (e) => {
+      if (e.ctrlKey || e.metaKey || e.altKey || ['Shift', 'Control', 'Alt', 'Meta', 'Tab'].includes(e.key)) return;
+      if (document.querySelector('.modal, .palette')) return;
+      // Handled here: the schedule's other keys and the focused card see defaultPrevented and stay out of it.
+      e.preventDefault();
+      const k = e.key;
+      const clampS = (v) => Math.max(timeRange.start, Math.min(timeRange.end - carry.dur, v));
+      if (k === 'ArrowUp' || k === 'ArrowDown') setCarry((c) => c && { ...c, s: clampS(c.s + (k === 'ArrowUp' ? -1 : 1) * (e.shiftKey ? 60 : step)) });
+      else if ((k === 'ArrowLeft' || k === 'ArrowRight') && !e.shiftKey) setCarry((c) => c && { ...c, col: Math.max(0, Math.min(columns.length - 1, c.col + (k === 'ArrowLeft' ? -1 : 1))) });
+      else if (['ArrowLeft', 'ArrowRight', 'PageUp', 'PageDown'].includes(k)) go({ date: shiftDate(date, (k === 'ArrowLeft' || k === 'PageUp' ? -1 : 1) * (view === 'week' ? 7 : 1)) });
+      else if (k === 'Enter') dropCarry();
+      else if (k === 'Escape') cancelCarry();
+      else if (k.toLowerCase() === 'b') {
+        onPin(carry.appt);
+        setCarry(null);
+        setPlacing(null);
+      }
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  });
+  // X / Shift+X: cancel or no-show the focused visit — the drawer opens on the reason picker (1–7 picks one).
+  const askBroken = (kind) => () => {
+    const a = target();
+    if (!a) return toast('Pick a visit first: click it, or press F to jump to the one happening now');
+    if (['completed', 'cancelled', 'no_show'].includes(a.status)) return toast(`${a.first_name} ${a.last_name}’s visit is already ${a.status === 'completed' ? 'done' : label(a.status).toLowerCase()}`);
+    setSelectedId(a.id);
+    makeActive(a);
+    setBrokenAsk({ kind, n: Date.now() });
+  };
+
   const cycleProvider = () => {
     const ids = ['', ...providers.map((p) => String(p.id))];
     const next = ids[(ids.indexOf(providerFilter) + 1) % ids.length];
@@ -379,6 +496,9 @@ export default function Schedule() {
     { combo: STEP_KEYS.ready, handler: stepKey('ready'), label: 'Ready for the doctor (again to clear)', section: 'Patient flow', enabled: w },
     { combo: STEP_KEYS.ready_checkout, handler: stepKey('ready_checkout'), label: 'Ready for checkout (again to clear)', section: 'Patient flow', enabled: w },
     { combo: STEP_KEYS.out, handler: stepKey('out'), label: 'Out — visit complete', section: 'Patient flow', enabled: w },
+    { combo: 'm', handler: () => { const a = target(); if (a || !pins.length) pickUp(a); else pickUp(pins.at(-1), true); }, label: 'Move the selected visit (or the last pinned one): ↑ ↓ ← →, Enter to put it down', section: 'Moving visits', enabled: w },
+    { combo: 'x', handler: askBroken('cancelled'), label: 'Cancel the selected visit (pick a reason, then rebook)', section: 'Moving visits', enabled: w },
+    { combo: 'shift+x', handler: askBroken('no_show'), label: 'No-show (pick a reason, then rebook)', section: 'Moving visits', enabled: w },
   ]);
   useCommands([
     { id: 'sched-chairs', label: 'Schedule: Chairs view', hint: 'C', run: () => showBy('operatory') },
@@ -386,6 +506,7 @@ export default function Schedule() {
     { id: 'sched-all', label: 'Schedule: show all providers', hint: 'Shift+V', run: () => setProviderFilter('') },
     ...providers.map((p) => ({ id: `sched-only-${p.id}`, label: `Schedule: show only ${p.name}`, hint: 'V cycles providers', run: () => setProviderFilter(p.id) })),
     { id: 'sched-today', label: 'Schedule: today', hint: 'T', run: () => go({ date: today }) },
+    { id: 'sched-unconfirmed', label: 'Schedule: unconfirmed visits', run: () => nav(`/followups?tab=unconfirmed${view === 'week' ? '&days=7' : `&date=${date}`}`) },
   ]);
 
   // ---- Keyboard shortcuts: ←/→ move, T today, D/W/A views, N new, Esc close ----
@@ -400,8 +521,9 @@ export default function Schedule() {
       else if (k === 'd') go({ view: 'day' });
       else if (k === 'w') go({ view: 'week' });
       else if (k === 'a') go({ view: 'agenda' });
-      else if (k === 'n' && can('schedule:write')) setModal({ type: 'new', defaults: { date } });
+      else if (k === 'n' && !e.shiftKey && can('schedule:write')) setModal({ type: 'new', defaults: { date } });
       else if (e.key === 'Escape') {
+        if (override) answerOverride(false);
         setPlacing(null);
         setSelectedId(null);
       } else return;
@@ -549,7 +671,11 @@ export default function Schedule() {
             return n > 0 ? <button className="stat-pill warn hidden-chairs" onClick={() => setChairLayout({ ...chairLayout, hidden: [] })} title="Some chairs are hidden on this computer — show them all"><EyeOff size={13} /> {n} in hidden chairs</button> : null;
           })()}
           <span className="stat-pill">{dayAppts.length} appts</span>
-          {unconfirmed > 0 && <span className="stat-pill warn">{unconfirmed} unconfirmed</span>}
+          {unconfirmed > 0 && (
+            <button className="stat-pill warn unconfirmed-link" onClick={() => nav(`/followups?tab=unconfirmed${view === 'week' ? '&days=7' : `&date=${date}`}`)} title="Open the list to confirm them or text a reminder">
+              {unconfirmed} unconfirmed
+            </button>
+          )}
           <span className="stat-pill prod" title="Scheduled production">
             {short(production)}{goal ? <span className="muted"> / {short(goal)}</span> : ''}
             {goal > 0 && <span className="goal-bar" title="Scheduled production vs goal"><i style={{ width: `${Math.min(100, (production / goal) * 100)}%` }} /></span>}
@@ -615,7 +741,25 @@ export default function Schedule() {
         </div>
       </div>
 
-      {placing && (
+      {override && <OverrideBanner message={override.message} name={`${override.appt.first_name} ${override.appt.last_name}`} onAnswer={answerOverride} />}
+      {carry && (() => {
+        const col = columns[carry.col];
+        return (
+          <div className="placing-banner carry-banner" role="status">
+            <span>
+              Moving <strong>{carry.appt.first_name} {carry.appt.last_name}</strong> to{' '}
+              <strong>{col ? `${dayName(col.date, { weekday: 'short', month: 'short', day: 'numeric' })} ${fmtTime(`${col.date} ${hhmm(carry.s)}`)}` : '…'}</strong>
+              {col && col.label && view !== 'week' ? ` · ${col.label}` : ''}
+              <span className="muted"> — ↑ ↓ time · ← → column · Shift+← → day · <kbd>Enter</kbd> put it here · <kbd>B</kbd> pinboard · <kbd>Esc</kbd> cancel</span>
+            </span>
+            <span className="inline">
+              <button className="small primary" onClick={dropCarry}>Put it here</button>
+              <button className="small" onClick={cancelCarry}>Cancel</button>
+            </span>
+          </div>
+        );
+      })()}
+      {placing && !carry && (
         <div className="placing-banner">
           <span>Tap a new time for <strong>{placing.first_name} {placing.last_name}</strong>{view === 'agenda' ? ' — switch to Day or Week view' : ''}.</span>
           <button className="small" onClick={() => setPlacing(null)}>Cancel</button>
@@ -644,6 +788,7 @@ export default function Schedule() {
             onNext={w ? (a) => runStep(a, nextKind(a)) : undefined}
             onOpenBlockout={(b) => can('schedule:write') && setModal({ type: 'block', blockout: b })}
             placing={placing} onPlace={onPlace} selectedId={selectedId} scrollKey={`${view}|${from}|${zoom}`}
+            carry={carry && columns[carry.col] ? { col: carry.col, s: carry.s, e: carry.s + carry.dur, id: carry.appt.id } : null}
             onPin={can('schedule:write') ? onPin : undefined}
             onReorderColumn={view === 'day' && mode === 'operatory' ? (from, to) => moveChair(from.chairId, to.chairId) : undefined}
           />
@@ -674,7 +819,7 @@ export default function Schedule() {
           {!pins.length && <span className="muted">Drop here to move it to another day</span>}
           {pins.map((p) => (
             <span key={p.id} className={`pin-item${placing?.id === p.id ? ' active' : ''}`} style={{ borderLeftColor: p.type_color || p.provider_color || '#64748b' }}>
-              <button className="link" onClick={() => setPlacing(placing?.id === p.id ? null : p)} title="Tap, then tap a new time on the schedule">
+              <button className="link" onClick={() => { if (placing?.id === p.id) { setPlacing(null); setCarry(null); } else { setPlacing(p); pickUp(p, true); } }} title="Tap, then tap a new time on the schedule (or use the arrow keys and Enter)">
                 {p.first_name} {p.last_name} <span className="muted">· {p.type_name || p.reason || 'Visit'} · {toMin(p.end_time) - toMin(p.start_time)} min · was {dayName(p.start_time.slice(0, 10), { month: 'short', day: 'numeric' })} {fmtTime(p.start_time)}</span>
               </button>
               <button className="link" aria-label="Unpin" title="Leave it where it is" onClick={() => { setPins((cur) => cur.filter((x) => x.id !== p.id)); if (placing?.id === p.id) setPlacing(null); }}><X size={14} /></button>
@@ -689,13 +834,14 @@ export default function Schedule() {
           appt={selected} can={can} onClose={() => setSelectedId(null)}
           onStatus={(s, scope, extra) => setStatus(selected, s, scope, extra)}
           onStep={(kind) => runStep(selected, kind)} focusComplete={focusComplete}
+          brokenAsk={brokenAsk} onBroken={(kind, choice) => breakVisit(selected, kind, choice)}
           onEdit={() => setModal({ type: 'edit', appt: selected })}
           onCheckout={() => nav(`/checkout/${selected.id}`)}
           onChart={() => nav(`/patients/${selected.patient_id}`)}
           onMove={() => {
+            // Tap a new time, or move it with the arrow keys and Enter.
             setPlacing(selected);
-            setSelectedId(null);
-            if (view === 'agenda') go({ view: 'day' });
+            pickUp(selected);
           }}
           onToggleAsap={() => saveMove(selected, { asap: !selected.asap }, { undoable: false }).then(() => api.get('/asap').then(setAsap))}
           onReminder={async () => {
@@ -711,9 +857,9 @@ export default function Schedule() {
       )}
 
       {modal?.type === 'new' && (
-        <Modal title="New appointment" onClose={() => setModal(null)}>
+        <Modal title={modal.rebook ? `Rebook ${modal.patient.first_name} ${modal.patient.last_name}` : 'New appointment'} onClose={() => setModal(null)}>
           <AppointmentForm defaults={modal.defaults} patient={modal.patient} onCancel={() => setModal(null)}
-            onBlock={() => setModal({ type: 'block', defaults: modal.defaults })}
+            onBlock={() => setModal({ type: 'block', defaults: modal.defaults })} key={modal.patient?.id || 'none'}
             onSaved={(a) => {
               setModal(null);
               cache.current.clear();

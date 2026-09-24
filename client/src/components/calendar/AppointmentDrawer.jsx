@@ -5,6 +5,7 @@ import { Link } from 'react-router-dom';
 import { useAuth } from '../../auth.jsx';
 import { Badge } from '../ui.jsx';
 import { nextKind, NEXT_LABEL, READY_LABEL, STEP_KEYS, postsCharges } from './flow.js';
+import BrokenPicker, { brokenLabel } from './BrokenPicker.jsx';
 import './workflow.css';
 
 // Side panel for one appointment: keeps the calendar visible while the front desk works.
@@ -14,7 +15,7 @@ export const CONFIRMED_VIA = { phone: 'by phone', text: 'by text', email: 'by em
 // Minutes between two practice-local 'YYYY-MM-DD HH:MM' times.
 const mins = (a, b) => (a && b ? Math.round((Date.parse(`${b.replace(' ', 'T')}Z`) - Date.parse(`${a.replace(' ', 'T')}Z`)) / 60000) : null);
 
-export default function AppointmentDrawer({ appt: a, can, onClose, onStatus, onStep, focusComplete = 0, onEdit, onChart, onMove, onPin, onToggleAsap, onReminder, onCheckout }) {
+export default function AppointmentDrawer({ appt: a, can, onClose, onStatus, onStep, focusComplete = 0, brokenAsk = null, onBroken, onEdit, onChart, onMove, onPin, onToggleAsap, onReminder, onCheckout }) {
   useEffect(() => {
     const onKey = (e) => e.key === 'Escape' && onClose();
     window.addEventListener('keydown', onKey);
@@ -26,8 +27,10 @@ export default function AppointmentDrawer({ appt: a, can, onClose, onStatus, onS
     setSeries(null);
     if (a.series_id) api.get(`/appointments/${a.id}`).then((d) => setSeries(d.series)).catch(() => {});
   }, [a.id, a.series_id]);
-  const [confirmCancel, setConfirmCancel] = useState(false);
-  useEffect(() => setConfirmCancel(false), [a.id]);
+  // Cancel or no-show: the reason picker ('cancelled' | 'no_show'), opened here or by X / Shift+X on the schedule.
+  const [asking, setAsking] = useState(null);
+  useEffect(() => setAsking(null), [a.id]);
+  useEffect(() => { if (brokenAsk) setAsking(brokenAsk.kind); }, [brokenAsk?.n]); // eslint-disable-line react-hooks/exhaustive-deps
   const active = !['completed', 'cancelled', 'no_show'].includes(a.status);
   const date = new Date(`${a.start_time.slice(0, 10)}T12:00:00Z`).toLocaleDateString('en-US', { timeZone: 'UTC', weekday: 'long', month: 'long', day: 'numeric' });
   // The next step of the visit, one click from the top of the panel (the same as its key on the schedule).
@@ -138,19 +141,16 @@ export default function AppointmentDrawer({ appt: a, can, onClose, onStatus, onS
         <ApptHistory id={a.id} />
         {w && active && (
           <div className="drawer-actions" style={{ marginTop: 16, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
-            <button className="danger" onClick={() => onStatus('no_show')}>No-show</button>
-            <button className="danger" onClick={() => setConfirmCancel(true)}>Cancel appointment</button>
+            <button className={`danger${asking === 'no_show' ? ' active' : ''}`} onClick={() => setAsking('no_show')} title="No-show (Shift+X on the schedule)">No-show{kbd('shift+x')}</button>
+            <button className={`danger${asking === 'cancelled' ? ' active' : ''}`} onClick={() => setAsking('cancelled')} title="Cancel (X on the schedule)">Cancel appointment{kbd('x')}</button>
           </div>
         )}
-        {w && active && confirmCancel && (
-          <div className="confirm-box">
-            <strong>Cancel {a.first_name}&apos;s {fmtTime(a.start_time)} visit?</strong>
-            <div className="drawer-actions">
-              <button className="danger" onClick={() => onStatus('cancelled')}>{series?.remaining ? 'Only this visit' : 'Yes, cancel it'}</button>
-              {series?.remaining > 0 && <button className="danger" onClick={() => onStatus('cancelled', 'following')}>This and {series.remaining} later visit{series.remaining === 1 ? '' : 's'}</button>}
-              <button onClick={() => setConfirmCancel(false)}>Keep it</button>
-            </div>
-          </div>
+        {w && active && asking && onBroken && (
+          <BrokenPicker appt={a} kind={asking} series={series} onClose={() => setAsking(null)}
+            onDone={(choice) => onBroken(asking, { ...choice, scope: choice.scope === 'following' ? 'following' : null })} />
+        )}
+        {['cancelled', 'no_show'].includes(a.status) && a.broken_reason && (
+          <div className="muted" style={{ marginTop: 10 }}>{a.status === 'no_show' ? 'Missed' : 'Cancelled'}: {brokenLabel(a.broken_reason)}{a.broken_note ? ` — ${a.broken_note}` : ''}</div>
         )}
       </div>
     </aside>

@@ -34,6 +34,7 @@ import financeRoutes, { financePublicRoutes } from './routes/finance.js';
 import scribeRoutes from './routes/scribe.js';
 import xrayAiRoutes from './routes/xrayai.js';
 import insuranceAiRoutes from './routes/insuranceai.js';
+import intakeReviewRoutes from './routes/intakereview.js';
 import askRoutes, { mcpRoutes } from './routes/ask.js';
 import orgRoutes from './routes/org.js';
 import claimAiRoutes from './routes/claimai.js';
@@ -196,7 +197,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   // Large bodies from the public form page are rate-limited before they're read (no sign-in there).
   const bigPublicBody = rateLimit({ windowMs: 60_000, max: 12, name: 'public-big-body' });
   app.use((req, res, next) => (/^\/api\/public\/forms\/[^/]+\/\d+$/.test(req.path) ? bigPublicBody(req, res, next) : next()));
-  app.use((req, res, next) => (/^\/api\/public\/forms\/[^/]+\/\d+$|^\/api\/insurance-plans\/\d+\/read-benefits$|^\/api\/eobs\/read$/.test(req.path) ? formBody : jsonBody)(req, res, next));
+  app.use((req, res, next) => (/^\/api\/public\/forms\/[^/]+\/\d+$|^\/api\/insurance-plans\/\d+\/read-benefits$|^\/api\/eobs\/read$|^\/api\/patients\/\d+\/insurance-card\/read$/.test(req.path) ? formBody : jsonBody)(req, res, next));
   app.use('/api', idempotency(db, secret));
   app.use((req, res, next) => {
     // Patient data isn't left in the browser's or a proxy's disk cache.
@@ -286,6 +287,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(scribeRoutes({ db, config }));
   api.use(xrayAiRoutes({ db, xrayAi }));
   api.use(insuranceAiRoutes({ db, config }));
+  api.use(intakeReviewRoutes({ db }));
   api.use(askRoutes({ db, config }));
   api.use(phoneRoutes({ db, storage }));
   api.use(orgRoutes({ db }));

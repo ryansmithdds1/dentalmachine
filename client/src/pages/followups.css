@@ -1,0 +1,8 @@
+/* Unconfirmed list (workflow 13): the row the keyboard is on, bulk actions and the reminder result. */
+.unconf-bar { margin: 8px 0; align-items: center; flex-wrap: wrap; }
+.unconf-actions { margin-left: auto; }
+.kb-hint { font-size: 12px; margin: -2px 0 8px; }
+.kb-hint kbd { font-size: 10px; padding: 0 4px; border: 1px solid var(--border); border-radius: 4px; background: var(--panel); }
+.unconf-table tr.kb-row td { background: var(--primary-soft, rgba(14, 165, 233, 0.08)); }
+.unconf-table tr.kb-row td:first-child { box-shadow: inset 3px 0 0 var(--primary); }
+.remind-result { margin-bottom: 10px; }

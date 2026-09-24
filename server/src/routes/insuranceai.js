@@ -1,15 +1,20 @@
 import { Router } from 'express';
+import { createHash } from 'node:crypto';
 import { requirePermission, HttpError } from '../auth.js';
-import { findOr404, audit } from '../util.js';
-import { structured } from '../ai.js';
-import { PLAN_BENEFITS } from '../benefits.js';
+import { findOr404, audit, insert, isRealDate, recorded } from '../util.js';
+import { structured, aiClient } from '../ai.js';
+import { PLAN_BENEFITS, savePolicy } from '../benefits.js';
+import { requireHuman } from '../aiguard.js';
 
 // Reading insurance paperwork with AI, so nobody retypes it:
 //  - a benefit summary (the payer portal's page saved as PDF or a screenshot, a fax, or the free-text notes in
 //    an eligibility response) becomes the plan's breakdown: maximums, percentages, frequencies, waiting
 //    periods, downgrades, age limits, missing-tooth clause — shown next to what's on file, applied by a person;
 //  - a paper EOB (or a check's remittance) becomes a filled-in insurance check: each claim found, matched to
-//    ours, with what was paid and written off per procedure — posted by a person through the usual check entry.
+//    ours, with what was paid and written off per procedure — posted by a person through the usual check entry;
+//  - a photo of an insurance card (front, and the back if there is one) becomes a filled-in policy form: the
+//    carrier (matched to ours, or offered as a new one), member ID, group, subscriber and payer ID — saved by a
+//    person, who is recorded as the one who approved what the AI read.
 const MAX_BYTES = 10_000_000;
 
 function fileContent(body) {
@@ -120,6 +125,70 @@ async function matchClaim(db, pid, c, used) {
   return best && best.score >= 60 ? best : null;
 }
 
+// ---- Insurance cards ----
+const CARD_TOOL = {
+  name: 'insurance_card',
+  description: 'What is printed on this dental insurance card. Leave out anything the card doesn’t show.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      carrier_name: { type: 'string', description: 'The insurance company (e.g. Delta Dental, MetLife), not the employer' },
+      payer_id: { type: 'string', description: 'Electronic payer ID for claims, when printed (often on the back)' },
+      member_id: { type: 'string', description: 'Member / subscriber / ID number exactly as printed' },
+      group_number: { type: 'string' }, plan_name: { type: 'string' }, employer: { type: 'string' },
+      subscriber_name: { type: 'string', description: 'The subscriber (primary member) as printed, First Last' },
+      subscriber_dob: { type: 'string', description: 'YYYY-MM-DD, only when printed' },
+      effective_date: { type: 'string', description: 'YYYY-MM-DD, only when printed' },
+      claims_address: { type: 'string' }, phone: { type: 'string', description: 'Provider services phone' },
+      unclear: { type: 'array', items: { type: 'string' }, description: 'Fields that were hard to read (blurred, cut off) and need checking' },
+    },
+  },
+};
+const CARD_SYSTEM = `You read photos of US dental insurance cards for a dental office's front desk. Copy what is printed exactly (ID numbers character for character). Don't guess: leave out anything not on the card, and list anything hard to read under "unclear". The carrier is the insurance company, not the employer or network name.`;
+
+// Card photos come from the browser, shrunk to a few hundred KB each.
+function cardImages(body) {
+  const sides = [body?.front || (body?.file_base64 ? body : null), body?.back].filter(Boolean);
+  if (!sides.length) throw new HttpError(400, 'Add a photo of the front of the card');
+  return sides.map((side) => {
+    const data = String(side.file_base64 || '');
+    const mime = String(side.mime || '');
+    if (!data) throw new HttpError(400, 'Add a photo of the front of the card');
+    if (data.length * 0.75 > MAX_BYTES) throw new HttpError(400, 'That photo is too large (10 MB at most)');
+    if (mime === 'application/pdf') return { data, block: { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data } } };
+    if (!/^image\/(png|jpeg|gif|webp)$/.test(mime)) throw new HttpError(400, 'A photo (PNG or JPEG) or a PDF of the card');
+    return { data, block: { type: 'image', source: { type: 'base64', media_type: mime, data } } };
+  });
+}
+
+// Sandbox (no AI key, demo/test servers): the same answer every time for the same picture, made up — never
+// read from the picture — so the whole flow can be tried and tested without sending anything anywhere.
+const SANDBOX_CARRIERS = [['Delta Dental', '94276'], ['MetLife Dental', '65978'], ['Cigna Dental', '62308'], ['Aetna Dental', '60054'], ['Guardian', '64246'], ['United Concordia', 'CX014']];
+export function sandboxCard(bytes, patient) {
+  const h = createHash('sha256').update(bytes).digest();
+  const [carrier_name, payer_id] = SANDBOX_CARRIERS[h[0] % SANDBOX_CARRIERS.length];
+  return {
+    carrier_name, payer_id, member_id: `SBX${h.readUInt32BE(1) % 1_000_000_000}`.padEnd(12, '0'), group_number: String(100000 + (h.readUInt16BE(5) % 900000)),
+    subscriber_name: `${patient.first_name} ${patient.last_name}`, subscriber_dob: patient.dob || undefined, plan_name: 'PPO', unclear: [],
+  };
+}
+
+const cardNorm = (s) => String(s || '').toLowerCase().replace(/\b(inc|co|company|insurance|of [a-z ]+)\b/g, '').replace(/[^a-z0-9]/g, '');
+// Our carrier for what's on the card: the payer ID first, then the name (either way round: "Delta Dental of Texas" is our "Delta Dental").
+async function matchCarrier(db, pid, { carrier_name: name, payer_id: payer }) {
+  const carriers = await db.all('SELECT id, name, payer_id FROM insurance_carriers WHERE practice_id = ? AND active = 1 ORDER BY id', pid);
+  if (payer) {
+    const byPayer = carriers.find((c) => c.payer_id && cardNorm(c.payer_id) === cardNorm(payer));
+    if (byPayer) return byPayer;
+  }
+  const n = cardNorm(name);
+  if (!n) return null;
+  return carriers.find((c) => cardNorm(c.name) === n) || carriers.find((c) => { const m = cardNorm(c.name); return m.length >= 4 && (n.startsWith(m) || m.startsWith(n)); }) || null;
+}
+
+const sameName = (a, b) => cardNorm(a).replace(/\d/g, '') === cardNorm(b).replace(/\d/g, '');
+const ageOn = (dob, today) => (dob ? Math.floor((Date.parse(today) - Date.parse(dob)) / (365.25 * 86400_000)) : null);
+
 export default function insuranceAiRoutes({ db, config }) {
   const r = Router();
 
@@ -173,6 +242,113 @@ export default function insuranceAiRoutes({ db, config }) {
       provider_adjustments: (out.provider_adjustments || []).map((a) => ({ reason: a.reason || 'Other', amount: toCents(a.amount) })), claims,
       totals_match: toCents(out.total_paid) === claims.reduce((s, c) => s + c.paid, 0) - (out.provider_adjustments || []).reduce((s, a) => s + (toCents(a.amount) || 0), 0),
     });
+  });
+
+  // A card photo → a filled-in policy for a person to check. Nothing is saved here; the read is kept in the
+  // audit trail (source: AI) so the saved policy can say where its numbers came from.
+  r.post('/patients/:id/insurance-card/read', requirePermission('patients:write'), async (req, res) => {
+    const pid = req.user.practice_id;
+    const patient = await findOr404(db, 'patients', req.params.id, pid, 'Patient');
+    const images = cardImages(req.body);
+    let out;
+    let sandbox = false;
+    if (aiClient(config)) {
+      out = await structured(config, { system: CARD_SYSTEM, tool: CARD_TOOL, effort: 'low', maxTokens: 4000, content: [...images.map((i) => i.block), { type: 'text', text: images.length > 1 ? 'The front of the card, then the back. Read it.' : 'The front of the card. Read it.' }] });
+      if (!out.member_id && !out.carrier_name) throw new HttpError(422, 'Couldn’t read an insurance card in that picture — try a clearer, closer photo');
+    } else if (config.ediMode === 'sandbox' || config.cardReader === 'sandbox' || process.env.CARD_READER === 'sandbox') {
+      out = sandboxCard(Buffer.from(images[0].data, 'base64'), patient);
+      sandbox = true;
+    } else throw new HttpError(503, 'Reading cards needs AI, which is off on this server (ANTHROPIC_API_KEY is not set) — type the card in instead');
+
+    const clean = (v, n) => (v == null ? null : String(v).replace(/[\u0000-\u001f]+/g, ' ').trim().slice(0, n) || null);
+    const today = new Date().toISOString().slice(0, 10);
+    const read = {
+      carrier_name: clean(out.carrier_name, 100), payer_id: clean(out.payer_id, 20), member_id: clean(out.member_id, 60)?.replace(/\s+/g, '') || null,
+      group_number: clean(out.group_number, 60), plan_name: clean(out.plan_name, 100), subscriber_name: clean(out.subscriber_name, 100),
+      subscriber_dob: isRealDate(out.subscriber_dob) ? out.subscriber_dob : null, effective_date: isRealDate(out.effective_date) ? out.effective_date : null,
+    };
+    const carrier = await matchCarrier(db, pid, read);
+    // Who the subscriber is to the patient: the patient when the names match; otherwise a parent for a
+    // child, a spouse for an adult — a suggestion the person confirms.
+    const self = !read.subscriber_name || sameName(read.subscriber_name, `${patient.first_name} ${patient.last_name}`);
+    const age = ageOn(patient.dob, today);
+    const relationship = self ? 'self' : age != null && age < 19 ? 'child' : 'spouse';
+    const unclear = Array.isArray(out.unclear) ? out.unclear.map((x) => String(x).slice(0, 60)).slice(0, 10) : [];
+    const reason = sandbox
+      ? 'Sandbox card reader: made-up values for trying things out — not read from the picture'
+      : `Read from the card photo${images.length > 1 ? 's (front and back)' : ''}${unclear.length ? `; hard to read: ${unclear.join(', ')}` : ''}. Check against the card before saving.`;
+    const proposed = {
+      carrier_id: carrier?.id ?? null, subscriber_name: read.subscriber_name || `${patient.first_name} ${patient.last_name}`, subscriber_id: read.member_id,
+      subscriber_dob: self ? patient.dob || read.subscriber_dob : read.subscriber_dob, relationship, group_number: read.group_number, effective_date: read.effective_date,
+    };
+    await audit(db, req, 'insurance_card.ai_read', 'patients', patient.id, { read, proposed, sandbox, sides: images.length }, {
+      source: 'ai', actor: sandbox ? 'Card reader (sandbox)' : `AI card reader (for ${req.user.name})`, reason,
+    });
+    const row = await db.get("SELECT MAX(id) AS id FROM audit_log WHERE practice_id = ? AND action = 'insurance_card.ai_read' AND entity_id = ?", pid, patient.id);
+    res.json({
+      read_id: row.id, read, proposed, reason, sandbox, unclear,
+      carrier: carrier ? { id: carrier.id, name: carrier.name } : null,
+      new_carrier: !carrier && read.carrier_name ? { name: read.carrier_name, payer_id: read.payer_id } : null,
+    });
+  });
+
+  // The person saved the policy from a card read: noted on the policy's history with what they corrected,
+  // so the AI's part and the person's approval are both on record.
+  r.post('/patients/:id/insurance-card/confirm', requirePermission('patients:write'), async (req, res) => {
+    const pid = req.user.practice_id;
+    const patient = await findOr404(db, 'patients', req.params.id, pid, 'Patient');
+    const policy = await findOr404(db, 'patient_insurance', req.body?.policy_id, pid, 'Policy');
+    if (policy.patient_id !== patient.id) throw new HttpError(400, 'That policy belongs to another patient');
+    const readRow = await db.get("SELECT id, details FROM audit_log WHERE id = ? AND practice_id = ? AND action = 'insurance_card.ai_read' AND entity_id = ?", Number(req.body?.read_id), pid, patient.id);
+    if (!readRow) throw new HttpError(404, 'Card read not found');
+    const { proposed = {}, sandbox = false } = JSON.parse(readRow.details || '{}');
+    const corrected = ['carrier_id', 'subscriber_name', 'subscriber_id', 'subscriber_dob', 'relationship', 'group_number', 'effective_date']
+      .filter((k) => proposed[k] !== undefined && String(proposed[k] ?? '') !== String(policy[k] ?? ''));
+    await audit(db, req, 'insurance.ai_card_confirmed', 'patient_insurance', policy.id, { read_id: readRow.id, corrected, sandbox, patient_id: patient.id }, {
+      reason: `Entered from a card photo read by AI; checked and saved by ${req.user.name}${corrected.length ? ` (corrected ${corrected.join(', ')})` : ''}`,
+    });
+    res.json({ ok: true, corrected });
+  });
+
+  // New insurance a patient sent from the portal, entered in one step: the carrier matched (or added), the
+  // policy created, and the update marked done. A patient who already has primary insurance needs replace:
+  // true (the old primary is made inactive — kept, not deleted).
+  r.post('/insurance-updates/:uid/apply', requirePermission('billing:write'), async (req, res) => {
+    requireHuman('entering insurance');
+    const pid = req.user.practice_id;
+    const u = await findOr404(db, 'insurance_updates', req.params.uid, pid, 'Insurance update');
+    if (u.status !== 'pending') throw new HttpError(409, 'That insurance update was already entered');
+    if (!u.carrier_name || !u.member_id) throw new HttpError(422, 'The patient didn’t type the insurance company and member ID — read the card photo instead', { needs_card_read: true });
+    const patient = await db.get('SELECT * FROM patients WHERE id = ?', u.patient_id);
+    const relationship = ['self', 'spouse', 'child', 'other'].includes(u.relationship) ? u.relationship : 'self';
+    const subscriberDob = isRealDate(u.subscriber_dob) ? u.subscriber_dob : relationship === 'self' ? patient.dob : null;
+    const current = await db.get("SELECT pi.id, pi.carrier_id, pi.subscriber_id, c.name AS carrier_name FROM patient_insurance pi JOIN insurance_carriers c ON c.id = pi.carrier_id WHERE pi.patient_id = ? AND pi.active = 1 AND pi.priority = 'primary' ORDER BY pi.id LIMIT 1", patient.id);
+    const out = await db.tx(async () => {
+      // Claimed first, so a double click or a second person can't enter it twice.
+      const took = await db.run("UPDATE insurance_updates SET status = 'reviewed', reviewed_by = ?, reviewed_at = datetime('now') WHERE id = ? AND status = 'pending'", req.user.id, u.id);
+      if (!took.changes) throw new HttpError(409, 'That insurance update was already entered');
+      let carrier = await matchCarrier(db, pid, { carrier_name: u.carrier_name });
+      let carrierCreated = false;
+      if (!carrier) {
+        const id = await insert(db, 'insurance_carriers', { practice_id: pid, name: u.carrier_name });
+        carrier = { id, name: u.carrier_name };
+        carrierCreated = true;
+        await audit(db, req, 'carrier.create', 'insurance_carriers', id, { from: 'portal insurance update', update_id: u.id });
+      }
+      // The same card entered already: nothing new to add.
+      if (current && current.carrier_id === carrier.id && String(current.subscriber_id).replace(/\s/g, '') === u.member_id.replace(/\s/g, '')) return { policyId: current.id, carrier, carrierCreated, same: true };
+      if (current && req.body?.replace !== true) throw new HttpError(409, `They already have ${current.carrier_name} as primary insurance. Replace it with ${u.carrier_name}?`, { replaces: current.carrier_name });
+      if (current) await recorded(db, 'patient_insurance', current.id, () => db.run('UPDATE patient_insurance SET active = 0 WHERE id = ?', current.id));
+      const policyId = await savePolicy(db, pid, null, {
+        patient_id: patient.id, carrier_id: carrier.id, priority: 'primary', subscriber_name: u.subscriber_name || `${patient.first_name} ${patient.last_name}`,
+        subscriber_id: u.member_id, subscriber_dob: subscriberDob, relationship, group_number: u.group_number || null,
+      });
+      return { policyId, carrier, carrierCreated, replaced: current?.id ?? null };
+    });
+    await audit(db, req, 'insurance_update.apply', 'patient_insurance', out.policyId, {
+      update_id: u.id, carrier_created: out.carrierCreated, replaced_policy_id: out.replaced ?? null, already_on_file: !!out.same, patient_id: patient.id,
+    }, { reason: 'Entered from the insurance the patient sent through the portal' });
+    res.status(out.same ? 200 : 201).json({ policy: await db.get('SELECT pi.*, c.name AS carrier_name FROM patient_insurance pi JOIN insurance_carriers c ON c.id = pi.carrier_id WHERE pi.id = ?', out.policyId), carrier_created: out.carrierCreated, replaced_policy_id: out.replaced ?? null, already_on_file: !!out.same });
   });
 
   return r;

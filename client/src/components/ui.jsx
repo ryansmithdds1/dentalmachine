@@ -11,8 +11,12 @@ export function Modal({ title, onClose, children, wide }) {
   // Keyboard users: focus moves into the dialog, Tab stays inside it, Escape closes, and focus goes back after.
   const [before] = useState(() => document.activeElement);
   useEffect(() => {
-    const first = box.current?.querySelector(`.modal-body ${FOCUSABLE}`) || box.current;
-    first?.focus({ preventScroll: true });
+    // A field with autoFocus already has focus: keep it. Otherwise the first thing in the body, not the header ✕.
+    if (!box.current?.contains(document.activeElement)) {
+      const inBody = FOCUSABLE.split(', ').map((x) => `.modal-body ${x}`).join(', ');
+      const first = box.current?.querySelector(inBody) || box.current;
+      first?.focus({ preventScroll: true });
+    }
     const onKey = (e) => {
       if (e.key === 'Escape') close.current();
       if (e.key !== 'Tab' || !box.current) return;

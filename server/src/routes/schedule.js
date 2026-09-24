@@ -19,6 +19,8 @@ export const CONFIRM_METHODS = ['phone', 'text', 'email', 'in_person', 'portal',
 const FLOW_RANK = { scheduled: 0, confirmed: 0, checked_in: 1, in_chair: 2, completed: 3 };
 const FLOW_TIMES = [['arrived_at'], ['seated_at', 'ready_at', 'ready_for'], ['dismissed_at']];
 export const READY_FOR = ['doctor', 'checkout'];
+// Why a visit was cancelled or missed, from the reason picker (labels live in the client's BrokenPicker).
+export const BROKEN_REASONS = ['sick', 'conflict', 'transportation', 'cost', 'forgot', 'office', 'no_contact', 'other'];
 
 const SELECT = `SELECT a.*, p.first_name, p.last_name, p.preferred_name, p.phone, p.medical_alerts, p.premed_required, p.dob,
   pr.name AS provider_name, pr.color AS provider_color, o.name AS operatory_name,
@@ -178,6 +180,107 @@ export async function openSlots(db, practiceId, providerId, date, { duration = 6
   return slots;
 }
 
+const nextDay = (d) => new Date(Date.parse(`${d}T12:00:00Z`) + 86400_000).toISOString().slice(0, 10);
+const overlaps = (rows, s, e) => rows.some((x) => x.start_time < e && x.end_time > s);
+
+// Smart defaults for booking a patient (workflow 9), so the form only needs a yes: who they see (their own
+// dentist, or hygienist for a hygiene type; else whoever they saw last), the visit type (a recall that's due),
+// its length, the provider's usual chair, and the first open time from `after` on — free for the provider,
+// the chair and the patient. Anything given is kept as it is. `why` says where each default came from.
+export async function suggestBooking(db, pid, { patient, type = null, pickType = false, providerId = null, operatoryId = null, lastChair = null, duration = null, after, start = null, days = 60, locationId = null }) {
+  const why = {};
+  const first = patient.preferred_name || patient.first_name;
+  let notBefore = null;
+  // A recall that's due decides the visit type (and the search starts on its due date, so insurance's
+  // "once every six months" is respected).
+  if (!type && pickType) {
+    const types = await recallTypes(db, pid);
+    const due = await db.all("SELECT type, due_date FROM recalls WHERE practice_id = ? AND patient_id = ? AND status IN ('due','contacted') ORDER BY due_date", pid, patient.id);
+    for (const r of due) {
+      const rt = types.find((t) => t.key === r.type && t.appointment_type_id);
+      const t = rt && await db.get('SELECT * FROM appointment_types WHERE id = ? AND practice_id = ? AND active = 1', rt.appointment_type_id, pid);
+      if (t) {
+        type = t;
+        why.type = `${rt.name} due ${r.due_date}`;
+        notBefore = r.due_date;
+        break;
+      }
+    }
+  }
+  const providers = await db.all('SELECT id, name, type FROM providers WHERE practice_id = ? AND active = 1 ORDER BY id', pid);
+  const fits = (p) => p && (!type?.provider_type || p.type === type.provider_type || !providers.some((x) => x.type === type.provider_type));
+  let provider = null;
+  let source = 'given';
+  if (providerId) provider = providers.find((p) => p.id === Number(providerId)) || await db.get('SELECT id, name, type FROM providers WHERE id = ? AND practice_id = ?', Number(providerId), pid);
+  if (!provider) {
+    const own = type?.provider_type === 'hygienist'
+      ? [[patient.primary_hygienist_id, 'hygienist'], [patient.primary_provider_id, 'dentist']]
+      : [[patient.primary_provider_id, 'dentist'], [patient.primary_hygienist_id, 'hygienist']];
+    for (const [id, role] of own) {
+      const p = providers.find((x) => x.id === id);
+      if (fits(p)) { provider = p; source = 'patient'; why.provider = `${first}'s ${role}`; break; }
+    }
+  }
+  if (!provider) {
+    const last = await db.all("SELECT provider_id FROM appointments WHERE practice_id = ? AND patient_id = ? AND status NOT IN ('cancelled','no_show') ORDER BY start_time DESC LIMIT 10", pid, patient.id);
+    for (const { provider_id: id } of last) {
+      const p = providers.find((x) => x.id === id);
+      if (fits(p)) { provider = p; source = 'history'; why.provider = `${first} saw them last`; break; }
+    }
+  }
+  if (!provider) {
+    provider = providers.find(fits) || providers[0];
+    source = 'default';
+  }
+  if (!provider) throw new HttpError(409, 'Add a provider first');
+  const length = Number(duration) || typeDuration(type, provider.id) || 60;
+
+  // The chair: the one given, else the provider's usual chair, the one this person used last with them,
+  // or where the provider has worked most in the last three months.
+  const chairs = await db.all(`SELECT id, name, location_id, default_provider_id FROM operatories WHERE practice_id = ? AND active = 1${locationId ? ' AND (location_id = ? OR location_id IS NULL)' : ''} ORDER BY id`, pid, ...(locationId ? [locationId] : []));
+  let chair = operatoryId ? await db.get('SELECT id, name, location_id FROM operatories WHERE id = ? AND practice_id = ?', Number(operatoryId), pid) : null;
+  if (!chair && !operatoryId) {
+    chair = chairs.find((o) => o.default_provider_id === provider.id) || null;
+    if (chair) why.chair = `${provider.name}'s usual chair`;
+    else if (lastChair && (chair = chairs.find((o) => o.id === Number(lastChair)) || null)) why.chair = 'the chair you used last';
+    else {
+      const since = new Date(Date.now() - 90 * 86400_000).toISOString().slice(0, 10);
+      const used = await db.all(
+        'SELECT operatory_id, COUNT(*) AS n FROM appointments WHERE practice_id = ? AND provider_id = ? AND operatory_id IS NOT NULL AND start_time >= ? GROUP BY operatory_id ORDER BY n DESC, operatory_id',
+        pid, provider.id, since,
+      );
+      for (const u of used) if ((chair = chairs.find((o) => o.id === u.operatory_id) || null)) break;
+      if (chair) why.chair = `where ${provider.name} usually works`;
+    }
+  }
+  const out = {
+    patient_id: patient.id, appointment_type_id: type?.id ?? null, provider_id: provider.id, provider_source: source,
+    operatory_id: chair?.id ?? null, duration: length, start_time: null, end_time: null, why,
+  };
+  if (start) return { ...out, start_time: start, end_time: addMinutes(start, length) };
+
+  // The first time from `after` on that's open for the provider (hours, visits, blocks, held online requests),
+  // the chair (visits and chair blocks) and the patient (no double booking).
+  let from = after;
+  if (notBefore && notBefore > from.slice(0, 10)) from = `${notBefore} 00:00`;
+  let date = from.slice(0, 10);
+  for (let i = 0; i < Math.min(Math.max(Number(days) || 60, 1), 120); i++, date = nextDay(date)) {
+    const slots = await openSlots(db, pid, provider.id, date, { duration: length, after: date === from.slice(0, 10) ? from : null, typeId: type?.id ?? null, locationId: chair?.location_id ?? locationId });
+    if (!slots.length) continue;
+    const dayStart = `${date} 00:00`;
+    const dayEnd = `${date} 24:00`;
+    const mine = await db.all(`SELECT start_time, end_time FROM appointments WHERE practice_id = ? AND patient_id = ? AND status NOT IN ${INACTIVE} AND start_time < ? AND end_time > ?`, pid, patient.id, dayEnd, dayStart);
+    const inChair = chair ? await db.all(`SELECT start_time, end_time FROM appointments WHERE practice_id = ? AND operatory_id = ? AND status NOT IN ${INACTIVE} AND start_time < ? AND end_time > ?`, pid, chair.id, dayEnd, dayStart) : [];
+    const chairBlocks = chair ? (await db.all('SELECT start_time, end_time, kind, appointment_type_ids FROM blockouts WHERE practice_id = ? AND operatory_id = ? AND start_time < ? AND end_time > ?', pid, chair.id, dayEnd, dayStart)).filter((b) => !reservedFor(b, type?.id)) : [];
+    for (const s of slots) {
+      const e = addMinutes(s, length);
+      if (overlaps(mine, s, e) || overlaps(inChair, s, e) || overlaps(chairBlocks, s, e)) continue;
+      return { ...out, start_time: s, end_time: e };
+    }
+  }
+  return out;
+}
+
 // ---- Recurring visits ----
 // repeat: { every: 1-12, unit: 'week' | 'month', count: 2-52 }
 // Repeats: every N weeks or months, for a number of visits or until a date. Monthly repeats land on
@@ -289,6 +392,36 @@ export default function scheduleRoutes({ db }) {
     res.json(await withEligibility(db, await db.all(`${SELECT} WHERE ${where.join(' AND ')}${scope.sql} ORDER BY a.start_time`, ...params, ...scope.args)));
   });
 
+
+  // The booking form's smart defaults and next open time for a patient (see suggestBooking). Read-only.
+  r.get('/appointments/suggest', requirePermission('schedule:read'), async (req, res) => {
+    const pid = req.user.practice_id;
+    const q = req.query;
+    if (!q.patient_id) throw new HttpError(400, 'patient_id is required');
+    const patient = await findOr404(db, 'patients', q.patient_id, pid, 'Patient');
+    if (!(await canSeePatient(db, req.user, patient.id))) throw new HttpError(404, 'Patient not found');
+    const type = q.appointment_type_id ? await findOr404(db, 'appointment_types', q.appointment_type_id, pid, 'Appointment type') : null;
+    if (q.provider_id) await findOr404(db, 'providers', q.provider_id, pid, 'Provider');
+    if (q.operatory_id) await findOr404(db, 'operatories', q.operatory_id, pid, 'Operatory');
+    let duration = null;
+    if (q.duration) {
+      duration = Number(q.duration);
+      if (!Number.isInteger(duration) || duration < 5 || duration > 480) throw new HttpError(400, 'duration must be 5-480 minutes');
+    }
+    // Never suggest a time that's already gone.
+    const now = await practiceNow(db, pid);
+    let after = now;
+    if (q.after) {
+      const given = /^\d{4}-\d{2}-\d{2}$/.test(q.after) ? (isRealDate(q.after) ? `${q.after} 00:00` : null) : normalizeDateTime(q.after, 'after');
+      if (!given) throw new HttpError(400, 'after must be a real date (YYYY-MM-DD) or date and time');
+      if (given > after) after = given;
+    }
+    const start = q.start_time ? normalizeDateTime(q.start_time, 'start_time') : null;
+    res.json(await suggestBooking(db, pid, {
+      patient, type, pickType: q.pick_type === '1', providerId: q.provider_id ? Number(q.provider_id) : null, operatoryId: q.operatory_id ? Number(q.operatory_id) : null,
+      lastChair: Number(q.last_chair) || null, duration, after, start, days: Number(q.days) || 60, locationId: Number(q.location_id) || req.location_id || null,
+    }));
+  });
 
   r.get('/appointments/:id', requirePermission('schedule:read'), async (req, res) => {
     const row = await db.get(`${SELECT} WHERE a.id = ? AND a.practice_id = ?`, Number(req.params.id), req.user.practice_id);
@@ -484,6 +617,16 @@ export default function scheduleRoutes({ db }) {
     }
     const via = req.body.confirmed_via;
     requireOneOf(via, CONFIRM_METHODS, 'confirmed_via');
+    // Why it was cancelled or missed: a code from the short list, and a few words when it's "other".
+    const broken = ['cancelled', 'no_show'].includes(status);
+    const brokenReason = req.body.broken_reason ?? null;
+    let brokenNote = null;
+    if (brokenReason != null) {
+      if (!broken) throw new HttpError(400, 'A reason only goes with a cancellation or no-show');
+      requireOneOf(brokenReason, BROKEN_REASONS, 'broken_reason');
+      brokenNote = req.body.broken_note == null ? null : String(req.body.broken_note).trim().slice(0, 300) || null;
+      if (brokenReason === 'other' && !brokenNote) throw new HttpError(400, 'Add a few words about what happened when the reason is "Other"');
+    }
     await recorded(db, 'appointments', existing.id, () => db.run(
       "UPDATE appointments SET status = ?, confirmed_at = CASE WHEN ? = 'confirmed' THEN COALESCE(confirmed_at, datetime('now')) ELSE confirmed_at END WHERE id = ?",
       status, status, existing.id,
@@ -505,6 +648,9 @@ export default function scheduleRoutes({ db }) {
       await recorded(db, 'appointments', existing.id, () => db.run(`UPDATE appointments SET ${flow} = COALESCE(${flow}, ?) WHERE id = ?`, now, existing.id));
       if (status === 'in_chair') await recorded(db, 'appointments', existing.id, () => db.run('UPDATE appointments SET arrived_at = COALESCE(arrived_at, ?) WHERE id = ?', now, existing.id));
     }
+    if (brokenReason) await recorded(db, 'appointments', existing.id, () => db.run('UPDATE appointments SET broken_reason = ?, broken_note = ? WHERE id = ?', brokenReason, brokenNote, existing.id));
+    // Back on the schedule (a mistaken cancel put right): the old reason no longer applies. The change log keeps it.
+    else if (!broken && existing.broken_reason) await recorded(db, 'appointments', existing.id, () => db.run('UPDATE appointments SET broken_reason = NULL, broken_note = NULL WHERE id = ?', existing.id));
     if (status === 'cancelled' || status === 'no_show') await releaseAppointment(db, existing.id);
     if (status === 'cancelled' && existing.status !== 'cancelled') openSlotLater(db, existing.id);
     // Finishing the visit also completes the work planned for it (posting the charges), when the
@@ -520,7 +666,7 @@ export default function scheduleRoutes({ db }) {
     if (status === 'cancelled' && req.body.scope === 'following' && existing.series_id) {
       const later = await db.all("SELECT id, start_time FROM appointments WHERE series_id = ? AND practice_id = ? AND start_time > ? AND status IN ('scheduled','confirmed')", existing.series_id, req.user.practice_id, existing.start_time);
       for (const occ of later) {
-        await recorded(db, 'appointments', occ.id, () => db.run("UPDATE appointments SET status = 'cancelled' WHERE id = ?", occ.id));
+        await recorded(db, 'appointments', occ.id, () => db.run("UPDATE appointments SET status = 'cancelled', broken_reason = COALESCE(?, broken_reason), broken_note = COALESCE(?, broken_note) WHERE id = ?", brokenReason, brokenNote, occ.id));
         await db.run("UPDATE recalls SET status = 'due', appointment_id = NULL WHERE appointment_id = ? AND status = 'scheduled'", occ.id);
         // Their pre-loaded type procedures are only placeholders; cancel them rather than leave "planned" work behind.
         for (const pr of await db.all("SELECT id FROM procedures WHERE appointment_id = ? AND status = 'planned' AND treatment_plan_id IS NULL", occ.id)) {
@@ -530,7 +676,10 @@ export default function scheduleRoutes({ db }) {
       changed(req, ...later.map((o) => o.start_time));
     }
     // "undo" marks a step taken back from the schedule's Undo, so the history reads as what happened.
-    await audit(db, req, 'appointment.status', 'appointments', existing.id, { from: existing.status, to: status, ...(completedProcedures ? { completed_procedures: completedProcedures } : {}), ...(req.body.undo === true ? { undo: true } : {}) });
+    await audit(db, req, 'appointment.status', 'appointments', existing.id, {
+      from: existing.status, to: status, ...(completedProcedures ? { completed_procedures: completedProcedures } : {}), ...(req.body.undo === true ? { undo: true } : {}),
+      ...(brokenReason ? { broken_reason: brokenReason, ...(brokenNote ? { broken_note: brokenNote } : {}) } : {}),
+    }, brokenReason ? { reason: brokenNote ? `${brokenReason}: ${brokenNote}` : brokenReason } : {});
     changed(req, existing.start_time);
     await emitAppointment(db, existing.id);
     res.json({ ...(await db.get(`${SELECT} WHERE a.id = ?`, existing.id)), completed_procedures: completedProcedures });
