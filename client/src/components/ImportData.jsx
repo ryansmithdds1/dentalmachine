@@ -137,8 +137,9 @@ export default function ImportData() {
     <>
       <FullConversion onDone={reload} />
       <div className="card">
-        <h2 style={{ marginTop: 0 }}>Import from another system</h2>
+        <h2 style={{ marginTop: 0 }}>Import one list at a time (CSV)</h2>
         <div className="muted" style={{ fontSize: 13, marginBottom: 12 }}>
+          For a whole practice, use the conversion above. This is for adding or correcting a single list from any system or spreadsheet.
           Export each list from your old software as a CSV file, then bring them in here in this order: <strong>patients</strong> first, then insurance, balances,
           appointments, recalls, treatment, payment history and notes (they find patients by the ID in the old system). Columns are matched by name; check the matches before importing.
           Importing the same file again updates what's already here instead of making duplicates.

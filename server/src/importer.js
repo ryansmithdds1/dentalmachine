@@ -1,5 +1,5 @@
 import { HttpError } from './auth.js';
-import { insert, practiceNow, validEmail } from './util.js';
+import { insert, practiceNow, recorded, validEmail } from './util.js';
 import { savePolicy } from './benefits.js';
 
 // Data conversion from another practice system. Offices export CSV files (Open Dental's query or table
@@ -280,7 +280,7 @@ function parsePriority(v) {
 }
 
 // Recall interval in months. Open Dental stores intervals packed into an integer (years<<24 | months<<16 | weeks<<8 | days).
-function parseInterval(v) {
+export function parseInterval(v) {
   const s = String(v ?? '').trim().toLowerCase();
   if (s.length > 64) throw new Error('Value is too long');
   if (!s) return 6;
@@ -292,7 +292,7 @@ function parseInterval(v) {
   throw new Error(`"${v}" isn't a recall interval`);
 }
 
-function parseDuration(v) {
+export function parseDuration(v) {
   const s = String(v ?? '').trim();
   if (s.length > 64) throw new Error('Value is too long');
   if (!s) return null;
@@ -408,7 +408,8 @@ export class Importer {
     let result;
     if (current) {
       id = current.id;
-      await db.run(`UPDATE patients SET ${Object.keys(row).map((k) => `${k} = ?`).join(', ')}, updated_at = datetime('now') WHERE id = ?`, ...Object.values(row), id);
+      // A corrected re-import updates the chart; what changed (before → after) goes to the audit log.
+      await recorded(db, 'patients', id, () => db.run(`UPDATE patients SET ${Object.keys(row).map((k) => `${k} = ?`).join(', ')}, updated_at = datetime('now') WHERE id = ?`, ...Object.values(row), id));
       result = 'updated';
     } else {
       id = await insert(db, 'patients', { ...row, practice_id: pid });
@@ -425,7 +426,7 @@ export class Importer {
   async linkGuarantors() {
     for (const [id, ref] of this.guarantors || []) {
       const x = await this.externalId('patients', ref);
-      if (x && x.local_id !== id) await this.db.run('UPDATE patients SET guarantor_id = ? WHERE id = ? AND practice_id = ?', x.local_id, id, this.pid);
+      if (x && x.local_id !== id) await recorded(this.db, 'patients', id, () => this.db.run('UPDATE patients SET guarantor_id = ? WHERE id = ? AND practice_id = ?', x.local_id, id, this.pid));
     }
     this.guarantors = [];
   }
@@ -436,7 +437,7 @@ export class Importer {
     if (entry && !entry.voided_at && entry.amount === cents) return 'unchanged';
     // A corrected balance replaces the old one: the old entry is voided (never edited) and a new one posted.
     if (entry && !entry.voided_at) {
-      await this.db.run("UPDATE ledger_entries SET voided_at = datetime('now'), voided_by = ?, void_reason = 'Replaced by a corrected import' WHERE id = ?", this.batch.created_by ?? null, entry.id);
+      await recorded(this.db, 'ledger_entries', entry.id, () => this.db.run("UPDATE ledger_entries SET voided_at = datetime('now'), voided_by = ?, void_reason = 'Replaced by a corrected import' WHERE id = ?", this.batch.created_by ?? null, entry.id));
       if (!cents) return 'updated';
     }
     if (!cents) return 'skipped';
@@ -504,7 +505,7 @@ export class Importer {
     const known = await this.externalId('appointments', key);
     const current = known && await db.get('SELECT id FROM appointments WHERE id = ? AND practice_id = ?', known.local_id, pid);
     if (current) {
-      await db.run(`UPDATE appointments SET ${Object.keys(row).map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, ...Object.values(row), current.id);
+      await recorded(db, 'appointments', current.id, () => db.run(`UPDATE appointments SET ${Object.keys(row).map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, ...Object.values(row), current.id));
       return 'updated';
     }
     const id = await insert(db, 'appointments', { ...row, practice_id: pid });
@@ -522,7 +523,7 @@ export class Importer {
     const interval = parseInterval(r.interval);
     const existing = await db.get('SELECT id FROM recalls WHERE practice_id = ? AND patient_id = ? AND type = ?', pid, p.id, type);
     if (existing) {
-      await db.run('UPDATE recalls SET due_date = ?, interval_months = ? WHERE id = ?', due, interval, existing.id);
+      await recorded(db, 'recalls', existing.id, () => db.run('UPDATE recalls SET due_date = ?, interval_months = ? WHERE id = ?', due, interval, existing.id));
       return 'updated';
     }
     const id = await insert(db, 'recalls', { practice_id: pid, patient_id: p.id, type, interval_months: interval, due_date: due, status: 'due' });

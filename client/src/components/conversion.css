@@ -1,0 +1,101 @@
+/* Settings → Import from another system: the full conversion wizard (FullConversion.jsx). */
+.conv { padding: 0; overflow: hidden; }
+.conv-head { padding: 18px 20px 14px; border-bottom: 1px solid var(--border); }
+.conv-head h2 { margin: 0 0 4px; font-size: 18px; }
+.conv-head p { margin: 0; color: var(--muted); font-size: 13px; }
+.conv-body { padding: 18px 20px 20px; }
+
+.conv-steps { display: flex; gap: 6px; list-style: none; margin: 12px 0 0; padding: 0; flex-wrap: wrap; }
+.conv-steps li { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--faint); }
+.conv-steps li + li::before { content: ''; width: 18px; height: 1px; background: var(--border-strong); margin-right: 2px; }
+.conv-steps .n { width: 22px; height: 22px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; border: 1.5px solid var(--border-strong); font-weight: 600; font-size: 12px; }
+.conv-steps li.on { color: var(--text); font-weight: 600; }
+.conv-steps li.on .n { border-color: var(--primary); background: var(--primary); color: #fff; }
+.conv-steps li.done { color: var(--primary-ink); }
+.conv-steps li.done .n { border-color: var(--primary); color: var(--primary); background: var(--primary-soft); }
+
+.conv-sources { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
+.conv-source { text-align: left; border: 1.5px solid var(--border); border-radius: var(--radius); background: var(--panel); padding: 14px; cursor: pointer; display: flex; flex-direction: column; gap: 6px; color: var(--text); font: inherit; transition: border-color .15s, box-shadow .15s, transform .15s; }
+.conv-source:hover { border-color: var(--primary); box-shadow: var(--shadow); transform: translateY(-1px); }
+.conv-source:focus-visible { outline: none; box-shadow: var(--ring); border-color: var(--primary); }
+.conv-source .logo { width: 34px; height: 34px; border-radius: 9px; display: flex; align-items: center; justify-content: center; background: var(--primary-soft); color: var(--primary-ink); }
+.conv-source strong { font-size: 15px; }
+.conv-source span { font-size: 12.5px; color: var(--muted); line-height: 1.4; }
+
+.conv-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: 18px; align-items: start; }
+@media (max-width: 860px) { .conv-grid { grid-template-columns: 1fr; } }
+.conv-howto { background: var(--subtle); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; }
+.conv-howto h3 { margin: 0 0 8px; font-size: 14px; }
+.conv-howto ol { margin: 0; padding-left: 20px; font-size: 13px; line-height: 1.55; color: var(--text-2); }
+.conv-howto li + li { margin-top: 6px; }
+.conv-howto .fine { margin-top: 10px; font-size: 12px; color: var(--muted); }
+
+.conv-drop { border: 2px dashed var(--border-strong); border-radius: var(--radius); padding: 28px 18px; text-align: center; cursor: pointer; background: var(--panel); transition: border-color .15s, background .15s; display: flex; flex-direction: column; align-items: center; gap: 8px; color: var(--muted); }
+.conv-drop:hover, .conv-drop:focus-visible { border-color: var(--primary); outline: none; }
+.conv-drop.over { border-color: var(--primary); background: var(--primary-soft); color: var(--primary-ink); }
+.conv-drop strong { color: var(--text); font-size: 15px; }
+.conv-drop .icon { color: var(--primary); }
+
+.conv-busy { display: flex; align-items: center; gap: 10px; font-size: 13.5px; color: var(--text-2); margin-top: 12px; }
+.conv-spin { animation: conv-spin 1s linear infinite; }
+@keyframes conv-spin { to { transform: rotate(360deg); } }
+.conv-bar { height: 8px; background: var(--border); border-radius: 99px; overflow: hidden; margin-top: 8px; }
+.conv-bar > div { height: 100%; background: linear-gradient(90deg, var(--primary), var(--primary-hover)); border-radius: 99px; transition: width .25s; }
+
+.conv-section { margin-top: 18px; }
+.conv-section > h3 { font-size: 14px; margin: 0 0 8px; display: flex; align-items: center; gap: 8px; }
+.conv-section > h3 .count { font-weight: 500; color: var(--muted); font-size: 12.5px; }
+
+.conv-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
+.conv-stat { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 12px; background: var(--panel); }
+.conv-stat .k { font-size: 12px; color: var(--muted); }
+.conv-stat .v { font-size: 20px; font-weight: 650; font-variant-numeric: tabular-nums; margin-top: 2px; }
+.conv-stat.ok { border-color: color-mix(in srgb, var(--ok) 35%, var(--border)); background: var(--ok-soft); }
+.conv-stat.warn { border-color: color-mix(in srgb, var(--warn) 35%, var(--border)); background: var(--warn-soft); }
+
+.conv-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.conv-table th { text-align: left; font-weight: 600; font-size: 12px; color: var(--muted); padding: 7px 8px; border-bottom: 1px solid var(--border); background: var(--subtle); }
+.conv-table td { padding: 7px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.conv-table .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.conv-table tr.muted-row td { color: var(--faint); }
+.conv-table details summary { cursor: pointer; color: var(--warn); font-size: 12px; margin-top: 2px; }
+.conv-table details ul { margin: 4px 0 0; padding-left: 18px; color: var(--text-2); font-size: 12px; }
+.conv-table details li .ex { color: var(--muted); }
+.conv-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.conv-wrap .conv-table tr:last-child td { border-bottom: none; }
+
+.conv-chip { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: 99px; font-size: 11.5px; font-weight: 600; background: var(--primary-soft); color: var(--primary-ink); white-space: nowrap; }
+.conv-chip.off { background: var(--subtle); color: var(--muted); border: 1px solid var(--border); }
+.conv-chip.warn { background: var(--warn-soft); color: var(--warn); }
+.conv-chip.ok { background: var(--ok-soft); color: var(--ok); }
+.conv-chip.bad { background: var(--danger-soft); color: var(--danger); }
+
+.conv-files { display: flex; flex-direction: column; gap: 4px; max-height: 260px; overflow: auto; font-size: 13px; }
+.conv-file { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 6px; }
+.conv-file:nth-child(odd) { background: var(--subtle); }
+.conv-file .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conv-file .rows { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; }
+
+.conv-map { border: 1px solid color-mix(in srgb, var(--warn) 35%, var(--border)); background: var(--warn-soft); border-radius: var(--radius); padding: 12px 14px; }
+.conv-map p { margin: 0 0 10px; font-size: 13px; color: var(--text-2); }
+.conv-map .conv-table th { background: transparent; }
+.conv-map select, .conv-map input { font-size: 13px; padding: 4px 6px; min-width: 170px; }
+.conv-map .fallback { font-size: 11.5px; color: var(--muted); }
+
+.conv-actions { display: flex; gap: 10px; align-items: center; margin-top: 18px; flex-wrap: wrap; }
+.conv-actions .spacer { flex: 1; }
+.conv-actions button { display: inline-flex; align-items: center; gap: 6px; }
+
+.conv-checklist { list-style: none; padding: 0; margin: 14px 0 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 6px 14px; font-size: 13px; }
+.conv-checklist li { display: flex; align-items: center; gap: 7px; color: var(--faint); }
+.conv-checklist li.done { color: var(--text-2); }
+.conv-checklist li.done svg { color: var(--ok); }
+.conv-checklist li.now { color: var(--text); font-weight: 600; }
+.conv-checklist li.now svg { color: var(--primary); }
+
+.conv-success { display: flex; gap: 14px; align-items: center; padding: 16px; border-radius: var(--radius); background: var(--ok-soft); border: 1px solid color-mix(in srgb, var(--ok) 30%, var(--border)); }
+.conv-success.warn { background: var(--warn-soft); border-color: color-mix(in srgb, var(--warn) 30%, var(--border)); }
+.conv-success .big { color: var(--ok); flex: none; }
+.conv-success.warn .big { color: var(--warn); }
+.conv-success h3 { margin: 0 0 2px; font-size: 16px; }
+.conv-success p { margin: 0; font-size: 13px; color: var(--text-2); }
