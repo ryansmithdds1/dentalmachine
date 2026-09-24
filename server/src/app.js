@@ -67,6 +67,7 @@ import inventoryRoutes from './routes/inventory.js';
 import queryBuilderRoutes from './routes/querybuilder.js';
 import orthoRoutes from './routes/ortho.js';
 import imagingRoutes, { bridgeAgentRoutes } from './routes/imaging.js';
+import bridgePackageRoutes from './routes/bridgepackage.js';
 import { portalPublicRoutes, portalRoutes } from './routes/portal.js';
 import systemRoutes from './routes/system.js';
 import chartingRoutes from './routes/charting.js';
@@ -328,6 +329,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(queryBuilderRoutes({ db }));
   api.use(orthoRoutes({ db, payments }));
   api.use(imagingRoutes({ db, storage }));
+  api.use(bridgePackageRoutes({ db, config }));
   api.use(systemRoutes({ db, config, messenger, storage, payments, clearinghouse, erx, mailer }));
   app.use('/api', api);
   app.use('/api', (_req, _res, next) => next(new HttpError(404, 'Not found')));

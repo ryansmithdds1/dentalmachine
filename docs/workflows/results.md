@@ -15,6 +15,10 @@ into one field.
 | 6 | Send/read texts | 4 to send | 3 (Alt+T, type, Enter); inbox reply 3 | — | 0.2 s | 3 | J/K move between threads; attach unknown numbers inline |
 | 7 | Clinical notes | ~7 (template picked by hand, confirm dialog, visit linked after) | 3 (Alt+N, type, Ctrl+Enter) | — | 0.6 s | 4 | Drafted from today's visit and linked to it automatically |
 | 8 | Chart conditions and findings | ~9+ per finding, one tooth at a time | 3 per entry, any number of teeth ("2-4 sealant plan") | — | 0.2 s | 4 | New anatomical chart; Undo instead of confirm/prompt |
+| 9 | Book an appointment | 7–8 | 2 (Alt+B, Enter: next open time, type defaults); 3 from a drag; 4 with a name search | — | < 1 s | 3 | Search-then-book is 4: two of those are finding the patient (#1) |
+| 10 | Reschedule | 3–4; no keyboard way | 3 (M, arrow, Enter); drag 1; pinned visit 2 | — | < 0.5 s | 3 | Blocked time asks inline (4) instead of a confirm() dialog |
+| 13 | Confirm appointments | 2 per row | 1 per row (C); "text all unconfirmed" 1 click | — | < 0.1 s | 1 | "N unconfirmed" pill opens the list; undo on confirm |
+| 19 | Cancel / no-show | 3, no rebook, no reason | 3 incl. reason + rebook (X, number, Enter); no-show 2 | — | < 0.5 s | 3 | Reason recorded and audited; no broken-appointment fee (no fee setting exists yet) |
 
 ## Couldn't hit the budget
 
@@ -23,3 +27,7 @@ into one field.
   complete in 1.
 - **#3, no-show and cancel keep their current flow** (no-show releases procedures and recalls that Undo can't
   restore; cancel keeps its confirmation, since it offers the rebook/fill choices).
+- **#9, booking with N and a name search: 4 actions** (budget 3). Two are the patient search itself; once the
+  patient is active it's 2.
+- **#10, moving into blocked time: 4** — the extra Enter on "Move it there" is the deliberate replacement for the old
+  confirm() dialog.

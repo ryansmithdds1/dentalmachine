@@ -19,12 +19,12 @@ practice-management systems work with these sensors.
    Plug the sensor in and let Windows finish installing it.
 2. **NAPS2**, the free scanning app, from naps2.com. Install it with the default options. NAPS2 7 and newer can use both
    32- and 64-bit TWAIN drivers.
-3. **Node.js 18 or newer** from nodejs.org.
-4. **The imaging bridge.**
-   1. In **Settings → Imaging bridges**, add the workstation (for example "Op 2").
-   2. Choose **Tuxedo sensor** or **Jazz sensor**.
-   3. Download `bridge-config.json` (its key is shown only once) and the bridge program.
-   4. Put both files in one folder, for example `C:\DentalMachine`.
+3. **The imaging bridge.**
+   1. In **Settings → Imaging bridges**, press **Set up a workstation** and name it (for example "Op 2").
+   2. Pick any imaging programs on that PC (or none), then choose **Tuxedo sensor** or **Jazz sensor**.
+   3. Download the install package. It holds the workstation's key, which is shown only once.
+   4. On the PC, unzip it and double-click `install.cmd`. The installer adds Node.js if it's missing, installs the
+      bridge in `C:\DentalMachine`, and starts it now and at every sign-in. See [imaging-bridges.md](imaging-bridges.md).
 
 ## Settings file
 
@@ -46,8 +46,8 @@ The downloaded `bridge-config.json` already has the sensor section:
   measurements are in mm straight away.
 - `command` (optional): where NAPS2 is installed, if it isn't in `C:\Program Files\NAPS2`.
 
-Start the bridge with `node dental-machine-bridge.mjs bridge-config.json` (or as a Windows startup task). The window
-should say `Sensor: Tuxedo sensor (<device name>)`.
+The installer starts the bridge for you. To run it by hand instead, use `node dental-machine-bridge.mjs bridge-config.json`.
+Its window (or `C:\DentalMachine\bridge.log`) should say `Sensor: Tuxedo sensor (<device name>)`.
 
 ## First test
 

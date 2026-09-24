@@ -1,7 +1,15 @@
 {
   "server": "https://app.yourpractice.com",
   "token": "dmb_paste-the-key-from-Settings-Imaging-bridges",
+  "_appsNote": "Presets (bridge/presets.json) fill in the path, arguments, bridge file and export folder; any field you add overrides the preset. Programs written out in full (like DEXIS and Sidexis below) work as before.",
   "apps": [
+    {
+      "preset": "romexis"
+    },
+    {
+      "preset": "eaglesoft",
+      "command": "D:\\EagleSoft\\Shared Files\\PattersonImaging.exe"
+    },
     {
       "id": "dexis",
       "name": "DEXIS",

@@ -19,6 +19,7 @@ import FormTemplates from '../components/FormTemplates.jsx';
 import { MembershipPlans } from '../components/Memberships.jsx';
 import MfaSetup from '../components/MfaSetup.jsx';
 import SensorTest from '../components/imaging/SensorTest.jsx';
+import BridgeSetup from '../components/imaging/BridgeSetup.jsx';
 
 const ROLES = ['admin', 'dentist', 'hygienist', 'assistant', 'front_desk', 'billing'];
 const CATEGORIES = ['diagnostic', 'preventive', 'restorative', 'endodontics', 'periodontics', 'prosthodontics', 'oral_surgery', 'orthodontics', 'implants', 'adjunctive'];
@@ -1386,61 +1387,45 @@ function BridgeChecks({ agent }) {
 }
 
 // Workstations running the imaging bridge (opens DEXIS/Sidexis/etc. and imports captured images).
+// New workstations are added through the setup wizard, which downloads a ready-to-install package.
 function ImagingBridges() {
-  const { practice } = useAuth();
+  const { practice, user } = useAuth();
   const { data: agents, reload } = useApi('/imaging/agents');
-  const [name, setName] = useState('');
-  const [created, setCreated] = useState(null);
-  const [sensorPreset, setSensorPreset] = useState('');
+  const [wizard, setWizard] = useState(false);
   const [testing, setTesting] = useState(null);
-  const add = useSubmit(async () => {
-    setCreated(await api.post('/imaging/agents', { name }));
-    setName('');
-    reload();
-  });
-  const config = created && JSON.stringify({
-    server: window.location.origin, token: created.token,
-    apps: [{ id: 'dexis', name: 'DEXIS', command: 'C:\\DEXIS\\DEXIS.exe', args: ['/P{patientId}'] }],
-    watch: [{ folder: 'C:\\DEXIS\\Export', category: 'xray' }],
-    ...(sensorPreset ? { sensor: { preset: sensorPreset, exposure: { kvp: 70, ma: 7 } } } : {}),
-  }, null, 2);
-  const download = async (path, filename, text) => {
-    const blob = text ? new Blob([text], { type: 'application/json' }) : await (await fetch(`/api${path}`, { headers: { Authorization: `Bearer ${getToken()}` } })).blob();
+  const isAdmin = user?.role === 'admin';
+  const download = async (path, filename) => {
+    const blob = await (await fetch(`/api${path}`, { headers: { Authorization: `Bearer ${getToken()}` } })).blob();
     Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: filename }).click();
   };
   return (
     <>
       <div className="card">
-        <h2>Imaging bridges</h2>
+        <div className="inline" style={{ justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+          <h2 style={{ margin: 0 }}>Imaging bridges</h2>
+          {isAdmin && !wizard && <button className="primary" onClick={() => setWizard(true)}>Set up a workstation</button>}
+        </div>
         <p className="muted" style={{ fontSize: 13 }}>
-          Install the bridge on each operatory computer that runs imaging software (DEXIS, Sidexis, Carestream, Apteryx, VixWin…). Staff can then open the
-          patient in the imaging program straight from the chart, and new x-rays and photos are filed in the patient&apos;s Documents automatically.
+          Install the bridge on each operatory computer that runs imaging software (DEXIS, Sidexis, Carestream, Romexis, Eaglesoft, VixWin and about 20 more), or takes x-rays
+          straight from a sensor. Staff can then open the patient in the imaging program from the chart, and new x-rays and photos are filed in the patient&apos;s Documents automatically.
         </p>
         <ol className="muted" style={{ fontSize: 13, paddingLeft: 18 }}>
-          <li>Add the workstation below and download its settings file.</li>
-          <li>On that computer, install Node.js (18 or newer) and save the <button className="link" onClick={() => download('/imaging/agent-download', 'dental-machine-bridge.mjs')}>bridge program</button> next to the settings file.</li>
-          <li>Edit the settings file with your imaging program&apos;s path and export folder (your imaging vendor&apos;s bridge guide lists the command-line options), then run <code>node dental-machine-bridge.mjs bridge-config.json</code> — or set it to start with Windows.</li>
-          <li>For direct sensor capture (Tuxedo, Jazz or any TWAIN sensor): install the sensor&apos;s TWAIN driver and the free NAPS2 scanner app, choose the sensor below, then press <strong>Test sensor</strong>. <code>node dental-machine-bridge.mjs bridge-config.json --list-sensors</code> shows the sensors that PC can see.</li>
-          <li>Check the setup with <code>node dental-machine-bridge.mjs bridge-config.json --check</code>. While it runs, the bridge re-checks itself every 10 minutes; problems show here and in Needs attention.</li>
+          <li>Press <strong>Set up a workstation</strong>, name the computer, pick its imaging programs (and sensor), and download its install package.</li>
+          <li>On that computer, unzip the package and double-click <code>install.cmd</code>. It installs Node.js if needed, starts the bridge with Windows, and checks the setup.</li>
+          <li>Point each imaging program&apos;s export at the folder listed in <code>SETUP.txt</code>, then open a test patient from the chart. With a sensor, press <strong>Test sensor</strong> below.</li>
         </ol>
-        <form className="inline" onSubmit={(e) => { e.preventDefault(); add.submit(); }} style={{ gap: 8 }}>
-          <input placeholder='Workstation name, e.g. "Op 2"' value={name} onChange={(e) => setName(e.target.value)} style={{ maxWidth: 320 }} />
-          <select aria-label="Sensor" value={sensorPreset} onChange={(e) => setSensorPreset(e.target.value)} style={{ width: 'auto' }}>
-            <option value="">No sensor on this PC</option>
-            <option value="tuxedo">Tuxedo sensor</option>
-            <option value="jazz">Jazz sensor</option>
-            <option value="twain">Other TWAIN sensor</option>
-          </select>
-          <button className="primary" disabled={!name.trim() || add.busy}>Add workstation</button>
-        </form>
-        <ErrorBox error={add.error} />
-        {created && (
-          <div className="public-notice ok" style={{ marginTop: 12 }}>
-            <strong>{created.name} added.</strong> Its key is shown only once — download the settings file now.
-            <div style={{ marginTop: 8 }}><button className="small primary" onClick={() => download(null, 'bridge-config.json', config)}>Download bridge-config.json</button></div>
-          </div>
-        )}
+        <details className="muted" style={{ fontSize: 13 }}>
+          <summary>Setting it up by hand</summary>
+          <p>
+            Save the <button className="link" onClick={() => download('/imaging/agent-download', 'dental-machine-bridge.mjs')}>bridge program</button>,{' '}
+            <button className="link" onClick={() => download('/imaging/presets-download', 'presets.json')}>presets.json</button> and the settings file from the
+            wizard (&quot;bridge-config.json only&quot;) in one folder, install Node.js 18 or newer, and run{' '}
+            <code>node dental-machine-bridge.mjs bridge-config.json</code>. <code>--check</code> checks the setup; <code>--list-sensors</code> shows the sensors that PC can see.
+            While it runs, the bridge re-checks itself every 10 minutes; problems show here and in Needs attention.
+          </p>
+        </details>
       </div>
+      {wizard && <BridgeSetup onClose={() => { setWizard(false); reload(); }} onCreated={reload} />}
       <div className="card" style={{ padding: 0 }}>
         <div className="table-wrap">
           <table>
@@ -1462,7 +1447,7 @@ function ImagingBridges() {
                   <td>{a.last_seen_at ? fmtUtcDateTime(a.last_seen_at, practice?.timezone) : 'Never'}</td>
                   <td className="inline" style={{ gap: 6, justifyContent: 'flex-end' }}>
                     {a.sensor && <button className="small" disabled={!a.online} onClick={() => setTesting(a)} title={a.online ? 'Take one test exposure' : 'The bridge is offline'}>Test sensor</button>}
-                    <button className="small danger" onClick={() => confirm(`Remove ${a.name}? Its bridge will stop working.`) && api.del(`/imaging/agents/${a.id}`).then(reload)}>Remove</button>
+                    {isAdmin && <button className="small danger" onClick={() => confirm(`Remove ${a.name}? Its bridge will stop working.`) && api.del(`/imaging/agents/${a.id}`).then(reload)}>Remove</button>}
                   </td>
                 </tr>
               ))}

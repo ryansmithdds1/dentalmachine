@@ -7,14 +7,18 @@
 //    Presets for Tuxedo and Jazz sensors fill in the TWAIN details: "sensor": { "preset": "tuxedo" }.
 //  • It checks its own setup (programs, folders, sensor, uploads) and reports problems to Settings → Imaging
 //    bridges and Needs attention every 10 minutes. `--check` prints the same checks and exits.
+//  • Imaging programs can be named by preset ("apps": [{ "preset": "dexis" }]) from presets.json next to this
+//    file; any field set in bridge-config.json (command, args, writeFile, watch, name) overrides the preset's.
+//    Apps written out in full, as before presets existed, keep working unchanged.
 // Usage: node dental-machine-bridge.mjs bridge-config.json [--list-sensors | --check]
 import { spawn } from 'node:child_process';
 import { readFileSync, writeFileSync, readdirSync, statSync, existsSync, mkdirSync, renameSync, rmSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { hostname, tmpdir } from 'node:os';
-import { join, resolve, dirname, basename } from 'node:path';
+import { join, resolve, dirname, basename, isAbsolute } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const VERSION = '1.3.0';
+const VERSION = '1.4.0';
 const configPath = resolve(process.argv[2] || 'bridge-config.json');
 const config = JSON.parse(readFileSync(configPath, 'utf8'));
 const server = String(config.server || '').replace(/\/$/, '');
@@ -23,6 +27,80 @@ if (!server || !String(config.token || '').startsWith('dmb_')) {
   process.exit(1);
 }
 const statePath = resolve(dirname(configPath), config.stateFile || 'bridge-state.json');
+
+// ---- Presets: "apps": [{ "preset": "dexis" }] fills in the program's path, arguments and bridge file ----
+// A Windows path ("C:\…", "\\server\share") is absolute on every OS; other relative paths are taken from
+// the folder bridge-config.json is in (the macOS/Linux installer writes "Export/…" folders that way).
+const isAbsolutePath = (p) => isAbsolute(p) || /^[A-Za-z]:[\\/]/.test(p) || /^\\\\/.test(p);
+// A Windows path on a Mac or Linux PC (a preset's default) can't be used there: never create it as a local folder.
+const foreignPath = (p) => process.platform !== 'win32' && /^[A-Za-z]:[\\/]|^\\\\/.test(String(p || ''));
+const fromConfigDir = (p) => (p && !isAbsolutePath(String(p)) ? resolve(dirname(configPath), String(p)) : p);
+const setupProblems = []; // shown by --check and reported with the self-check
+const setupNotes = []; // informational only (--check prints them; they never raise a Needs attention item)
+function loadPresets() {
+  const candidates = config.presetsFile ? [fromConfigDir(config.presetsFile)] : [join(dirname(fileURLToPath(import.meta.url)), 'presets.json'), join(dirname(configPath), 'presets.json')];
+  for (const file of candidates) {
+    if (!existsSync(file)) continue;
+    try {
+      const list = JSON.parse(readFileSync(file, 'utf8')).presets;
+      if (Array.isArray(list)) return list;
+    } catch (err) {
+      setupProblems.push({ name: 'Imaging program presets', ok: false, note: `${file} can't be read (${err.message})` });
+      return [];
+    }
+  }
+  setupProblems.push({ name: 'Imaging program presets', ok: false, note: `presets.json not found next to the bridge (looked in ${candidates.join(', ')})` });
+  return [];
+}
+function resolveApps() {
+  const raw = Array.isArray(config.apps) ? config.apps : [];
+  if (!raw.some((a) => a && a.preset)) return raw; // older configs: nothing to do
+  const presets = loadPresets();
+  const find = (key) => {
+    const k = String(key).toLowerCase();
+    return presets.find((p) => p.id === k || (p.aliases || []).includes(k));
+  };
+  const apps = [];
+  const watch = [...(config.watch || [])];
+  const sameFolder = (a, b) => String(a).replace(/[\\/]+$/, '').toLowerCase() === String(b).replace(/[\\/]+$/, '').toLowerCase();
+  for (const entry of raw) {
+    if (!entry?.preset) {
+      apps.push(entry);
+      continue;
+    }
+    const p = find(entry.preset);
+    if (!p) {
+      setupProblems.push({ name: `Imaging program "${entry.preset}"`, ok: false, note: `No preset called "${entry.preset}" in presets.json — check the spelling, or write the program out in full` });
+      continue;
+    }
+    // A preset's program may be installed in one of a few places: use the first that exists on this PC.
+    const command = 'command' in entry ? entry.command : ((p.commandCandidates || []).find((c) => existsSync(c)) || p.command);
+    const writeFile = entry.writeFile === false || (!p.writeFile && !entry.writeFile) ? undefined : { ...(p.writeFile || {}), ...(entry.writeFile || {}) };
+    if (writeFile?.path) writeFile.path = fromConfigDir(writeFile.path);
+    const args = (entry.args || p.args || []).map((a) => String(a).split('{bridgeFile}').join(writeFile?.path || ''));
+    const app = { ...entry, id: entry.id || p.id, name: entry.name || p.name, preset: p.id, command: command || undefined, args, writeFile, launchable: entry.launchable ?? p.launchable ?? true };
+    apps.push(app);
+    if (p.verify && !entry.verified) setupNotes.push(`${app.name}: the preset's command-line options are unconfirmed for your version — open a test patient from the chart once; if the patient doesn't open, fix "args"/"writeFile" (see presets.json "comment")`);
+    if (p.needsCommand && !app.command) setupProblems.push({ name: `${app.name}: program`, ok: false, note: 'Set "command" to the program\'s .exe in bridge-config.json' });
+    // The preset's export folders are watched too, unless the app says "watch": false or lists its own.
+    if (entry.watch !== false) {
+      for (const w of Array.isArray(entry.watch) ? entry.watch : p.watch || []) {
+        if (!watch.some((x) => sameFolder(fromConfigDir(x.folder), fromConfigDir(w.folder)))) watch.push({ create: true, ...w });
+      }
+    }
+  }
+  config.watch = watch;
+  return apps;
+}
+config.apps = resolveApps();
+for (const w of config.watch || []) {
+  w.folder = fromConfigDir(w.folder);
+  if (w.moveTo) w.moveTo = fromConfigDir(w.moveTo);
+  // Export folders the installer or a preset named are made here, so the imaging program has somewhere to export to.
+  if (w.create && w.folder && !foreignPath(w.folder) && !existsSync(w.folder)) {
+    try { mkdirSync(w.folder, { recursive: true }); } catch { /* reported by the self-check */ }
+  }
+}
 const state = existsSync(statePath) ? JSON.parse(readFileSync(statePath, 'utf8')) : { seen: {} };
 const saveState = () => writeFileSync(statePath, JSON.stringify(state));
 const pollSeconds = Number(config.scanSeconds) || 5;
@@ -45,6 +123,7 @@ const call = async (method, path, body, headers = {}) => {
 const fill = (template, p) => String(template).replace(/\{(\w+)\}/g, (_, k) => ({
   patientId: p.id, firstName: p.first_name, lastName: p.last_name, preferredName: p.preferred_name || p.first_name,
   dob: p.dob || '', dobYMD: (p.dob || '').replace(/-/g, ''), dobMDY: p.dob ? `${p.dob.slice(5, 7)}/${p.dob.slice(8, 10)}/${p.dob.slice(0, 4)}` : '',
+  dobDMY: p.dob ? `${p.dob.slice(8, 10)}/${p.dob.slice(5, 7)}/${p.dob.slice(0, 4)}` : '', dobDotted: p.dob ? `${p.dob.slice(8, 10)}.${p.dob.slice(5, 7)}.${p.dob.slice(0, 4)}` : '',
   gender: { female: 'F', male: 'M' }[p.gender] || 'U',
 })[k] ?? '');
 
@@ -62,6 +141,8 @@ function launch(cmd) {
     child.unref();
   }
   lastPatient = { id: cmd.patient.id, at: Date.now() };
+  // Programs with no outside hand-off: nothing opens, but images exported next are filed to this patient.
+  if (!app.command && !app.writeFile) return `Ready for ${cmd.patient.first_name} ${cmd.patient.last_name} — images exported from ${app.name} on this computer go to their chart`;
   return `${app.name} opened for ${cmd.patient.first_name} ${cmd.patient.last_name}`;
 }
 
@@ -324,6 +405,7 @@ async function scan() {
 // ---- Self-check: is this PC set up the way bridge-config.json says? ----
 const isPath = (p) => /[\\/]/.test(String(p || ''));
 const canWrite = (dir) => {
+  if (foreignPath(dir)) return false;
   try {
     mkdirSync(dir, { recursive: true });
     const probe = join(dir, `.dm-bridge-check-${process.pid}`);
@@ -335,11 +417,14 @@ const canWrite = (dir) => {
   }
 };
 function selfCheck() {
-  const checks = [];
+  const checks = [...setupProblems];
   const add = (name, ok, note) => checks.push({ name, ok, note: note || null });
   for (const a of config.apps || []) {
     if (a.command && isPath(a.command)) add(`${a.name || a.id}: program`, existsSync(a.command), existsSync(a.command) ? null : `Not found at ${a.command} — fix "command" in bridge-config.json`);
-    if (a.writeFile?.path) add(`${a.name || a.id}: bridge file folder`, canWrite(dirname(a.writeFile.path)), `Can't write to ${dirname(a.writeFile.path)}`);
+    if (a.writeFile?.path) {
+      const folder = foreignPath(a.writeFile.path) ? a.writeFile.path.replace(/[\\/][^\\/]*$/, '') : dirname(a.writeFile.path);
+      add(`${a.name || a.id}: bridge file folder`, canWrite(folder), `Can't write to ${folder}`);
+    }
   }
   for (const w of config.watch || []) {
     let readable = false;
@@ -363,10 +448,11 @@ function selfCheck() {
 if (process.argv.includes('--check')) {
   const checks = selfCheck();
   for (const c of checks) console.log(`${c.ok ? 'OK  ' : 'FAIL'} ${c.name}${c.ok || !c.note ? '' : ` — ${c.note}`}`);
+  for (const n of setupNotes) console.log(`NOTE ${n}`);
   process.exit(checks.every((c) => c.ok) ? 0 : 1);
 }
 const helloBody = () => ({
-  apps: (config.apps || []).map((a) => ({ id: a.id, name: a.name })),
+  apps: (config.apps || []).filter((a) => a.launchable !== false).map((a) => ({ id: a.id, name: a.name })),
   sensor: sensor ? { name: sensor.name || 'Sensor', mode: sensor.mode || 'command', preset: sensor.preset || null, exposure: sensor.exposure || null, pixelSize: sensor.pixelSize || null, size: sensor.size ?? null } : null,
   hostname: hostname(), version: VERSION, checks: selfCheck(), uploads: { ok: uploads.ok, failed: uploads.failed },
 });
