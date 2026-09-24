@@ -200,7 +200,9 @@ test('#28 a task from anywhere in 3 actions: assignee by first name, badge and n
   // Jordan gets a note and a badge.
   // (Counts are checked every 15 s; see QuickCommands.jsx for why it isn't a live stream.)
   await jordan.page.waitForSelector('.toast:has-text("New task from Morgan Reyes: call the lab about the crown")', { timeout: 25_000 });
-  await jordan.page.waitForSelector('a[href="/office"] .nav-badge');
+  // The To-do count is in the Manage module's dropdown and rolls up onto the Manage module in the menu.
+  await jordan.page.waitForSelector('a[href="/office"] .nav-badge', { state: 'attached' });
+  await jordan.page.waitForSelector('.rail-mod[data-module="manage"] .rail-mod-btn .nav-badge');
 
   // Jordan ticks it off with one key, then undoes it.
   await jordan.page.goto(`${app.base}/office`);

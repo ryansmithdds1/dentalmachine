@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useApi, useLookup } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
 import { useMakeActive } from '../activePatient.jsx';
+import { PATIENT_MODULES } from '../nav/navConfig.js';
 import './patient.css';
 import { money, fullName, age, fmtDate, fmtDateTime, label, practiceToday } from '../format.js';
 import { Modal, Badge, ErrorBox, useSubmit, Menu } from '../components/ui.jsx';
@@ -41,12 +42,11 @@ export default function PatientDetail() {
   const navigate = useNavigate();
   const { data: p, error, reload } = useApi(`/patients/${id}`);
   useMakeActive(p);
-  // Links can open a tab directly (?tab=ledger, ?tab=insurance…).
-  const [params] = useSearchParams();
-  const [tab, setTab] = useState(() => params.get('tab') || 'overview');
-  useEffect(() => {
-    if (params.get('tab')) setTab(params.get('tab'));
-  }, [params]);
+  // The tab is in the address (?tab=ledger, ?tab=insurance…), so links open it directly and the menu's patient
+  // modules (nav/navConfig.js: Family, Account, Treatment Plan, Chart, Images) know which one you're in.
+  const [params, setParams] = useSearchParams();
+  const tab = params.get('tab') || 'overview';
+  const setTab = (k) => setParams({ tab: k }, { replace: true });
   const [modal, setModal] = useState(null);
   const [popup, setPopup] = useState(null);
   // On a phone the tab strip scrolls sideways; keep the open tab in view (e.g. when a link opens ?tab=insurance).
@@ -76,7 +76,7 @@ export default function PatientDetail() {
   if (error) return <div className="error">{error.message}</div>;
   if (!p) return <div className="empty">Loading…</div>;
 
-  const tabs = [
+  const allTabs = [
     ['overview', 'Overview', true],
     ['family', `Family${p.family_size > 1 ? ` (${p.family_size})` : ''}`, true],
     ['chart', 'Chart', can('clinical:read')],
@@ -91,6 +91,10 @@ export default function PatientDetail() {
     ['insurance', 'Insurance', true],
     ['comms', 'Messages & forms', true],
   ].filter((t) => t[2]);
+  // The tabs sit under the menu module they belong to, in the menu's order, so the two always match.
+  const groups = PATIENT_MODULES.map((m) => ({ ...m, tabs: m.tabs.map((k) => allTabs.find((t) => t[0] === k)).filter(Boolean) })).filter((g) => g.tabs.length);
+  const inModule = groups.find((g) => g.tabs.some((t) => t[0] === tab));
+  const ModIcon = inModule?.icon;
 
   return (
     <>
@@ -99,6 +103,7 @@ export default function PatientDetail() {
           <div className="patient-banner">
             <PatientPhoto p={p} canEdit={can('patients:write')} onChange={reload} />
             <div>
+              {inModule && <div className="pt-module" data-module={inModule.key}><ModIcon size={13} aria-hidden /> {inModule.label}</div>}
               <h1>{fullName(p)} {p.status !== 'active' && <Badge value={p.status} />}</h1>
               <div className="muted">
                 #{p.id} · {p.dob ? `${fmtDate(p.dob)} (${age(p.dob)} y)` : 'DOB not recorded'} {p.gender ? `· ${label(p.gender)}` : ''} {p.phone ? `· ${p.phone}` : ''}
@@ -146,9 +151,16 @@ export default function PatientDetail() {
           <button type="button" className="link" onClick={() => setPopup(null)} aria-label="Hide the office alert">Got it</button>
         </div>
       )}
-      <div className="tabs" style={{ marginTop: 16 }} ref={tabsRef}>
-        {tabs.map(([key, text]) => (
-          <button key={key} className={tab === key ? 'active' : ''} onClick={() => setTab(key)}>{text}</button>
+      <div className="tabs pt-tabs" style={{ marginTop: 16 }} ref={tabsRef}>
+        {groups.map((g) => (
+          <div key={g.key} className={`pt-tab-group${inModule?.key === g.key ? ' in' : ''}`} data-module={g.key} role="group" aria-label={`${g.label} module`}>
+            <span className="pt-tab-mod" aria-hidden>{g.label}</span>
+            <div className="pt-tab-row">
+              {g.tabs.map(([key, text]) => (
+                <button key={key} className={tab === key ? 'active' : ''} onClick={() => setTab(key)}>{text}</button>
+              ))}
+            </div>
+          </div>
         ))}
       </div>
 

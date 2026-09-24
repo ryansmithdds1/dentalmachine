@@ -16,7 +16,7 @@ const PAGES = [
   ['Practice KPIs', '/reports'], ['X-ray AI review', '/xray-review'], ['Day sheet', '/reports?tab=ops'], ['Month-end close', '/reports?tab=close&type=month'], ['Credits & refunds', '/claims?tab=refunds'], ['To-do & labs', '/office'], ['Sent in online (intake review)', '/intake'], ['Supplies', '/office?tab=supplies'],
   ['Time clock', '/timeclock'], ['My bonus', '/bonus'], ['Billing autopilot', '/billing-autopilot'], ['Team bonus settings', '/settings?tab=bonus'], ['Recall autopilot', '/recall'], ['Chart audit', '/chart-audit'], ['Insurance autopilot (Billing tab)', '/claims?tab=autopilot'], ['Scan a paper EOB', '/claims?tab=autopilot&sub=paper'], ['Insurance reconciliation', '/claims?tab=autopilot&sub=recon'], ['Referrals', '/referrals'], ['Metrics', '/metrics'], ['Production & income', '/reports?tab=production'], ['Clock in or out', '/timeclock'], ['Staff schedules', '/timeclock?tab=schedule'], ['Who’s in today', '/timeclock?tab=today'], ['Approve payroll hours', '/timeclock?tab=period'], ['Payroll export', '/timeclock?tab=export'], ['Time off requests', '/timeclock?tab=pto'], ['Deposits and cash', '/deposits'], ['Cash drawer', '/deposits?tab=drawers'], ['Finance', '/finance'], ['Settings', '/settings'], ['Help', '/help'],
   ['Reviews & patient feedback', '/reviews'], ['Team shout-outs', '/reviews?tab=shoutouts'],
-  // Every sidebar page can be reached from here too (the sidebar groups them: nav/navConfig.js).
+  // Every page in the menu can be reached from here too (the menu puts them under its modules: nav/navConfig.js).
   ['Online reviews (Google)', '/reputation'], ['Phones', '/phones'], ['Treatment follow-up', '/recall?type=treatment'], ['Insurance verification (Billing tab)', '/claims?tab=verification'],
   ['Lab check-in', '/lab-checkin'], ['Checklists', '/checklists'], ['Documents', '/documents'], ['Intranet', '/intranet'], ['Capacity', '/capacity'],
   ['Business', '/business'], ['Marketing results', '/marketing'], ['Ask your data', '/ask'], ['Group', '/group'],
@@ -47,6 +47,9 @@ export default function CommandPalette() {
   const { can } = useAuth();
   const { patientId, recent, setActive, clear } = useActivePatient();
   const [open, setOpen] = useState(false);
+  // A patient module (nav/Rail.jsx) with no active patient asks for one here: { label, tab } — picking a
+  // patient then opens that tab of their chart.
+  const [pick, setPick] = useState(null);
   const [q, setQ] = useState('');
   const [res, setRes] = useState({ patients: [], claims: [] });
   const [idx, setIdx] = useState(0);
@@ -59,13 +62,15 @@ export default function CommandPalette() {
     const onKey = (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
+        setPick(null);
         setOpen((o) => !o);
       } else if (e.key === '/' && !e.target.closest?.('input, textarea, select, [contenteditable]')) {
         e.preventDefault();
+        setPick(null);
         setOpen(true);
       }
     };
-    const onOpen = () => setOpen(true);
+    const onOpen = (e) => { setPick(e.detail?.pick || null); setOpen(true); };
     window.addEventListener('keydown', onKey);
     window.addEventListener('dm:search', onOpen);
     return () => {
@@ -93,6 +98,12 @@ export default function CommandPalette() {
     const ql = q.toLowerCase().trim();
     const hit = (label) => !ql || label.toLowerCase().includes(ql);
     const patient = (p) => ({ key: `p${p.id}`, label: nameOf(p), sub: subOf(p), alert: p.medical_alerts, to: `/patients/${p.id}`, icon: '🧑', patient: p });
+    // Choosing a patient for a module: only patients (recent ones until the person types), straight to the tab.
+    if (pick) {
+      const to = (p) => `/patients/${p.id}${pick.tab ? `?tab=${pick.tab}` : ''}`;
+      const list = ql.length >= 2 ? res.patients : recent;
+      return list.map((p) => ({ ...patient(p), to: to(p), sub: ql.length >= 2 ? subOf(p) : `Recent · ${subOf(p)}` }));
+    }
     const pages = (n) => PAGES.filter(([l]) => hit(l)).slice(0, n).map(([l, to]) => ({ key: `page:${l}`, label: l, sub: 'Go to page', to, icon: '→' }));
     // "insurance verification", "chart audit", "x-ray AI review" start with an action word, so screens
     // whose names match are offered after the patients.
@@ -118,7 +129,7 @@ export default function CommandPalette() {
       // Keyed by label: two entries can open the same screen ("Time clock", "Clock in or out").
       ...pages(ql ? 6 : 10),
     ];
-  }, [res, q, action, active, recent, patientId, can, clear]);
+  }, [res, q, action, active, recent, patientId, can, clear, pick]);
 
   if (!open) return null;
   const go = (it) => {
@@ -129,10 +140,11 @@ export default function CommandPalette() {
   };
   return (
     <div className="palette-backdrop" onMouseDown={(e) => e.target === e.currentTarget && setOpen(false)}>
-      <div className="palette" role="dialog" aria-label="Quick search">
+      <div className={`palette${pick ? ' palette-pick' : ''}`} role="dialog" aria-label={pick ? `Choose a patient for ${pick.label}` : 'Quick search'}>
+        {pick && <div className="palette-pick-head">Choose a patient for <strong>{pick.label}</strong></div>}
         <input
           // Focused as it appears, so the first letter typed right after Ctrl/⌘K isn't lost.
-          ref={input} autoFocus value={q} placeholder="Find a patient (name, phone, birth date, chart #), a screen or an action…"
+          ref={input} autoFocus value={q} placeholder={pick ? 'Patient name, phone, birth date or chart #…' : 'Find a patient (name, phone, birth date, chart #), a screen or an action…'}
           onChange={(e) => { setQ(e.target.value); setIdx(0); }}
           onKeyDown={(e) => {
             if (e.key === 'Escape') setOpen(false);
@@ -153,6 +165,7 @@ export default function CommandPalette() {
             </button>
           ))}
           {term.length >= 2 && !res.patients.length && !res.claims.length && <div className="empty" style={{ padding: 12 }}>No patients match “{term}”.</div>}
+          {pick && term.length < 2 && !items.length && <div className="empty" style={{ padding: 12 }}>Type a name, phone number, birth date or chart number.</div>}
         </div>
         <div className="palette-foot muted">↑↓ to move · Enter to open · Esc to close · <kbd>/</kbd> or <kbd>Ctrl K</kbd> anywhere</div>
       </div>

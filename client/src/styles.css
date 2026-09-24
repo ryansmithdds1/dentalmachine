@@ -19,7 +19,7 @@
   --info: #1d4ed8;
   --info-soft: #eaf0ff;
   --sidebar: #0c1524;
-  --rail-w: 60px;
+  --rail-w: 76px; /* room for the module names under their icons (nav/rail.css) */
   --rail-open-w: 216px;
   --radius: 12px;
   --radius-sm: 8px;

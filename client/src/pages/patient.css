@@ -7,3 +7,14 @@
 /* Clinical notes: composer beside the list; stacked on a phone. */
 .grid.notes-layout { grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); align-items: start; }
 @media (max-width: 800px) { .grid.notes-layout { grid-template-columns: minmax(0, 1fr); } }
+
+/* Which menu module you're in (nav/navConfig.js): a small label over the name, and the tabs grouped under their
+   modules — Family, Account, Treatment Plan, Chart, Images — in the menu's order. */
+.pt-module { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--primary-ink); margin-bottom: 2px; }
+.tabs.pt-tabs { gap: 0; align-items: flex-end; }
+.pt-tab-group { flex: none; display: flex; flex-direction: column; padding: 0 3px; border-left: 1px solid var(--border); }
+.pt-tabs .pt-tab-row button { padding: 10px 11px; }
+.pt-tab-group:first-child { border-left: none; padding-left: 0; }
+.pt-tab-mod { font-size: 10px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; color: var(--faint); padding: 4px 11px 0; white-space: nowrap; }
+.pt-tab-group.in .pt-tab-mod { color: var(--primary-ink); }
+.pt-tab-row { display: flex; gap: 2px; }

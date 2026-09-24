@@ -306,8 +306,8 @@ function MovedToBilling({ tab, sub = false }) {
   return <Navigate to={`/claims?${next}`} replace />;
 }
 
-// The navigation rail (nav/Rail.jsx): group icons only by default so the schedule gets the screen, their pages
-// on hover, and a pin to keep it open (remembered on this computer). You, your office, the time clock and
+// The module bar (nav/Rail.jsx): slim by default so the schedule gets the screen — each module one click, the
+// rest of it in a dropdown — and a button to keep it open (remembered on this computer). You, your office, the time clock and
 // sign-out live in the menu under your initials.
 const railPref = () => {
   try {

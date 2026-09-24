@@ -1,54 +1,100 @@
-/* The grouped navigation rail (nav/Rail.jsx). The rail itself is always dark (--sidebar); its flyouts, sections'
-   pins and the phone menu are page surfaces, so they use the theme tokens and follow dark mode. */
+/* The module bar (nav/Rail.jsx). The rail itself is always dark (--sidebar); its dropdowns, the phone menu and
+   the command bar's "choose a patient" heading are page surfaces, so they use the theme tokens and follow dark mode. */
 
 /* Badges: red wants a person now; grey and blue can wait. */
 .nav-badge.alert { background: #ef4444; }
 .nav-badge.calm { background: #64748b; }
 .nav-badge.info { background: #2563eb; }
-.app .rail-fly .nav-badge.nav-badge, .app .rail-sheet .nav-badge.nav-badge, .app .rail-section .nav-badge.nav-badge { position: static; box-shadow: none; padding: 1px 6px; font-size: 10.5px; }
+.app .rail-fly .nav-badge.nav-badge, .app .rail-sheet .nav-badge.nav-badge, .app .rail-mod-items .nav-badge.nav-badge { position: static; box-shadow: none; padding: 1px 6px; font-size: 10.5px; }
 
-/* Pinned pages, above the groups */
+/* Collapsed rail: icons centred, a module's name under its icon (like Open Dental's module bar) */
+.app:not(.rail-open) .sidebar:not(.rail-phone) .rail-item { justify-content: center; padding: 0; }
+.app:not(.rail-open) .sidebar:not(.rail-phone) .rail-brand { justify-content: center; padding-left: 0; padding-right: 0; }
+
+/* Pinned pages, above the modules */
 .rail-pins { display: flex; flex-direction: column; gap: 2px; padding-bottom: 6px; margin-bottom: 6px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); flex: none; }
-.rail-group { position: relative; flex: none; }
 
-/* Collapsed rail: a group's pages in a flyout beside its icon (fixed to the window; Rail.jsx places it) */
-.rail-fly { position: fixed; z-index: 90; min-width: 232px; max-width: 300px; background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow-lg); padding: 6px; display: flex; flex-direction: column; gap: 1px; animation: pop-in 0.12s ease-out; }
-.rail-fly[hidden] { display: none; }
-.rail-fly-head { font-size: 11.5px; font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); padding: 6px 10px 5px; }
+/* A module: the button (one click goes there) and its chevron (the dropdown) side by side */
+.rail-mod-slot { flex: none; display: flex; flex-direction: column; gap: 2px; }
+.rail-mod { position: relative; flex: none; }
+.rail-mod-row { display: flex; align-items: stretch; border-radius: 10px; }
+.rail-mod-row:hover { background: rgba(255, 255, 255, 0.05); }
+.rail-mod-btn { flex: 1; min-width: 0; }
+.rail-mod-btn:hover { background: none; }
+.rail-mod-row:has(.rail-mod-btn.active) { background: rgba(20, 184, 166, 0.16); }
+.rail-mod-btn.active { background: none; }
+.rail-mod-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rail-mod-short { display: none; }
+.app:not(.rail-open) .rail-mod-btn { flex-direction: column; justify-content: center; gap: 3px; height: 50px; padding: 0 2px; }
+.app:not(.rail-open) .rail-mod-name { font-size: 10.5px; font-weight: 550; letter-spacing: 0.01em; max-width: 100%; }
+.app:not(.rail-open) .rail-mod-full { display: none; }
+.app:not(.rail-open) .rail-mod-short { display: inline; }
+.app:not(.rail-open) .rail-mod-btn .nav-badge { top: 3px; right: 6px; }
+.app.rail-open .rail-mod-btn .nav-badge { margin-left: auto; }
+.rail-mod-chev { flex: none; width: 13px; display: grid; place-items: center; padding: 0; margin: 0; border: none; border-radius: 0 10px 10px 0; background: none; color: #7d889b; opacity: 0.55; cursor: pointer; min-height: 0; box-shadow: none; }
+.rail-mod-row:hover .rail-mod-chev, .rail-mod.open .rail-mod-chev { opacity: 1; }
+.rail-mod-chev:hover { background: rgba(255, 255, 255, 0.1); color: #fff; }
+.rail-mod.open .rail-mod-chev { color: #5eead4; }
+.app.rail-open .rail-mod-chev { width: 30px; border-radius: 8px; margin: 5px 0; }
+.app.rail-open .rail-mod-chev svg { transition: transform 0.15s ease; transform: rotate(-90deg); }
+.app.rail-open .rail-mod.open .rail-mod-chev svg { transform: none; }
+@media (pointer: coarse) { .app:not(.rail-open) .rail-mod-chev { width: 18px; opacity: 1; } }
+
+/* The patient the patient modules work on, and a quiet line around those modules */
+.rail-patient { height: 34px; margin-top: 4px; }
+.rail-patient-dot { width: 26px; height: 26px; flex: none; border-radius: 50%; display: grid; place-items: center; font-size: 10.5px; font-weight: 700; color: #0c1524; background: #99f6e4; }
+.rail-patient.none .rail-patient-dot { background: rgba(255, 255, 255, 0.1); color: #aab4c5; }
+.rail-patient .rail-label { flex-direction: column; align-items: flex-start; gap: 0; font-size: 12.5px; color: #e6ebf3; overflow: hidden; text-overflow: ellipsis; }
+.rail-patient .rail-label small { text-transform: uppercase; letter-spacing: 0.05em; font-size: 9.5px; }
+.rail-mod-slot.pt-first { border-top: 1px solid rgba(255, 255, 255, 0.08); margin-top: 4px; }
+.rail-mod-slot.pt-after { border-top: 1px solid rgba(255, 255, 255, 0.08); margin-top: 4px; padding-top: 4px; }
+
+/* Collapsed rail: a module's dropdown beside it (fixed to the window; Rail.jsx places it) */
+.rail-fly { position: fixed; z-index: 90; min-width: 240px; max-width: 320px; background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow-lg); padding: 6px; display: flex; flex-direction: column; gap: 1px; animation: pop-in 0.12s ease-out; }
+.rail-fly.wide { max-width: 540px; min-width: 480px; }
+.rail-fly.wide .rail-fly-body { columns: 2; column-gap: 8px; }
+.rail-fly.wide .rail-fly-section { break-inside: avoid; }
+.rail-fly[hidden], .rail-mod-items[hidden] { display: none; }
+.rail-fly-head { display: flex; flex-direction: column; font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); padding: 6px 10px 6px; border-radius: 8px; }
+.rail-fly-head:hover { color: var(--primary-ink); text-decoration: none; background: var(--hover); }
+.rail-fly-who { text-transform: none; letter-spacing: 0; font-size: 13px; font-weight: 600; color: var(--text); margin-top: 2px; }
+.rail-fly-sub { font-size: 10.5px; font-weight: 650; letter-spacing: 0.05em; text-transform: uppercase; color: var(--faint); padding: 8px 10px 3px; }
 .rail-fly-row, .rail-sub-row { position: relative; display: flex; align-items: center; }
 .rail-fly-link { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 7px 34px 7px 10px; border-radius: 8px; color: var(--text); font-size: 13.5px; font-weight: 500; }
+button.rail-fly-link, button.rail-sub { background: none; border: none; box-shadow: none; text-align: left; font: inherit; cursor: pointer; min-height: 0; margin: 0; }
+button.rail-fly-link { font-size: 13.5px; font-weight: 500; }
 .rail-fly-link svg { color: var(--muted); flex: none; }
 .rail-fly-link:hover, .rail-fly-link:focus-visible { background: var(--hover); text-decoration: none; outline: none; }
 .rail-fly-link:focus-visible { box-shadow: var(--ring); }
 .rail-fly-link.active { background: var(--primary-soft); color: var(--primary-ink); }
 .rail-fly-link.active svg { color: var(--primary-ink); }
+.rail-pick { color: var(--primary-ink); }
 .rail-page-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rail-tabnote { color: var(--faint); font-weight: 400; }
 .rail-fly-link .nav-badge { margin-left: 0; }
 .rail-fly-foot { font-size: 11px; color: var(--faint); padding: 6px 10px 2px; margin-top: 4px; border-top: 1px solid var(--border); }
 
 /* The pin beside each page: shown on hover or focus, always when pinned */
-.rail-pin { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 26px; height: 26px; display: grid; place-items: center; padding: 0; border: none; border-radius: 6px; background: none; color: var(--faint); opacity: 0; cursor: pointer; }
+.rail-pin { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 26px; height: 26px; display: grid; place-items: center; padding: 0; border: none; border-radius: 6px; background: none; color: var(--faint); opacity: 0; cursor: pointer; min-height: 0; box-shadow: none; }
 .rail-fly-row:hover .rail-pin, .rail-fly-row:focus-within .rail-pin, .rail-sub-row:hover .rail-pin, .rail-sub-row:focus-within .rail-pin, .rail-pin.on { opacity: 1; }
 .rail-pin:hover { background: var(--hover); color: var(--text); }
 .rail-pin.on { color: var(--primary); }
 @media (pointer: coarse) { .rail-pin { opacity: 1; } }
 
-/* Rail kept open: groups are collapsible sections (the rail is dark in both themes) */
-.rail-section { flex: none; }
-.rail-section-head { font-size: 13.5px; }
-.rail-section-head.in { color: #fff; }
-.rail-chev { margin-left: auto; transition: transform 0.15s ease; opacity: 0.6; }
-.rail-section:not(.open) .rail-chev { transform: rotate(-90deg); }
-.rail-section-pages { display: flex; flex-direction: column; gap: 1px; padding: 1px 0 6px; }
+/* Menu kept open: a module's dropdown folds out under it (the rail is dark in both themes) */
+.rail-mod-items { display: flex; flex-direction: column; gap: 1px; padding: 1px 0 6px; }
+.rail-mod-items .rail-fly-sub { color: #7d889b; padding-left: 41px; }
 .rail-sub { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 32px 0 41px; border-radius: 8px; color: #aab4c5; font-size: 13px; }
+.rail-sub .rail-tabnote { color: #7d889b; }
+.rail-sub.rail-pick { color: #5eead4; }
 .rail-sub:hover, .rail-sub:focus-visible { background: rgba(255, 255, 255, 0.07); color: #fff; text-decoration: none; outline: none; }
 .rail-sub:focus-visible { box-shadow: 0 0 0 2px rgba(45, 212, 191, 0.6); }
 .rail-sub.active { background: rgba(20, 184, 166, 0.16); color: #5eead4; }
-.rail-section .rail-pin { color: #7d889b; }
-.rail-section .rail-pin:hover { background: rgba(255, 255, 255, 0.1); color: #fff; }
-.rail-section .rail-pin.on { color: #5eead4; }
+.rail-mod-items .rail-pin { color: #7d889b; }
+.rail-mod-items .rail-pin:hover { background: rgba(255, 255, 255, 0.1); color: #fff; }
+.rail-mod-items .rail-pin.on { color: #5eead4; }
 
-/* Phone: the bar shows the pins and a Menu button; the groups open in a bottom sheet */
+/* Phone: the bar shows the pins and a Menu button; the modules open in a bottom sheet */
 .rail-menu-btn { display: none; }
 @media (max-width: 800px) {
   .rail-pins { flex-direction: row; border: none; padding: 0; margin: 0; }
@@ -60,17 +106,27 @@
 .rail-sheet-backdrop { position: fixed; inset: 0; z-index: 95; background: rgba(15, 23, 42, 0.45); display: flex; align-items: flex-end; }
 .rail-sheet { width: 100%; max-height: 82dvh; overflow-y: auto; background: var(--panel); color: var(--text); border-radius: 16px 16px 0 0; box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.25); padding: 8px 16px 20px; animation: sheet-in 0.18s ease-out; }
 @keyframes sheet-in { from { transform: translateY(40px); opacity: 0; } to { transform: none; opacity: 1; } }
-.rail-sheet-head { display: flex; align-items: center; justify-content: space-between; position: sticky; top: -8px; background: var(--panel); padding: 8px 0; z-index: 1; }
-.rail-sheet-close { width: 36px; height: 36px; display: grid; place-items: center; padding: 0; border-radius: 10px; }
-.rail-sheet-group { padding: 8px 0; border-top: 1px solid var(--border); }
-.rail-sheet-group h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 4px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
-.rail-sheet-group.in h3 { color: var(--primary-ink); }
-.rail-sheet-pages { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 2px 4px; }
-.rail-sheet-link { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; min-height: 42px; padding: 0 30px 0 8px; border-radius: 10px; color: var(--text); font-size: 14px; font-weight: 500; }
+.rail-sheet-head { display: flex; align-items: center; gap: 10px; position: sticky; top: -8px; background: var(--panel); padding: 8px 0; z-index: 1; }
+.rail-sheet-who { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: var(--muted); }
+.rail-sheet-close { width: 36px; height: 36px; display: grid; place-items: center; padding: 0; border-radius: 10px; margin-left: auto; }
+.rail-sheet-group { padding: 6px 0; border-top: 1px solid var(--border); }
+.rail-sheet-mod { display: flex; align-items: center; gap: 10px; min-height: 46px; padding: 0 8px; border-radius: 10px; color: var(--text); font-size: 15px; font-weight: 600; }
+.rail-sheet-mod svg { color: var(--muted); flex: none; }
+.rail-sheet-mod:hover, .rail-sheet-mod:focus-visible { background: var(--hover); text-decoration: none; }
+.rail-sheet-for { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; font-weight: 500; color: var(--muted); }
+.rail-sheet-mod .nav-badge { margin-left: auto; }
+.rail-sheet-group.in .rail-sheet-mod { background: var(--primary-soft); color: var(--primary-ink); }
+.rail-sheet-group.in .rail-sheet-mod svg { color: var(--primary-ink); }
+.rail-sheet-pages { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 2px 4px; padding-left: 10px; }
+.rail-sheet-link { flex: 1; min-width: 0; display: flex; align-items: center; gap: 7px; min-height: 40px; padding: 0 28px 0 6px; border-radius: 10px; color: var(--text); font-size: 13.5px; font-weight: 500; }
 .rail-sheet-link svg { color: var(--muted); flex: none; }
 .rail-sheet-link:hover, .rail-sheet-link:focus-visible { background: var(--hover); text-decoration: none; }
 .rail-sheet-link.active { background: var(--primary-soft); color: var(--primary-ink); }
-.rail-sheet-foot { border-top: 1px solid var(--border); padding-top: 8px; }
+.rail-sheet-foot { border-top: 1px solid var(--border); padding-top: 8px; padding-left: 0; }
 .rail-sheet-foot .rail-sheet-link { padding-right: 10px; }
+
+/* The command bar asking which patient a module should open */
+.palette-pick-head { padding: 10px 16px 0; font-size: 12.5px; color: var(--muted); }
+.palette-pick-head strong { color: var(--text); }
 
 @media print { .rail-fly, .rail-sheet-backdrop { display: none !important; } }

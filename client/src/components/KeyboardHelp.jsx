@@ -4,7 +4,13 @@ import { Modal } from './ui.jsx';
 import { useShortcutList, comboLabel, registeredHelp } from '../shortcuts.js';
 
 // "?" shows every keyboard shortcut; "g" then a letter jumps to a main area (like Gmail or GitHub).
-const GO = { t: ['/', 'Today (dashboard)'], s: ['/schedule', 'Schedule'], p: ['/patients', 'Patients'], m: ['/messages', 'Messages'], f: ['/followups', 'Follow-up lists'], b: ['/claims', 'Billing & claims'], r: ['/reports', 'Reports'], o: ['/office', 'To-do & labs'], x: ['/settings', 'Settings'] };
+// "module:…" entries are the patient modules of the menu (nav/Rail.jsx): they open the active patient's tab, or
+// ask for a patient first. (Family and Treatment Plan have no letter: F and T were already taken.)
+const GO = {
+  t: ['/', 'Today (dashboard)'], s: ['/schedule', 'Schedule'], p: ['/patients', 'Patients'], m: ['/messages', 'Messages'], f: ['/followups', 'Follow-up lists'],
+  b: ['/claims', 'Billing & claims'], r: ['/reports', 'Reports'], o: ['/office', 'To-do & labs'], x: ['/settings', 'Settings'],
+  a: ['module:account', 'Account (the patient’s ledger)'], c: ['module:chart', 'Chart (the patient’s chart)'], i: ['module:images', 'Images (the patient’s x-rays and documents)'],
+};
 const typing = (el) => !!el?.closest?.('input, textarea, select, [contenteditable]');
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || '');
 
@@ -63,7 +69,9 @@ export default function KeyboardHelp() {
         e.preventDefault();
         pendingG.current = 0;
         setOpen(false);
-        navigate(GO[e.key.toLowerCase()][0]);
+        const to = GO[e.key.toLowerCase()][0];
+        if (to.startsWith('module:')) window.dispatchEvent(new CustomEvent('dm:module', { detail: to.slice(7) }));
+        else navigate(to);
         return;
       }
       pendingG.current = e.key.toLowerCase() === 'g' && !document.querySelector('.modal') ? Date.now() : 0;
