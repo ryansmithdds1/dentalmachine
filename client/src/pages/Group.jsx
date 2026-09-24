@@ -1,11 +1,18 @@
 import { useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { api } from '../api.js';
 import { useApi } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
 import { money } from '../format.js';
 import { ErrorBox, useSubmit } from '../components/ui.jsx';
+import BillingQueue, { QUEUE_ORDER } from '../components/group/BillingQueue.jsx';
+import PatientLookup from '../components/group/PatientLookup.jsx';
+import GroupReports from '../components/group/GroupReports.jsx';
+import RoleTemplates from '../components/group/RoleTemplates.jsx';
+import '../components/group/group.css';
 
-// A group of practices: each office's numbers side by side, and keeping setup in step across offices.
+// A group of practices (a DSO): each office at a glance, the central billing office's queue and patient
+// lookup (for the group's billing team), group reports, and keeping setup and roles in step across offices.
 const pct = (n) => (n == null ? '—' : `${n}%`);
 const COLS = [
   ['production', 'Production', money], ['collections', 'Collected', money], ['completed_visits', 'Visits', String], ['new_patients', 'New patients', String],
@@ -24,7 +31,9 @@ export default function Group() {
       <div className="page-header">
         <div>
           <h1>{data.org ? data.org.name : 'Practice group'}</h1>
-          <div className="muted">Your offices side by side, and their setup kept in step. The group sees totals only — never another office’s patients.</div>
+          <div className="muted">{data.billing
+            ? 'Your offices side by side, and the group’s billing work in one place. You work an item inside its own practice.'
+            : 'Your offices side by side, and their setup kept in step. The group sees totals only — never another office’s patients.'}</div>
         </div>
       </div>
       {!data.org && <Start admin={user.role === 'admin'} onDone={reload} />}
@@ -69,12 +78,78 @@ function LeaveButton({ onDone }) {
   return <button className="small danger" onClick={() => window.confirm('Take this practice out of the group?') && leave.submit()}>Leave the group</button>;
 }
 
+const TABS = [['overview', 'Overview'], ['billing', 'Billing queue', (o) => o.billing], ['lookup', 'Patient lookup', (o) => o.billing], ['reports', 'Reports'], ['setup', 'Setup & roles', (o) => o.role === 'owner']];
+
 function Dashboard({ org, onChange }) {
   const { user } = useAuth();
+  const [params, setParams] = useSearchParams();
+  const tabs = TABS.filter(([, , show]) => !show || show(org));
+  const tab = tabs.some(([k]) => k === params.get('tab')) ? params.get('tab') : 'overview';
+  const { data: summary, reload: reloadSummary } = useApi(org.billing ? '/org/billing/summary' : null);
+  const me = { ...org, me: user.id };
+  const go = (next, extra = {}) => setParams({ tab: next, ...extra });
+  return (
+    <>
+      <div className="tabs" role="tablist">
+        {tabs.map(([k, l]) => (
+          <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'active' : ''} onClick={() => go(k)}>
+            {l}{k === 'billing' && summary?.mine ? <span className="count" title="Assigned to you">{summary.mine}</span> : null}
+          </button>
+        ))}
+      </div>
+      {tab === 'overview' && <Overview org={org} summary={summary} onQueue={(queue, practice) => go('billing', { queue, practice: String(practice) })} />}
+      {tab === 'billing' && <BillingQueue org={me} summary={summary} onChanged={reloadSummary} initialQueue={params.get('queue') || 'outstanding'} initialPractice={params.get('practice') || ''} />}
+      {tab === 'lookup' && <PatientLookup />}
+      {tab === 'reports' && <GroupReports org={org} />}
+      {tab === 'setup' && (
+        <>
+          <Push org={org} />
+          <Manage org={org} onChange={onChange} me={user.id} />
+          <RoleTemplates />
+        </>
+      )}
+    </>
+  );
+}
+
+// A tile per office: this month's numbers and, for the billing team, the work waiting there.
+const CHIPS = [['outstanding', 'waiting on payer'], ['denied', 'denied', 'danger'], ['unsent', 'not sent', 'warn'], ['era', 'unmatched payments', 'warn'], ['credits', 'credit balances']];
+function Tiles({ roll, summary, org, onQueue }) {
+  const billing = new Map((summary?.practices || []).map((p) => [p.practice_id, p]));
+  return (
+    <div className="grp-tiles">
+      {(roll?.practices || []).map((p) => {
+        const b = billing.get(p.practice_id);
+        return (
+          <div key={p.practice_id} className="card grp-tile">
+            <div className="grp-tile-head">
+              <h3>{p.name}</h3>
+              {p.practice_id === org.user_practice_id ? <span className="grp-you">You’re here</span> : p.city ? <span className="muted" style={{ fontSize: 12 }}>{p.city}</span> : null}
+            </div>
+            <div className="grp-tile-nums">
+              <div><div className="k">Production</div><div className="v">{money(p.production).replace('.00', '')}</div></div>
+              <div><div className="k">Collected</div><div className="v">{money(p.collections).replace('.00', '')}</div></div>
+              <div><div className="k">Owed 90+</div><div className="v" style={p.ar_over_90_pct > 20 ? { color: 'var(--danger)' } : {}}>{p.ar_over_90_pct == null ? '—' : `${p.ar_over_90_pct}%`}</div></div>
+            </div>
+            {b && (
+              <div className="grp-chips">
+                {CHIPS.filter(([k]) => b.queues[k].count).map(([k, l, tone]) => (
+                  <button key={k} className={`grp-chip ${tone || ''}`} onClick={() => onQueue(k, p.practice_id)} title={`${money(b.queues[k].amount)} · open the queue`}><b>{b.queues[k].count}</b>{l}</button>
+                ))}
+                {QUEUE_ORDER.every((k) => !b.queues[k].count) && <span className="muted" style={{ fontSize: 12 }}>Billing queues clear</span>}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function Overview({ org, summary, onQueue }) {
   const today = new Date().toLocaleDateString('en-CA');
   const [range, setRange] = useState({ from: `${today.slice(0, 7)}-01`, to: today });
   const { data: roll, error } = useApi(`/org/rollup?from=${range.from}&to=${range.to}`);
-  const owner = org.role === 'owner';
   const best = (k) => {
     const vals = (roll?.practices || []).map((p) => p[k]).filter((v) => v != null);
     if (vals.length < 2) return null;
@@ -82,7 +157,8 @@ function Dashboard({ org, onChange }) {
   };
   return (
     <>
-      <div className="card inline" style={{ gap: 12, flexWrap: 'wrap' }}>
+      <Tiles roll={roll} summary={summary} org={org} onQueue={onQueue} />
+      <div className="card inline" style={{ gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
         <label className="inline">From <input type="date" value={range.from} onChange={(e) => setRange({ ...range, from: e.target.value })} /></label>
         <label className="inline">To <input type="date" value={range.to} onChange={(e) => setRange({ ...range, to: e.target.value })} /></label>
         <span className="muted" style={{ fontSize: 12 }}>Best office on each measure is highlighted.</span>
@@ -109,8 +185,6 @@ function Dashboard({ org, onChange }) {
           </table>
         </div>
       </div>
-      {owner && <Push org={org} />}
-      {owner && <Manage org={org} onChange={onChange} me={user.id} />}
     </>
   );
 }
@@ -152,8 +226,9 @@ function Manage({ org, onChange, me }) {
   const [code, setCode] = useState(null);
   const [email, setEmail] = useState('');
   const [role, setRole] = useState('viewer');
+  const [billing, setBilling] = useState(false);
   const gen = useSubmit(async () => setCode(await api.post('/org/join-code')));
-  const add = useSubmit(async () => { await api.post('/org/members', { email, role }); setEmail(''); onChange(); });
+  const add = useSubmit(async () => { await api.post('/org/members', { email, role, billing }); setEmail(''); setBilling(false); onChange(); });
   const act = useSubmit(async (fn) => { await fn(); onChange(); });
   return (
     <div className="grid grid-2" style={{ marginTop: 12 }}>
@@ -173,16 +248,25 @@ function Manage({ org, onChange, me }) {
       </div>
       <div className="card">
         <h2>Who can see the group</h2>
+        <p className="muted" style={{ fontSize: 12, marginTop: -6 }}>Viewers see totals. The billing team also works the billing queues and can look up patients across offices (each lookup is recorded).</p>
         <ErrorBox error={add.error} />
         {org.members.map((m) => (
           <div key={m.id} className="inline" style={{ justifyContent: 'space-between', padding: '4px 0' }}>
-            <span>{m.name} <span className="muted" style={{ fontSize: 12 }}>{m.practice} · {m.role}</span></span>
-            {m.id !== me && <button className="small" onClick={() => act.submit(() => api.del(`/org/members/${m.id}`))}>Remove</button>}
+            <span>{m.name} <span className="muted" style={{ fontSize: 12 }}>{m.practice} · {m.role}{m.role !== 'owner' && Number(m.billing) ? ' · billing team' : ''}</span></span>
+            <span className="inline" style={{ gap: 6 }}>
+              {m.role !== 'owner' && (
+                <label className="checkbox" style={{ fontSize: 12 }} title="Works the group’s billing queues and can look patients up across the group">
+                  <input type="checkbox" checked={!!Number(m.billing)} onChange={(e) => act.submit(() => api.put(`/org/members/${m.id}`, { billing: e.target.checked }))} /> Billing team
+                </label>
+              )}
+              {m.id !== me && <button className="small" onClick={() => act.submit(() => api.del(`/org/members/${m.id}`))}>Remove</button>}
+            </span>
           </div>
         ))}
         <form className="inline" style={{ gap: 6, marginTop: 8 }} onSubmit={(e) => { e.preventDefault(); add.submit(); }}>
           <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email of someone at a member office" style={{ flex: 1 }} />
           <select value={role} onChange={(e) => setRole(e.target.value)}><option value="viewer">Viewer</option><option value="owner">Owner</option></select>
+          {role !== 'owner' && <label className="checkbox" style={{ fontSize: 12 }}><input type="checkbox" checked={billing} onChange={(e) => setBilling(e.target.checked)} /> Billing team</label>}
           <button className="small" disabled={!email || add.busy}>Add</button>
         </form>
       </div>

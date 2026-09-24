@@ -1,0 +1,54 @@
+/* Group (DSO) console: practice tiles, the central billing queue, reports. Uses the app's tokens only. */
+.grp-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.grp-tile { display: flex; flex-direction: column; gap: 10px; }
+.grp-tile-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.grp-tile-head h3 { margin: 0; font-size: 15px; }
+.grp-tile-nums { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.grp-tile-nums .k { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; }
+.grp-tile-nums .v { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.grp-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.grp-chip { display: inline-flex; gap: 6px; align-items: center; font-size: 12px; padding: 3px 9px; border-radius: 999px; background: var(--subtle); color: var(--text-2); border: 1px solid var(--border); min-height: 0; box-shadow: none; }
+.grp-chip b { font-variant-numeric: tabular-nums; color: var(--text); }
+.grp-chip.warn { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
+.grp-chip.danger { background: var(--danger-soft); color: var(--danger); border-color: transparent; }
+.grp-you { font-size: 11px; font-weight: 600; color: var(--primary-ink); background: var(--primary-soft); padding: 1px 7px; border-radius: 999px; }
+
+.grp-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+.grp-toolbar select, .grp-toolbar input { width: auto; }
+.grp-toolbar .spacer { flex: 1; }
+.grp-seg-count { font-variant-numeric: tabular-nums; opacity: 0.75; margin-left: 4px; font-size: 11px; }
+
+.grp-queue { max-height: 62vh; overflow: auto; }
+.grp-queue table { font-size: 13px; }
+.grp-queue thead th { position: sticky; top: 0; z-index: 1; }
+.grp-queue tbody tr { cursor: pointer; }
+.grp-queue tbody tr:hover td { background: var(--subtle); }
+.grp-queue tbody tr.cursor td { background: var(--primary-soft); }
+.grp-queue tbody tr.cursor td:first-child { box-shadow: inset 3px 0 0 var(--primary); }
+.grp-queue tbody tr.readonly td { color: var(--text-2); }
+.grp-queue td.num, .grp-queue th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.grp-age { display: inline-block; min-width: 42px; text-align: center; font-size: 12px; font-weight: 600; border-radius: 6px; padding: 1px 6px; background: var(--subtle); }
+.grp-age.a60 { background: var(--warn-soft); color: var(--warn); }
+.grp-age.a90 { background: var(--danger-soft); color: var(--danger); }
+.grp-bulk { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--primary-soft); font-size: 13px; }
+.grp-bulk select { width: auto; }
+.grp-hint { font-size: 12px; color: var(--muted); display: flex; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
+.grp-note { font-size: 12.5px; padding: 8px 12px; border-radius: var(--radius-sm); background: var(--subtle); border: 1px solid var(--border); margin-bottom: 10px; }
+
+.grp-charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 12px; margin: 12px 0; }
+.grp-charts h2 { margin: 0 0 8px; font-size: 15px; }
+.grp-stack { display: flex; height: 14px; border-radius: 4px; overflow: hidden; gap: 2px; background: var(--subtle); }
+.grp-stack i { display: block; height: 100%; min-width: 0; }
+.grp-row { margin-bottom: 10px; font-size: 13px; }
+.grp-row .inline { justify-content: space-between; margin-bottom: 4px; }
+.grp-rates { display: grid; grid-template-columns: minmax(90px, 1fr) repeat(3, minmax(70px, 1fr)); gap: 6px 12px; align-items: center; font-size: 13px; }
+.grp-rates .h { color: var(--muted); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+.grp-meter { position: relative; height: 8px; border-radius: 4px; background: var(--subtle); overflow: hidden; }
+.grp-meter i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 4px; background: var(--primary); }
+.grp-rate-v { font-variant-numeric: tabular-nums; font-weight: 600; font-size: 12px; }
+.grp-total-row td { border-top: 2px solid var(--border); font-weight: 700; }
+
+@media (max-width: 640px) {
+  .grp-tile-nums { grid-template-columns: repeat(2, 1fr); }
+  .grp-queue { max-height: none; }
+}

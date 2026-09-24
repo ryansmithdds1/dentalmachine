@@ -1915,6 +1915,54 @@ CREATE TABLE IF NOT EXISTS org_role_templates (
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE (organization_id, name)
 );
+-- Perfect day / block scheduling (S2, production.js). A named plan for one provider's day ("Dr. Chen Tuesday"):
+-- lanes of time kept for some visit types, each with a production goal, and a goal for the whole day.
+-- weekdays is a JSON list (0 = Sunday) of the days it applies to by itself. Configuration: retired with
+-- active = 0, never deleted; editing a template retires its old blocks and adds the new ones.
+CREATE TABLE IF NOT EXISTS day_templates (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  provider_id INTEGER NOT NULL REFERENCES providers(id),
+  location_id INTEGER REFERENCES locations(id),
+  name TEXT NOT NULL,
+  weekdays TEXT NOT NULL DEFAULT '[]',
+  day_goal INTEGER,
+  release_hours INTEGER NOT NULL DEFAULT 24,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- A block of a day template: 'HH:MM' times, the visit types it's kept for (JSON ids; empty = a goal-only
+-- lane that takes anything) until release_hours (template's when null) before it starts, and its goal in cents.
+CREATE TABLE IF NOT EXISTS day_template_blocks (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  template_id INTEGER NOT NULL REFERENCES day_templates(id),
+  label TEXT NOT NULL,
+  start_time TEXT NOT NULL,
+  end_time TEXT NOT NULL,
+  appointment_type_ids TEXT NOT NULL DEFAULT '[]',
+  goal INTEGER NOT NULL DEFAULT 0,
+  release_hours INTEGER,
+  color TEXT,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- One date for one provider planned differently from their weekday template: another template ('template'),
+-- no template ('none'), or back to the usual ('auto' — how a date override is taken off, never by deleting it).
+CREATE TABLE IF NOT EXISTS day_template_dates (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  provider_id INTEGER NOT NULL REFERENCES providers(id),
+  date TEXT NOT NULL,
+  mode TEXT NOT NULL DEFAULT 'template' CHECK (mode IN ('template','none','auto')),
+  template_id INTEGER REFERENCES day_templates(id),
+  reason TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (provider_id, date)
+);
 `;
 
 // Columns added after the first release. SQLite has no ADD COLUMN IF NOT EXISTS, so check first.

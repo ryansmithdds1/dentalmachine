@@ -20,6 +20,8 @@ export const HIGH_RISK = [
   ['PUT', /^\/(insurance|insurance-plans|payment-plans)\/\d+$/, 'insurance and payment plans'],
   ['PUT', /^\/patients\/\d+\/medical$/, 'changing the medical history'],
   ['POST', /^\/insurance-updates\/\d+\/apply$/, 'insurance'],
+  ['POST', /^\/org\/role-templates\/\d+\/apply$/, 'changing permissions across the group'],
+  ['PUT', /^\/org\/role-templates\/\d+$/, 'changing permissions across the group'],
   ['POST', /^\/patients\/\d+\/insurance-card\/confirm$/, 'insurance'],
   ['DELETE', /./, 'removing records'],
 ];

@@ -10,7 +10,7 @@ Rules that apply to all of them are in `/CLAUDE.md`.
 |---|---|---|
 | Practice (tenant) | `practices` | Every tenant-owned row has `practice_id`; every query filters by it (`findOr404(db, table, id, practice_id)`). Data never crosses practices. |
 | Office / location | `locations` | A practice's physical offices. Appointments, operatories, ledger entries, procedures, claims, clinical notes, messages, calls, documents, prescriptions and patients (home office) carry `location_id` — `insert()` fills it from the visit, the office being worked in, or the patient's home office. Users can be restricted to locations (`users.location_ids`). |
-| Group of practices | `organizations`, `org_members`, `practices.organization_id` | Owners see **totals** across practices and copy setup; never another practice's patient records. |
+| Group of practices | `organizations`, `org_members`, `practices.organization_id` | Owners see **totals** across practices and copy setup. Only the group's central billing team (owners, and members an owner flags `org_members.billing`, who also hold `billing:read`) sees patient-level rows across practices — billing queues and a read-only lookup — and every such view is audited in the patient's own practice (`docs/dso.md`). Records are only opened and changed from within their own practice. |
 | Staff user | `users`, `custom_roles` | Role + custom role permissions ± per-user adds/removes (`effectivePermissions`). MFA, SSO, idle timeout, `token_version` to revoke sessions. |
 | Machine access | `api_keys` (scopes), MCP | Acts as `role: 'api'`, audited as `API: <key name>` / `MCP: <key name>`. |
 

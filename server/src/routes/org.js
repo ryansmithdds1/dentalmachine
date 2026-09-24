@@ -6,11 +6,13 @@ import { toolByName } from '../datatools.js';
 import { agingReport } from '../aging.js';
 import { financeOverview } from '../finance/metrics.js';
 import { recordFeeChange } from '../fees.js';
+import orgBillingRoutes from './orgbilling.js';
 
 // Groups of practices (a DSO, or one owner with several offices, each its own practice): the owners see the
 // offices side by side and keep their setup in step. A practice joins with a one-time code from an owner,
 // entered by that practice's own administrator, so both sides agree. Patient records never cross over:
-// the group sees totals only.
+// the group sees totals only — except the group's billing team (org_members.billing), who work the central
+// billing queues and look patients up across the group's practices (routes/orgbilling.js, docs/dso.md).
 const requireAdmin = (req, _res, next) => (req.user.role === 'admin' ? next() : next(new HttpError(403, 'Only administrators can do this')));
 
 // What can be pushed from one practice to the others.
@@ -67,7 +69,7 @@ async function copyInto(db, kind, from, to, userId) {
 export default function orgRoutes({ db }) {
   const r = Router();
   const membership = (req) => db.get(
-    'SELECT m.role, o.* FROM org_members m JOIN organizations o ON o.id = m.organization_id WHERE m.user_id = ? ORDER BY m.id LIMIT 1', req.user.id,
+    'SELECT m.role, m.billing, o.* FROM org_members m JOIN organizations o ON o.id = m.organization_id WHERE m.user_id = ? ORDER BY m.id LIMIT 1', req.user.id,
   );
   const requireOrg = (owner) => async (req, _res, next) => {
     try {
@@ -93,8 +95,10 @@ export default function orgRoutes({ db }) {
     const org = await db.get('SELECT id, name, created_at FROM organizations WHERE id = ?', orgId);
     res.json({
       org, role: m?.role ?? null, practice_in_group: mine.organization_id === orgId, pushable: PUSHABLE,
+      // Works the central billing queues (owners always can; they also need billing access at their own practice).
+      billing: !!m && (m.role === 'owner' || !!Number(m.billing)), user_practice_id: req.user.practice_id,
       practices: m ? await practicesOf(orgId) : [],
-      members: m ? await db.all('SELECT u.id, u.name, u.email, m.role, p.name AS practice FROM org_members m JOIN users u ON u.id = m.user_id JOIN practices p ON p.id = u.practice_id WHERE m.organization_id = ? ORDER BY u.name', orgId) : [],
+      members: m ? await db.all('SELECT u.id, u.name, u.email, m.role, m.billing, p.name AS practice FROM org_members m JOIN users u ON u.id = m.user_id JOIN practices p ON p.id = u.practice_id WHERE m.organization_id = ? ORDER BY u.name', orgId) : [],
     });
   });
 
@@ -150,16 +154,28 @@ export default function orgRoutes({ db }) {
     res.json({ ok: true });
   });
 
-  // Owners add people (from the group's practices) as owners or viewers of the group's numbers.
+  // Owners add people (from the group's practices) as owners or viewers of the group's numbers, and choose who
+  // is on the group's billing team (sees patient-level billing work across the group's practices).
   r.post('/org/members', requireOrg(true), async (req, res) => {
     const role = req.body?.role === 'owner' ? 'owner' : 'viewer';
+    const billing = req.body?.billing ? 1 : 0;
     const u = await db.get('SELECT u.id, u.practice_id, u.role FROM users u JOIN practices p ON p.id = u.practice_id WHERE lower(u.email) = lower(?) AND p.organization_id = ? AND u.active = 1', String(req.body?.email || ''), req.org.id);
     if (!u) throw new HttpError(404, 'No active user with that email at a practice in this group');
     if (role === 'owner' && u.role !== 'admin') throw new HttpError(400, 'Owners must be administrators of their practice');
-    const have = await db.get('SELECT id FROM org_members WHERE user_id = ?', u.id);
-    if (have) await db.run('UPDATE org_members SET role = ?, organization_id = ? WHERE id = ?', role, req.org.id, have.id);
-    else await insert(db, 'org_members', { organization_id: req.org.id, user_id: u.id, role });
-    await audit(db, req, 'org.member', 'organizations', req.org.id, { user_id: u.id, role });
+    const have = await db.get('SELECT id, role, billing FROM org_members WHERE user_id = ?', u.id);
+    if (have) await db.run('UPDATE org_members SET role = ?, billing = ?, organization_id = ? WHERE id = ?', role, billing, req.org.id, have.id);
+    else await insert(db, 'org_members', { organization_id: req.org.id, user_id: u.id, role, billing });
+    await audit(db, req, 'org.member', 'organizations', req.org.id, { user_id: u.id, role, billing }, { before: have ? { role: have.role, billing: have.billing } : null, after: { role, billing } });
+    res.json({ ok: true });
+  });
+  // Putting someone on (or taking them off) the billing team is a permission change: owners only, audited.
+  r.put('/org/members/:uid', requireOrg(true), async (req, res) => {
+    const have = await db.get('SELECT id, role, billing FROM org_members WHERE organization_id = ? AND user_id = ?', req.org.id, Number(req.params.uid));
+    if (!have) throw new HttpError(404, 'Not a member of this group');
+    if (typeof req.body?.billing !== 'boolean') throw new HttpError(400, 'Say whether they’re on the billing team (billing: true or false)');
+    const billing = req.body.billing ? 1 : 0;
+    await db.run('UPDATE org_members SET billing = ? WHERE id = ?', billing, have.id);
+    await audit(db, req, 'org.member_billing', 'organizations', req.org.id, { user_id: Number(req.params.uid) }, { before: { billing: have.billing }, after: { billing } });
     res.json({ ok: true });
   });
   r.delete('/org/members/:uid', requireOrg(true), async (req, res) => {
@@ -217,5 +233,8 @@ export default function orgRoutes({ db }) {
     }
     res.json({ results });
   });
+
+  // Central billing queues, patient lookup, group reports and role templates.
+  r.use(orgBillingRoutes({ db }));
   return r;
 }
