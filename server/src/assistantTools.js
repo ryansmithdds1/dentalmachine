@@ -176,6 +176,21 @@ export function toolbox(call, today) {
         return `Add a clinical note for ${who}:\n“${i.body}”`;
       case 'add_procedures':
         return `${i.status === 'completed' ? 'Complete' : 'Plan'} for ${who}: ${(i.items || []).map((x) => `${x.code}${x.tooth ? ` #${x.tooth}` : ''}${x.surfaces ? ` ${x.surfaces}` : ''}${x.area ? ` ${x.area}` : ''}`).join(', ')}`;
+      case 'chart_entry': {
+        // The same preview the chart shows (POST /charting/resolve): what will be charted, fees, and anything to check.
+        let r;
+        try {
+          r = await call('POST', '/charting/resolve', { patient_id: i.patient_id, text: i.text });
+        } catch (err) {
+          return `Chart for ${who}: “${i.text}” — can’t: ${err.message}`;
+        }
+        const line = (items) => items.map((x) => `${x.text}${x.error ? ` (can’t: ${x.error})` : ''}`).join(', ');
+        const money = (c) => `$${dollars(c).toFixed(2)}`;
+        const est = (x) => (x.estimate ? `; est. patient ${money(x.estimate.total_patient)}` : '');
+        if (r.options) return `Treatment options for ${who}:\n${r.options.map((o) => `${o.label}: ${line(o.items)} — ${money(o.total_fee)}${est(o)}`).join('\n')}`;
+        const warn = r.warnings?.length ? `\nCheck: ${r.warnings.join('; ')}` : '';
+        return `Chart for ${who}: ${line(r.items)} — ${money(r.total_fee)}${est(r)}${warn}`;
+      }
       case 'chart_conditions':
         return `Chart for ${who}: ${(i.items || []).map((x) => `#${x.tooth} ${String(x.condition).replace('_', ' ')}${x.surfaces ? ` ${x.surfaces}` : ''}${x.notes ? ` (${x.notes})` : ''}`).join(', ')}`;
       case 'record_perio':

@@ -24,6 +24,8 @@ import BridgeSetup from '../components/imaging/BridgeSetup.jsx';
 import DayTemplates from '../components/settings/DayTemplates.jsx';
 import OpportunityRules from '../components/opportunities/OpportunityRules.jsx';
 import Digests from '../components/settings/Digests.jsx';
+import JourneySettings from '../components/JourneySettings.jsx';
+import ChartShortcuts from '../components/settings/ChartShortcuts.jsx';
 
 const ROLES = ['admin', 'dentist', 'hygienist', 'assistant', 'front_desk', 'billing'];
 const CATEGORIES = ['diagnostic', 'preventive', 'restorative', 'endodontics', 'periodontics', 'prosthodontics', 'oral_surgery', 'orthodontics', 'implants', 'adjunctive'];
@@ -64,6 +66,8 @@ const RESOURCES = {
 // What each section contains, so the search box finds "lock date" or "two-factor" as well as section names.
 // Fields of the simple list sections (providers, carriers…) are added from their definitions.
 const KEYWORDS = {
+  chartshortcuts: 'chart shortcuts quick buttons hotkeys alt aliases bundles crown implant new patient srp bridge denture night guard sealants treatment entry voice',
+  journeys: 'patient journeys welcome new patient birthday thank you card post-op check-in anniversary milestone certificate we miss you reactivation referral newsletter holiday cards survey nps delight',
   opportunities: 'opportunities upside sealants fluoride bitewings fmx pano perio maintenance srp arestin night guard unscheduled treatment recall frequency',
   digests: 'metric emails digest huddle end of day weekly monthly trends areas improvement unsubscribe',
   account: 'password two-factor 2fa authenticator mfa my account sign in',
@@ -97,9 +101,9 @@ export default function Settings() {
   const groups = [
     ['You', [['account', 'My account', true]]],
     ['Practice', [['practice', 'Practice & security', admin], ['users', 'Users & roles', admin], ['locations', 'Offices', admin], ['providers', 'Providers', true], ['operatories', 'Operatories', true], ['types', 'Appointment types', true], ['daytemplates', 'Perfect day & late patients', can('schedule:read')], ['import', 'Import from another system', admin]]],
-    ['Clinical', [['templates', 'Note templates', can('clinical:write')], ['forms', 'Forms & consents', can('patients:read')], ['labs', 'Labs', can('clinical:read')], ['education', 'Patient education', can('patients:read')], ['referrals', 'Referral contacts', can('patients:read')], ['opportunities', 'Opportunities', can('clinical:read')]]],
+    ['Clinical', [['templates', 'Note templates', can('clinical:write')], ['forms', 'Forms & consents', can('patients:read')], ['labs', 'Labs', can('clinical:read')], ['education', 'Patient education', can('patients:read')], ['referrals', 'Referral contacts', can('patients:read')], ['opportunities', 'Opportunities', can('clinical:read')], ['chartshortcuts', 'Chart shortcuts & bundles', can('clinical:read')]]],
     ['Billing', [['codes', 'Fee schedule', true], ['ppo', 'Fee schedules', can('billing:read')], ['carriers', 'Insurance carriers', can('billing:read')], ['memberships', 'Membership plans', can('billing:read')]]],
-    ['Patients', [['messaging', 'Messages & reviews', admin], ['digests', 'Metric emails', admin], ['phone', 'Phone line', admin], ['checkin', 'Mobile check-in', admin], ['booking', 'Online booking links', admin], ['custom', 'Custom patient fields', admin], ['duplicates', 'Duplicate charts', admin]]],
+    ['Patients', [['messaging', 'Messages & reviews', admin], ['digests', 'Metric emails', admin], ['phone', 'Phone line', admin], ['checkin', 'Mobile check-in', admin], ['journeys', 'Patient journeys', can('patients:read')], ['booking', 'Online booking links', admin], ['custom', 'Custom patient fields', admin], ['duplicates', 'Duplicate charts', admin]]],
     ['Connections', [['integrations', 'Integrations', admin], ['imaging', 'Imaging bridges', admin], ['assistant', 'Assistant', admin], ['developer', 'API & webhooks', admin], ['activity', 'Connection activity', admin]]],
     ['Compliance', [['audit', 'Audit log', admin], ['backups', 'Backups', admin]]],
   ].map(([g, items]) => [g, items.filter((t) => t[2])]).filter(([, items]) => items.length);
@@ -169,6 +173,8 @@ export default function Settings() {
       {tab === 'daytemplates' && <DayTemplates />}
       {tab === 'opportunities' && <OpportunityRules />}
       {tab === 'digests' && <Digests />}
+      {tab === 'journeys' && <JourneySettings />}
+      {tab === 'chartshortcuts' && <ChartShortcuts />}
       {tab === 'assistant' && <AssistantLog />}
       {tab === 'integrations' && <Integrations />}
       {tab === 'audit' && <AuditLog />}

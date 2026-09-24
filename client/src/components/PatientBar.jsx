@@ -1,12 +1,14 @@
 import { useLocation, useNavigate } from 'react-router-dom';
-import { AlertTriangle, CalendarPlus, CreditCard, FileText, MessageSquare, Stethoscope, X, Wallet } from 'lucide-react';
+import { AlertTriangle, CalendarPlus, CreditCard, FileText, MessageSquare, Star, Stethoscope, X, Wallet } from 'lucide-react';
+import { requestReview } from '../reviewRequest.js';
 import { useApi } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
 import { useActivePatient } from '../activePatient.jsx';
 import { useShortcuts, comboLabel } from '../shortcuts.js';
 import { money, age, fmtDate } from '../format.js';
+import ReferralChip from './referrals/ReferralChip.jsx';
 
-// Where each patient action goes. Alt+letter works from any screen while a patient is active.
+// Where each patient action goes (or, with `run`, what it does in place). Alt+letter works from any screen while a patient is active.
 export const PATIENT_ACTIONS = [
   { key: 'c', label: 'Chart', icon: Stethoscope, to: (id) => `/patients/${id}?tab=chart`, perm: 'clinical:read' },
   { key: 'n', label: 'Note', icon: FileText, to: (id) => `/patients/${id}?tab=notes`, perm: 'clinical:write' },
@@ -14,7 +16,11 @@ export const PATIENT_ACTIONS = [
   { key: 't', label: 'Text', icon: MessageSquare, to: (id) => `/messages?patient=${id}`, perm: 'patients:read' },
   { key: 'l', label: 'Ledger', icon: Wallet, to: (id) => `/patients/${id}?tab=ledger`, perm: 'billing:read' },
   { key: 'p', label: 'Pay', icon: CreditCard, to: (id) => `/patients/${id}?tab=ledger&pay=1`, perm: 'billing:write' },
+  // Texts (or emails) the "how did we do?" link; throttled and opt-out aware on the server (docs/reviews.md).
+  { key: 'r', label: 'Review', title: 'Ask for a review', icon: Star, run: (id) => requestReview(id, { source: 'patient_bar' }), perm: 'patients:write' },
 ];
+// Runs an action for a patient: goes to its screen, or does it right here.
+export const runPatientAction = (a, id, nav) => (a.run ? a.run(id) : nav(a.to(id)));
 
 const when = (dt) => (dt ? `${fmtDate(dt.slice(0, 10))} ${dt.slice(11, 16)}` : '');
 
@@ -27,7 +33,7 @@ export default function PatientBar() {
   const { data: p, error } = useApi(patientId ? `/patients/${patientId}/card` : null);
   const actions = PATIENT_ACTIONS.filter((a) => can(a.perm));
   useShortcuts([
-    ...actions.map((a) => ({ combo: `alt+${a.key}`, handler: () => nav(a.to(patientId)), label: `${a.label} for the active patient`, section: 'Active patient', enabled: !!patientId })),
+    ...actions.map((a) => ({ combo: `alt+${a.key}`, handler: () => runPatientAction(a, patientId, nav), label: `${a.title || a.label} for the active patient`, section: 'Active patient', enabled: !!patientId })),
     { combo: 'alt+x', handler: clear, label: 'Clear the active patient', section: 'Active patient', enabled: !!patientId },
   ]);
   if (!patientId || error) return null;
@@ -50,9 +56,10 @@ export default function PatientBar() {
         </span>
       )}
       <span className="pb-chip">{p.next_visit ? <>Next <b>{when(p.next_visit.start_time)}</b></> : <span className="muted">No visit booked</span>}</span>
+      <ReferralChip patientId={p.id} />
       <span className="pb-actions">
         {actions.map((a) => (
-          <button key={a.key} type="button" className="pb-act" onClick={() => nav(a.to(p.id))} title={`${a.label} (${comboLabel(`alt+${a.key}`).join(' ')})`}>
+          <button key={a.key} type="button" className="pb-act" onClick={() => runPatientAction(a, p.id, nav)} title={`${a.title || a.label} (${comboLabel(`alt+${a.key}`).join(' ')})`}>
             <a.icon size={15} aria-hidden /><span>{a.label}</span>
           </button>
         ))}

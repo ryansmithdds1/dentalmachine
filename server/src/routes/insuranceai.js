@@ -189,6 +189,42 @@ async function matchCarrier(db, pid, { carrier_name: name, payer_id: payer }) {
 const sameName = (a, b) => cardNorm(a).replace(/\d/g, '') === cardNorm(b).replace(/\d/g, '');
 const ageOn = (dob, today) => (dob ? Math.floor((Date.parse(today) - Date.parse(dob)) / (365.25 * 86400_000)) : null);
 
+// Reads a paper EOB (or a check's remittance) with AI and matches each claim on it to ours, line by line (amounts
+// in cents). A draft for a person: nothing is posted here. Used by the EOB screen and the insurance autopilot.
+export async function readEob(db, config, pid, content) {
+  const out = await structured(config, { system: EOB_SYSTEM, tool: EOB_TOOL, effort: 'medium', maxTokens: 16000, content: [...content, { type: 'text', text: 'Read this EOB.' }] });
+  const used = new Set();
+  const claims = [];
+  for (const c of out.claims || []) {
+    const m = await matchClaim(db, pid, c, used);
+    let lines = [];
+    if (m) {
+      used.add(m.claim.id);
+      const items = await db.all('SELECT ci.id, pr.code, pr.tooth, ci.fee FROM claim_items ci JOIN procedures pr ON pr.id = ci.procedure_id WHERE ci.claim_id = ? ORDER BY ci.id', m.claim.id);
+      const free = [...items];
+      lines = (c.lines || []).map((l) => {
+        const i = free.findIndex((x) => x.code === String(l.code).toUpperCase() && (!l.tooth || !x.tooth || String(x.tooth) === String(l.tooth)));
+        const item = i >= 0 ? free.splice(i, 1)[0] : null;
+        return { claim_item_id: item?.id ?? null, code: l.code, tooth: l.tooth || null, billed: toCents(l.billed), paid: toCents(l.paid) || 0, write_off: toCents(l.write_off) || 0, patient_resp: toCents(l.patient_resp), reason: l.reason || null };
+      });
+    }
+    const paid = toCents(c.paid) || 0;
+    claims.push({
+      patient_name: c.patient_name, date_of_service: c.date_of_service || null, payer_claim_number: c.payer_claim_number || null, denied: !!c.denied, remarks: c.remarks || null,
+      paid, write_off: lines.reduce((s, l) => s + (l.write_off || 0), 0), deductible: toCents(c.deductible), patient_responsibility: toCents(c.patient_responsibility),
+      claim_id: m?.claim.id ?? null, match: m ? { score: Math.min(100, m.score), why: m.why, patient: `${m.claim.first_name} ${m.claim.last_name}`, billed: m.claim.total_fee } : null,
+      lines,
+    });
+  }
+  const carrier = out.payer_name ? await db.get('SELECT id, name FROM insurance_carriers WHERE practice_id = ? AND lower(name) = lower(?)', pid, out.payer_name) : null;
+  return {
+    payer_name: out.payer_name || null, carrier_id: carrier?.id ?? null, check_number: out.check_number || null, check_date: out.check_date || null,
+    amount: toCents(out.total_paid), method: out.method === 'eft' ? 'eft' : 'check',
+    provider_adjustments: (out.provider_adjustments || []).map((a) => ({ reason: a.reason || 'Other', amount: toCents(a.amount) })), claims,
+    totals_match: toCents(out.total_paid) === claims.reduce((s, c) => s + c.paid, 0) - (out.provider_adjustments || []).reduce((s, a) => s + (toCents(a.amount) || 0), 0),
+  };
+}
+
 export default function insuranceAiRoutes({ db, config }) {
   const r = Router();
 
@@ -209,39 +245,9 @@ export default function insuranceAiRoutes({ db, config }) {
   });
 
   r.post('/eobs/read', requirePermission('billing:write'), async (req, res) => {
-    const pid = req.user.practice_id;
-    const out = await structured(config, { system: EOB_SYSTEM, tool: EOB_TOOL, effort: 'medium', maxTokens: 16000, content: [...fileContent(req.body), { type: 'text', text: 'Read this EOB.' }] });
-    const used = new Set();
-    const claims = [];
-    for (const c of out.claims || []) {
-      const m = await matchClaim(db, pid, c, used);
-      let lines = [];
-      if (m) {
-        used.add(m.claim.id);
-        const items = await db.all('SELECT ci.id, pr.code, pr.tooth, ci.fee FROM claim_items ci JOIN procedures pr ON pr.id = ci.procedure_id WHERE ci.claim_id = ? ORDER BY ci.id', m.claim.id);
-        const free = [...items];
-        lines = (c.lines || []).map((l) => {
-          const i = free.findIndex((x) => x.code === String(l.code).toUpperCase() && (!l.tooth || !x.tooth || String(x.tooth) === String(l.tooth)));
-          const item = i >= 0 ? free.splice(i, 1)[0] : null;
-          return { claim_item_id: item?.id ?? null, code: l.code, tooth: l.tooth || null, billed: toCents(l.billed), paid: toCents(l.paid) || 0, write_off: toCents(l.write_off) || 0, patient_resp: toCents(l.patient_resp), reason: l.reason || null };
-        });
-      }
-      const paid = toCents(c.paid) || 0;
-      claims.push({
-        patient_name: c.patient_name, date_of_service: c.date_of_service || null, payer_claim_number: c.payer_claim_number || null, denied: !!c.denied, remarks: c.remarks || null,
-        paid, write_off: lines.reduce((s, l) => s + (l.write_off || 0), 0), deductible: toCents(c.deductible), patient_responsibility: toCents(c.patient_responsibility),
-        claim_id: m?.claim.id ?? null, match: m ? { score: Math.min(100, m.score), why: m.why, patient: `${m.claim.first_name} ${m.claim.last_name}`, billed: m.claim.total_fee } : null,
-        lines,
-      });
-    }
-    const carrier = out.payer_name ? await db.get('SELECT id, name FROM insurance_carriers WHERE practice_id = ? AND lower(name) = lower(?)', pid, out.payer_name) : null;
-    await audit(db, req, 'eob.ai_read', 'claims', null, { claims: claims.length, matched: claims.filter((c) => c.claim_id).length });
-    res.json({
-      payer_name: out.payer_name || null, carrier_id: carrier?.id ?? null, check_number: out.check_number || null, check_date: out.check_date || null,
-      amount: toCents(out.total_paid), method: out.method === 'eft' ? 'eft' : 'check',
-      provider_adjustments: (out.provider_adjustments || []).map((a) => ({ reason: a.reason || 'Other', amount: toCents(a.amount) })), claims,
-      totals_match: toCents(out.total_paid) === claims.reduce((s, c) => s + c.paid, 0) - (out.provider_adjustments || []).reduce((s, a) => s + (toCents(a.amount) || 0), 0),
-    });
+    const eob = await readEob(db, config, req.user.practice_id, fileContent(req.body));
+    await audit(db, req, 'eob.ai_read', 'claims', null, { claims: eob.claims.length, matched: eob.claims.filter((c) => c.claim_id).length });
+    res.json(eob);
   });
 
   // A card photo → a filled-in policy for a person to check. Nothing is saved here; the read is kept in the

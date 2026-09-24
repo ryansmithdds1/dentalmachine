@@ -22,6 +22,8 @@ async function claimReady() {
 
 test('sandbox clearinghouse: submit → 999 → 277CA → 835 posts payment automatically', async () => {
   const { api, claim, patient } = await claimReady();
+  // Mailbox ERAs post on their own only once the owner turns auto-posting on (insurance autopilot, A1).
+  assert.equal((await api.put('/eob-autopilot/settings', { autopost: true })).status, 200);
   assert.equal((await api.get('/clearinghouse')).data.mode, 'sandbox');
   const sent = await api.post('/claims/submit', { claim_ids: [claim.id] });
   assert.equal(sent.status, 201, JSON.stringify(sent.data));
@@ -253,6 +255,7 @@ test('responses are scoped: one practice cannot post to or reject another practi
 
 test('the same response file processed twice at once is applied once', async () => {
   const { api, claim, patient } = await claimReady();
+  await api.put('/eob-autopilot/settings', { autopost: true });
   await manuallySent(api, claim);
   const file = { name: 'dup.835', content: era835([{ control_number: `DM${claim.id}`, paid: claim.estimated_amount, write_off: 23500 - claim.estimated_amount }]) };
   const results = await Promise.all([processInbound(h.db, file), processInbound(h.db, file), processInbound(h.db, file)]);
@@ -289,12 +292,16 @@ test('835 files: several remittances in one file, split claim lines, and patient
   await manuallySent(one.api, one.claim);
   await manuallySent(one.api, two.claim).catch(() => {}); // other practice — send through its own account
   await manuallySent(two.api, two.claim);
-  // Claim one paid in two lines (150 + 50), $35 patient share, $0 contractual listed → rest written off.
+  for (const x of [one, two]) await x.api.put('/eob-autopilot/settings', { autopost: true });
+  // Claim one paid in two lines (150 + 50): $35 patient share, $15 + $35 contractual (CO-45) — it adds up, so
+  // the two lines post together.
   const fileA = era835([
-    { control_number: `DM${one.claim.id}`, paid: 15000, patient: 3500, billed: 20000 },
+    { control_number: `DM${one.claim.id}`, paid: 15000, patient: 3500, billed: 20000, write_off: 1500 },
     { control_number: `DM${one.claim.id}`, paid: 0, patient: 0, billed: 3500, write_off: 3500 },
   ]).replace(/CLP\*([^*]+)\*4\*/, 'CLP*$1*1*');
-  const fileB = era835([{ control_number: `DM${two.claim.id}`, paid: 20000, billed: 23500, patient: 0 }]).replace(/CAS\*CO\*45/, 'CAS*PI*45');
+  // Claim two: a payer-initiated (PI) reduction isn't a contractual write-off, so it waits for a person
+  // instead of being written off on its own.
+  const fileB = era835([{ control_number: `DM${two.claim.id}`, paid: 20000, billed: 23500, patient: 0, write_off: 3500 }]).replace(/CAS\*CO\*45/, 'CAS*PI*45');
   const both = bundle835(fileA, fileB);
   const res = await processInbound(h.db, { name: 'multi.835', content: both });
   assert.equal(res.error ?? null, null, JSON.stringify(res));
@@ -303,9 +310,10 @@ test('835 files: several remittances in one file, split claim lines, and patient
   assert.equal(c1.paid_amount, 15000);
   assert.equal((await one.api.get(`/patients/${one.patient.id}/ledger`)).data.balance, 3500);
   const c2 = (await two.api.get(`/claims/${two.claim.id}`)).data;
-  assert.equal(c2.status, 'paid');
-  assert.equal(c2.paid_amount, 20000);
-  assert.equal((await two.api.get(`/patients/${two.patient.id}/ledger`)).data.balance, 0);
+  assert.equal(c2.status, 'submitted', 'a PI reduction is an exception, not an automatic write-off');
+  const work = (await two.api.get('/eob-autopilot')).data.items.find((i) => i.claim_id === two.claim.id);
+  assert.equal(work.kind, 'review');
+  assert.match(work.reason, /PI-45/);
 });
 
 test('a TA1 rejection sends the whole batch back; a non-277 status answer is a gateway error', async () => {

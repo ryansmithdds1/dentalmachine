@@ -109,7 +109,7 @@ export const TEMPLATE_META = {
     es: '{code} es su código del portal de pacientes de {practice}. Vence en {minutes} minutos. Si no lo pidió, puede ignorar este mensaje.',
   },
   review: {
-    label: 'Review request', help: 'After a visit. The link asks how the visit went: happy patients are sent on to your review page, others can tell you privately.', vars: ['first_name', 'practice', 'link', 'phone'], required: ['link'],
+    label: 'Review request', help: 'The link asks how the visit went: happy patients are invited to post a review, others can tell you privately (everyone can still post publicly).', vars: ['first_name', 'practice', 'link', 'phone'], required: ['link'],
     text: 'Thanks for visiting {practice} today, {first_name}! How did we do? {link}',
     es: '¡Gracias por visitar {practice} hoy, {first_name}! ¿Cómo lo hicimos? {link}',
   },

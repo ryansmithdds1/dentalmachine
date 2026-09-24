@@ -1,9 +1,13 @@
 import { useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api } from '../../api.js';
 import { useApi, useLookup } from '../../hooks.js';
 import { useAuth } from '../../auth.jsx';
 import { money, fmtDate, label, age, toCents, fromCents, practiceToday } from '../../format.js';
-import { Mic } from 'lucide-react';
+import { Mic, Settings2 } from 'lucide-react';
+import { buildLookups, shortcutText } from './chartShorthand.js';
+import { useShortcuts, useHelpRows, isMac } from '../../shortcuts.js';
+import ShortcutIcon from './ShortcutIcon.jsx';
 import ChartEntry from './ChartEntry.jsx';
 import CompleteWork, { UncompleteForm, useTodaysWork } from './CompleteWork.jsx';
 import { undoable } from '../../toast.js';
@@ -36,6 +40,17 @@ export default function ChartTab({ patient, onChange }) {
   const [undoFor, setUndoFor] = useState(null);
   const write = can('clinical:write') && !asOf;
   const todays = useTodaysWork(patient, data?.procedures, practice?.timezone);
+  // The office's and this person's bundles, quick buttons and aliases (Settings → Clinical → Chart shortcuts & bundles).
+  const { data: setup } = useApi(can('clinical:read') ? '/chart-shortcuts' : null);
+  const lookups = useMemo(() => (setup ? buildLookups(setup) : null), [setup]);
+  const [entryRequest, setEntryRequest] = useState(null);
+  const buttons = useMemo(() => (setup?.shortcuts || []).filter((s) => s.button).map((s) => ({ ...s, text: shortcutText(s, setup.bundles) })), [setup]);
+  const press = (s) => s.text && setEntryRequest((r) => ({ text: s.text, auto: true, n: (r?.n || 0) + 1 }));
+  useShortcuts(buttons.slice(0, 9).map((s, i) => ({ combo: `alt+${i + 1}`, handler: () => press(s), label: `${s.label}${s.text ? ` (${s.text})` : ''}`, section: 'Chart buttons', enabled: write && !!s.text })));
+  useHelpRows('Chart aliases (type them, or say them to the assistant)', [
+    ...(setup?.bundles || []).filter((b) => b.alias).map((b) => [[b.alias], `${b.name}: ${b.items.map((it) => `${it.optional ? '(' : ''}${it.label || it.code || (it.work || it.finding || '').replace(/_/g, ' ')}${it.optional ? ')' : ''}`).join(' + ')}`]),
+    ...(setup?.shortcuts || []).filter((s) => s.alias).map((s) => [[s.alias], `${s.label} (${s.kind} ${s.kind === 'bundle' ? '' : s.target} ${s.mode})`.replace(/\s+/g, ' ')]),
+  ]);
 
   const refresh = () => { reload(); reloadPlans(); onChange?.(); };
   const act = async (fn) => {
@@ -86,7 +101,21 @@ export default function ChartTab({ patient, onChange }) {
           <button className="small" onClick={() => window.print()} style={write ? undefined : { marginLeft: 'auto' }}>Print</button>
         </div>
         {asOf && <div className="public-notice" style={{ marginBottom: 8 }}>Showing the chart as it was on {fmtDate(asOf)}: conditions recorded and work completed by then. Planned treatment isn’t shown.</div>}
-        {write && !asOf && <ChartEntry patient={patient} tooth={tooth} onDone={refresh} />}
+        {write && !asOf && buttons.length > 0 && (
+          <div className="te-buttons no-print" aria-label="Quick buttons">
+            {buttons.map((s, i) => (
+              <button
+                key={s.id} type="button" className="small te-btn" style={s.color ? { '--te-color': s.color } : undefined} disabled={!s.text}
+                title={s.text ? `${s.text}${i < 9 ? ` · ${isMac ? '⌥' : 'Alt+'}${i + 1}` : ''}${tooth ? ` on #${tooth}` : ''}` : 'Its bundle was retired'}
+                onClick={() => press(s)}
+              >
+                <ShortcutIcon name={s.icon} size={14} />{s.label}{i < 9 && <kbd>{i + 1}</kbd>}
+              </button>
+            ))}
+            <Link className="te-edit muted" to="/settings?tab=chartshortcuts" title="Change the buttons, bundles and aliases"><Settings2 size={13} aria-hidden /> Customize</Link>
+          </div>
+        )}
+        {write && !asOf && <ChartEntry patient={patient} tooth={tooth} onDone={refresh} setup={setup} lookups={lookups} chart={data} request={entryRequest} />}
         <ChartStats conditions={data.conditions} procedures={data.procedures} />
         <Odontogram conditions={data.conditions} procedures={data.procedures} selected={tooth} onSelect={pickTooth} dentition={dentition} />
       </div>

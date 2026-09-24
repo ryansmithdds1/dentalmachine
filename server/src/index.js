@@ -31,6 +31,9 @@ import { depositWatchAll } from './deposits.js';
 import { runCapacitySnapshots } from './capacity.js';
 import { runChecklistJobs } from './checklists.js';
 import { runReadinessJob } from './labcheck.js';
+import { runJourneyExtras } from './journeys.js';
+import { runReferralJobs } from './referraltracker.js';
+import { runEobAutopilot } from './eobjob.js';
 import { runPaperworkSafely } from './paperwork.js';
 import { loggedFetch } from './issues.js';
 import { runChartAudits } from './chartaudit.js';
@@ -143,6 +146,29 @@ if (process.env.READINESS_JOBS !== 'off') {
   const readiness = () => runExclusive('readiness', 30 * 60 * 1000, () => runReadinessJob(db)).catch(jobFailed('Visit readiness'));
   setInterval(readiness, 60 * 60 * 1000).unref();
   setTimeout(readiness, 100_000).unref();
+}
+// Referral follow-up: critical referrals re-alerted weekly, reports matched to open referrals (hourly).
+if (process.env.REFERRAL_JOBS !== 'off') {
+  const referrals = () => runExclusive('referrals', 30 * 60 * 1000, () => runReferralJobs(db, { storage: app.locals.storage, config })).catch(jobFailed('Referral follow-up'));
+  setInterval(referrals, 60 * 60 * 1000).unref();
+  setTimeout(referrals, 120_000).unref();
+}
+// Insurance autopilot: clean ERA lines post (practices that turned it on), balances left after insurance are billed
+// (the texts/emails go through the cadence job), paper statements mailed, reconciliation gaps raised — every 15 minutes.
+if (process.env.EOB_AUTOPILOT !== 'off') {
+  const eobMailer = createMailer();
+  const eob = () => runExclusive('eob-autopilot', 10 * 60 * 1000, () => runEobAutopilot(db, { mailer: eobMailer, appUrl: config.appUrl }))
+    .catch(jobFailed('Insurance autopilot'));
+  setInterval(eob, 15 * 60 * 1000).unref();
+  setTimeout(eob, 70_000).unref();
+}
+// Patient journeys extras: thank-you card tasks, milestones, life-event suggestions, survey comments, holiday cards and
+// the newsletter (the journey texts/emails themselves go out through the cadence job).
+if (process.env.JOURNEYS !== 'off') {
+  const journeyMailer = createMailer();
+  const journeys = () => runExclusive('journeys', 10 * 60 * 1000, () => runJourneyExtras(db, { messenger, mailer: journeyMailer, appUrl: config.appUrl })).catch(jobFailed('Patient journeys'));
+  setInterval(journeys, 15 * 60 * 1000).unref();
+  setTimeout(journeys, 75_000).unref();
 }
 // Chart audit: each practice's completed visits checked once a day after 1am practice time.
 if (process.env.CHART_AUDIT !== 'off') {

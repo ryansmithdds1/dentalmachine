@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { api } from '../api.js';
+import { api, getToken } from '../api.js';
 import { useApi } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
 import { money, fmtDate, toCents, fromCents } from '../format.js';
@@ -99,6 +99,7 @@ export default function ClaimDetail() {
       </div>
 
       <Attachments claim={c} onChange={() => { reload(); setChecks((n) => n + 1); }} />
+      <Remittances claim={c} />
 
       <div className="card">
         <h2>Services</h2>
@@ -252,6 +253,30 @@ function Appeal({ claim }) {
           <div className="form-actions"><button onClick={() => navigator.clipboard?.writeText(draft.letter)}>Copy</button><button className="primary" onClick={print}>Print</button></div>
         </>
       )}
+    </div>
+  );
+}
+
+// What the payer sent for this claim (ERAs and paper EOBs, from the insurance autopilot) and the EOB itself.
+function Remittances({ claim }) {
+  const { data } = useApi(`/claims/${claim.id}/remittances`);
+  if (!data?.length) return null;
+  const open = async (url) => {
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${getToken()}` } });
+    if (res.ok) window.open(URL.createObjectURL(await res.blob()), '_blank', 'noopener');
+  };
+  const STATE = { posted: 'Posted', ready: 'Ready to post', exception: 'Needs a look', resolved: 'Decided' };
+  return (
+    <div className="card">
+      <h2>Insurance payments received</h2>
+      <table><thead><tr><th>Received</th><th>From</th><th>Paid</th><th>Written off</th><th>Patient</th><th>Status</th><th /></tr></thead>
+        <tbody>{data.map((r) => (
+          <tr key={r.id}>
+            <td>{fmtDate(r.created_at.slice(0, 10))}</td><td>{r.source === 'era' ? 'ERA' : 'Paper EOB'} {r.trace || ''}</td><td>{money(r.paid)}</td><td>{money(r.contractual)}</td><td>{money(r.patient_resp)}</td>
+            <td>{STATE[r.state] || r.state}{r.state === 'exception' && r.reason ? ` — ${r.reason}` : ''}{r.state === 'exception' ? <> · <Link to="/insurance-autopilot">worklist</Link></> : null}</td>
+            <td>{r.eob_url && <button className="small" onClick={() => open(r.eob_url)}>See the EOB</button>}</td>
+          </tr>
+        ))}</tbody></table>
     </div>
   );
 }

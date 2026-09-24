@@ -7,7 +7,8 @@ import { useMakeActive } from '../activePatient.jsx';
 import './patient.css';
 import { money, fullName, age, fmtDate, fmtDateTime, label, practiceToday } from '../format.js';
 import { Modal, Badge, ErrorBox, useSubmit, Menu } from '../components/ui.jsx';
-import { Pin, Pill, TriangleAlert, MoreHorizontal, GitMerge, FileArchive, ShieldCheck, CalendarPlus, Pencil } from 'lucide-react';
+import { Pin, Pill, TriangleAlert, MoreHorizontal, GitMerge, FileArchive, ShieldCheck, CalendarPlus, Pencil, Star } from 'lucide-react';
+import { requestReview } from '../reviewRequest.js';
 import PatientForm from '../components/PatientForm.jsx';
 import AppointmentForm from '../components/AppointmentForm.jsx';
 import ChartTab from '../components/patient/ChartTab.jsx';
@@ -112,6 +113,7 @@ export default function PatientDetail() {
               <strong>{money(p.balance)}</strong>
             </div>
             {can('patients:write') && <button onClick={() => setModal('edit')}><Pencil size={15} /> Edit</button>}
+            {can('patients:write') && <button className="review-ask" title="Text (or email) a “how did we do?” link — Alt+R from any screen" onClick={() => requestReview(p.id, { source: 'chart', name: `${p.first_name} ${p.last_name}` })}><Star size={15} /> Ask for review</button>}
             {can('schedule:write') && <button className="primary" onClick={() => setModal('appt')}><CalendarPlus size={16} /> Book appointment</button>}
             <Menu label={<MoreHorizontal size={18} />} title="More" items={[
               can('clinical:read') && can('billing:read') && { label: 'Export record', icon: <FileArchive size={16} />, title: "The patient's copy of their record (for a records request): summary PDF, all the data and their images and documents, in one ZIP", onClick: () => download(`/patients/${p.id}/record-export`, `health-record-${p.id}.zip`) },

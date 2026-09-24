@@ -12,10 +12,15 @@ import { codeArea, QUADRANT_LABELS } from '../Odontogram.jsx';
 import { parseEntry } from './chartShorthand.js';
 import { useShortcuts } from '../../shortcuts.js';
 import { toast, undoable } from '../../toast.js';
+import { Settings2, GripVertical, ChevronUp, ChevronDown, Plus } from 'lucide-react';
+import FinDesk from './FinDesk.jsx';
+import StaffCompare from './StaffCompare.jsx';
+import FinOptionsSettings from '../FinOptionsSettings.jsx';
 import './treatment.css';
+import './finoptions.css';
 
 export default function TreatmentTab({ patient, onChange }) {
-  const { can, practice } = useAuth();
+  const { can, practice, user } = useAuth();
   const codes = useLookup('/procedure-codes?active=true');
   const [adding, setAdding] = useState(null);
   const [booking, setBooking] = useState(null);
@@ -26,6 +31,22 @@ export default function TreatmentTab({ patient, onChange }) {
   const [presenting, setPresenting] = useState(null);
   const [consent, setConsent] = useState(null);
   const [note, setNote] = useState(null);
+  const [finSettings, setFinSettings] = useState(false);
+  // The live estimate per phase and the financial options for each open plan (F1/F3), fetched again whenever the
+  // plans change. phasesFor: the phases the patient is choosing from, per plan.
+  const [quotes, setQuotes] = useState({});
+  const [phasesFor, setPhasesFor] = useState({});
+  const quoteable = (p) => ['proposed', 'accepted'].includes(p.status) && p.procedures?.some((x) => x.status === 'planned');
+  const loadQuote = async (planId, phases = phasesFor[planId]) => {
+    try {
+      const q = await api.get(`/treatment-plans/${planId}/quote${phases?.length ? `?phases=${phases.join(',')}` : ''}`);
+      setQuotes((all) => ({ ...all, [planId]: q }));
+    } catch { setQuotes((all) => ({ ...all, [planId]: null })); }
+  };
+  useEffect(() => {
+    for (const p of plans || []) if (quoteable(p)) loadQuote(p.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plans]);
   const refresh = () => { reload(); reloadLoose(); onChange?.(); };
 
   const act = async (fn) => {
@@ -52,8 +73,9 @@ export default function TreatmentTab({ patient, onChange }) {
       refresh();
     } catch (e) { setErr(e); }
   };
-  const quiet = !creating && !adding && !booking && !presenting && !consent;
+  const quiet = !creating && !adding && !booking && !presenting && !consent && !finSettings;
   useShortcuts([
+    { combo: 'f', handler: () => document.querySelector('.fin-card-main:not([disabled])')?.focus(), label: 'Ways to pay (financial options)', section: 'Treatment', enabled: quiet },
     { combo: 'n', handler: () => setCreating(true), label: 'New treatment plan (type “14 D2740”, Enter for each)', section: 'Treatment', enabled: canWrite && quiet },
     { combo: 'a', handler: planAll, label: 'Put all unplanned work on a new plan', section: 'Treatment', enabled: canWrite && quiet && unplanned.length > 0 },
   ]);
@@ -66,11 +88,17 @@ export default function TreatmentTab({ patient, onChange }) {
           <div className="actions">
             {unplanned.length > 0 && <button onClick={planAll} title="Shortcut: A">Plan all unplanned work ({unplanned.length})</button>}
             <button className="primary" onClick={() => setCreating(true)} title="Shortcut: N">+ New treatment plan</button>
+            {user?.role === 'admin' && <button className="icon-button" title="Financial options: discounts, payment plans, lenders" aria-label="Financial options settings" onClick={() => setFinSettings(true)}><Settings2 size={16} /></button>}
           </div>
         )}
       </div>
       <ErrorBox error={err} />
       {note && <div className="public-notice ok" style={{ marginBottom: 12 }}>{note}</div>}
+      {finSettings && (
+        <Modal title="Financial options" wide onClose={() => setFinSettings(false)}>
+          <FinOptionsSettings onSaved={() => { setFinSettings(false); refresh(); }} />
+        </Modal>
+      )}
       {presenting && <PresentModal plan={presenting} patient={patient} onClose={() => { setPresenting(null); refresh(); }} />}
       {consent && (
         <SendForms patient={patient} title={`Consent for “${consent.name}”`} procedureIds={consent.procedures.filter((p) => p.status === 'planned').map((p) => p.id)} onClose={() => setConsent(null)} />
@@ -113,9 +141,15 @@ export default function TreatmentTab({ patient, onChange }) {
               </div>
             )}
           </div>
-          <PlanTable plan={plan} codes={codes} canEdit={canWrite && !['completed', 'rejected'].includes(plan.status)} act={act} withUndo={withUndo}
-            onBook={(procs) => setBooking({ plan, procs })} canBook={can('schedule:write')} />
-          {['proposed', 'accepted'].includes(plan.status) && plan.procedures?.some((p) => p.status === 'planned') && <PlanMoney plan={plan} patient={patient} onChange={refresh} />}
+          {plan.option_group && plans.find((x) => x.option_group === plan.option_group) === plan && quotes[plan.id]?.alternatives?.length > 1 && <StaffCompare plan={plan} onChange={refresh} />}
+          <PlanTable plan={plan} quote={quotes[plan.id]} codes={codes} canEdit={canWrite && !['completed', 'rejected'].includes(plan.status)} act={act} withUndo={withUndo}
+            onBook={(procs) => setBooking({ plan, procs })} canBook={can('schedule:write')} onQuote={(q) => setQuotes((all) => ({ ...all, [plan.id]: q }))} />
+          {quoteable(plan) && <PlanMoney plan={plan} />}
+          {quoteable(plan) && (
+            <FinDesk plan={plan} patient={patient} quote={quotes[plan.id]} onChange={refresh}
+              onQuote={(phases) => { setPhasesFor((all) => ({ ...all, [plan.id]: phases })); loadQuote(plan.id, phases); }}
+              onBook={(procs) => setBooking({ plan, procs })} onConsent={(p) => setConsent(p)} />
+          )}
         </div>
       ))}
       {adding && (
@@ -152,53 +186,24 @@ export default function TreatmentTab({ patient, onChange }) {
   );
 }
 
-// Paying for the plan: insurance this benefit year vs next (with a suggested split when the annual
-// maximum runs out), and monthly options — the office's own plans and outside lenders.
-function PlanMoney({ plan, patient, onChange }) {
-  const { can } = useAuth();
+// Insurance this benefit year vs next, with a suggested split when the annual maximum runs out. (The ways to
+// pay are in FinDesk.)
+function PlanMoney({ plan }) {
   const { data: years } = useApi(`/treatment-plans/${plan.id}/benefit-years?v=${plan.estimate?.total_insurance}`);
-  const { data: full } = useApi(`/treatment-plans/${plan.id}?v=${plan.estimate?.total_patient}`);
-  const [note, setNote] = useState(null);
-  const [err, setErr] = useState(null);
-  const fin = full?.financing;
-  const startPlan = async (o) => {
-    setErr(null);
-    try {
-      await api.post(`/patients/${patient.id}/payment-plans`, { total: fin.amount, down_payment: 0, installments: o.months, start_date: practiceToday(), notes: `${plan.name} (treatment plan)` });
-      setNote(`Payment plan set up: ${o.months} × ${money(o.monthly)}. It's on the Ledger tab.`);
-      onChange?.();
-    } catch (e) { setErr(e); }
-  };
-  if (!years?.policy && !fin) return null;
+  if (!years?.policy) return null;
   return (
     <div className="plan-money">
-      <ErrorBox error={err} />
-      {years?.policy && (
-        <div>
-          <strong>Insurance</strong> ({years.policy.carrier_name}): {years.remaining_now != null ? <>{money(years.remaining_now)} left this benefit year, renews {fmtDate(years.renews)}.</> : null} This plan: insurance {money(years.all_now.insurance)}, patient {money(years.all_now.patient)}.
-          {years.split && (
-            <div className="plan-split">
-              💡 Split across benefit years to get <strong>{money(years.split.saves)} more</strong> from insurance:
-              {' '}now — {years.split.this_year.procedures.map((p) => `${p.code}${p.tooth ? ` #${p.tooth}` : ''}`).join(', ')} (insurance {money(years.split.this_year.insurance)});
-              {' '}from {fmtDate(years.split.next_year.from)} — {years.split.next_year.procedures.map((p) => `${p.code}${p.tooth ? ` #${p.tooth}` : ''}`).join(', ')} (insurance {money(years.split.next_year.insurance)}).
-              {' '}Patient pays {money(years.split.patient)} instead of {money(years.all_now.patient)}.
-            </div>
-          )}
-        </div>
-      )}
-      {fin && (
-        <div style={{ marginTop: 6 }}>
-          <strong>Financing</strong> for the {money(fin.amount)} patient portion:{' '}
-          {fin.in_house.map((o) => (
-            <span key={o.months} className="fin-option">
-              {o.months} × {money(o.monthly)}{o.apr ? ` (${o.apr}% APR)` : ' (0%)'}
-              {can('billing:write') && <button className="small" onClick={() => startPlan(o)}>Set up</button>}
-            </span>
-          ))}
-          {fin.links.map((l) => <a key={l.url} className="fin-option" href={l.url} target="_blank" rel="noreferrer">{l.name} ↗</a>)}
-          {note && <div className="muted" style={{ fontSize: 12 }}>{note}</div>}
-        </div>
-      )}
+      <div>
+        <strong>Insurance</strong> ({years.policy.carrier_name}): {years.remaining_now != null ? <>{money(years.remaining_now)} left this benefit year, renews {fmtDate(years.renews)}.</> : null} This plan: insurance {money(years.all_now.insurance)}, patient {money(years.all_now.patient)}.
+        {years.split && (
+          <div className="plan-split">
+            💡 Split across benefit years to get <strong>{money(years.split.saves)} more</strong> from insurance:
+            {' '}now — {years.split.this_year.procedures.map((p) => `${p.code}${p.tooth ? ` #${p.tooth}` : ''}`).join(', ')} (insurance {money(years.split.this_year.insurance)});
+            {' '}from {fmtDate(years.split.next_year.from)} — {years.split.next_year.procedures.map((p) => `${p.code}${p.tooth ? ` #${p.tooth}` : ''}`).join(', ')} (insurance {money(years.split.next_year.insurance)}).
+            {' '}Patient pays {money(years.split.patient)} instead of {money(years.all_now.patient)}. Give the later work its own phase with a date after the renewal to plan it that way.
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -209,12 +214,19 @@ const bookingMinutes = (procs, codes) => {
   return Math.max(30, Math.ceil((units * 10) / 10) * 10 || 60);
 };
 
-// A plan's work by phase, in order: move rows, change phases, override fees, take work off the plan.
-function PlanTable({ plan, codes, canEdit, act, withUndo, onBook, canBook }) {
+// A plan's work by phase, in order (F1): drag work between phases (or ↑/↓ and the phase menu from the keyboard),
+// name phases in place, move whole phases earlier or later, and see each phase's estimate — insurance,
+// in-network write-off, the patient's share and which benefit year it falls in — update as you go.
+function PlanTable({ plan, quote, codes, canEdit, act, withUndo, onBook, canBook }) {
   const est = Object.fromEntries((plan.estimate?.items || []).map((i) => [i.procedure_id, i]));
   const procs = plan.procedures;
-  const phases = [...new Set(procs.map((p) => p.phase || 1))].sort((a, b) => a - b);
-  const reorder = (list) => act(() => api.put(`/treatment-plans/${plan.id}/order`, { items: list.map((p) => ({ id: p.id, phase: p.phase || 1 })) }));
+  const qp = new Map((quote?.phases || []).map((p) => [p.phase, p]));
+  const phases = [...new Set([...procs.map((p) => p.phase || 1), ...qp.keys()])].sort((a, b) => a - b);
+  const [drag, setDrag] = useState(null);
+  const [over, setOver] = useState(null);
+  const nameOf = (n) => qp.get(n)?.name || `Phase ${n}`;
+  const order = (list) => api.put(`/treatment-plans/${plan.id}/order`, { items: list.map((p) => ({ id: p.id, phase: p.phase || 1 })) });
+  const reorder = (list) => act(() => order(list));
   const move = (p, dir) => {
     const list = [...procs];
     const i = list.findIndex((x) => x.id === p.id);
@@ -226,7 +238,38 @@ function PlanTable({ plan, codes, canEdit, act, withUndo, onBook, canBook }) {
     reorder(list);
   };
   const setPhase = (p, phase) => reorder(procs.map((x) => (x.id === p.id ? { ...x, phase } : x)).sort((a, b) => (a.phase || 1) - (b.phase || 1)));
+  // Dropped on a row: goes just before it, in its phase. Dropped on a phase heading: the end of that phase.
+  const dropOn = (phase, beforeId) => {
+    const p = procs.find((x) => x.id === drag);
+    setDrag(null);
+    setOver(null);
+    if (!p || beforeId === p.id) return;
+    const rest = procs.filter((x) => x.id !== p.id);
+    let at = beforeId != null ? rest.findIndex((x) => x.id === beforeId) : -1;
+    if (at < 0) at = rest.map((x) => (x.phase || 1) <= phase).lastIndexOf(true) + 1;
+    rest.splice(at, 0, { ...p, phase });
+    const list = rest.sort((a, b) => (a.phase || 1) - (b.phase || 1));
+    withUndo(`${label(p)} moved to ${nameOf(phase)}`, () => order(list), () => order(procs));
+  };
+  const savePhase = (n, body) => act(() => api.put(`/treatment-plans/${plan.id}/phases/${n}`, body));
+  const movePhase = (n, dir) => {
+    const list = [...phases];
+    const i = list.indexOf(n);
+    [list[i], list[i + dir]] = [list[i + dir], list[i]];
+    act(() => api.put(`/treatment-plans/${plan.id}/phase-order`, { order: list }));
+  };
   const showEst = !!plan.estimate;
+  const cols = showEst ? (plan.estimate.total_write_off > 0 ? 10 : 9) : 7;
+  const multiYear = (quote?.years?.length || 0) > 1;
+  const dragProps = (p) => (canEdit && p.status === 'planned' ? {
+    draggable: true,
+    onDragStart: (e) => { setDrag(p.id); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(p.id)); },
+    onDragEnd: () => { setDrag(null); setOver(null); },
+  } : {});
+  const dropProps = (phase, beforeId) => ({
+    onDragOver: (e) => { if (drag != null) { e.preventDefault(); setOver(phase); } },
+    onDrop: (e) => { if (drag != null) { e.preventDefault(); dropOn(phase, beforeId); } },
+  });
   return (
     <div className="table-wrap">
       <table>
@@ -234,23 +277,44 @@ function PlanTable({ plan, codes, canEdit, act, withUndo, onBook, canBook }) {
           <tr><th>#</th><th>Code</th><th>Description</th><th>Tooth / area</th><th>Status</th><th className="num">Fee</th>{showEst && <>{plan.estimate.total_write_off > 0 && <th className="num">PPO write-off</th>}<th className="num">Est. insurance</th><th className="num">Est. patient</th></>}<th /></tr>
         </thead>
         <tbody>
-          {phases.map((phase) => {
+          {phases.map((phase, idx) => {
             const rows = procs.filter((p) => (p.phase || 1) === phase);
+            const q = qp.get(phase);
             const sum = plan.phases?.find((x) => x.phase === phase);
             const open = rows.filter((p) => p.status === 'planned' && !p.appointment_id);
             return [
               phases.length > 1 || canEdit ? (
-                <tr key={`ph-${phase}`} className="phase-row">
-                  <td colSpan={showEst ? (plan.estimate.total_write_off > 0 ? 10 : 9) : 7}>
-                    <strong>Phase {phase}</strong>
-                    {sum && <span className="muted"> · {sum.planned} planned · {money(sum.fee)}{showEst ? ` · est. insurance ${money(sum.insurance)}` : ''}</span>}
-                    {canBook && open.length > 0 && <button className="small" style={{ marginLeft: 10 }} onClick={() => onBook(open)}>Schedule phase {phase}</button>}
+                <tr key={`ph-${phase}`} className={`phase-row${over === phase ? ' drop' : ''}`} {...dropProps(phase, null)}>
+                  <td colSpan={cols}>
+                    <div className="phase-head">
+                      {canEdit ? (
+                        <InlineEdit label={`Name of phase ${phase}`} value={nameOf(phase)} display={<strong>{nameOf(phase)}</strong>} width={200} text
+                          valid={(v) => v.trim().length > 0 && v.trim().length <= 60} onSave={(v) => savePhase(phase, { name: v })} />
+                      ) : <strong>{nameOf(phase)}</strong>}
+                      {multiYear && q?.years?.length > 0 && <span className="phase-year" title="Estimated with this benefit year's maximum">{q.years.map((y) => `${y.slice(0, 4)} benefits`).join(', ')}</span>}
+                      <span className="muted">{rows.length ? `${sum?.planned ?? rows.length} planned${q ? ` · ${q.visits} visit${q.visits === 1 ? '' : 's'}` : ''}` : 'Drag work here'}</span>
+                      {canEdit && phases.length > 1 && (
+                        <span className="inline" style={{ gap: 2 }}>
+                          <button type="button" className="small" aria-label={`Move ${nameOf(phase)} earlier`} disabled={idx === 0} onClick={() => movePhase(phase, -1)}><ChevronUp size={14} /></button>
+                          <button type="button" className="small" aria-label={`Move ${nameOf(phase)} later`} disabled={idx === phases.length - 1} onClick={() => movePhase(phase, 1)}><ChevronDown size={14} /></button>
+                        </span>
+                      )}
+                      {canBook && open.length > 0 && <button className="small" onClick={() => onBook(open)}>Schedule {nameOf(phase).toLowerCase().startsWith('phase') ? `phase ${phase}` : nameOf(phase)}</button>}
+                      {q && q.count > 0 && (
+                        <span className="phase-money">
+                          <span>fee {money(q.fee)}</span>
+                          {q.write_off > 0 && <span>in-network −{money(q.write_off)}</span>}
+                          {q.insurance > 0 && <span>insurance {money(q.insurance)}</span>}
+                          <span>patient <strong>{money(q.you_pay)}</strong></span>
+                        </span>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ) : null,
               ...rows.map((p) => (
-                <tr key={p.id}>
-                  <td>{p.priority}</td>
+                <tr key={p.id} className={drag === p.id ? 'dragging' : ''} {...dragProps(p)} {...dropProps(p.phase || 1, p.id)}>
+                  <td>{canEdit && p.status === 'planned' && <GripVertical size={12} className="drag-dot" aria-hidden="true" />}{p.priority}</td>
                   <td>{p.code}</td>
                   <td>{p.description}</td>
                   <td>{p.tooth ? `#${p.tooth}` : ''} {p.surfaces || ''}{p.area ? QUADRANT_LABELS[p.area] : ''}</td>
@@ -272,7 +336,7 @@ function PlanTable({ plan, codes, canEdit, act, withUndo, onBook, canBook }) {
                         <button className="small" title="Earlier" onClick={() => move(p, -1)}>↑</button>
                         <button className="small" title="Later" onClick={() => move(p, 1)}>↓</button>
                         <select className="small" value={p.phase || 1} onChange={(e) => setPhase(p, Number(e.target.value))} aria-label="Phase" style={{ width: 'auto' }}>
-                          {[1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>Phase {n}</option>)}
+                          {[...new Set([...phases, 1, 2, 3, 4, 5])].sort((a, b) => a - b).map((n) => <option key={n} value={n}>{nameOf(n)}</option>)}
                         </select>
                         <button className="small" onClick={() => act(() => api.post(`/procedures/${p.id}/complete`))}>Complete</button>
                         <button className="small" title="Take it off this plan (stays on the chart)" onClick={() => withUndo(`${label(p)} taken off the plan`,
@@ -288,7 +352,10 @@ function PlanTable({ plan, codes, canEdit, act, withUndo, onBook, canBook }) {
           })}
           {showEst && (
             <tr className="totals-row">
-              <td colSpan={5}>Remaining planned {plan.estimate.policy ? `· ${plan.estimate.policy.carrier_name}` : '· self-pay'}</td>
+              <td colSpan={5}>
+                Remaining planned {plan.estimate.policy ? `· ${plan.estimate.policy.carrier_name}` : '· self-pay'}
+                {canEdit && phases.length < 9 && <button type="button" className="small" style={{ marginLeft: 10 }} onClick={() => savePhase(Math.max(0, ...phases) + 1, { name: `Phase ${Math.max(0, ...phases) + 1}` })}><Plus size={13} /> Phase</button>}
+              </td>
               <td className="num">{money(plan.estimate.total_fee)}</td>
               {plan.estimate.total_write_off > 0 && <td className="num">−{money(plan.estimate.total_write_off)}</td>}
               <td className="num">{money(plan.estimate.total_insurance)}</td>
@@ -302,6 +369,16 @@ function PlanTable({ plan, codes, canEdit, act, withUndo, onBook, canBook }) {
         </tbody>
       </table>
       {!procs.length && <div className="muted">Nothing on this plan yet.</div>}
+      {quote?.policy && quote.all_years?.length > 0 && (
+        <div className="fin-years">
+          {quote.all_years.map((y) => (
+            <span key={y.start || 'all'} className={y.limited ? 'warn' : ''}>
+              {y.start ? `Benefit year from ${fmtDate(y.start)}` : 'Benefits'}: insurance {money(y.insurance)}{y.max_left_after != null ? ` · ${money(y.max_left_after)} of the maximum left after` : ''}{y.limited ? ' · maximum reached' : ''}
+            </span>
+          ))}
+          {quote.ppo_savings > 0 && <span>In-network savings {money(quote.ppo_savings)}</span>}
+        </div>
+      )}
     </div>
   );
 }
@@ -409,7 +486,7 @@ function ProcTable({ procs, estimate, canEdit, act, withUndo }) {
 }
 
 // Click (or Enter) to edit in place; Enter saves, Esc puts it back. No prompt boxes.
-function InlineEdit({ value, display, label, valid = () => true, onSave, width = 80, suffix = '' }) {
+function InlineEdit({ value, display, label, valid = () => true, onSave, width = 80, suffix = '', text = false }) {
   const [editing, setEditing] = useState(false);
   const [v, setV] = useState(value);
   const done = useRef(false);
@@ -425,7 +502,7 @@ function InlineEdit({ value, display, label, valid = () => true, onSave, width =
   return (
     <span className="inline-edit">
       <input
-        autoFocus aria-label={label} value={v} inputMode="decimal" style={{ width }} className={valid(v) ? '' : 'invalid'}
+        autoFocus aria-label={label} value={v} inputMode={text ? 'text' : 'decimal'} style={{ width, ...(text ? { textAlign: 'left' } : {}) }} className={valid(v) ? '' : 'invalid'}
         onChange={(e) => setV(e.target.value)} onFocus={(e) => e.target.select()} onBlur={() => finish(true)}
         onKeyDown={(e) => {
           if (e.key === 'Enter') { e.preventDefault(); finish(true); }

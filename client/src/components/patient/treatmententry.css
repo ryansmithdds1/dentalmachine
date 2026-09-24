@@ -1,0 +1,32 @@
+/* Treatment entry: the chart's quick buttons, the entry preview's extras, and the shortcuts editor. */
+.te-buttons { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; align-items: center; }
+.te-buttons .te-btn {
+  display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; font-size: 13px;
+  border: 1px solid var(--te-color, var(--border)); color: var(--te-color, var(--text));
+  background: color-mix(in srgb, var(--te-color, transparent) 9%, var(--surface, #fff));
+}
+.te-buttons .te-btn:hover { background: color-mix(in srgb, var(--te-color, transparent) 18%, var(--surface, #fff)); }
+.te-buttons .te-btn kbd { font-size: 10px; padding: 0 4px; opacity: 0.7; }
+.te-buttons .te-btn[disabled] { opacity: 0.5; }
+.te-buttons .te-edit { margin-left: auto; font-size: 12px; }
+.chart-entry .preview .chip.bad { border-color: var(--danger); color: var(--danger); }
+.chart-entry .preview .chip small { margin-left: 4px; opacity: 0.75; }
+.chart-entry .preview .chip.phased small:first-child { margin: 0 4px 0 0; font-weight: 600; }
+.chart-entry .te-opt { font-size: 12px; padding: 1px 8px; border-radius: 999px; border: 1px dashed var(--border); background: transparent; color: var(--muted); }
+.chart-entry .te-opt.on { border-style: solid; color: var(--text); }
+.chart-entry .te-issues { list-style: none; margin: 6px 0 0; padding: 0; width: 100%; font-size: 12px; color: var(--warn, #b45309); }
+.chart-entry .te-issues li { display: flex; gap: 4px; align-items: center; }
+.chart-entry .te-issues li.bad { color: var(--danger); }
+.chart-entry .te-mic.live { color: var(--danger); border-color: var(--danger); }
+.chart-entry .te-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 8px; width: 100%; }
+.chart-entry .te-option { border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; }
+.te-editor .te-list { width: 100%; }
+.te-editor .te-list td { vertical-align: middle; }
+.te-editor .te-swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: middle; margin-right: 6px; }
+.te-editor .te-items { display: grid; gap: 6px; }
+.te-editor .te-item { display: grid; grid-template-columns: minmax(90px, 1.2fr) minmax(90px, 1fr) minmax(70px, 0.8fr) 60px auto auto auto; gap: 6px; align-items: center; }
+.te-editor .te-preview { margin-top: 10px; padding: 8px 10px; border: 1px dashed var(--border); border-radius: 8px; font-size: 13px; }
+.te-editor .te-preview .chip { margin: 2px 4px 2px 0; }
+@media (max-width: 700px) {
+  .te-editor .te-item { grid-template-columns: 1fr 1fr; }
+}

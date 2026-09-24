@@ -1,6 +1,7 @@
 import { insert, friendlyDateTime, newToken, localNow, zonedToUtc, recorded } from './util.js';
 import { raiseIssue, resolveIssue, failed } from './issues.js';
 import { templatesFor, renderTemplate, patientLang, fixedText, subjectFor } from './templates.js';
+import { runReviewJobs } from './reviewfunnel.js';
 
 // Delivery drivers. "log" records the message without sending it (development / not yet configured).
 export function createMessenger({ env = process.env, fetchImpl = globalThis.fetch } = {}) {
@@ -533,33 +534,8 @@ async function sendNoShowTexts(db, messenger, practice, local, appUrl) {
   return sent;
 }
 
-// After a completed visit, ask happy patients for an online review (at most once every 6 months).
+// Review requests (RV1–RV2): requests asked outside sending hours, and automatic ones after a visit when the
+// office turned that on. The rules (throttle, opt-outs, the feedback screen) live in reviewfunnel.js.
 export async function runReviewRequests(db, messenger, { now = new Date(), appUrl = '' } = {}) {
-  let sent = 0;
-  for (const practice of await db.all("SELECT * FROM practices WHERE review_requests = 1 AND review_url IS NOT NULL AND review_url != ''")) {
-    const local = localNow(practice.timezone, now);
-    const due = await db.all(
-      `SELECT a.id, a.patient_id FROM appointments a WHERE a.practice_id = ? AND a.status = 'completed' AND a.review_sent_at IS NULL
-       AND a.start_time >= ? AND a.end_time <= ?`,
-      practice.id, `${local.slice(0, 10)} 00:00`, local,
-    );
-    for (const { id, patient_id: patientId } of due) {
-      await db.run("UPDATE appointments SET review_sent_at = datetime('now') WHERE id = ?", id);
-      const recent = await db.get("SELECT 1 FROM messages WHERE patient_id = ? AND kind = 'review' AND created_at > ?", patientId, new Date(Date.now() - 180 * 86400_000).toISOString().slice(0, 19).replace('T', ' '));
-      const patient = await db.get('SELECT * FROM patients WHERE id = ?', patientId);
-      const target = preferredChannel(patient);
-      if (recent || !target) continue;
-      // The link asks how the visit went first: happy patients go on to the public review page,
-      // unhappy ones can tell the office privately (review routing).
-      const { token, hash } = newToken();
-      await insert(db, 'review_feedback', { practice_id: practice.id, patient_id: patientId, appointment_id: id, token_hash: hash });
-      const msg = await sendMessage(db, messenger, {
-        practiceId: practice.id, patientId, appointmentId: id, kind: 'review', channel: target.channel, to: target.to,
-        subject: subjectFor(patientLang(patient), 'review', `Thanks for visiting ${practice.name}`, practice.name),
-        body: renderTemplate(templatesFor(practice, patientLang(patient)).review, { first_name: patient.first_name, practice: practice.name, link: `${appUrl}/r/${token}`, phone: practice.phone || '' }),
-      });
-      if (msg.status === 'sent') sent++;
-    }
-  }
-  return sent;
+  return runReviewJobs(db, messenger, { now, appUrl });
 }

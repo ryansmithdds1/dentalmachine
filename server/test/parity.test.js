@@ -235,7 +235,8 @@ test('analytics KPIs, statement batch, recall campaign, review requests and temp
   assert.ok(sent.length > before);
 
   // Review requests after today's completed visit, once.
-  await api.put('/practice', { review_url: 'https://g.page/r/example/review', review_requests: true });
+  // Sending hours open all day: review requests respect quiet hours (they'd wait for the morning otherwise).
+  await api.put('/practice', { review_url: 'https://g.page/r/example/review', review_requests: true, send_from: '00:00', send_until: '00:00' });
   const early = (await api.post('/appointments', { patient_id: patient.id, provider_id: dentist.id, start_time: `${d} 00:10`, end_time: `${d} 00:20` })).data;
   await api.put(`/appointments/${early.id}`, { status: 'completed' });
   // Run as of late evening that day (the job only sends for visits that have ended).

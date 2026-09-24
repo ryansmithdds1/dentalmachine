@@ -48,7 +48,7 @@ export default function referralRoutes({ db }) {
   const validate = async (req, row) => {
     requireOneOf(row.direction, ['in', 'out'], 'direction');
     requireOneOf(row.status, STATUSES, 'status');
-    requireOneOf(row.urgency || undefined, ['routine', 'soon', 'urgent'], 'urgency');
+    requireOneOf(row.urgency || undefined, ['routine', 'soon', 'urgent', 'critical'], 'urgency');
     if (row.referral_date && !DATE.test(row.referral_date)) throw new HttpError(400, 'referral_date must be YYYY-MM-DD');
     if (row.contact_id) await findOr404(db, 'referral_contacts', row.contact_id, req.user.practice_id, 'Referral contact');
     if (row.provider_id) await findOr404(db, 'providers', row.provider_id, req.user.practice_id, 'Provider');

@@ -96,6 +96,26 @@ export const WRITERS = {
       undo: i.status === 'completed' ? null : () => Promise.all(done.map((p) => api.post(`/procedures/${p.id}/cancel`))),
     };
   },
+  // Through the chart's own entry engine (bundles, aliases, shorthand): the same preview the person just
+  // confirmed, charted in one step. Compared options become treatment options (side by side, not on the chart).
+  async chart_entry(i) {
+    const preview = await api.post('/charting/resolve', { patient_id: i.patient_id, text: i.text });
+    if (!preview.ok) throw new Error(preview.errors.join('; '));
+    if (preview.options) {
+      const out = await api.post(`/patients/${i.patient_id}/treatment-options`, {
+        options: preview.options.map((o) => ({ label: o.label, items: o.items.map((it) => ({ code: it.code, tooth: it.tooth, surfaces: it.surfaces, area: it.area || null, phase: it.phase || null })) })),
+        source: 'voice',
+      });
+      return { result: { treatment_options: out } };
+    }
+    const out = await api.post(`/patients/${i.patient_id}/chart-entry`, { items: preview.items, provider_id: i.provider_id, source: 'voice' });
+    return {
+      result: out.made,
+      // Findings and planned work can be taken back; completed work is reversed from its row (that also reverses the charge).
+      undo: out.made.some((m) => m.kind === 'completed') ? null : () => Promise.all(out.made.map((m) => (m.kind === 'condition'
+        ? api.post(`/conditions/${m.id}/void`, { reason: 'Undone from the assistant' }) : api.post(`/procedures/${m.id}/cancel`)))),
+    };
+  },
   async chart_conditions(i) {
     const out = [];
     for (const c of i.items || []) out.push(await api.post(`/patients/${i.patient_id}/conditions`, { tooth: c.tooth, condition: c.condition, surfaces: c.surfaces, notes: c.notes }));

@@ -187,8 +187,9 @@ const permanent = (fn) => {
 };
 
 // Each file is processed once and filed under the practice it belongs to. With `practiceId` (a file a user
-// uploaded) only that practice's claims and batches can be touched.
-export async function processInbound(db, file, { practiceId = null } = {}) {
+// uploaded) only that practice's claims and batches can be touched; `userId` is the person who uploaded it
+// (their ERA's clean claims post as them — mailbox files post only if the practice turned auto-posting on).
+export async function processInbound(db, file, { practiceId = null, userId = null } = {}) {
   const sha = createHash('sha256').update(file.content).digest('hex');
   const hash = `${practiceId ? `p${practiceId}` : 'mailbox'}:${sha}`;
   const type = x12Type(file.content);
@@ -207,13 +208,14 @@ export async function processInbound(db, file, { practiceId = null } = {}) {
     else if (type === 'TA1') ({ practiceId: owner, result } = await db.tx(() => applyTA1(db, permanent(() => parseTA1(file.content)), practiceId)));
     else if (type === '277CA' || type === '277') ({ practiceId: owner, result } = await db.tx(() => apply277(db, permanent(() => parse277(file.content)), practiceId)));
     else if (type === '835') {
-      const eras = await importEra(db, file.content, { practiceId, filename: file.name });
+      const eras = await importEra(db, file.content, { practiceId, userId, filename: file.name });
       const posted = eras.filter((e) => e.practice_id);
       owner = practiceId || posted[0]?.practice_id || null;
       result = {
         eras: eras.length, posted: eras.reduce((s, e) => s + e.claims.filter((c) => c.result === 'posted').length, 0),
         denied: eras.reduce((s, e) => s + e.claims.filter((c) => c.result === 'denied').length, 0),
         review: eras.reduce((s, e) => s + e.claims.filter((c) => c.result === 'needs_review' || c.result === 'unmatched').length, 0),
+        ready: eras.reduce((s, e) => s + e.claims.filter((c) => c.result === 'ready').length, 0),
         practices: [...new Set(posted.map((e) => e.practice_id))],
       };
       if (!posted.length) error = 'No matching claims — import it manually from Billing → Remittance';

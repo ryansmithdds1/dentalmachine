@@ -27,8 +27,10 @@ import reportLibraryRoutes from './routes/reportlibrary.js';
 import productionReportRoutes from './routes/productionreport.js';
 import opportunityRoutes from './routes/opportunities.js';
 import cadenceRoutes from './routes/cadence.js';
+import journeyRoutes, { journeyPublicRoutes } from './routes/journeys.js';
 import recallBookRoutes, { recallVoiceWebhooks } from './routes/recallbook.js';
 import chatRoutes from './routes/chat.js';
+import treatmentEntryRoutes from './routes/treatmententry.js';
 import checklistRoutes from './routes/checklists.js';
 import onlineSchedPublicRoutes, { onlineSchedRoutes, onlineSchedEmbedRoutes } from './routes/onlinesched.js';
 import consentRoutes from './routes/consents.js';
@@ -97,6 +99,9 @@ import systemRoutes from './routes/system.js';
 import offlineRoutes from './routes/offline.js';
 import chartingRoutes from './routes/charting.js';
 import referralRoutes from './routes/referrals.js';
+import referralTrackerRoutes, { referralPublicRoutes } from './routes/referraltracker.js';
+import reviewFunnelRoutes, { reviewPublicRoutes } from './routes/reviewfunnel.js';
+import eobAutopilotRoutes, { eobAutopilotPublicRoutes } from './routes/eobauto.js';
 import importRoutes from './routes/imports.js';
 import backupRoutes from './routes/backup.js';
 import formRoutes from './routes/forms.js';
@@ -248,7 +253,8 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   // Which environment this is (APP_ENV: development, demo, staging, production), so screens can say so.
   app.get('/api/health', (_req, res) => res.json({ ok: true, environment: environmentName() }));
   app.use('/api/public', statusRoutes({ db, storage, messenger }));
-  app.use('/api/public', recallBookRoutes({ db, messenger, config, secret }), digestPublicRoutes({ db, secret }));
+  app.use('/api/public', recallBookRoutes({ db, messenger, config, secret }), digestPublicRoutes({ db, secret }), journeyPublicRoutes({ db }));
+  app.use('/api/public', reviewPublicRoutes({ db }), referralPublicRoutes({ db, storage, config }), eobAutopilotPublicRoutes({ db, config, secret, payments }));
   app.use('/api/auth', authRoutes({ db, secret, config, fetchImpl, messenger }));
   app.use('/api/public', (_req, res, next) => {
     res.set('Cache-Control', 'no-store');
@@ -314,7 +320,9 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(capacityRoutes({ db }));
   api.use(clinicalRoutes({ db }));
   api.use(chartingRoutes({ db, config, transcriber }));
+  api.use(treatmentEntryRoutes({ db }));
   api.use(referralRoutes({ db }));
+  api.use(referralTrackerRoutes({ db, storage, config, messenger }));
   api.use(importRoutes({ db }));
   api.use(backupRoutes({ db, storage, config }));
   api.use(formRoutes({ db, messenger, config }));
@@ -329,6 +337,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(scribeRoutes({ db, config }));
   api.use(xrayAiRoutes({ db, xrayAi }));
   api.use(insuranceAiRoutes({ db, config }));
+  api.use(eobAutopilotRoutes({ db, config, storage, mailer, clearinghouse }));
   api.use(intakeReviewRoutes({ db }));
   api.use(askRoutes({ db, config }));
   api.use(phoneRoutes({ db, storage }));
@@ -341,6 +350,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(checkinRoutes({ db, messenger }));
   api.use(lenderRoutes({ db, messenger }));
   api.use(reputationRoutes({ db, config, secret, gbp }));
+  api.use(reviewFunnelRoutes({ db, messenger, config }));
   api.use(onboardingRoutes({ db, messenger, payments }));
   api.use(attachmentRoutes({ db, storage, sender: attachmentSender ?? createAttachmentSender(attachmentConfig(process.env, config.ediMode), fetchImpl) }));
   // Cash voids, refunds and same-day discounts need a manager: checked before billing handles them.
@@ -356,6 +366,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(optimizerRoutes({ db, config, messenger, app: () => app }));
   api.use(labCheckinRoutes({ db, storage, config, messenger, transcriber }));
   api.use(cadenceRoutes({ db, messenger, mailer, config, secret }));
+  api.use(journeyRoutes({ db, messenger, mailer, config, secret }));
   api.use(metricRoutes({ db }));
   api.use(digestRoutes({ db, messenger, config, secret }));
   api.use(engagementRoutes({ db, messenger, config }));

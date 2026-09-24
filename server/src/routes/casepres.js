@@ -11,6 +11,9 @@ import { allergyWarning, controlledSchedule, stricterSchedule } from '../drugs.j
 import { PdfDoc, dataUrlImage } from '../pdf.js';
 import { mintHandoff, redeemHandoff, HANDOFF_MINUTES } from '../handoff.js';
 import { formPass } from './public.js';
+import { makeThumbnail } from '../thumbnails.js';
+import finOptionRoutes, { planQuote, publicQuote, alternativesOf, acceptChoice, agreementView, phaseList } from './finoptions.js';
+import treatmentOptionRoutes, { compareFor, publicCompare } from './treatmentoptions.js';
 
 // Common dental prescriptions for one-click entry.
 export const RX_FAVORITES = [
@@ -102,6 +105,10 @@ const pdfFilename = (plan) => `Treatment plan ${plan.name} ${(plan.signed_at || 
 
 export default function casePresentationRoutes({ db, messenger, config, erx, secret }) {
   const r = Router();
+  // Phases, the live quote and financial options, accepting an option at the desk (routes/finoptions.js).
+  r.use(finOptionRoutes({ db }));
+  // Comparing 2–3 options for one problem, and making them in one call (routes/treatmentoptions.js).
+  r.use(treatmentOptionRoutes({ db }));
 
   // Staff: send the plan to the patient to review and sign remotely, or get a link for a chairside tablet.
   r.post('/treatment-plans/:tid/present', requirePermission('clinical:write'), async (req, res) => {
@@ -365,8 +372,12 @@ export function publicCasePresentation({ db, storage, secret }) {
     const practice = await db.get('SELECT name, phone, address, city, state, zip, financing FROM practices WHERE id = ?', plan.practice_id);
     const financing = financingOptions(practice, v.estimate.total_patient);
     delete practice.financing;
+    // The visual presentation (F2) and the financial options side by side (F3); after signing, what was chosen.
+    const chosen = agreementView(await db.get('SELECT * FROM fin_agreements WHERE live_key = ?', `tp:${plan.id}`));
+    const alternatives = plan.signed_at ? [] : (await alternativesOf(db, plan)).filter((a) => !a.signed).map(({ id, label, name, current, procedures, fee, insurance, you_pay, visits, from_monthly }) => ({ id, label, name, current, procedures, fee, insurance, you_pay, visits, from_monthly }));
     return {
-      financing,
+      financing, quote: plan.signed_at ? null : publicQuote(await planQuote(db, plan)), alternatives,
+      agreement: chosen && { title: chosen.chosen.title, kind: chosen.kind, lender: chosen.chosen.lender || null, total: chosen.total, due_today: chosen.due_today, monthly: chosen.monthly, months: chosen.months, apply_url: chosen.chosen.apply_url || null, discount: chosen.discount_amount, ppo_savings: chosen.ppo_savings },
       name: v.name, status: v.status, notes: v.notes, signed_at: v.signed_at, signature_name: v.signature_name, first_name: patient.first_name, language: patientLang(patient), practice,
       procedures: v.procedures.map((p) => ({ code: p.code, description: p.description, tooth: p.tooth, surfaces: p.surfaces, fee: p.fee, status: p.status })),
       estimate: { ...v.estimate, items: v.estimate.items.map(({ procedure_id: _, ...rest }) => rest) },
@@ -388,21 +399,72 @@ export function publicCasePresentation({ db, storage, secret }) {
     res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': `attachment; filename="${pdfFilename(plan)}.pdf"` }).send(await planPdf(db, plan));
   });
 
-  r.post('/tp/:token', limiter, async (req, res) => {
+  // Another option for the same work (Option B beside Option A), for this patient's link only.
+  const optionOf = async (plan, id) => {
+    if (id == null || id === '' || Number(id) === plan.id) return plan;
+    const other = plan.option_group && await db.get("SELECT * FROM treatment_plans WHERE id = ? AND practice_id = ? AND patient_id = ? AND option_group = ? AND status IN ('proposed','accepted') AND signed_at IS NULL", Number(id), plan.practice_id, plan.patient_id, plan.option_group);
+    if (!other) throw new HttpError(404, 'That option is not available');
+    return other;
+  };
+  // The options again for other phases (or another option of the plan): the patient ticks what they'll do now.
+  r.get('/tp/:token/quote', viewLimit, async (req, res) => {
     const plan = await byToken(req.params.token, req);
-    if (plan.signed_at) throw new HttpError(409, 'This plan has already been signed');
+    const target = await optionOf(plan, req.query.plan);
+    res.json(publicQuote(await planQuote(db, target, { phases: phaseList(req.query.phases) })));
+  });
+  // Options for the same problem side by side (F6), for the patient's screen.
+  r.get('/tp/:token/compare', viewLimit, async (req, res) => {
+    const plan = await byToken(req.params.token, req);
+    res.json(publicCompare(await compareFor(db, plan)));
+  });
+  // A phase's x-ray or photo (a small preview), chosen by the office for the presentation.
+  r.get('/tp/:token/phase-image/:phase', viewLimit, async (req, res) => {
+    const plan = await byToken(req.params.token, req);
+    const target = await optionOf(plan, req.query.plan);
+    const row = await db.get('SELECT document_id FROM treatment_plan_phases WHERE treatment_plan_id = ? AND phase = ?', target.id, Number(req.params.phase));
+    const doc = row?.document_id && await db.get('SELECT * FROM documents WHERE id = ? AND patient_id = ? AND practice_id = ? AND deleted_at IS NULL', row.document_id, plan.patient_id, plan.practice_id);
+    if (!doc || !storage) throw new HttpError(404, 'No picture for this phase');
+    let thumb = doc.thumb_key ? { mime: doc.thumb_mime, data: await storage.read(doc.thumb_key, !!doc.thumb_encrypted) } : null;
+    if (!thumb?.data) {
+      const data = /^image\//.test(doc.mime) ? await storage.read(doc.storage_key, !!doc.encrypted) : null;
+      thumb = data ? makeThumbnail(doc.mime, data) || (doc.mime === 'image/jpeg' || doc.mime === 'image/png' ? { mime: doc.mime, data } : null) : null;
+    }
+    if (!thumb?.data) throw new HttpError(404, 'No picture for this phase');
+    await linkAudit(req, plan, 'treatment_plan.link_image');
+    res.set({ 'Content-Type': thumb.mime, 'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'none'; sandbox" }).send(thumb.data);
+  });
+
+  r.post('/tp/:token', limiter, async (req, res) => {
+    const linked = await byToken(req.params.token, req);
+    if (linked.signed_at) throw new HttpError(409, 'This plan has already been signed');
+    // The patient may sign another option of the same work, and may choose how to pay (F4): the numbers they
+    // chose from must still be the numbers now, or nothing is signed.
+    const choice = req.body?.choice && typeof req.body.choice === 'object' ? req.body.choice : null;
+    const plan = await optionOf(linked, choice?.plan_id ?? req.body?.plan_id);
+    const quote = choice ? await planQuote(db, plan, { phases: phaseList(choice.phases) }) : null;
+    if (quote && choice.quote_hash !== quote.quote_hash) throw new HttpError(409, 'The numbers have changed since you opened this — please look them over again', { changed: true });
     const name = String(req.body?.signature_name || '').trim();
     if (name.length < 2) throw new HttpError(400, 'Type your full name to sign');
     const image = req.body?.signature_image;
     if (image != null && (typeof image !== 'string' || !image.startsWith('data:image/png;base64,') || image.length > 300_000)) throw new HttpError(400, 'Invalid signature image');
     if (!req.body?.consent) throw new HttpError(400, 'Please confirm you have read and understand the plan');
     const snapshot = JSON.stringify(snapshotOf(await planView(db, plan)));
-    const signed = await recorded(db, 'treatment_plans', plan.id, () => db.run(
-      "UPDATE treatment_plans SET status = 'accepted', accepted_at = COALESCE(accepted_at, datetime('now')), signed_at = datetime('now'), signature_name = ?, signature_image = ?, signed_snapshot = ? WHERE id = ? AND signed_at IS NULL",
-      name, image || null, snapshot, plan.id,
-    ));
-    if (!signed.changes) throw new HttpError(409, 'This plan has already been signed');
-    await audit(db, { ip: req.ip, user: { practice_id: plan.practice_id, id: null } }, 'treatment_plan.patient_signed', 'treatment_plans', plan.id);
+    const today = (await practiceNow(db, plan.practice_id)).slice(0, 10);
+    const agreement = await db.tx(async () => {
+      const signed = await recorded(db, 'treatment_plans', plan.id, () => db.run(
+        "UPDATE treatment_plans SET status = 'accepted', accepted_at = COALESCE(accepted_at, datetime('now')), signed_at = datetime('now'), signature_name = ?, signature_image = ?, signed_snapshot = ? WHERE id = ? AND signed_at IS NULL",
+        name, image || null, snapshot, plan.id,
+      ));
+      if (!signed.changes) throw new HttpError(409, 'This plan has already been signed');
+      // Signing another option: the link now opens that one.
+      if (plan.id !== linked.id) {
+        await db.run('UPDATE treatment_plans SET sign_token_hash = NULL WHERE id = ?', linked.id);
+        await db.run('UPDATE treatment_plans SET sign_token_hash = ?, sign_token_expires_at = ?, presented_at = COALESCE(presented_at, datetime(\'now\')) WHERE id = ?', linked.sign_token_hash, linked.sign_token_expires_at, plan.id);
+      }
+      return choice ? (await acceptChoice(db, { plan, quote, optionKey: String(choice.option_key || ''), hash: choice.quote_hash, source: 'patient', signature: { name, image: image || null }, today })).agreement : null;
+    });
+    await audit(db, { ip: req.ip, user: { practice_id: plan.practice_id, id: null } }, 'treatment_plan.patient_signed', 'treatment_plans', plan.id, plan.id !== linked.id ? { option_of: linked.id } : undefined);
+    if (agreement) await audit(db, { ip: req.ip, user: { practice_id: plan.practice_id, id: null } }, 'fin_agreement.accept', 'fin_agreements', agreement.id, { patient_id: plan.patient_id, treatment_plan_id: plan.id, option: agreement.option_key, total: agreement.total, due_today: agreement.due_today, monthly: agreement.monthly, phases: JSON.parse(agreement.phases) });
     // The signed copy is filed in the chart, so it's there even if the plan is edited later.
     if (storage) {
       const fresh = await db.get('SELECT * FROM treatment_plans WHERE id = ?', plan.id);
@@ -413,7 +475,7 @@ export function publicCasePresentation({ db, storage, secret }) {
         storage_key: saved.storageKey, encrypted: saved.encrypted ? 1 : 0, notes: `Signed by ${name}`,
       });
     }
-    res.json(await publicView(await db.get('SELECT * FROM treatment_plans WHERE id = ?', plan.id)));
+    res.json({ ...(await publicView(await db.get('SELECT * FROM treatment_plans WHERE id = ?', plan.id))), pass: plan.id !== linked.id ? planPass(plan, secret) : undefined });
   });
   return r;
 }

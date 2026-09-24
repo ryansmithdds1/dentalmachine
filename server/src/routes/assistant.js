@@ -181,6 +181,19 @@ export const TOOLS = [
     },
   },
   {
+    name: 'chart_entry', kind: 'write',
+    description: 'Chart the way the office types it, through the chart\'s own entry engine: its bundles, aliases and shorthand. Pass the person\'s words as text, e.g. "crown bundle on 14 with buildup, plan it", "14 crb bu", "np", "srp no LL", "3-5 bridge plan", "30 MO caries; 19 rct done". Compared alternatives ("option one, extraction and bone graft on 19; option two, root canal, buildup and crown") become treatment options side by side. The confirmation shows exactly what will be charted, with fees and warnings.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        patient_id: { type: 'integer' },
+        text: { type: 'string', description: 'What to chart, in the words used (bundle names and aliases work)' },
+        provider_id: { type: 'integer', description: 'Who did it, for work charted as done' },
+      },
+      required: ['patient_id', 'text'],
+    },
+  },
+  {
     name: 'chart_conditions', kind: 'write',
     description: 'Chart existing conditions and work found on exam (not treatment): existing fillings, crowns, root canals, implants, missing teeth, caries, fractures, watches.',
     input_schema: {
@@ -243,7 +256,7 @@ How to work:
 - Scheduling: find open times, then book the best match (earliest that fits what they said). An exact time they gave can be booked directly.
 - Payments are in dollars; card payments here are recorded, not charged.
 - Clinical notes: write a clean professional note from the dictation, in its order, with nothing added. If they name a template or one clearly fits, fill its blanks from what was said and leave unmentioned blanks as they are.
-- Charting what's already there (existing restorations, missing teeth, decay found) is chart_conditions; treatment to do or done today is add_procedures.
+- Charting what's already there (existing restorations, missing teeth, decay found) is chart_conditions; treatment to do or done today is add_procedures. When the person names a bundle or alias ("crown bundle", "np", "srp", "imp"), speaks in chart shorthand, or compares options for a tooth, use chart_entry with their words instead: it charts exactly as typing it on the chart would.
 - Teeth use Universal numbering (1-32, primary A-T). Perio sites are DB, B, MB, DL, L, ML: "buccal 3 2 4" is DB, B, MB; "lingual" is DL, L, ML. For a full-mouth perio chart by voice, use start_voice_perio.
 - Replies are shown briefly, not read aloud: at most one short sentence, or just the question you need answered. After making changes, say nothing unless there's something they need to know. Times in 12-hour form. No markdown.
 - If a tool returns an error, say plainly what went wrong in a few words.`;

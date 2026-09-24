@@ -6,6 +6,7 @@ import { findOr404, audit, insert, practiceNow } from '../util.js';
 import { structured } from '../ai.js';
 import { syncReviews, postReply, sealGbp, setBookingLink } from '../reviews.js';
 import { publish } from '../events.js';
+import { scanReviews } from '../shoutouts.js';
 
 const requireAdmin = (req, _res, next) => (req.user.role === 'admin' ? next() : next(new HttpError(403, 'Only administrators can do this')));
 
@@ -37,6 +38,7 @@ export async function runReviewSync(db, { gbp, secret }) {
     try {
       n += (await syncReviews(db, gbp, secret, c.practice_id)).synced;
       await newReviewTasks(db, c.practice_id, since);
+      await scanReviews(db, c.practice_id); // team shout-outs named in new reviews (RV3)
       await resolveIssue(db, c.practice_id, 'reviews-sync');
     } catch (err) {
       await raiseIssue(db, { practiceId: c.practice_id, kind: 'sync', key: 'reviews-sync', role: 'admin', title: 'Google reviews couldn’t be checked', detail: err.message });
@@ -79,6 +81,7 @@ export default function reputationRoutes({ db, config, secret, gbp }) {
     const since = new Date().toISOString().slice(0, 19).replace('T', ' ');
     const out = await syncReviews(db, gbp, secret, req.user.practice_id);
     await newReviewTasks(db, req.user.practice_id, since);
+    await scanReviews(db, req.user.practice_id); // team shout-outs named in new reviews (RV3)
     res.json(out);
   });
   // Online booking from the Google listing ("Book" in Search and Maps), tagged so bookings show it came from Google.

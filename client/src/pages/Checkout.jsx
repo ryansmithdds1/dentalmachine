@@ -10,6 +10,7 @@ import { ReaderPay, useReaders } from '../components/CardReader.jsx';
 import NextVisitPicker from '../components/NextVisitPicker.jsx';
 import { useLastMethod, methodToPost } from '../components/patient/lastMethod.js';
 import '../components/patient/moneyflows.css';
+import { requestReview } from '../reviewRequest.js';
 
 const METHODS = ['credit_card', 'debit_card', 'cash', 'check', 'care_credit', 'ach', 'other'];
 
@@ -138,6 +139,7 @@ export default function Checkout() {
             <button className="primary" onClick={() => act(() => api.post(`/appointments/${a.id}/checkout`, {}), 'Checked out.')}>Mark checked out</button>
           )}
           <button style={{ marginLeft: 8 }} onClick={() => window.open(`/appointments/${a.id}/walkout`, '_blank')}>Print walkout</button>
+          {can('patients:write') && <button style={{ marginLeft: 8 }} title="Text (or email) a “how did we do?” link" onClick={() => requestReview(a.patient_id, { source: 'checkout', appointmentId: a.id, name: `${a.first_name} ${a.last_name}` })}>Ask for a review</button>}
         </section>
       </div>
 

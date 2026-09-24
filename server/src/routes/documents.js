@@ -11,6 +11,7 @@ import { readLimitFor } from '../filetypes.js';
 import { createVirusScanner } from '../virusscan.js';
 import { createOcr } from '../ocr.js';
 import docManageRoutes, { cleanFolder } from './docmanage.js';
+import { referralDocumentFiled } from '../referraltracker.js';
 
 // Mount layouts (FMX etc.): how many images each holds; the client draws the slots.
 export const MOUNT_TEMPLATES = { fmx18: 18, fmx20: 20, fmx14: 14, bw4: 4, bw2: 2, vbw7: 7, pa1: 1, pa2: 2, pa4: 4, pano1: 1, photos8: 8 };
@@ -333,6 +334,8 @@ export default function documentRoutes({ db, storage, config = {} }) {
     await recorded(db, 'documents', doc.id, () => db.run(`UPDATE documents SET ${Object.keys(row).map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, ...Object.values(row), doc.id));
     await audit(db, req, 'document.update', 'documents', doc.id, { patient_id: doc.patient_id, ...row });
     publish(req.user.practice_id, doc.patient_id ? { type: 'documents', patient_id: doc.patient_id } : { type: 'office-documents' });
+    // Filed as a specialist's letter: suggest the open referral it answers (referraltracker.js; never throws).
+    if (doc.patient_id && ['referral', 'correspondence'].includes(row.category)) await referralDocumentFiled(db, storage, config, doc.id);
     const out = await db.get('SELECT id, category, tooth, taken_at, filename, notes, tags, exposure, folder, expires_on, appointment_id, claim_id, treatment_plan_id FROM documents WHERE id = ?', doc.id);
     res.json({ ...out, exposure: parseJson(out.exposure) });
   });

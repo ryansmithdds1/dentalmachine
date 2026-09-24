@@ -28,7 +28,7 @@ import { pendingCount } from './offline/index.js';
 import { ClockButton } from './components/TimeClock.jsx';
 import { useLiveEvents } from './live.js';
 import MfaSetup from './components/MfaSetup.jsx';
-import { Sun, CalendarDays, Users, MessageSquare, Inbox as InboxIcon, PhoneCall, Megaphone, Receipt, ListChecks, ChartColumn, Landmark, Settings as SettingsIcon, Search, PanelLeftClose, PanelLeftOpen, LogOut, Keyboard, Monitor, Moon, Sparkles, Phone, Building2, Star, HelpCircle, AlertTriangle, BookOpen, Clock, Banknote, Gauge, Repeat, ShieldCheck, FolderOpen, CalendarRange, ClipboardCheck, PackageCheck } from 'lucide-react';
+import { Sun, CalendarDays, Users, MessageSquare, Inbox as InboxIcon, PhoneCall, Megaphone, Receipt, ListChecks, ChartColumn, Landmark, Settings as SettingsIcon, Search, PanelLeftClose, PanelLeftOpen, LogOut, Keyboard, Monitor, Moon, Sparkles, Phone, Building2, Star, HelpCircle, AlertTriangle, BookOpen, Clock, Banknote, Gauge, Repeat, ShieldCheck, FolderOpen, CalendarRange, ClipboardCheck, PackageCheck, Send, BadgeCheck } from 'lucide-react';
 import { getThemePref, setThemePref, watchTheme } from './theme.js';
 
 // Pages load on demand so the first screen appears quickly.
@@ -84,6 +84,8 @@ const PayResult = lazy(() => import('./pages/public/PayResult.jsx'));
 const LabCasePage = lazy(() => import('./pages/public/LabCasePage.jsx'));
 const LearnPage = lazy(() => import('./pages/public/LearnPage.jsx'));
 const RecallBook = lazy(() => import('./pages/public/RecallBook.jsx'));
+const WelcomePage = lazy(() => import('./pages/public/WelcomePage.jsx'));
+const NewsUnsubscribe = lazy(() => import('./pages/public/NewsUnsubscribe.jsx'));
 const PaperworkPage = lazy(() => import('./pages/public/Paperwork.jsx'));
 const FormsKiosk = lazy(() => import('./pages/public/Kiosk.jsx'));
 const EduPage = lazy(() => import('./pages/public/EduPage.jsx'));
@@ -94,6 +96,9 @@ const OfficeDocuments = lazy(() => import('./pages/OfficeDocuments.jsx'));
 const Capacity = lazy(() => import('./pages/Capacity.jsx'));
 const Checklists = lazy(() => import('./pages/Checklists.jsx'));
 const LabCheckin = lazy(() => import('./pages/LabCheckin.jsx'));
+const ReviewsDashboard = lazy(() => import('./pages/ReviewsDashboard.jsx'));
+const Referrals = lazy(() => import('./pages/Referrals.jsx'));
+const EobAutopilot = lazy(() => import('./pages/EobAutopilot.jsx'));
 const CheckinPage = lazy(() => import('./pages/public/CheckinPage.jsx'));
 const StatusPage = lazy(() => import('./pages/public/StatusPage.jsx'));
 const Help = lazy(() => import('./pages/Help.jsx'));
@@ -112,6 +117,8 @@ export default function App() {
         <Route path="/f/:token" element={<IntakePage />} />
         <Route path="/r/:token" element={<ReviewPage />} />
         <Route path="/s/:token" element={<SurveyPage />} />
+        <Route path="/welcome/:token" element={<WelcomePage />} />
+        <Route path="/unsubscribe-news/:token" element={<NewsUnsubscribe />} />
         <Route path="/u/:token" element={<UnsubscribePage />} />
         <Route path="/pay/:result" element={<PayResult />} />
         <Route path="/tp/:token" element={<CaseAcceptance />} />
@@ -257,6 +264,8 @@ function StaffApp() {
     ['/metrics', Gauge, 'Metrics', can('reports:read') || can('reports:own')],
     ['/capacity', CalendarRange, 'Capacity', can('schedule:read')],
     ['/lab-checkin', PackageCheck, 'Lab check-in', can('clinical:write')],
+    ['/referrals', Send, 'Referrals', can('patients:read')],
+    ['/insurance-autopilot', BadgeCheck, 'Insurance autopilot', can('billing:read')],
     ['/campaigns', Megaphone, 'Campaigns', can('patients:write')],
     ['/reputation', Star, 'Reviews', can('patients:read')],
     ['/claims', Receipt, 'Billing', can('billing:read')],
@@ -458,6 +467,9 @@ function Shell({ nav }) {
             <Route path="/office" element={<Office />} />
             <Route path="/checklists/*" element={<Checklists />} />
             <Route path="/lab-checkin" element={<LabCheckin />} />
+            <Route path="/reviews" element={<ReviewsDashboard />} />
+            <Route path="/referrals" element={<Referrals />} />
+            <Route path="/insurance-autopilot" element={<EobAutopilot />} />
             <Route path="/timeclock" element={<TimeClockPage />} />
             <Route path="/deposits" element={<Deposits />} />
             <Route path="/claims" element={<Claims />} />

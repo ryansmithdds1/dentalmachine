@@ -22,6 +22,62 @@ function normalizeToothFields(row) {
   return row;
 }
 
+// ---- Procedures ----
+// Charging something other than the fee schedule is a billing decision, not a charting one.
+const feeOverride = (req) => {
+  if (req.user.role !== 'admin' && !can(req.user, 'billing:write')) throw new HttpError(403, 'Changing a fee from the fee schedule needs billing permission');
+};
+const checkPriority = (row) => {
+  if (row.priority == null || row.priority === '') { delete row.priority; return; }
+  if (!(Number.isInteger(Number(row.priority)) && Number(row.priority) >= 1 && Number(row.priority) <= 999)) throw new HttpError(400, 'priority must be a whole number, 1-999');
+  row.priority = Number(row.priority);
+};
+// One procedure row, checked and priced (the chart-entry route, routes/treatmententry.js, charts through it too).
+export async function buildProcedureRow(db, req, patientId, input) {
+  const row = normalizeToothFields(pick(input, ['code_id', 'code', 'tooth', 'surfaces', 'area', 'fee', 'provider_id', 'treatment_plan_id', 'appointment_id', 'priority', 'phase']));
+  const pid = req.user.practice_id;
+  const code = row.code_id
+    ? await findOr404(db, 'procedure_codes', row.code_id, pid, 'Procedure code')
+    : await db.get('SELECT * FROM procedure_codes WHERE practice_id = ? AND code = ?', pid, String(row.code || '').toUpperCase());
+  if (!code) throw new HttpError(400, 'A valid code_id or code is required');
+  if (code.requires_tooth && !row.tooth) throw new HttpError(400, `${code.code} requires a tooth`);
+  if (code.requires_surface && !row.surfaces) throw new HttpError(400, `${code.code} requires surfaces`);
+  checkArea(code, row);
+  if (row.provider_id) await findOr404(db, 'providers', row.provider_id, pid, 'Provider');
+  if (row.appointment_id && (await findOr404(db, 'appointments', row.appointment_id, pid, 'Appointment')).patient_id !== Number(patientId)) throw new HttpError(400, "That appointment is another patient's");
+  if (row.treatment_plan_id) {
+    const plan = await findOr404(db, 'treatment_plans', row.treatment_plan_id, pid, 'Treatment plan');
+    if (plan.patient_id !== patientId) throw new HttpError(400, 'Treatment plan belongs to another patient');
+  }
+  const scheduled = await officeFee(db, pid, code, { patientId, providerId: row.provider_id, locationId: req.location_id });
+  const fee = row.fee != null && row.fee !== '' ? Math.round(Number(row.fee)) : scheduled;
+  if (!Number.isFinite(fee) || fee < 0 || fee > MAX_CENTS) throw new HttpError(400, 'fee must be a non-negative number of cents');
+  if (fee !== scheduled) feeOverride(req);
+  checkPriority(row);
+  return {
+    practice_id: pid, patient_id: patientId, code_id: code.id, code: code.code, description: code.description, category: code.category,
+    tooth: row.tooth ?? null, surfaces: row.surfaces ?? null, area: row.area ?? null, fee, provider_id: row.provider_id ?? null,
+    treatment_plan_id: row.treatment_plan_id ?? null, appointment_id: row.appointment_id ?? null, priority: row.priority ?? 1, phase: checkPhase(row.phase ?? 1),
+  };
+}
+
+// Quadrant codes (scaling and root planing, osseous surgery) need a quadrant; arch codes (dentures) an arch.
+export function checkArea(code, row) {
+  const kind = codeArea(code);
+  if (kind === 'quadrant') {
+    if (!QUADRANTS.includes(row.area)) throw new HttpError(400, `${code.code} is charted by quadrant: area must be one of ${QUADRANTS.join(', ')}`);
+  } else if (kind === 'arch') {
+    if (!ARCHES.includes(row.area)) throw new HttpError(400, `${code.code} is charted by arch: area must be U or L`);
+  } else if (row.area) {
+    throw new HttpError(400, `${code.code} is not charted by quadrant or arch`);
+  }
+}
+export const checkPhase = (phase) => {
+  const n = Number(phase);
+  if (!Number.isInteger(n) || n < 1 || n > 9) throw new HttpError(400, 'phase must be 1-9');
+  return n;
+};
+
 export default function clinicalRoutes({ db }) {
   const r = Router();
   const patientOr404 = async (req) => await findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient');
@@ -87,59 +143,7 @@ export default function clinicalRoutes({ db }) {
   });
 
   // ---- Procedures ----
-  // Charging something other than the fee schedule is a billing decision, not a charting one.
-  const feeOverride = (req) => {
-    if (req.user.role !== 'admin' && !can(req.user, 'billing:write')) throw new HttpError(403, 'Changing a fee from the fee schedule needs billing permission');
-  };
-  const checkPriority = (row) => {
-    if (row.priority == null || row.priority === '') { delete row.priority; return; }
-    if (!(Number.isInteger(Number(row.priority)) && Number(row.priority) >= 1 && Number(row.priority) <= 999)) throw new HttpError(400, 'priority must be a whole number, 1-999');
-    row.priority = Number(row.priority);
-  };
-  async function buildProcedure(req, patientId, input) {
-    const row = normalizeToothFields(pick(input, ['code_id', 'code', 'tooth', 'surfaces', 'area', 'fee', 'provider_id', 'treatment_plan_id', 'appointment_id', 'priority', 'phase']));
-    const pid = req.user.practice_id;
-    const code = row.code_id
-      ? await findOr404(db, 'procedure_codes', row.code_id, pid, 'Procedure code')
-      : await db.get('SELECT * FROM procedure_codes WHERE practice_id = ? AND code = ?', pid, String(row.code || '').toUpperCase());
-    if (!code) throw new HttpError(400, 'A valid code_id or code is required');
-    if (code.requires_tooth && !row.tooth) throw new HttpError(400, `${code.code} requires a tooth`);
-    if (code.requires_surface && !row.surfaces) throw new HttpError(400, `${code.code} requires surfaces`);
-    checkArea(code, row);
-    if (row.provider_id) await findOr404(db, 'providers', row.provider_id, pid, 'Provider');
-    if (row.appointment_id && (await findOr404(db, 'appointments', row.appointment_id, pid, 'Appointment')).patient_id !== Number(patientId)) throw new HttpError(400, "That appointment is another patient's");
-    if (row.treatment_plan_id) {
-      const plan = await findOr404(db, 'treatment_plans', row.treatment_plan_id, pid, 'Treatment plan');
-      if (plan.patient_id !== patientId) throw new HttpError(400, 'Treatment plan belongs to another patient');
-    }
-    const scheduled = await officeFee(db, pid, code, { patientId, providerId: row.provider_id, locationId: req.location_id });
-    const fee = row.fee != null && row.fee !== '' ? Math.round(Number(row.fee)) : scheduled;
-    if (!Number.isFinite(fee) || fee < 0 || fee > MAX_CENTS) throw new HttpError(400, 'fee must be a non-negative number of cents');
-    if (fee !== scheduled) feeOverride(req);
-    checkPriority(row);
-    return {
-      practice_id: pid, patient_id: patientId, code_id: code.id, code: code.code, description: code.description, category: code.category,
-      tooth: row.tooth ?? null, surfaces: row.surfaces ?? null, area: row.area ?? null, fee, provider_id: row.provider_id ?? null,
-      treatment_plan_id: row.treatment_plan_id ?? null, appointment_id: row.appointment_id ?? null, priority: row.priority ?? 1, phase: checkPhase(row.phase ?? 1),
-    };
-  }
-
-  // Quadrant codes (scaling and root planing, osseous surgery) need a quadrant; arch codes (dentures) an arch.
-  function checkArea(code, row) {
-    const kind = codeArea(code);
-    if (kind === 'quadrant') {
-      if (!QUADRANTS.includes(row.area)) throw new HttpError(400, `${code.code} is charted by quadrant: area must be one of ${QUADRANTS.join(', ')}`);
-    } else if (kind === 'arch') {
-      if (!ARCHES.includes(row.area)) throw new HttpError(400, `${code.code} is charted by arch: area must be U or L`);
-    } else if (row.area) {
-      throw new HttpError(400, `${code.code} is not charted by quadrant or arch`);
-    }
-  }
-  const checkPhase = (phase) => {
-    const n = Number(phase);
-    if (!Number.isInteger(n) || n < 1 || n > 9) throw new HttpError(400, 'phase must be 1-9');
-    return n;
-  };
+  const buildProcedure = (req, patientId, input) => buildProcedureRow(db, req, patientId, input);
 
   r.get('/patients/:id/procedures', requirePermission('clinical:read'), async (req, res) => {
     const patient = await patientOr404(req);

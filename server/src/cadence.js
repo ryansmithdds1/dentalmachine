@@ -23,6 +23,7 @@ import { recallCadence } from './cadence-recall.js';
 //   describe(db, enrollments)  words for the message: { visit: 'checkup and cleaning' }
 //   afterSend(db, enrollments) (optional) bookkeeping on the source rows (recall → contacted)
 //   linkPath                   the patient page a message's link opens (/rb/<token>), or null for none
+//   messageKind                (optional) the kind its texts and emails are logged as ('recall' when not given)
 // Everything the job does runs as the automation actor; AI calls are recorded as 'ai'. The engine never sends
 // a step twice: each (enrollment, step, occurrence) is claimed by inserting its cadence_runs row first.
 
@@ -526,7 +527,7 @@ async function runGroup(db, practice, type, def, { recipient, members, lead, ctx
   const tried = [];
   for (const channel of order) {
     if (needsHours(channel) && !withinSendHours(practice, ctx.nowLocal)) { tried.push({ channel, result: 'quiet hours' }); continue; }
-    const r = await deliver(db, practice, { channel, recipient, patients, text, subject, vars, step, runId: leadRunId, link, deps, lang, members: going });
+    const r = await deliver(db, practice, { channel, recipient, patients, text, subject, vars, step, runId: leadRunId, link, deps, lang, members: going, kind: def.messageKind || 'recall' });
     tried.push({ channel, ...r });
     if (r.status === 'sent' || r.status === 'task') {
       outcome = { channel, ...r };
@@ -568,7 +569,7 @@ async function runGroup(db, practice, type, def, { recipient, members, lead, ctx
 }
 
 // One channel, one attempt. Returns { status: 'sent' | 'task' | 'failed' | 'unreachable', result, ids… }.
-async function deliver(db, practice, { channel, recipient, patients, text, subject, vars, step, runId, link, deps, lang, members }) {
+async function deliver(db, practice, { channel, recipient, patients, text, subject, vars, step, runId, link, deps, lang, members, kind = 'recall' }) {
   const { messenger, mailer } = deps;
   if (channel === 'text' || channel === 'email') {
     const sms = channel === 'text';
@@ -578,7 +579,7 @@ async function deliver(db, practice, { channel, recipient, patients, text, subje
     if (await isOptedOutAddress(db, practice.id, sms ? 'sms' : 'email', to)) return { status: 'unreachable', result: 'opted out' };
     if (!messenger) return { status: 'failed', result: 'messaging is not set up' };
     const body = sms && !/\bSTOP\b/.test(text) ? `${text}${fixedText(lang).sms_stop}` : text;
-    const msg = await sendMessage(db, messenger, { practiceId: practice.id, patientId: recipient.id, channel: sms ? 'sms' : 'email', to, subject, body, kind: 'recall' });
+    const msg = await sendMessage(db, messenger, { practiceId: practice.id, patientId: recipient.id, channel: sms ? 'sms' : 'email', to, subject, body, kind });
     if (msg.status === 'sent') return { status: 'sent', result: sms ? 'texted' : 'emailed', message_id: msg.id };
     if (msg.status === 'blocked') return { status: 'unreachable', result: msg.error || 'blocked' };
     return { status: 'failed', result: msg.error || 'delivery failed', message_id: msg.id };

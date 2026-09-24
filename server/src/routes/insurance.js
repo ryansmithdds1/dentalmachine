@@ -518,47 +518,55 @@ export default function insuranceRoutes({ db }) {
     res.json(await db.get(`${CLAIM_SELECT} WHERE c.id = ?`, claim.id));
   });
 
-  // What would this cost the patient? Read-only: nothing is charted, charged or stored.
-  // procedure_ids: work already on the chart; items: [{ code, tooth, surfaces }] for work not charted yet (the
-  // chart-by-typing preview, "14 D2740"). The patient's primary policy is used unless patient_insurance_id is
-  // given (null prices it with no insurance).
+  // What would this cost the patient? Read-only: nothing is charted, charged or stored (estimateFor, below).
   r.post('/patients/:id/estimate', requirePermission('billing:read'), async (req, res) => {
     const patient = await findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient');
-    const pid = req.user.practice_id;
-    const body = req.body || {};
-    const policyId = body.patient_insurance_id;
-    const policy = policyId === null ? null
-      : policyId !== undefined
-        ? await db.get('SELECT pi.*, c.name AS carrier_name FROM patient_insurance pi JOIN insurance_carriers c ON c.id = pi.carrier_id WHERE pi.id = ? AND pi.practice_id = ? AND pi.patient_id = ?', Number(policyId), pid, patient.id)
-        : await primaryPolicy(db, pid, patient.id);
-    if (policyId != null && !policy) throw new HttpError(404, 'Insurance policy not found');
-    const ids = Array.isArray(body.procedure_ids) ? body.procedure_ids : [];
-    const items = Array.isArray(body.items) ? body.items : [];
-    if (ids.length + items.length > 50) throw new HttpError(400, 'Estimate up to 50 procedures at a time');
-    const procs = await mapSeq(ids, async (id) => {
-      const p = await findOr404(db, 'procedures', id, pid, 'Procedure');
-      if (p.patient_id !== patient.id) throw new HttpError(400, `Procedure ${p.id} belongs to another patient`);
-      return p;
-    });
-    // Work not charted yet: priced the way charting it would price it (the patient's, else the office's fee schedule).
-    const hypothetical = await mapSeq(items, async (it, i) => {
-      const code = await db.get('SELECT * FROM procedure_codes WHERE practice_id = ? AND code = ?', pid, String(it?.code || '').trim().toUpperCase());
-      if (!code) throw new HttpError(400, `Unknown procedure code ${String(it?.code || '').slice(0, 10) || '(blank)'}`);
-      const tooth = it.tooth == null || it.tooth === '' ? null : String(it.tooth).toUpperCase();
-      if (tooth && !validTooth(tooth)) throw new HttpError(400, 'tooth must be 1-32, A-T, or a supernumerary tooth (51-82, AS-TS)');
-      const surfaces = it.surfaces ? String(it.surfaces).toUpperCase() : null;
-      if (surfaces && !/^[MODBFLI]{1,5}$/.test(surfaces)) throw new HttpError(400, 'surfaces must be letters from M, O, D, B, F, L, I');
-      return {
-        id: null, preview: i, practice_id: pid, patient_id: patient.id, code: code.code, description: code.description, category: code.category,
-        tooth, surfaces, fee: await officeFee(db, pid, code, { patientId: patient.id, locationId: req.location_id }), status: 'planned',
-      };
-    });
-    const out = await estimateCoverage(db, policy, [...procs, ...hypothetical]);
-    // Name each line, so a preview can show it without looking the code up again.
-    const all = [...procs, ...hypothetical];
-    out.items = out.items.map((it, i) => ({ ...it, code: all[i].code, description: all[i].description, tooth: all[i].tooth ?? null }));
-    res.json(out);
+    res.json(await estimateFor(db, req, patient, req.body || {}));
   });
 
   return r;
+}
+
+// What would this cost the patient? Read-only: nothing is charted, charged or stored. Used by POST
+// /patients/:id/estimate and the chart-entry preview (routes/treatmententry.js), so both price work the same way.
+// procedure_ids: work already on the chart; items: [{ code, tooth, surfaces, area }] for work not charted yet (the
+// chart-by-typing preview, "14 D2740", a bundle). The patient's primary policy is used unless patient_insurance_id
+// is given (null prices it with no insurance).
+export async function estimateFor(db, req, patient, body = {}) {
+  const pid = req.user.practice_id;
+  const policyId = body.patient_insurance_id;
+  const policy = policyId === null ? null
+    : policyId !== undefined
+      ? await db.get('SELECT pi.*, c.name AS carrier_name FROM patient_insurance pi JOIN insurance_carriers c ON c.id = pi.carrier_id WHERE pi.id = ? AND pi.practice_id = ? AND pi.patient_id = ?', Number(policyId), pid, patient.id)
+      : await primaryPolicy(db, pid, patient.id);
+  if (policyId != null && !policy) throw new HttpError(404, 'Insurance policy not found');
+  const ids = Array.isArray(body.procedure_ids) ? body.procedure_ids : [];
+  const items = Array.isArray(body.items) ? body.items : [];
+  if (ids.length + items.length > 50) throw new HttpError(400, 'Estimate up to 50 procedures at a time');
+  const procs = await mapSeq(ids, async (id) => {
+    const p = await findOr404(db, 'procedures', id, pid, 'Procedure');
+    if (p.patient_id !== patient.id) throw new HttpError(400, `Procedure ${p.id} belongs to another patient`);
+    return p;
+  });
+  // Work not charted yet: priced the way charting it would price it (the patient's, else the office's fee schedule).
+  const hypothetical = await mapSeq(items, async (it, i) => {
+    const code = await db.get('SELECT * FROM procedure_codes WHERE practice_id = ? AND code = ?', pid, String(it?.code || '').trim().toUpperCase());
+    if (!code) throw new HttpError(400, `Unknown procedure code ${String(it?.code || '').slice(0, 10) || '(blank)'}`);
+    const tooth = it.tooth == null || it.tooth === '' ? null : String(it.tooth).toUpperCase();
+    if (tooth && !validTooth(tooth)) throw new HttpError(400, 'tooth must be 1-32, A-T, or a supernumerary tooth (51-82, AS-TS)');
+    const surfaces = it.surfaces ? String(it.surfaces).toUpperCase() : null;
+    if (surfaces && !/^[MODBFLI]{1,5}$/.test(surfaces)) throw new HttpError(400, 'surfaces must be letters from M, O, D, B, F, L, I');
+    // The quadrant or arch, so per-quadrant limits (SRP) count each quadrant once.
+    const area = it.area ? String(it.area).toUpperCase() : null;
+    if (area && !/^(UR|UL|LL|LR|U|L)$/.test(area)) throw new HttpError(400, 'area must be a quadrant (UR, UL, LL, LR) or arch (U, L)');
+    return {
+      id: null, preview: i, practice_id: pid, patient_id: patient.id, code: code.code, description: code.description, category: code.category,
+      tooth, surfaces, area, fee: await officeFee(db, pid, code, { patientId: patient.id, locationId: req.location_id }), status: 'planned',
+    };
+  });
+  const out = await estimateCoverage(db, policy, [...procs, ...hypothetical]);
+  // Name each line, so a preview can show it without looking the code up again.
+  const all = [...procs, ...hypothetical];
+  out.items = out.items.map((it, i) => ({ ...it, code: all[i].code, description: all[i].description, tooth: all[i].tooth ?? null, area: all[i].area ?? null }));
+  return out;
 }

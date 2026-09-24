@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Modal } from './ui.jsx';
-import { useShortcutList, comboLabel } from '../shortcuts.js';
+import { useShortcutList, comboLabel, registeredHelp } from '../shortcuts.js';
 
 // "?" shows every keyboard shortcut; "g" then a letter jumps to a main area (like Gmail or GitHub).
 const GO = { t: ['/', 'Today'], s: ['/schedule', 'Schedule'], p: ['/patients', 'Patients'], m: ['/messages', 'Messages'], f: ['/followups', 'Follow-up lists'], b: ['/claims', 'Billing'], r: ['/reports', 'Reports'], o: ['/office', 'To-do & labs'], x: ['/settings', 'Settings'] };
@@ -34,6 +34,9 @@ const SECTIONS = [
     [['B', 'U', 'P'], 'Perio: bleeding, pus or plaque on the site just probed (Shift+B: the whole side)'],
     [['G', 'D'], 'Perio: switch to gingival margins or depths (in a perio box)'],
     [['E', '0–9'], 'Chart: type a finding, e.g. 30 MO caries, 14 D2740, 2-4 sealant plan'],
+    [[isMac ? '⌥' : 'Alt', '1–9'], 'Chart: the quick buttons, in order (tooth selected first)', '+'],
+    [['14 crb bu', 'np', 'srp no LL'], 'Chart: bundles and aliases — typed, or said to the assistant'],
+    [['option one …', 'option two …'], 'Chart: compare treatment options side by side'],
     [['←', '→', '↑', '↓'], 'Chart: move between teeth'],
   ]],
   ['Messages & settings', [
@@ -77,7 +80,8 @@ export default function KeyboardHelp() {
   return (
     <Modal title="Keyboard shortcuts" wide onClose={() => setOpen(false)}>
       <div className="shortcuts">
-        {[...SECTIONS, ...Object.entries(registered.reduce((acc, r) => ({ ...acc, [r.section]: [...(acc[r.section] || []), [comboLabel(r.combo), r.label, '+']] }), {}))].map(([title, rows]) => (
+        {[...SECTIONS, ...Object.entries(registered.reduce((acc, r) => ({ ...acc, [r.section]: [...(acc[r.section] || []), [comboLabel(r.combo), r.label, '+']] }), {})),
+          ...registeredHelp().map((h) => [h.section, h.rows])].map(([title, rows]) => (
           <section key={title}>
             <h3>{title}</h3>
             <dl>

@@ -161,7 +161,9 @@ test('insurance checks post across several claims, line by line; ERA service lin
   const c3 = (await ctx.api.post('/claims', { patient_insurance_id: ctx.policy.id, procedure_ids: [p3.id] })).data;
   await ctx.api.post(`/claims/${c3.id}/submit`);
   let era = sandbox835({ payee: { name: 'P', npi: '1234567893' }, eft: 'EFT9', date: '2026-02-01', claims: [{ control_number: `DM${c3.id}`, billed: 23500, paid: 18800, patient: 4700, write_off: 0, payer_claim_number: 'P9' }] });
-  era = era.replace(/CAS\*PR\*2\*47~/, 'CAS*PR*2*47~SVC*AD:D2392*235*188~CAS*PR*2*47~').replace(/~(\s*)SE\*/, '~$1PLB*1234567893*20261231*L6:INT*-2.5~$1SE*');
+  // The patient share on the service line (not repeated at claim level, which would count it twice).
+  era = era.replace(/CAS\*PR\*2\*47~/, 'SVC*AD:D2392*235*188~CAS*PR*2*47~').replace(/~(\s*)SE\*/, '~$1PLB*1234567893*20261231*L6:INT*-2.5~$1SE*');
+  await ctx.api.put('/eob-autopilot/settings', { autopost: true });
   const res = await processInbound(h.db, { name: 'e.835', content: era }, { practiceId: ctx.patient.practice_id });
   assert.equal(res.error ?? null, null, JSON.stringify(res));
   const line = await h.db.get('SELECT paid_amount, patient_resp FROM claim_items WHERE claim_id = ?', c3.id);

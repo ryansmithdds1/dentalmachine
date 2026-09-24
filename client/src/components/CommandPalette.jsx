@@ -6,6 +6,7 @@ import { useAuth } from '../auth.jsx';
 import { useActivePatient } from '../activePatient.jsx';
 import { screenCommands } from '../shortcuts.js';
 import { PATIENT_ACTIONS } from './PatientBar.jsx';
+import { requestReview } from '../reviewRequest.js';
 
 const PAGES = [
   ['Today / huddle', '/'], ['Schedule', '/schedule'], ['Patients', '/patients'], ['Messages', '/messages'], ['Follow-up lists', '/followups'], ['Recall list', '/followups?tab=recall'],
@@ -13,7 +14,8 @@ const PAGES = [
   ['Billing & claims', '/claims'], ['Statements', '/claims?tab=statements'], ['Insurance follow-up', '/claims?tab=followup'], ['Import ERA', '/claims?tab=era'],
   ['Insurance checks (EOB)', '/claims?tab=checks'], ['Eligibility', '/claims?tab=eligibility'], ['Pre-authorizations', '/claims?tab=preauths'], ['Deposits', '/claims?tab=deposits'],
   ['Practice KPIs', '/reports'], ['Day sheet', '/reports?tab=ops'], ['Month-end close', '/reports?tab=close'], ['To-do & labs', '/office'], ['Sent in online (intake review)', '/intake'], ['Supplies', '/office?tab=supplies'],
-  ['Time clock', '/timeclock'], ['Recall autopilot', '/recall'], ['Chart audit', '/chart-audit'], ['Metrics', '/metrics'], ['Production & income', '/reports?tab=production'], ['Clock in or out', '/timeclock'], ['Staff schedules', '/timeclock?tab=schedule'], ['Who’s in today', '/timeclock?tab=today'], ['Approve payroll hours', '/timeclock?tab=period'], ['Payroll export', '/timeclock?tab=export'], ['Time off requests', '/timeclock?tab=pto'], ['Deposits and cash', '/deposits'], ['Cash drawer', '/deposits?tab=drawers'], ['Finance', '/finance'], ['Settings', '/settings'], ['Help', '/help'],
+  ['Time clock', '/timeclock'], ['Recall autopilot', '/recall'], ['Chart audit', '/chart-audit'], ['Insurance autopilot', '/insurance-autopilot'], ['Scan a paper EOB', '/insurance-autopilot?tab=paper'], ['Insurance reconciliation', '/insurance-autopilot?tab=recon'], ['Referrals', '/referrals'], ['Metrics', '/metrics'], ['Production & income', '/reports?tab=production'], ['Clock in or out', '/timeclock'], ['Staff schedules', '/timeclock?tab=schedule'], ['Who’s in today', '/timeclock?tab=today'], ['Approve payroll hours', '/timeclock?tab=period'], ['Payroll export', '/timeclock?tab=export'], ['Time off requests', '/timeclock?tab=pto'], ['Deposits and cash', '/deposits'], ['Cash drawer', '/deposits?tab=drawers'], ['Finance', '/finance'], ['Settings', '/settings'], ['Help', '/help'],
+  ['Reviews & patient feedback', '/reviews'], ['Team shout-outs', '/reviews?tab=shoutouts'],
 ];
 
 // Things to do for a patient; typing the verb first ("book jane", "note doe", "perio 555-0100") shows just that.
@@ -27,7 +29,10 @@ const ACTIONS = [
   { verb: /^(ledger|balance)\s+/i, label: 'Ledger for', icon: '💵', to: (p) => `/patients/${p.id}?tab=ledger` },
   { verb: /^(xray|x-ray|xrays|images?|photos?)\s+/i, label: 'Images for', icon: '🩻', to: (p) => `/patients/${p.id}?tab=documents` },
   { verb: /^(insurance|ins)\s+/i, label: 'Insurance for', icon: '🛡', to: (p) => `/patients/${p.id}?tab=insurance` },
+  // Does it in place: texts the "how did we do?" link (docs/reviews.md).
+  { verb: /^(review|reviews|ask for a review)\s+/i, label: 'Ask for a review from', icon: '⭐', run: (p) => requestReview(p.id, { source: 'command', name: `${p.first_name} ${p.last_name}` }) },
 ];
+const doOrGo = (a, p) => (a.run ? { run: () => a.run(p) } : { to: a.to(p) });
 const QUICK = [['New patient', '/patients?new=1', '➕'], ['New appointment', '/schedule?book=new', '📅']];
 const nameOf = (p) => `${p.first_name}${p.preferred_name ? ` "${p.preferred_name}"` : ''} ${p.last_name}`;
 const subOf = (p) => [p.dob && `${age(p.dob)}y · ${p.dob}`, p.phone].filter(Boolean).join(' · ');
@@ -80,11 +85,11 @@ export default function CommandPalette() {
     const ql = q.toLowerCase().trim();
     const hit = (label) => !ql || label.toLowerCase().includes(ql);
     const patient = (p) => ({ key: `p${p.id}`, label: nameOf(p), sub: subOf(p), alert: p.medical_alerts, to: `/patients/${p.id}`, icon: '🧑', patient: p });
-    if (action) return res.patients.map((p) => ({ key: `a${p.id}`, label: `${action.label} ${nameOf(p)}`, sub: subOf(p), to: action.to(p), icon: action.icon, patient: p }));
+    if (action) return res.patients.map((p) => ({ key: `a${p.id}`, label: `${action.label} ${nameOf(p)}`, sub: subOf(p), ...doOrGo(action, p), icon: action.icon, patient: p }));
     const top = res.patients[0];
     const activeActions = active && !res.patients.length
       ? [
-        ...PATIENT_ACTIONS.filter((a) => can(a.perm) && hit(`${a.label} ${active.first_name}`)).map((a) => ({ key: `aa${a.key}`, label: `${a.label} — ${nameOf(active)}`, sub: 'Active patient', to: a.to(active.id), icon: '★', kbd: `Alt ${a.key.toUpperCase()}` })),
+        ...PATIENT_ACTIONS.filter((a) => can(a.perm) && hit(`${a.title || a.label} ${active.first_name}`)).map((a) => ({ key: `aa${a.key}`, label: `${a.title || a.label} — ${nameOf(active)}`, sub: 'Active patient', ...(a.run ? { run: () => a.run(active.id) } : { to: a.to(active.id) }), icon: '★', kbd: `Alt ${a.key.toUpperCase()}` })),
         ...(hit('clear patient') ? [{ key: 'clear', label: `Clear ${nameOf(active)}`, sub: 'Stop working on this patient', run: clear, icon: '×' }] : []),
       ]
       : [];
@@ -93,7 +98,7 @@ export default function CommandPalette() {
     return [
       ...res.patients.map(patient),
       // The best match's common actions, right under it.
-      ...(top ? ACTIONS.slice(0, 5).map((a) => ({ key: `a${a.label}${top.id}`, label: `${a.label} ${top.first_name} ${top.last_name}`, sub: 'Action', to: a.to(top), icon: a.icon, patient: top })) : []),
+      ...(top ? ACTIONS.slice(0, 5).map((a) => ({ key: `a${a.label}${top.id}`, label: `${a.label} ${top.first_name} ${top.last_name}`, sub: 'Action', ...doOrGo(a, top), icon: a.icon, patient: top })) : []),
       ...res.claims.map((c) => ({ key: `c${c.id}`, label: `Claim #${c.id}`, sub: `${c.first_name} ${c.last_name} · ${c.status}`, to: `/claims/${c.id}`, icon: '🧾' })),
       ...activeActions,
       ...screen,

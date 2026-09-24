@@ -8,6 +8,7 @@ import { insert, findOr404, audit, practiceNow, friendlyDateTime, recorded } fro
 import { publish } from '../events.js';
 import { offerFor, claimOffer } from '../fill.js';
 import { patientLang } from '../templates.js';
+import { postopReply } from '../journeys.js';
 
 const STOP = ['STOP', 'STOPALL', 'UNSUBSCRIBE', 'CANCEL', 'END', 'QUIT', 'OPTOUT'];
 const START = ['START', 'UNSTOP', 'YES START', 'SUBSCRIBE'];
@@ -165,6 +166,8 @@ export function smsWebhook({ db, config }) {
           : (lang === 'es' ? `No encontramos una cita por confirmar. Llámenos al ${phone} si necesita algo.` : `We didn't find a visit waiting to be confirmed. Call us at ${phone} if you need anything.`);
       }
     }
+    // "1 / 2 / 3" answering an evening check-in after surgery (patient journeys): 2 or 3 alerts the doctor.
+    if (!reply && candidates.length) reply = await postopReply(db, { practice, from, body });
     if (reply) {
       await insert(db, 'messages', {
         practice_id: practice.id, patient_id: patient?.id ?? null, channel: 'sms', kind: 'auto_reply', direction: 'outbound',

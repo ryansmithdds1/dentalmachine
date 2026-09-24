@@ -8,6 +8,8 @@ import { money, fmtTime, shiftDate, practiceToday } from '../format.js';
 import { Badge } from '../components/ui.jsx';
 import OpportunityDay from '../components/opportunities/OpportunityDay.jsx';
 import ReadinessHuddle from '../components/readiness/ReadinessHuddle.jsx';
+import ReferralHuddle from '../components/referrals/ReferralHuddle.jsx';
+import MomentsCard from '../components/MomentsCard.jsx';
 import CapacityWidget from '../components/CapacityWidget.jsx';
 import HuddlePlanCard from '../components/optimizer/HuddlePlanCard.jsx';
 import { getLocationId } from '../api.js';
@@ -92,6 +94,8 @@ export default function Dashboard() {
       {can('schedule:read') && <HuddlePlanCard date={date} locationId={getLocationId()} />}
       {can('clinical:read') && <div style={{ marginTop: 16 }}><OpportunityDay date={date} locationId={getLocationId()} /></div>}
       {can('clinical:read') && <ReadinessHuddle date={date} />}
+      {can('patients:read') && <ReferralHuddle date={date} />}
+      {can('schedule:read') && <MomentsCard date={date} />}
       <div style={{ marginTop: 16 }}><CapacityWidget locationId={getLocationId()} /></div>
       <div className="card" style={{ marginTop: 16, padding: 0 }}>
         <div className="page-header" style={{ padding: '14px 16px', marginBottom: 0 }}>

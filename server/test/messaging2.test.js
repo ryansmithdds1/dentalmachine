@@ -52,14 +52,15 @@ test('review routing: happy patients go on to the review page, unhappy ones reac
   const t2 = /\/r\/([\w-]+)/.exec(h.sent[n].body)[1];
   const sad = (await pub.post(`/public/review/${t2}`, { rating: 2 })).data;
   assert.equal(sad.happy, false);
-  assert.equal((await fetch(`${h.origin}/api/public/review/${t2}/go`, { redirect: 'manual' })).status, 404);
+  // No review gating: the public review link works for every rating (docs/reviews.md).
+  assert.equal((await fetch(`${h.origin}/api/public/review/${t2}/go`, { redirect: 'manual' })).status, 302);
   await pub.post(`/public/review/${t2}`, { comment: 'Waited 40 minutes' });
   const tasks = (await api.get(`/tasks?patient_id=${other.id}`)).data;
   assert.equal(tasks.length, 1);
   assert.match(tasks[0].title, /Unhappy after visit \(2★\): Sam Ruiz — “Waited 40 minutes”/);
 
   const report = (await api.get(`/reports/reviews?from=${d}&to=${d}`)).data;
-  assert.deepEqual([report.sent, report.responded, report.happy, report.unhappy, report.went_to_review, report.average], [2, 2, 1, 1, 1, 3.5]);
+  assert.deepEqual([report.sent, report.responded, report.happy, report.unhappy, report.went_to_review, report.average], [2, 2, 1, 1, 2, 3.5]);
   assert.equal(report.feedback[0].comment, 'Waited 40 minutes');
 });
 

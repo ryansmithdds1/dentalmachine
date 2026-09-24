@@ -214,7 +214,7 @@ export default function ediRoutes({ db, config, clearinghouse: ch }) {
   // Upload a response file by hand (999, 277CA, 277 or 835) — for practices on manual mode.
   r.post('/clearinghouse/responses', requirePermission('billing:write'), express.text({ type: () => true, limit: '10mb' }), async (req, res) => {
     // Scoped to this practice: nothing in the file can touch another practice's claims or batches.
-    const out = await processInbound(db, { name: String(req.query.filename || 'upload').slice(0, 200), content: String(req.body || '') }, { practiceId: req.user.practice_id });
+    const out = await processInbound(db, { name: String(req.query.filename || 'upload').slice(0, 200), content: String(req.body || '') }, { practiceId: req.user.practice_id, userId: req.user.id });
     if (out.retry) throw new HttpError(503, `Couldn't process the file right now (${out.error}) — try again`);
     await audit(db, req, 'clearinghouse.upload', null, null, { type: out.type });
     res.status(201).json(out);

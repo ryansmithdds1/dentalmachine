@@ -6,6 +6,7 @@ import { HttpError, can } from './auth.js';
 import { insert, audit, findOr404, validTooth } from './util.js';
 import { classify } from './filetypes.js';
 import { checkUpload } from './virusscan.js';
+import { referralDocumentFiled } from './referraltracker.js';
 import { inspectUpload } from './volume.js';
 import { extractText, suggestCategory, findExpiry, aiReadable, PATIENT_CATEGORIES, OFFICE_CATEGORIES } from './ocr.js';
 import { indexDocument } from './docsearch.js';
@@ -143,6 +144,8 @@ export async function readDocument(db, storage, config, reader, docId, { force =
   }
   if (doc.patient_id) publish(doc.practice_id, { type: 'documents', patient_id: doc.patient_id });
   else publish(doc.practice_id, { type: 'office-documents' });
+  // A specialist's letter or report: suggest the open referral it answers (referraltracker.js; never throws).
+  if (doc.patient_id) await referralDocumentFiled(db, storage, config, doc.id);
   return row.ocr_status;
 }
 

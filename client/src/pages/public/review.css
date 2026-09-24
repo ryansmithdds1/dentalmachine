@@ -1,0 +1,16 @@
+/* "How did we do?" (ReviewPage): big, friendly stars that are easy to tap on a phone. */
+.rv-card { max-width: 520px; margin: 0 auto; }
+.rv-lead { font-size: 18px; line-height: 1.4; }
+.rv-stars { display: flex; justify-content: center; gap: 4px; margin: 14px 0 6px; }
+.rv-star { font-size: 56px; line-height: 1; min-width: 56px; min-height: 56px; background: none; border: none; color: #cbd5e1; cursor: pointer; padding: 2px; border-radius: 10px; }
+.rv-stars:hover .rv-star, .rv-stars:focus-within .rv-star { color: #f59e0b; }
+.rv-stars .rv-star:hover ~ .rv-star, .rv-stars .rv-star:focus ~ .rv-star { color: #cbd5e1; }
+.rv-star.on { color: #f59e0b; }
+.rv-star:focus-visible { outline: 3px solid #93c5fd; }
+.rv-label { display: block; font-weight: 600; margin-top: 8px; }
+.rv-label textarea { width: 100%; margin-top: 4px; font-weight: normal; }
+.rv-small { font-size: 13px; }
+.rv-sites { display: flex; flex-direction: column; gap: 8px; margin: 12px 0; }
+.rv-callback { display: flex; align-items: center; gap: 8px; margin: 10px 0 6px; }
+.rv-public { text-align: center; font-size: 13px; margin-top: 18px; }
+@media (max-width: 400px) { .rv-star { font-size: 46px; min-width: 48px; } }

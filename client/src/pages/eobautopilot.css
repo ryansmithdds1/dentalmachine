@@ -1,0 +1,38 @@
+/* Insurance autopilot (pages/EobAutopilot.jsx) */
+.eob-ready { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; border-left: 4px solid var(--primary); }
+.eob-counts { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0; }
+.eob-chip { display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: var(--primary-soft); color: var(--text); white-space: nowrap; }
+.eob-denied, .eob-reversal { background: #fde2e1; color: #9b1c1c; }
+.eob-underpaid, .eob-overpaid { background: #fdf0d5; color: #8a5a00; }
+.eob-unmatched, .eob-review, .eob-partial { background: #e8ecf4; color: #334; }
+.eob-secondary { background: #dff3ee; color: #0f5f55; }
+.eob-split { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 12px; align-items: start; }
+.eob-list { padding: 8px 0; }
+.eob-keys { font-size: 12px; color: var(--muted); display: flex; gap: 12px; flex-wrap: wrap; padding: 0 12px 6px; }
+.eob-item { display: grid; grid-template-columns: 150px 1fr auto; gap: 10px; align-items: start; padding: 10px 12px; border-top: 1px solid var(--border); cursor: pointer; }
+.eob-item.current { background: var(--primary-soft); box-shadow: inset 3px 0 0 var(--primary); }
+.eob-reason { font-size: 13px; margin-top: 2px; }
+.eob-amt { font-variant-numeric: tabular-nums; font-weight: 600; }
+.eob-panel { position: sticky; top: 12px; }
+.eob-panel-head { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 6px; }
+.eob-why { font-size: 15px; margin: 6px 0; }
+.eob-codes { margin: 0 0 8px; padding-left: 18px; font-size: 13px; }
+.eob-amounts { width: 100%; font-size: 14px; margin: 6px 0; }
+.eob-amounts td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+.eob-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; align-items: center; }
+.eob-actions kbd, .eob-ready kbd { margin-left: 4px; }
+.eob-ask { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; align-items: center; }
+.eob-ask input { flex: 1 1 220px; }
+.eob-cand { display: block; width: 100%; text-align: left; }
+.eob-drop { border: 2px dashed var(--border); text-align: center; padding: 22px; }
+.eob-table { width: 100%; }
+.eob-table td, .eob-table th { font-variant-numeric: tabular-nums; }
+.eob-row-ex td { background: #fff8e6; }
+.eob-preview { background: var(--primary-soft); border-radius: 8px; padding: 10px 12px; margin: 8px 0 12px; }
+.eob-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; align-items: end; margin-bottom: 8px; }
+.eob-form label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+@media (max-width: 900px) {
+  .eob-split { grid-template-columns: 1fr; }
+  .eob-panel { position: static; }
+  .eob-item { grid-template-columns: 1fr; }
+}

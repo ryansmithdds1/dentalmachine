@@ -17,8 +17,12 @@ export function matches(combo, e) {
   const mod = isMac ? e.metaKey : e.ctrlKey;
   if (want.mod !== mod || want.alt !== e.altKey) return false;
   // Letters are compared by the key's position, so Alt on a Mac (which types symbols) still works.
-  const pressed = /^[a-z]$/.test(key) ? (e.code === `Key${key.toUpperCase()}` || e.key.toLowerCase() === key) : e.key.toLowerCase() === key;
+  // Digits too (Alt+1…9 on a Mac types ¡™£…), and digits care about Shift (Shift+3 is #, not 3).
+  const digit = /^[0-9]$/.test(key);
+  const pressed = /^[a-z]$/.test(key) ? (e.code === `Key${key.toUpperCase()}` || e.key.toLowerCase() === key)
+    : digit ? (e.code === `Digit${key}` || e.key === key) : e.key.toLowerCase() === key;
   if (!pressed) return false;
+  if (digit) return want.shift === e.shiftKey;
   // Shift matters for letters and named keys (Enter vs Shift+Enter); "?" and other symbols already need it to type.
   return key.length === 1 && !/^[a-z]$/.test(key) ? true : want.shift === e.shiftKey;
 }
@@ -73,6 +77,20 @@ export function useCommands(list) {
     return () => { commands.delete(id); changed(); };
   }, [key]);
 }
+
+// Extra rows for the ? list that aren't key presses — e.g. the chart's typed aliases ("np", "crb"): [[keys], label].
+const helpRows = new Map();
+export function useHelpRows(section, rows) {
+  const key = JSON.stringify(rows);
+  useEffect(() => {
+    if (!rows.length) return undefined;
+    const id = ++seq;
+    helpRows.set(id, { section, rows });
+    changed();
+    return () => { helpRows.delete(id); changed(); };
+  }, [section, key]); // eslint-disable-line react-hooks/exhaustive-deps
+}
+export const registeredHelp = () => [...helpRows.values()];
 
 export const registeredShortcuts = () => [...registry.values()];
 export const screenCommands = () => [...commands.values()].flatMap((f) => f());

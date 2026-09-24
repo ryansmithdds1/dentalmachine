@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { Star } from 'lucide-react';
 import { api } from '../api.js';
 import { useApi } from '../hooks.js';
@@ -27,7 +27,7 @@ export default function Reputation() {
       <div className="page-header">
         <div>
           <h1>Reviews</h1>
-          <div className="muted">Your Google reviews in one place, answered in minutes. Low ratings become a task to reply the same day.</div>
+          <div className="muted">Your Google reviews in one place, answered in minutes. Low ratings become a task to reply the same day. <Link to="/reviews">Review requests, private feedback &amp; shout-outs →</Link></div>
         </div>
         {data.connected && <button onClick={() => run(() => api.post('/reputation/sync'))}>Check for new reviews</button>}
       </div>
