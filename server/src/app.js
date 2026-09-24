@@ -15,6 +15,7 @@ import patientRoutes from './routes/patients.js';
 import scheduleRoutes from './routes/schedule.js';
 import productionRoutes from './routes/production.js';
 import dayTemplateRoutes from './routes/daytemplates.js';
+import capacityRoutes from './routes/capacity.js';
 import clinicalRoutes from './routes/clinical.js';
 import billingRoutes from './routes/billing.js';
 import insuranceRoutes from './routes/insurance.js';
@@ -302,6 +303,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(productionRoutes({ db }));
   api.use(scheduleRoutes({ db }));
   api.use(dayTemplateRoutes({ db }));
+  api.use(capacityRoutes({ db }));
   api.use(clinicalRoutes({ db }));
   api.use(chartingRoutes({ db, config, transcriber }));
   api.use(referralRoutes({ db }));

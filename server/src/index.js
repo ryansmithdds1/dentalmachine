@@ -28,6 +28,7 @@ import { createMailer } from './mail.js';
 import { runChatJobs } from './chat.js';
 import { runDigests } from './digests.js';
 import { depositWatchAll } from './deposits.js';
+import { runCapacitySnapshots } from './capacity.js';
 import { loggedFetch } from './issues.js';
 import { runChartAudits } from './chartaudit.js';
 import { createNoteComparer } from './ai/notecompare.js';
@@ -120,6 +121,12 @@ if (process.env.DEPOSIT_WATCH !== 'off') {
   const watch = () => runExclusive('deposit-watch', 30 * 60 * 1000, () => depositWatchAll(db)).catch(jobFailed('Deposit watch'));
   setInterval(watch, 60 * 60 * 1000).unref();
   setTimeout(watch, 90_000).unref();
+}
+// Capacity meter trend: each practice's snapshot once its evening comes (checked hourly; once a day).
+if (process.env.CAPACITY_SNAPSHOTS !== 'off') {
+  const capacity = () => runExclusive('capacity-snapshots', 30 * 60 * 1000, () => runCapacitySnapshots(db)).catch(jobFailed('Capacity snapshots'));
+  setInterval(capacity, 60 * 60 * 1000).unref();
+  setTimeout(capacity, 100_000).unref();
 }
 // Chart audit: each practice's completed visits checked once a day after 1am practice time.
 if (process.env.CHART_AUDIT !== 'off') {

@@ -3089,6 +3089,32 @@ CREATE TABLE IF NOT EXISTS document_terms (
   term TEXT NOT NULL,
   UNIQUE (document_id, term)
 );
+-- Capacity meter trend (capacity.js): one row per practice/office, kind and night. Derived rows; pruned after
+-- two years.
+CREATE TABLE IF NOT EXISTS capacity_snapshots (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  snapshot_date TEXT NOT NULL,
+  scope_key TEXT NOT NULL DEFAULT 'practice',
+  location_id INTEGER REFERENCES locations(id),
+  kind TEXT NOT NULL CHECK (kind IN ('doctor','hygiene')),
+  status TEXT,
+  booked_pct_2w INTEGER,
+  booked_pct_4w INTEGER,
+  booked_pct_8w INTEGER,
+  first_new_patient_days INTEGER,
+  first_emergency_days INTEGER,
+  first_recall_days INTEGER,
+  first_treatment_days INTEGER,
+  open_hours_week INTEGER,
+  demand_hours_week INTEGER,
+  recall_hours_4w INTEGER,
+  unscheduled_hours INTEGER,
+  asap_count INTEGER,
+  requests_count INTEGER,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (practice_id, snapshot_date, scope_key, kind)
+);
 `;
 
 // Columns added after the first release. SQLite has no ADD COLUMN IF NOT EXISTS, so check first.
@@ -3521,6 +3547,7 @@ const COLUMNS = [
   ['bridge_agents', 'scanner', 'TEXT'],
   ['bridge_agents', 'scanner_info', 'TEXT'],
   ['practices', 'document_ai', 'INTEGER NOT NULL DEFAULT 1'],
+  ['practices', 'capacity_targets', 'TEXT'],
 ];
 
 // CHECK constraints widened after release: [table, constraint name on Postgres, old text, new text].

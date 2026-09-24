@@ -1,0 +1,116 @@
+/* Capacity meter (CAP1–CAP2). Status colours are the app's status tokens and always come with an icon and a word. */
+:root {
+  --cap-band: rgba(13, 148, 136, 0.16);
+  --cap-track: #eef1f5;
+  --cap-open: #0d9488;
+  --cap-need: #64748b;
+}
+:root[data-theme='dark'] {
+  --cap-band: rgba(45, 212, 191, 0.18);
+  --cap-track: #1e293b;
+  --cap-open: #2dd4bf;
+  --cap-need: #94a3b8;
+}
+
+.cap-page h1 { display: flex; align-items: center; gap: 8px; }
+.cap-page h2 { font-size: 16px; margin: 0 0 10px; display: flex; align-items: center; gap: 6px; }
+.cap-page h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin: 16px 0 8px; display: flex; align-items: center; gap: 6px; font-weight: 600; }
+.cap-page h3 .muted { text-transform: none; letter-spacing: 0; font-weight: 400; }
+
+.cap-pill { display: inline-flex; align-items: center; gap: 4px; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; background: var(--subtle); color: var(--text-2); }
+.cap-pill.green { background: var(--ok-soft); color: var(--ok); }
+.cap-pill.amber { background: var(--warn-soft); color: var(--warn); }
+.cap-pill.red { background: var(--danger-soft); color: var(--danger); }
+
+/* What to do */
+.cap-recs ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.cap-rec { display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: start; padding: 10px 12px; border-radius: var(--radius-sm); border: 1px solid var(--border); border-left-width: 4px; }
+.cap-rec.red { border-left-color: var(--danger); }
+.cap-rec.amber { border-left-color: var(--warn); }
+.cap-rec-text { font-weight: 600; font-size: 15px; line-height: 1.35; }
+.cap-rec-why { font-size: 12.5px; margin-top: 3px; }
+.cap-rec-go { white-space: nowrap; display: inline-flex; align-items: center; gap: 4px; font-size: 13px; align-self: center; }
+.cap-allgood { display: flex; align-items: center; gap: 8px; color: var(--ok); font-weight: 600; }
+
+/* One card per kind */
+.cap-kinds { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 16px; margin: 16px 0; }
+.cap-kinds > .card { margin-top: 0; }
+.cap-kind { border-top: 4px solid var(--border); }
+.cap-kind.green { border-top-color: var(--ok); }
+.cap-kind.amber { border-top-color: var(--warn); }
+.cap-kind.red { border-top-color: var(--danger); }
+.cap-kind-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.cap-kind-head h2 { margin: 0; }
+
+.cap-chips { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 8px; }
+.cap-chip { display: flex; flex-direction: column; gap: 1px; padding: 8px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border); border-left: 4px solid var(--border); background: var(--panel); min-height: 44px; }
+.cap-chip.green { border-left-color: var(--ok); }
+.cap-chip.amber { border-left-color: var(--warn); background: var(--warn-soft); }
+.cap-chip.red { border-left-color: var(--danger); background: var(--danger-soft); }
+.cap-chip-label { font-size: 12px; color: var(--muted); }
+.cap-chip strong { font-size: 17px; color: var(--text); }
+.cap-chip-date { font-size: 11.5px; color: var(--muted); }
+
+/* Booked bars with the target band */
+.cap-meters { display: grid; gap: 8px; }
+.cap-bar-row { display: grid; grid-template-columns: 64px 1fr 44px; align-items: center; gap: 10px; }
+.cap-bar-label { font-size: 12.5px; color: var(--text-2); }
+.cap-bar { position: relative; height: 14px; border-radius: 7px; background: var(--cap-track); overflow: hidden; }
+.cap-band { position: absolute; top: 0; bottom: 0; background: var(--cap-band); border-left: 2px solid var(--primary); border-right: 2px solid var(--primary); }
+.cap-fill { position: absolute; left: 0; top: 4px; height: 6px; border-radius: 0 4px 4px 0; background: var(--muted); }
+.cap-fill.green { background: var(--ok); }
+.cap-fill.amber { background: var(--warn); }
+.cap-fill.red { background: var(--danger); }
+.cap-bar-value { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* Open vs needed */
+.cap-sd { display: grid; gap: 6px; }
+.cap-sd-row { display: grid; grid-template-columns: 64px 1fr 56px; align-items: center; gap: 10px; font-size: 12.5px; }
+.cap-sd-row strong { text-align: right; font-variant-numeric: tabular-nums; }
+.cap-sd-track { height: 10px; border-radius: 5px; background: var(--cap-track); overflow: hidden; }
+.cap-sd-fill { height: 100%; border-radius: 0 4px 4px 0; }
+.cap-sd-fill.open { background: var(--cap-open); }
+.cap-sd-fill.need { background: var(--cap-need); }
+.cap-sd-gap { margin-top: 2px; }
+
+.cap-demand { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; margin: 14px 0 0; font-size: 13px; }
+.cap-demand dt { color: var(--muted); display: flex; align-items: center; gap: 4px; }
+.cap-demand dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+
+/* Trend */
+.cap-spark { margin: 14px 0 0; }
+.cap-spark figcaption { font-size: 12px; margin-bottom: 4px; }
+.cap-spark svg { width: 100%; height: 56px; display: block; cursor: crosshair; }
+.cap-spark-band { fill: var(--cap-band); }
+.cap-spark-line { fill: none; stroke: var(--primary); stroke-width: 2; stroke-linejoin: round; }
+.cap-spark-dot { fill: var(--primary); stroke: var(--panel); stroke-width: 2; }
+.cap-spark-empty { font-size: 12px; margin-top: 14px; }
+
+.cap-providers td, .cap-providers th { white-space: nowrap; }
+.cap-foot { font-size: 12px; margin: 12px 0 24px; }
+
+/* Targets side panel */
+.cap-field { display: grid; gap: 4px; margin-bottom: 12px; font-size: 13px; }
+.cap-field-input { display: flex; align-items: center; gap: 8px; }
+.cap-field input { width: 90px; }
+.cap-field select { width: 100%; }
+
+/* Widget */
+.cap-widget { display: grid; gap: 8px; }
+.cap-widget-head { display: flex; justify-content: space-between; align-items: center; }
+.cap-widget-head strong { display: inline-flex; align-items: center; gap: 6px; }
+.cap-widget-head a { display: inline-flex; align-items: center; gap: 3px; font-size: 13px; }
+.cap-widget-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; font-size: 13px; }
+.cap-widget-rec { font-size: 13px; padding: 8px 10px; border-radius: var(--radius-sm); background: var(--subtle); border-left: 4px solid var(--border); }
+.cap-widget-rec.red { border-left-color: var(--danger); }
+.cap-widget-rec.amber { border-left-color: var(--warn); }
+
+@media (max-width: 1000px) {
+  .cap-rec { grid-template-columns: auto 1fr; }
+  .cap-rec-go { grid-column: 2; justify-self: start; }
+}
+@media (max-width: 720px) {
+  .cap-kinds { grid-template-columns: 1fr; }
+  .cap-rec { grid-template-columns: 1fr; }
+  .cap-rec-go { grid-column: auto; }
+}
