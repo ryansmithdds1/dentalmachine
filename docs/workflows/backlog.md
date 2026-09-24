@@ -63,6 +63,25 @@ K4. **Email foundation:** reusable email templates and layout, a sending log wit
     events already tracked), BAA-covered provider notes, and staff-facing emails (task assigned, lab case overdue,
     claim denied) using the same system.
 
+## Team chat and tasks (asked for, high priority)
+Builds on workflow 28 (tasks between staff, in progress) and the live-update events already used by the schedule.
+T1. **Team chat:** channels (whole office, front desk, clinical, each office in a group), direct messages and small
+    groups; threads and replies; @mentions (@name, @front-desk, @everyone); emoji picker and reactions; GIFs (a GIF
+    search provider behind an adapter, off unless the practice turns it on, with no patient details ever sent to it);
+    images and files (stored and encrypted like documents); edit/delete own messages (kept in history); search.
+T2. **Nobody misses a message:** unread badges on the rail and per channel, desktop/browser notifications with sound,
+    an "urgent" flag that stays on screen until acknowledged and shows who has seen it (read receipts), @mention and
+    urgent pushes to the phone app (PWA push), quiet hours per person, and a digest email for anything unread after a
+    set time.
+T3. **Patient context without leaking it:** link a message to a patient (shows the patient chip; opens the chart);
+    patient-linked messages follow office access rules and are audited like other PHI; the "Chat" key from the
+    active patient bar starts a thread about that patient.
+T4. **Tasks from chat and personal to-do lists:** turn any message into a task (assignee, due date, patient),
+    assign tasks to each other or to yourself, a personal "My tasks" list with today/overdue/upcoming, checklists,
+    recurring tasks (e.g. "Friday: order supplies"), notifications when assigned or due, and done in one key with undo.
+T5. **Fast and keyboard-first:** Ctrl/⌘J opens chat from anywhere, a slide-out panel so the current screen stays,
+    ↑ to edit the last message, Enter to send, Shift+Enter for a new line, and the command bar can "message @Maria …".
+
 ## Then: remaining workflow batches
 9. Batch 4 (32–44): new patient setup, ERA/EOB posting, prescriptions, lab cases, huddle actions, recall lists,
    pre-auths, financing, adjustments, referrals, end-of-day, review requests (fix the count bug), clock in/out.
