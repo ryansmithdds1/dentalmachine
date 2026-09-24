@@ -14,7 +14,7 @@
 //    primary PPO fee schedule (the in-network allowed amount, from resolveFee on the day the work was done, else
 //    the day it was diagnosed) — an estimate, not money.
 import { localNow } from './util.js';
-import { resolveFee } from './feeversions.js';
+import { resolveFee, currentVersion } from './feeversions.js';
 
 export const EXAM_TYPES = { new_patient: 'New patient exams', recall: 'Recall (periodic) exams', perio: 'Perio exams', emergency: 'Emergency (limited) exams' };
 // Exam codes and what they are by default. D9110 (palliative) isn't an exam but marks an emergency visit.
@@ -253,14 +253,19 @@ export async function loadDiagnoses(db, pid, o) {
        JOIN insurance_carriers ic ON ic.id = pi.carrier_id LEFT JOIN insurance_plans ip ON ip.id = pi.plan_id
        WHERE pi.patient_id IN (${IN(ids)}) AND pi.active = 1 AND pi.priority = 'primary' ORDER BY pi.id`, ...ids,
     ))) if (r.fs && !schedules.has(r.patient_id)) schedules.set(r.patient_id, r.fs);
-    // The one fee resolver (feeversions.js): the schedule's fee in effect on the day of service.
+    // The one fee resolver (feeversions.js): the schedule's fee in effect on the day of service. Days on or after
+    // the schedule's current version all read the live table, so those are looked up once per code, not per day.
     const allowed = new Map();
+    const current = new Map();
     for (const f of out) {
       const fs = schedules.get(f.patient_id);
       if (!fs) continue;
       const day = f.completed_on || f.diagnosed_on;
-      const k = `${fs}|${f.code}|${day}`;
-      if (!allowed.has(k)) allowed.set(k, await resolveFee(db, pid, fs, f.code, day));
+      if (!current.has(fs)) current.set(fs, (await currentVersion(db, pid, fs)) ?? null);
+      const cur = current.get(fs);
+      const live = !day || !cur || day >= cur.effective_from;
+      const k = live ? `${fs}|${f.code}` : `${fs}|${f.code}|${day}`;
+      if (!allowed.has(k)) allowed.set(k, await resolveFee(db, pid, fs, f.code, live ? null : day));
       const a = allowed.get(k);
       if (a != null) f.expected = Math.min(Number(a), f.fee);
     }

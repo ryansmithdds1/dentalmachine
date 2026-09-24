@@ -12,6 +12,7 @@
     "build": "npm run build --workspace client",
     "start": "npm start --workspace server",
     "seed": "npm run seed --workspace server",
+    "seed:themed": "npm run seed:themed --workspace server",
     "invite": "npm run invite --workspace server --",
     "rotate-keys": "npm run rotate-keys --workspace server",
     "test": "npm test --workspace server",

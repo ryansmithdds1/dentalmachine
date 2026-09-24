@@ -5423,6 +5423,23 @@ CREATE TABLE IF NOT EXISTS claim_prep_attachments (
 );
 CREATE INDEX IF NOT EXISTS idx_claim_prep_skips_proc ON claim_prep_skips(procedure_id, patient_insurance_id);
 CREATE INDEX IF NOT EXISTS idx_claim_prep_att_policy ON claim_prep_attachments(patient_insurance_id);
+-- Progress of the themed demo practice's batched seed (themeddemo.js): which phase it is in and how far it got,
+-- so a serverless call that runs out of time carries on where it stopped. A lease keeps two servers from working
+-- on it at once. Not practice data (no practice_id), so it is left out of backups.
+CREATE TABLE IF NOT EXISTS demo_seed_state (
+  key TEXT PRIMARY KEY,
+  size TEXT NOT NULL,
+  anchor TEXT NOT NULL,
+  phase TEXT NOT NULL,
+  cursor INTEGER NOT NULL DEFAULT 0,
+  data TEXT,
+  themed_practice_id INTEGER,
+  lease_owner TEXT,
+  lease_until TEXT,
+  started_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  finished_at TEXT
+);
 `;
 
 // Columns added after the first release. SQLite has no ADD COLUMN IF NOT EXISTS, so check first.
@@ -6142,6 +6159,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_bonus_approval_once ON bonus_approvals(pla
 CREATE INDEX IF NOT EXISTS idx_bonus_approvals_payroll ON bonus_approvals(practice_id, payroll_period_start, status);
 CREATE INDEX IF NOT EXISTS idx_bonus_lines_user ON bonus_payout_lines(practice_id, user_id);
 CREATE INDEX IF NOT EXISTS idx_bonus_versions_plan ON bonus_plan_versions(plan_id, effective_from);
+-- Found with the themed demo practice (3,000 patients): benefits used, ortho used and duplicate checks look up a
+-- policy's claims (Ready to approve, estimates), and the family deductible looks up a plan's subscribers.
+CREATE INDEX IF NOT EXISTS idx_claims_policy ON claims(patient_insurance_id, status);
+CREATE INDEX IF NOT EXISTS idx_policy_plan_sub ON patient_insurance(plan_id, subscriber_id);
 `;
 
 // ---------------------------------------------------------------------------

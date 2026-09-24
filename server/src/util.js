@@ -267,12 +267,15 @@ export function normalizeSurfaces(surfaces) {
 }
 
 // Appointment times are stored as practice-local wall-clock strings 'YYYY-MM-DD HH:MM'.
+// Building an Intl.DateTimeFormat is slow (reports convert thousands of timestamps), so one is kept per zone.
+const localFormats = new Map();
 export function localNow(timeZone = 'America/New_York', date = new Date()) {
-  const parts = Object.fromEntries(
-    new Intl.DateTimeFormat('en-CA', {
-      timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
-    }).formatToParts(date).map((p) => [p.type, p.value]),
-  );
+  let format = localFormats.get(timeZone);
+  if (!format) {
+    format = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+    localFormats.set(timeZone, format);
+  }
+  const parts = Object.fromEntries(format.formatToParts(date).map((p) => [p.type, p.value]));
   return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}`;
 }
 

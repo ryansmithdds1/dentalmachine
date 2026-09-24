@@ -2,6 +2,8 @@
 // screens staff use all day. Run against a scratch database:
 //   node scripts/loadtest.js                       (SQLite file in the temp folder, 50,000 patients)
 //   DATABASE_URL=postgres://…/scratch node scripts/loadtest.js --patients 50000
+//   node scripts/loadtest.js --reuse <db file> --email admin@middle-earth.dental --password demo-password-123
+//     (times an existing database as that user — e.g. one loaded with `npm run seed:themed`)
 // Screens used all day have a budget of 800 ms (--budget); reports that run now and then get 1.5 s
 // (--report-budget). Anything slower is flagged and the exit code is 1. Nothing here touches a real
 // database unless you point it at one — use an empty scratch database.
@@ -17,9 +19,11 @@ const arg = (name, dflt) => { const i = process.argv.indexOf(`--${name}`); retur
 const PATIENTS = Number(arg('patients', 50000));
 const BUDGET = Number(arg('budget', 800));
 const REPORT_BUDGET = Number(arg('report-budget', 1500));
-const REPORTS = new Set(['Outstanding claims', 'A/R aging', 'KPIs (90 days)', 'KPIs (12 months)', 'Day sheet', 'Production', 'Collections', 'Hygiene report', 'Treatment plans report']);
+const REPORTS = new Set(['Outstanding claims', 'A/R aging', 'KPIs (90 days)', 'KPIs (12 months)', 'Day sheet', 'Production', 'Collections', 'Hygiene report', 'Treatment plans report', 'Metrics (month)', 'Metrics (year to date)']);
 // --reuse <file>: time an already-built SQLite database again (after a code change) without rebuilding it.
 const reuse = arg('reuse', null);
+const EMAIL = arg('email', 'load@example.com');
+const PASSWORD = arg('password', 'load-test-password');
 const target = process.env.DATABASE_URL || reuse || join(mkdtempSync(join(tmpdir(), 'dm-load-')), 'load.db');
 
 let seed = 42;
@@ -130,18 +134,22 @@ async function main() {
   const app = createApp({ db, secret: 'load-test-secret', config: { appUrl: 'http://localhost', uploadDir: join(tmpdir(), 'dm-load-uploads') } });
   const server = await new Promise((resolve) => { const s = app.listen(0, () => resolve(s)); });
   const base = `http://127.0.0.1:${server.address().port}/api`;
-  const token = (await (await fetch(`${base}/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: 'load@example.com', password: 'load-test-password' }) })).json()).token;
-  const aPatient = (await db.get('SELECT patient_id FROM ledger_entries ORDER BY id DESC LIMIT 1')).patient_id;
+  const token = (await (await fetch(`${base}/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: EMAIL, password: PASSWORD }) })).json()).token;
+  const pid = (await db.get('SELECT practice_id FROM users WHERE lower(email) = lower(?)', EMAIL)).practice_id;
+  // A patient with a long history (the chart and ledger are slowest for them).
+  const aPatient = (await db.get('SELECT patient_id, COUNT(*) AS n FROM appointments WHERE practice_id = ? GROUP BY patient_id ORDER BY n DESC, patient_id LIMIT 1', pid)).patient_id;
   const today = day(0);
   const screens = [
-    ['Patient search', '/patients?q=smi'], ['Patient list', '/patients'], ['Global search', '/search?q=garc'], ['Patient chart', `/patients/${aPatient}`],
+    ['Patient search', `/patients?q=${arg('q', 'smi')}`], ['Patient list', '/patients'], ['Global search', `/search?q=${arg('q2', 'garc')}`], ['Patient chart', `/patients/${aPatient}`],
+    ['Clinical chart', `/patients/${aPatient}/chart`],
     ['Ledger', `/patients/${aPatient}/ledger`], ['Family', `/patients/${aPatient}/family`], ['Schedule (day)', `/schedule?from=${today}&to=${today}`],
     ['Schedule (week)', `/schedule?from=${today}&to=${day(6)}`], ['Huddle', '/huddle'], ['Dashboard', '/dashboard'], ['Claims worklist', '/claims?attention=1'],
     ['Claims (all)', '/claims'], ['Outstanding claims', '/reports/outstanding-claims'], ['A/R aging', '/reports/aging'], ['KPIs (90 days)', `/analytics?from=${day(-89)}&to=${today}`],
     ['KPIs (12 months)', `/analytics?from=${day(-364)}&to=${today}`], ['Day sheet', `/reports/daysheet?date=${day(-1)}`], ['Production', `/reports/production?from=${day(-30)}&to=${today}`],
     ['Recall list', '/recalls'], ['Collections', '/collections'], ['Payment plans', '/payment-plans'], ['Eligibility (tomorrow)', `/eligibility/batch?date=${day(1)}`],
     ['Conversations', '/conversations'], ['Tasks', '/tasks'], ['Audit log', '/audit-log'], ['Hygiene report', `/reports/hygiene?from=${day(-89)}&to=${today}`],
-    ['Treatment plans report', '/reports/treatment-plans'],
+    ['Treatment plans report', '/reports/treatment-plans'], ['Ready to approve', '/claim-queue'], ['Metrics (month)', '/metrics?period=month'],
+    ['Metrics (year to date)', '/metrics?period=ytd'], ['Business (today)', '/business/today'],
   ];
   const results = [];
   for (const [name, path] of screens) {

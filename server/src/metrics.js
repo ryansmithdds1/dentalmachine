@@ -247,8 +247,10 @@ async function balancesDue(db, pid, visits) {
   const heads = [...new Set(visits.map((v) => v.guarantor_id || v.patient_id))];
   if (!heads.length) return [];
   const rows = await db.all(
-    `SELECT COALESCE(p.guarantor_id, p.id) AS g, COALESCE(SUM(l.amount),0) AS n FROM ledger_entries l JOIN patients p ON p.id = l.patient_id
-     WHERE l.practice_id = ? AND COALESCE(p.guarantor_id, p.id) IN (${IN(heads)}) GROUP BY COALESCE(p.guarantor_id, p.id)`, pid, ...heads,
+    // Written as guarantor-or-self from the practice's patients (not COALESCE(...) IN over the ledger) so it reads
+    // only those households' entries: the old form read every ledger entry in the practice.
+    `SELECT COALESCE(p.guarantor_id, p.id) AS g, COALESCE(SUM(l.amount),0) AS n FROM patients p JOIN ledger_entries l ON l.patient_id = p.id
+     WHERE p.practice_id = ? AND (p.guarantor_id IN (${IN(heads)}) OR (p.guarantor_id IS NULL AND p.id IN (${IN(heads)}))) GROUP BY COALESCE(p.guarantor_id, p.id)`, pid, ...heads, ...heads,
   );
   const owed = new Map(rows.filter((r) => Number(r.n) > 0).map((r) => [r.g, Number(r.n)]));
   const seen = new Set();

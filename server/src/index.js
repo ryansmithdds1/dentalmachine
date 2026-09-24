@@ -51,6 +51,7 @@ import { runChartAudits } from './chartaudit.js';
 import { createNoteComparer } from './ai/notecompare.js';
 import { runRecordingJobs, createExamTranscriber } from './longrecording.js';
 import { createTranscriber } from './phones.js';
+import { runThemedDemoBatch } from './themeddemo.js';
 
 let secret = process.env.JWT_SECRET;
 if (process.env.NODE_ENV === 'production') {
@@ -368,6 +369,19 @@ if (process.env.AUTO_WATCH !== 'off') {
     .catch(jobFailed('Scheduled reports'));
   setInterval(run, 60 * 60 * 1000).unref();
   setTimeout(run, 120_000).unref();
+}
+// The themed demo practice (DEMO_THEMED=on, themeddemo.js): loaded a batch at a time until it's all there.
+// Each batch is idempotent and resumable, so a restart or another server simply carries on.
+if (process.env.DEMO_THEMED === 'on') {
+  let done = false;
+  const run = () => (done ? null : runExclusive('themed-demo', 5 * 60 * 1000, () => runThemedDemoBatch(db, { seconds: 20, storage: app.locals.storage }))
+    .then((out) => {
+      if (out?.done) done = true;
+      if (out?.steps) log.info(`Themed demo practice: ${out.done ? 'loaded' : `${out.phase} ${out.cursor}`}`);
+    })
+    .catch(jobFailed('Themed demo practice')));
+  setInterval(run, 30 * 1000).unref();
+  setTimeout(run, 3000).unref();
 }
 log.info(`Clearinghouse: ${ch?.name || 'manual'}${ch?.realtime ? ' + real-time eligibility/status' : ''}`);
 log.info(`Database: ${db.dialect} · cluster: ${cluster.mode}`);
