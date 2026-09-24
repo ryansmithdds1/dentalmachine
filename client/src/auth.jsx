@@ -3,6 +3,7 @@ import { clearPatientSession } from './activePatient.jsx';
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { api, getToken, setToken } from './api.js';
 import { clearOfflineDay } from './offline.js';
+import { startOffline, offlineSession, wipeOffline } from './offline/index.js';
 
 const AuthContext = createContext(null);
 
@@ -58,9 +59,15 @@ export function AuthProvider({ children }) {
     try {
       const me = await api.get('/auth/me');
       setState({ loading: false, user: me.user, practice: me.practice });
+      startOffline(me);
     } catch (err) {
       // No connection (not a rejected session): keep the session and show the offline schedule.
-      if (!err.status || [502, 503, 504].includes(err.status)) return setState({ loading: false, user: null, practice: null, offline: true });
+      if (!err.status || [502, 503, 504].includes(err.status)) {
+        // A reload during an outage: the person kept (encrypted) with today's copy in this tab, if there is one.
+        const kept = await offlineSession();
+        if (kept) startOffline(kept);
+        return setState({ loading: false, user: kept?.user ?? null, practice: kept?.practice ?? null, offline: true });
+      }
       setToken(null);
       setState({ loading: false, user: null, practice: null });
     }
@@ -68,9 +75,12 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     refresh();
-    const onLogout = () => { clearOfflineDay(); setState({ loading: false, user: null, practice: null }); };
+    const onLogout = () => { clearOfflineDay(); wipeOffline(); setState({ loading: false, user: null, practice: null }); };
+    // Back online after starting offline: check the session for real.
+    const onOnline = () => refresh();
     window.addEventListener('dm:logout', onLogout);
-    return () => window.removeEventListener('dm:logout', onLogout);
+    window.addEventListener('dm:online', onOnline);
+    return () => { window.removeEventListener('dm:logout', onLogout); window.removeEventListener('dm:online', onOnline); };
   }, [refresh]);
 
   const login = async (email, password, mfa_code) => {
@@ -88,6 +98,7 @@ export function AuthProvider({ children }) {
     if (getToken()) api.post('/auth/logout', reason === 'idle' ? { reason } : {}).catch(() => {});
     setToken(null);
     clearOfflineDay();
+    wipeOffline();
     resetPrefs();
     clearPatientSession();
     setState({ loading: false, user: null, practice: null });

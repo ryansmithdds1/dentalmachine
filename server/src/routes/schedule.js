@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { openSlotLater } from '../fill.js';
 import { requirePermission, HttpError, can } from '../auth.js';
-import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, normalizeDateTime, practiceNow, mapSeq, paged, recorded, isRealDate } from '../util.js';
+import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, normalizeDateTime, practiceNow, localNow, mapSeq, paged, recorded, isRealDate } from '../util.js';
 import { hoursFor, providerHours, providerHoursFor, providerHoursOn, validateHours } from '../hours.js';
 import { publish, eventStream } from '../events.js';
 import { emitAppointment } from '../webhooks.js';
@@ -11,6 +11,7 @@ import { officeFee } from '../fees.js';
 import { videoRoomFor } from '../video.js';
 import { cleanPattern, fitPattern, providerOverlap, typeDuration } from '../patterns.js';
 import { appointmentScope, checkOffice, canSeePatient } from '../officeaccess.js';
+import { checkDayBlocks } from '../production.js';
 
 export const STATUSES = ['scheduled', 'confirmed', 'checked_in', 'in_chair', 'completed', 'cancelled', 'no_show'];
 export const INACTIVE = "('cancelled','no_show')";
@@ -96,6 +97,9 @@ export async function validateAppt(db, practiceId, row, { overrideBlockout = fal
     }
     throw new HttpError(409, `Scheduling conflict: ${[...kinds].join(', ')} already booked`, { conflicts });
   }
+  // Perfect-day blocks (day templates, S2): kept for their visit types until their release time. Checked even
+  // when overridden, so the caller can record that someone booked into one anyway.
+  const dayBlock = await checkDayBlocks(db, practiceId, row);
   if (!overrideBlockout) {
     // Reserved blocks (block scheduling) take the appointment types they're kept for.
     const blocks = (await findBlockouts(db, practiceId, row)).filter((b) => !reservedFor(b, row.appointment_type_id));
@@ -103,6 +107,7 @@ export async function validateAppt(db, practiceId, row, { overrideBlockout = fal
       const b = blocks[0];
       throw new HttpError(409, b.kind === 'reserved' ? `That time is reserved for ${b.reason}` : `That time is blocked: ${b.reason}`, { blockouts: blocks, can_override: true });
     }
+    if (dayBlock) throw new HttpError(409, dayBlock.message, { day_block: dayBlock.block, can_override: true });
     // Nobody is booked outside their hours — the provider's own (part-time hygienists, visiting
     // specialists) or else the office's — without a deliberate override.
     const date = row.start_time.slice(0, 10);
@@ -115,6 +120,16 @@ export async function validateAppt(db, practiceId, row, { overrideBlockout = fal
       throw new HttpError(409, why, { outside_hours: [...ranges], can_override: true });
     }
   }
+  return { dayBlock: overrideBlockout ? dayBlock : null };
+}
+
+// Booking into a perfect-day block "anyway" is recorded with the block it went into.
+export async function auditDayBlockOverride(db, req, apptId, dayBlock) {
+  if (!dayBlock) return;
+  const b = dayBlock.block;
+  await audit(db, req, 'appointment.block_override', 'appointments', apptId, { block: b.label, template_id: b.template_id, block_id: b.id, start: b.start_time, end: b.end_time, release_at: b.release_at }, {
+    reason: `Booked into ${b.label} time (kept for ${b.type_names.join(', ') || 'other visit types'}) anyway`,
+  });
 }
 
 // Recall visits: which recall a booked appointment takes care of. The visit's procedures decide
@@ -460,7 +475,7 @@ export default function scheduleRoutes({ db }) {
     if (req.body.video || type?.is_video) row.video_url = videoRoomFor(await db.get('SELECT * FROM providers WHERE id = ? AND practice_id = ?', Number(row.provider_id), req.user.practice_id));
     requireFields(row, ['patient_id', 'provider_id', 'start_time', 'end_time']);
     const repeat = parseRepeat(req.body.repeat, row.start_time && normalizeDateTime(row.start_time, 'start_time'));
-    await validateAppt(db, req.user.practice_id, row, { overrideBlockout: !!req.body.override_blockout });
+    const checked = await validateAppt(db, req.user.practice_id, row, { overrideBlockout: !!req.body.override_blockout });
     const withTypeProcs = req.body.add_type_procedures !== false && !(req.body.procedure_ids || []).length;
     let series = null;
     const id = await db.tx(async () => {
@@ -495,6 +510,7 @@ export default function scheduleRoutes({ db }) {
     // Booked: off the waitlist.
     await db.run("UPDATE waitlist SET status = 'booked' WHERE practice_id = ? AND patient_id = ? AND status = 'waiting'", req.user.practice_id, row.patient_id);
     await audit(db, req, 'appointment.create', 'appointments', id, { start: row.start_time });
+    await auditDayBlockOverride(db, req, id, checked.dayBlock);
     changed(req, row.start_time, ...(series ? Array.from({ length: repeat.count }, (_, i) => shiftVisit(row.start_time, repeat, i)) : []));
     await emitAppointment(db, id, 'appointment.created');
     res.status(201).json({ ...(await db.get(`${SELECT} WHERE a.id = ?`, id)), ...(series ? { series } : {}) });
@@ -509,6 +525,7 @@ export default function scheduleRoutes({ db }) {
     requireOneOf(b.mode, ['back_to_back', 'side_by_side'], 'mode');
     let start = normalizeDateTime(b.start_time, 'start_time');
     const pid = req.user.practice_id;
+    const overrides = [];
     const ids = await db.tx(async () => {
       const out = [];
       for (const [i, m] of members.entries()) {
@@ -521,8 +538,9 @@ export default function scheduleRoutes({ db }) {
           start_time: start, end_time: addMinutes(start, duration),
         };
         requireFields(row, ['patient_id', 'provider_id']);
+        let checked;
         try {
-          await validateAppt(db, pid, row, { overrideBlockout: !!b.override_blockout });
+          checked = await validateAppt(db, pid, row, { overrideBlockout: !!b.override_blockout });
         } catch (err) {
           if (!(err instanceof HttpError)) throw err;
           const p = await db.get('SELECT first_name FROM patients WHERE id = ?', row.patient_id);
@@ -532,11 +550,13 @@ export default function scheduleRoutes({ db }) {
         await addTypeProcedures(req, type, id, row);
         await linkRecalls(db, pid, id);
         out.push(id);
+        if (checked.dayBlock) overrides.push([id, checked.dayBlock]);
         if (b.mode === 'back_to_back') start = row.end_time;
       }
       return out;
     });
     await audit(db, req, 'appointment.family', 'appointments', ids[0], { count: ids.length, mode: b.mode });
+    for (const [id, block] of overrides) await auditDayBlockOverride(db, req, id, block);
     changed(req, normalizeDateTime(b.start_time, 'start_time'));
     for (const x of ids) await emitAppointment(db, x, 'appointment.created');
     res.status(201).json(await db.all(`${SELECT} WHERE a.id IN (${ids.map(() => '?').join(',')}) ORDER BY a.start_time, a.id`, ...ids));
@@ -548,7 +568,8 @@ export default function scheduleRoutes({ db }) {
     const merged = { ...existing, ...changes };
     if ('location_id' in changes) checkOffice(req.user, changes.location_id);
     if (changes.patient_id && !(await canSeePatient(db, req.user, changes.patient_id))) throw new HttpError(404, 'Patient not found');
-    if (!['cancelled', 'no_show'].includes(merged.status)) await validateAppt(db, req.user.practice_id, merged, { overrideBlockout: !!req.body.override_blockout });
+    let checked = null;
+    if (!['cancelled', 'no_show'].includes(merged.status)) checked = await validateAppt(db, req.user.practice_id, merged, { overrideBlockout: !!req.body.override_blockout });
     else {
       requireOneOf(merged.status, STATUSES, 'status');
       await checkApptRefs(db, req.user.practice_id, merged);
@@ -574,6 +595,7 @@ export default function scheduleRoutes({ db }) {
       ...(row.start_time !== existing.start_time ? { from: existing.start_time, to: row.start_time } : {}),
       ...(Number(row.provider_id) !== existing.provider_id ? { provider_id: Number(row.provider_id) } : {}),
     });
+    await auditDayBlockOverride(db, req, existing.id, checked?.dayBlock);
     // "This and following": apply the same shift (and provider/chair/length changes) to later visits in the series.
     let seriesUpdate = null;
     if (req.body.scope === 'following' && existing.series_id) {
@@ -644,7 +666,13 @@ export default function scheduleRoutes({ db }) {
     // Patient flow: when they arrived, were seated and left (practice-local time, for wait and chair times).
     const flow = { checked_in: 'arrived_at', in_chair: 'seated_at', completed: 'dismissed_at' }[status];
     if (flow) {
-      const now = await practiceNow(db, req.user.practice_id);
+      // A step made during an internet outage and sent later carries when it really happened (offline queue).
+      // Trusted only within the last 36 hours and never in the future; otherwise it's the time it arrived.
+      const queued = Date.parse(req.get('X-Offline-Queued-At') || '');
+      const real = Number.isFinite(queued) && queued <= Date.now() && queued > Date.now() - 36 * 3600_000;
+      const now = real
+        ? localNow((await db.get('SELECT timezone FROM practices WHERE id = ?', req.user.practice_id))?.timezone || 'America/New_York', new Date(queued))
+        : await practiceNow(db, req.user.practice_id);
       await recorded(db, 'appointments', existing.id, () => db.run(`UPDATE appointments SET ${flow} = COALESCE(${flow}, ?) WHERE id = ?`, now, existing.id));
       if (status === 'in_chair') await recorded(db, 'appointments', existing.id, () => db.run('UPDATE appointments SET arrived_at = COALESCE(arrived_at, ?) WHERE id = ?', now, existing.id));
     }

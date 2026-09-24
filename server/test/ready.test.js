@@ -98,3 +98,22 @@ test('stepping back in the flow (undo) clears the times of the undone steps; com
   assert.deepEqual(audits.map((r) => JSON.parse(r.details).to), ['confirmed', 'checked_in', 'confirmed', 'in_chair', 'completed', 'in_chair', 'checked_in']);
   assert.deepEqual(audits.map((r) => !!JSON.parse(r.details).undo), [false, false, false, false, false, true, false], 'the undo is marked');
 });
+
+test('a check-in made during an internet outage keeps the time it really happened', async () => {
+  const { api, provider, patient, token } = await h.practice();
+  const a = await visit(api, provider, patient);
+  const at = new Date(Date.now() - 20 * 60_000);
+  const late = h.client(token, { 'X-Offline-Queued-At': at.toISOString() });
+  assert.equal((await late.patch(`/appointments/${a.id}/status`, { status: 'checked_in' })).status, 200);
+  const row = await h.db.get('SELECT arrived_at FROM appointments WHERE id = ?', a.id);
+  const tz = (await h.db.get('SELECT timezone FROM practices WHERE id = (SELECT practice_id FROM appointments WHERE id = ?)', a.id)).timezone || 'America/New_York';
+  const { localNow } = await import('../src/util.js');
+  assert.equal(row.arrived_at, localNow(tz, at));
+
+  // A time in the future or days old isn't trusted: the arrival time is when the server got it.
+  const b = await visit(api, provider, patient, '11:00');
+  const odd = h.client(token, { 'X-Offline-Queued-At': new Date(Date.now() + 3600_000).toISOString() });
+  await odd.patch(`/appointments/${b.id}/status`, { status: 'checked_in' });
+  const rowB = await h.db.get('SELECT arrived_at FROM appointments WHERE id = ?', b.id);
+  assert.equal(rowB.arrived_at.slice(0, 16), localNow(tz).slice(0, 16));
+});

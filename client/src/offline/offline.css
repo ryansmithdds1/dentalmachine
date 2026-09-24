@@ -1,0 +1,13 @@
+.offline-banner { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; border-radius: 8px; padding: 7px 12px; margin-bottom: 12px; font-size: 13px; font-weight: 550; border: 1px solid; }
+.offline-banner.warn { background: var(--warn-soft); color: var(--warn); border-color: #f5d9a8; }
+.offline-banner.danger { background: var(--danger-soft); color: var(--danger); border-color: #fbd5c2; }
+.offline-banner.info { background: var(--info-soft); color: var(--info); border-color: #c7d6fb; }
+.offline-banner-text { flex: 1; min-width: 200px; }
+:root[data-theme='dark'] .offline-banner { border-color: rgba(255, 255, 255, 0.14); }
+.offline-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
+.offline-item { display: flex; gap: 12px; justify-content: space-between; align-items: flex-start; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 12px; }
+.offline-item.failed, .offline-item.check { border-color: #fbd5c2; background: var(--danger-soft); }
+.offline-item-main { flex: 1; min-width: 0; }
+.offline-item-error { color: var(--danger); font-size: 12.5px; margin-top: 2px; }
+.offline-item-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.offline-needs { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }

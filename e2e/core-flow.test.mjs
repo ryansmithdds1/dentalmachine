@@ -94,7 +94,7 @@ test('a new patient from first visit to paid claim and statement', async () => {
   // Insurance.
   await step('insurance', async () => {
   await page.click('.tabs button:has-text("Insurance")');
-  await page.click('text=+ Add policy');
+  await page.click('text=+ Type it in');
   const carrier = page.locator('.modal label:has-text("Carrier *") select');
   await carrier.selectOption({ index: 1 });
   await page.getByLabel('Subscriber name *').fill(`Erin ${last}`);

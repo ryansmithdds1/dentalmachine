@@ -15,6 +15,8 @@ import IdleLogout from './components/IdleLogout.jsx';
 import { Suspense, lazy, useEffect, useState } from 'react';
 import { api, getLocationId, setLocationId } from './api.js';
 import { readOfflineDay } from './offline.js';
+import OfflineBanner from './offline/OfflineBanner.jsx';
+import { pendingCount } from './offline/index.js';
 import { ClockButton } from './components/TimeClock.jsx';
 import { useLiveEvents } from './live.js';
 import MfaSetup from './components/MfaSetup.jsx';
@@ -177,7 +179,7 @@ function UnreadBadge() {
 function StaffApp() {
   const { user, practice, loading, offline, logout, can, refresh } = useAuth();
   if (loading) return <div className="empty">Loading…</div>;
-  if (offline) return <OfflineSchedule onRetry={refresh} />;
+  if (offline && !user) return <OfflineSchedule onRetry={refresh} />;
   if (!user) {
     return (
       <Routes>
@@ -321,7 +323,7 @@ function UserMenu({ user, practice, logout }) {
           <LocationPicker user={user} />
           <ClockButton />
           <button className="menu-item" onClick={() => { setOpen(false); window.dispatchEvent(new Event('dm:shortcuts')); }}><Keyboard size={16} /> Keyboard shortcuts <kbd>?</kbd></button>
-          <button className="menu-item" onClick={logout}><LogOut size={16} /> Sign out</button>
+          <button className="menu-item" onClick={() => (!pendingCount() || window.confirm(`${pendingCount()} change(s) made offline haven’t been sent yet. They stay locked on this computer and are sent the next time you sign in here. Sign out?`)) && logout()}><LogOut size={16} /> Sign out</button>
         </div>
       )}
     </div>
@@ -377,6 +379,7 @@ function Shell({ nav }) {
       </aside>
       <main className={`main${fullBleed ? ' full-bleed' : ''}`} id="main" tabIndex={-1}>
         <EnvironmentBanner />
+        <OfflineBanner />
         {user.role === 'admin' && practice?.setup_status === 'pending' && location.pathname !== '/setup' && (
           <div className="setup-banner no-print">Finish setting up {practice.name} — providers, fees, insurance and reminders. <NavLink to="/setup">Continue setup →</NavLink></div>
         )}

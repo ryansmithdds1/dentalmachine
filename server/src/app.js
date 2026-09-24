@@ -71,6 +71,7 @@ import imagingRoutes, { bridgeAgentRoutes } from './routes/imaging.js';
 import bridgePackageRoutes from './routes/bridgepackage.js';
 import { portalPublicRoutes, portalRoutes } from './routes/portal.js';
 import systemRoutes from './routes/system.js';
+import offlineRoutes from './routes/offline.js';
 import chartingRoutes from './routes/charting.js';
 import referralRoutes from './routes/referrals.js';
 import importRoutes from './routes/imports.js';
@@ -273,6 +274,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
     next();
   });
   api.use(prefsRoutes({ db }));
+  api.use(offlineRoutes({ db, secret, app: () => app }));
   api.use(patientRoutes({ db }));
   api.use(scheduleRoutes({ db }));
   api.use(clinicalRoutes({ db }));

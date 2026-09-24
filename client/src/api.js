@@ -1,3 +1,5 @@
+import { offlineFallback, markOnline } from './offline/index.js';
+
 const TOKEN_KEY = 'dm_token';
 
 export const getToken = () => {
@@ -63,11 +65,25 @@ async function request(method, path, body, extraHeaders = {}) {
   const token = getToken();
   const key = idempotencyKey(method, path, body);
   if (key) extraHeaders = { 'Idempotency-Key': key, ...extraHeaders };
-  const res = await fetch(`/api${path}`, {
-    method,
-    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...locationHeader(), ...extraHeaders },
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
+  // No connection (or the server can't be reached): today's offline copy answers reads, and the few safe
+  // changes wait on this computer with this same key (see offline/). Anything else says it needs the internet.
+  const offline = async () => {
+    const r = await offlineFallback({ method, path, body, key, assistant: !!extraHeaders['X-Acting-For'] });
+    if (r.error) throw new ApiError(0, r.error);
+    return r.data;
+  };
+  let res;
+  try {
+    res = await fetch(`/api${path}`, {
+      method,
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...locationHeader(), ...extraHeaders },
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+  } catch {
+    return offline();
+  }
+  if ([502, 503, 504].includes(res.status)) return offline();
+  markOnline();
   const data = await res.json().catch(() => ({}));
   if (res.status === 401 && token) {
     setToken(null);
