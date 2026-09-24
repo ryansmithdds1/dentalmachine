@@ -4,7 +4,7 @@ import { requestReview } from '../reviewRequest.js';
 import { useApi } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
 import { useActivePatient } from '../activePatient.jsx';
-import { useShortcuts, comboLabel } from '../shortcuts.js';
+import { useShortcuts, useCommands, comboLabel } from '../shortcuts.js';
 import { money, age, fmtDate } from '../format.js';
 import ReferralChip from './referrals/ReferralChip.jsx';
 import ConnectionChips from './cards/Connection.jsx';
@@ -19,6 +19,14 @@ export const PATIENT_ACTIONS = [
   { key: 'p', label: 'Pay', icon: CreditCard, to: (id) => `/patients/${id}?tab=ledger&pay=1`, perm: 'billing:write' },
   // Texts (or emails) the "how did we do?" link; throttled and opt-out aware on the server (docs/reviews.md).
   { key: 'r', label: 'Review', title: 'Ask for a review', icon: Star, run: (id) => requestReview(id, { source: 'patient_bar' }), perm: 'patients:write' },
+];
+// Less frequent jobs for the active patient, found in the command bar (Ctrl/⌘K "rx", "lab", "adjust"…), each
+// opening its form with the patient already chosen (daily workflows 34, 35, 39, 40 — docs/workflows/specs/).
+export const PATIENT_COMMANDS = [
+  { id: 'rx', label: 'Write a prescription (Rx)', to: (id) => `/patients/${id}?tab=rx`, perm: 'clinical:sign' },
+  { id: 'lab', label: 'New lab case', to: (id) => `/office?lab=new&patient=${id}`, perm: 'clinical:write' },
+  { id: 'adjust', label: 'Adjustment or write-off', to: (id) => `/patients/${id}?tab=ledger&adjust=1`, perm: 'billing:write' },
+  { id: 'finance', label: 'Send a financing application', to: (id) => `/patients/${id}?tab=ledger&finance=1`, perm: 'billing:write' },
 ];
 // Runs an action for a patient: goes to its screen, or does it right here.
 export const runPatientAction = (a, id, nav) => (a.run ? a.run(id) : nav(a.to(id)));
@@ -37,6 +45,8 @@ export default function PatientBar() {
     ...actions.map((a) => ({ combo: `alt+${a.key}`, handler: () => runPatientAction(a, patientId, nav), label: `${a.title || a.label} for the active patient`, section: 'Active patient', enabled: !!patientId })),
     { combo: 'alt+x', handler: clear, label: 'Clear the active patient', section: 'Active patient', enabled: !!patientId },
   ]);
+  const name = p ? `${p.preferred_name || p.first_name} ${p.last_name}` : 'the active patient';
+  useCommands(patientId ? PATIENT_COMMANDS.filter((c) => can(c.perm)).map((c) => ({ id: `ap-${c.id}`, label: `${c.label} — ${name}`, hint: 'Active patient', run: () => nav(c.to(patientId)) })) : []);
   if (!patientId || error) return null;
   // The chart already shows all this at the top.
   if (loc.pathname === `/patients/${patientId}`) return null;

@@ -13,6 +13,7 @@ import { useRemembered } from '../../prefs.js';
 import { useShortcut } from '../../shortcuts.js';
 import BalanceWhy from './BalanceWhy.jsx';
 import { useLastMethod, methodToPost } from './lastMethod.js';
+import { undoable } from '../../toast.js';
 import './moneyflows.css';
 
 const KINDS = { Charges: ['charge'], 'Patient payments': ['payment'], 'Insurance payments': ['insurance_payment'], Adjustments: ['adjustment'], Refunds: ['refund'] };
@@ -32,15 +33,20 @@ export default function LedgerTab({ patient, onChange }) {
   const [showWhy, rememberWhy] = useRemembered('ledger.why', true);
   const [version, setVersion] = useState(0);
   useShortcut('w', () => rememberWhy(!showWhy), { label: 'Show or hide why this balance', section: 'Ledger' });
-  // ?pay=1 (from quick search "Take payment…") opens the payment form.
+  // ?pay=1 (from quick search "Take payment…") opens the payment form; ?adjust=1 the adjustment (workflow 40) and
+  // ?finance=1 the financing application (workflow 39) — the command bar's actions for the active patient.
   const [params, setParams] = useSearchParams();
+  const [financeOpen, setFinanceOpen] = useState(false);
   useEffect(() => {
-    if (!params.get('pay')) return;
-    setModal('payment');
+    const open = params.get('pay') ? 'payment' : params.get('adjust') ? 'adjustment' : null;
+    if (!open && !params.get('finance')) return;
+    if (open) setModal(open);
+    else setFinanceOpen(true);
     const next = new URLSearchParams(params);
-    next.delete('pay');
+    ['pay', 'adjust', 'finance'].forEach((k) => next.delete(k));
     setParams(next, { replace: true });
   }, [params, setParams]);
+  useShortcut('a', () => setModal('adjustment'), { label: 'Adjustment or write-off', section: 'Ledger', enabled: can('billing:write') && !modal });
   const done = () => { setModal(null); reload(); setVersion((v) => v + 1); onChange?.(); };
   if (!data) return <div className="empty">Loading…</div>;
   const providers = [...new Map(data.entries.filter((e) => e.provider_id).map((e) => [e.provider_id, e.provider_name])).entries()];
@@ -67,6 +73,13 @@ export default function LedgerTab({ patient, onChange }) {
           <PaymentForm patient={patient} balance={data.patient_portion} lockDate={data.lock_date} onDone={done} onCancel={() => setModal(null)} />
         </section>
       )}
+      {/* Adjustments happen right here too (workflow 40): amount, Enter; Undo reverses it. */}
+      {modal === 'adjustment' && (
+        <section className="inline-panel" aria-label="Adjustment">
+          <header><h3>Adjustment or write-off</h3><button className="small" onClick={() => setModal(null)}>Cancel</button></header>
+          <AdjustmentForm patient={patient} lockDate={data.lock_date} onDone={done} />
+        </section>
+      )}
       {showWhy
         ? (data.balance !== 0 || data.entries.length > 0) && <BalanceWhy patient={patient} version={`${version}-${data.balance}-${data.entries.length}`} onClose={() => rememberWhy(false)} />
         : <div className="no-print" style={{ marginBottom: 12 }}><button className="small" onClick={() => rememberWhy(true)} title="W">Why this balance?</button></div>}
@@ -80,7 +93,7 @@ export default function LedgerTab({ patient, onChange }) {
               <>
                 {payConfig?.enabled && <button onClick={() => setModal('paylink')}>Send card payment link</button>}
                 {terminal.readers.length > 0 && <button onClick={() => setModal('reader')}>Card reader</button>}
-                <button onClick={() => setModal('adjustment')}>Adjustment</button>
+                <button onClick={() => setModal('adjustment')} title="A">Adjustment</button>
                 {data.balance < 0 && <button onClick={() => setModal('refund')}>Refund credit</button>}
                 {(patient.guarantor || patient.family_size > 1) && <button onClick={() => setModal('transfer')} title="Move a balance or credit to another family member">Transfer</button>}
                 <button className="primary" onClick={() => setModal('payment')}>Take payment</button>
@@ -138,7 +151,7 @@ export default function LedgerTab({ patient, onChange }) {
       <PaymentPlans patient={patient} onChange={reload} />
       {/* Billing autopilot (BL1–BL5): Set up payments, automatic-payment history, office fees and waivers. */}
       <BillingActivity patientId={patient.guarantor_id || patient.id} />
-      <Financing patient={patient} canWrite={can('billing:write')} onChange={reload} />
+      <Financing patient={patient} canWrite={can('billing:write')} onChange={reload} open={financeOpen} onOpened={() => setFinanceOpen(false)} />
       {payRequests?.length > 0 && (
         <div className="card">
           <h3>Online payment requests</h3>
@@ -159,7 +172,6 @@ export default function LedgerTab({ patient, onChange }) {
       {modal?.receipt && <Modal title={`Receipt #${modal.receipt.id}`} onClose={() => setModal(null)}><ReceiptActions patient={patient} entry={modal.receipt} /></Modal>}
       {modal === 'reader' && <Modal title="Card reader payment" onClose={() => { setModal(null); reload(); }}><ReaderPay patient={patient} amount={data.patient_portion} readers={terminal.readers} testMode={terminal.test_mode} onDone={(_p, close) => { reload(); if (close) setModal(null); }} /></Modal>}
       {modal === 'paylink' && <Modal title="Send card payment link" onClose={() => setModal(null)}><PayLinkForm patient={patient} balance={data.patient_portion} fullBalance={data.balance} onDone={() => { setModal(null); reloadRequests(); }} /></Modal>}
-      {modal === 'adjustment' && <Modal title="Ledger adjustment" onClose={() => setModal(null)}><AdjustmentForm patient={patient} lockDate={data.lock_date} onDone={done} /></Modal>}
       {modal === 'transfer' && <Modal title="Transfer within the family" onClose={() => setModal(null)}><TransferForm patient={patient} balance={data.balance} onDone={done} /></Modal>}
       {modal === 'refund' && <Modal title="Refund credit" onClose={() => setModal(null)}><RefundForm patient={patient} credit={-data.balance} entries={data.entries} onDone={done} /></Modal>}
       {modal?.void && <Modal title={`Void ${label(modal.void.type).toLowerCase()}`} onClose={() => setModal(null)}><VoidForm entry={modal.void} onDone={done} /></Modal>}
@@ -370,23 +382,41 @@ function TransferForm({ patient, balance, onDone }) {
   );
 }
 
+// Workflow 40 (docs/workflows/specs/40-adjustments.md): the type this person used last (else "Courtesy discount"),
+// the reason filled from the type (a reason is always required and can be changed), the amount ready to type.
+// Posting needs no confirmation: the toast's Undo voids it — a reversing entry with a reason, never a delete.
 function AdjustmentForm({ patient, lockDate, onDone }) {
   const { data: types } = useApi('/adjustment-types');
+  const [lastType, rememberType] = useRemembered('ledger.adjustment_type', null);
   const [form, setForm] = useState({ amount: '', direction: 'credit', description: 'Courtesy discount', entry_date: '', adjustment_type: 'Courtesy discount' });
+  const [typed, setTyped] = useState(false);
+  // Once the practice's types load, start on the one this person used last (if it's still offered).
+  useEffect(() => {
+    const t = types?.find((x) => x.active && x.name === lastType && x.name !== 'Insurance write-off');
+    if (!t || typed) return;
+    setForm((f) => ({ ...f, adjustment_type: t.name, direction: t.direction, description: f.description === f.adjustment_type ? t.name : f.description }));
+  }, [types, lastType]); // eslint-disable-line react-hooks/exhaustive-deps
   const { submit, busy, error } = useSubmit(async () => {
     const cents = toCents(form.amount);
-    await api.post(`/patients/${patient.id}/adjustments`, { amount: form.direction === 'credit' ? -cents : cents, description: form.description, entry_date: form.entry_date || undefined, adjustment_type: form.adjustment_type || null });
+    if (!(cents > 0)) throw new Error('Enter the amount');
+    if (!form.description.trim()) throw new Error('Say why (the reason is kept with the entry)');
+    const signed = form.direction === 'credit' ? -cents : cents;
+    await undoable(`${form.adjustment_type || 'Adjustment'} of ${money(cents)} posted for ${patient.first_name}`,
+      () => api.post(`/patients/${patient.id}/adjustments`, { amount: signed, description: form.description.trim(), entry_date: form.entry_date || undefined, adjustment_type: form.adjustment_type || null }),
+      (out) => api.post(`/ledger/${out.entry.id}/void`, { reason: 'Undone right after posting' }).then(onDone));
+    rememberType(form.adjustment_type);
     onDone();
   });
   return (
     <form onSubmit={(e) => { e.preventDefault(); submit(); }}>
       <ErrorBox error={error} />
       <div className="form-grid">
-        <label>Amount ($)<input type="number" step="0.01" min="0.01" required value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} /></label>
+        <label>Amount ($)<input autoFocus aria-label="Adjustment amount" type="number" step="0.01" min="0.01" required value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} /></label>
         <label>
           Type
           <select value={form.adjustment_type} onChange={(e) => {
             const t = types?.find((x) => x.name === e.target.value);
+            setTyped(true);
             setForm({ ...form, adjustment_type: e.target.value, direction: t?.direction || form.direction, description: form.description === form.adjustment_type || !form.description ? e.target.value : form.description });
           }}>
             {(types || []).filter((t) => t.active && t.name !== 'Insurance write-off').map((t) => <option key={t.id} value={t.name}>{t.name} ({t.direction === 'credit' ? 'reduces balance' : 'adds to balance'})</option>)}

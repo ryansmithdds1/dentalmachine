@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, getToken } from '../api.js';
 import { useApi } from '../hooks.js';
@@ -6,8 +6,8 @@ import { useAuth } from '../auth.jsx';
 import { money, fmtDate, toCents, fromCents } from '../format.js';
 import { ChStatus, ClaimEdiCard, sendClaims } from '../components/ClaimEdi.jsx';
 import { Badge, ErrorBox, Modal, useSubmit } from '../components/ui.jsx';
-import { useShortcuts } from '../shortcuts.js';
-import { undoable } from '../toast.js';
+import { useShortcuts, isMac } from '../shortcuts.js';
+import { undoable, toast } from '../toast.js';
 import './claimdetail.css';
 
 export default function ClaimDetail() {
@@ -73,7 +73,7 @@ export default function ClaimDetail() {
       </div>
       <ErrorBox error={err} />
       {c.denial_reason && <div className="error">Denial reason: {c.denial_reason}</div>}
-      {w && ['denied', 'partially_paid', 'paid'].includes(c.status) && <Appeal claim={c} />}
+      {w && ['denied', 'partially_paid', 'paid'].includes(c.status) && <Appeal key={c.id} claim={c} onSent={() => setEdits((n) => n + 1)} />}
       {c.payer_claim_number && <div className="muted" style={{ marginBottom: 8 }}>Payer claim # {c.payer_claim_number}</div>}
       {c.ch_status === 'rejected' && c.status === 'draft' && <div className="error">Rejected electronically: {c.ch_message}</div>}
       <ClaimChecks id={c.id} status={c.status} version={checks} />
@@ -216,41 +216,80 @@ function ClaimChecks({ id, status, version }) {
   );
 }
 
-// An appeal letter drafted from the chart and the payer's reason, to edit, print on letterhead and send.
-function Appeal({ claim }) {
-  const [open, setOpen] = useState(false);
+// Appeal (workflow 46, docs/workflows/specs/46-denied-claim-appeals.md). On a denied claim it's open already with
+// the payer's reason filled in: D (or the button) drafts the letter — by AI from the chart, or from a plain template
+// when AI is off — and "Send appeal & print" (Ctrl/⌘+Enter) files it on the chart as a PDF, records it in the
+// claim's history and brings the claim back up for a follow-up call in 30 days. Nothing goes out on its own.
+function Appeal({ claim, onSent }) {
+  const [open, setOpen] = useState(claim.status === 'denied');
   const [reason, setReason] = useState(claim.denial_reason || '');
   const [draft, setDraft] = useState(null);
+  const [followUp, setFollowUp] = useState(() => new Date(Date.now() + 30 * 86400_000).toLocaleDateString('en-CA'));
   const [busy, setBusy] = useState(false);
+  const [sent, setSent] = useState(null);
   const [err, setErr] = useState(null);
+  const letterRef = useRef(null);
+  // The letter gets the cursor as soon as a draft is in, to read and finish it (then Ctrl/⌘+Enter).
+  const drafted = !!draft?.letter;
+  useEffect(() => { if (drafted) letterRef.current?.focus(); }, [drafted]);
   const write = async () => {
     setBusy(true);
     setErr(null);
-    try { setDraft(await api.post(`/claims/${claim.id}/appeal`, { reason })); } catch (e) { setErr(e); } finally { setBusy(false); }
+    try {
+      const d = await api.post(`/claims/${claim.id}/appeal`, { reason });
+      setDraft(d);
+    } catch (e) { setErr(e); } finally { setBusy(false); }
   };
-  const print = () => {
+  const print = (letter) => {
     const w = window.open('', '_blank');
     if (!w) return;
     w.document.title = `Appeal — claim ${claim.id}`;
     const pre = w.document.createElement('pre');
     pre.style.cssText = 'font: 12pt/1.5 Georgia, serif; white-space: pre-wrap; margin: 1in;';
-    pre.textContent = draft.letter;
+    pre.textContent = letter;
     w.document.body.appendChild(pre);
     w.print();
   };
-  if (!open) return <div style={{ margin: '8px 0' }}><button className="small" onClick={() => setOpen(true)}>Draft an appeal letter</button></div>;
+  const send = async () => {
+    if (!draft?.letter || busy) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const out = await api.post(`/claims/${claim.id}/appeal`, { letter: draft.letter, reason, follow_up_date: followUp, drafted_by: draft.drafted_by || 'staff' });
+      setSent(out);
+      toast(`Appeal filed on the chart · claim #${claim.id} comes back for a call on ${fmtDate(out.follow_up_date)}`);
+      print(draft.letter);
+      onSent?.();
+    } catch (e) { setErr(e); } finally { setBusy(false); }
+  };
+  useShortcuts([
+    { combo: 'd', handler: () => { setOpen(true); write(); }, label: 'Draft the appeal letter', section: 'Claim', enabled: !draft && !busy },
+    { combo: 'mod+enter', handler: send, label: 'Send the appeal and print it', section: 'Claim', enabled: !!draft && !sent, inInputs: true },
+  ]);
+  if (!open) return <div style={{ margin: '8px 0' }}><button className="small" onClick={() => setOpen(true)}>Appeal this claim…</button></div>;
   return (
     <div className="card">
       <h2>Appeal</h2>
       <ErrorBox error={err} />
-      <label>What the payer said, or what you disagree with<textarea rows={2} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Downgraded to amalgam; paid at 50% instead of 80%" /></label>
-      <div className="form-actions" style={{ justifyContent: 'flex-start' }}><button className="primary" disabled={busy} onClick={write}>{busy ? 'Writing…' : draft ? 'Write again' : 'Draft with AI'}</button></div>
-      {draft && (
+      {sent ? (
+        <div className="public-notice ok">Appeal filed on the chart (Insurance folder) and in this claim’s history. It comes back on the follow-up list on {fmtDate(sent.follow_up_date)}. <button className="small" onClick={() => print(draft.letter)}>Print again</button></div>
+      ) : (
         <>
-          <textarea rows={16} style={{ width: '100%', fontFamily: 'Georgia, serif' }} value={draft.letter} onChange={(e) => setDraft({ ...draft, letter: e.target.value })} aria-label="Appeal letter" />
-          {draft.enclosures?.length > 0 && <div className="muted" style={{ fontSize: 12 }}>Enclose: {draft.enclosures.join('; ')}</div>}
-          {draft.missing?.length > 0 && <div className="text-warn" style={{ fontSize: 12 }}>Stronger with (not in the chart): {draft.missing.join('; ')}</div>}
-          <div className="form-actions"><button onClick={() => navigator.clipboard?.writeText(draft.letter)}>Copy</button><button className="primary" onClick={print}>Print</button></div>
+          <label>What the payer said, or what you disagree with<textarea rows={2} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Downgraded to amalgam; paid at 50% instead of 80%" /></label>
+          <div className="form-actions" style={{ justifyContent: 'flex-start' }}><button className={draft ? '' : 'primary'} disabled={busy} onClick={write}>{busy && !draft ? 'Writing…' : draft ? 'Write again' : <>Draft the letter <kbd>D</kbd></>}</button></div>
+          {draft && (
+            <>
+              {draft.drafted_by === 'template' && <div className="text-warn" style={{ fontSize: 12, marginBottom: 6 }}>Drafted from the office template (AI is off): add the dentist’s clinical reason where the brackets are.</div>}
+              <textarea ref={letterRef} rows={16} style={{ width: '100%', fontFamily: 'Georgia, serif' }} value={draft.letter} onChange={(e) => setDraft({ ...draft, letter: e.target.value, drafted_by: draft.drafted_by === 'ai' ? 'ai' : draft.drafted_by })} aria-label="Appeal letter" />
+              {draft.enclosures?.length > 0 && <div className="muted" style={{ fontSize: 12 }}>Enclose: {draft.enclosures.join('; ')}</div>}
+              {draft.missing?.length > 0 && <div className="text-warn" style={{ fontSize: 12 }}>Stronger with (not in the chart): {draft.missing.join('; ')}</div>}
+              <div className="form-actions">
+                <label className="inline" style={{ gap: 6, marginRight: 'auto' }}>Call the payer again on<input type="date" value={followUp} onChange={(e) => setFollowUp(e.target.value)} /></label>
+                <button onClick={() => navigator.clipboard?.writeText(draft.letter)}>Copy</button>
+                <button className="primary" disabled={busy} onClick={send}>{busy ? 'Filing…' : 'Send appeal & print'} <kbd>{isMac ? '⌘' : 'Ctrl'}↵</kbd></button>
+              </div>
+            </>
+          )}
         </>
       )}
     </div>

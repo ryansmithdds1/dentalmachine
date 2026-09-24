@@ -60,7 +60,8 @@ export default function reputationRoutes({ db, config, secret, gbp }) {
     const recent = rated.filter((x) => (x.posted_at || x.created_at) >= since90);
     const avg = (list) => (list.length ? Math.round((list.reduce((s, x) => s + x.rating, 0) / list.length) * 10) / 10 : null);
     const surveys = await db.get("SELECT COUNT(*) AS n, AVG(nps) AS avg FROM survey_responses WHERE practice_id = ? AND answered_at IS NOT NULL AND nps IS NOT NULL AND answered_at >= ?", pid, since90.slice(0, 10));
-    const requests = await db.get("SELECT COUNT(*) AS n FROM messages WHERE practice_id = ? AND kind = 'review_request' AND created_at >= ?", pid, since90.slice(0, 19).replace('T', ' '));
+    // Review requests are saved as kind 'review' (reviewfunnel.js); 'review_request' is the older name.
+    const requests = await db.get("SELECT COUNT(*) AS n FROM messages WHERE practice_id = ? AND kind IN ('review','review_request') AND created_at >= ?", pid, since90.slice(0, 19).replace('T', ' '));
     res.json({
       mode: gbp?.mode || null, connected: !!conn, connection: conn,
       summary: {

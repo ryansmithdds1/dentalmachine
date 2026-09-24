@@ -1,18 +1,27 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { useLookup } from '../hooks.js';
 import { fromCents, toCents, practiceToday } from '../format.js';
 import { useAuth } from '../auth.jsx';
 import { useActivePatient } from '../activePatient.jsx';
 import { ErrorBox, PatientPicker, useSubmit } from './ui.jsx';
+import { useRemembered } from '../prefs.js';
+import { undoable } from '../toast.js';
 
 export const LAB_STATUSES = [['sent', 'Sent to lab'], ['received', 'Received'], ['returned_for_adjustment', 'Returned for adjustment'], ['delivered', 'Delivered to patient'], ['cancelled', 'Cancelled']];
 
+// Workflow 35 (docs/workflows/specs/35-lab-cases.md): a new case starts with the active patient, the lab this person
+// used last (or the practice's only lab), and the patient's planned lab work (crown, bridge, denture) with its tooth
+// and provider, so usually only the shade is typed. Logging it needs no confirmation: an Undo toast cancels it.
+const LAB_WORK = /^D(2[5-7]|29[5-6]|5|6[2-7])/;
 export function LabCaseForm({ labCase, patient: fixedPatient, onDone }) {
   const providers = useLookup('/providers?active=true');
   const labs = useLookup('/labs');
   const [procs, setProcs] = useState([]);
-  const [patient, setPatient] = useState(fixedPatient || (labCase ? { id: labCase.patient_id, first_name: labCase.first_name, last_name: labCase.last_name } : null));
+  const { patientId, recent } = useActivePatient();
+  const [lastLab, rememberLab] = useRemembered('lab.last', null);
+  const shadeRef = useRef(null);
+  const [patient, setPatient] = useState(fixedPatient || (labCase ? { id: labCase.patient_id, first_name: labCase.first_name, last_name: labCase.last_name } : recent.find((r) => r.id === patientId) || null));
   const [form, setForm] = useState({
     lab_id: labCase?.lab_id || '', procedure_id: labCase?.procedure_id || '',
     lab_name: labCase?.lab_name || '', description: labCase?.description || '', tooth: labCase?.tooth || '', shade: labCase?.shade || '',
@@ -23,26 +32,51 @@ export function LabCaseForm({ labCase, patient: fixedPatient, onDone }) {
   // Lab work on this patient's chart (crowns, bridges, dentures) to link the case to.
   useEffect(() => {
     if (!patient?.id) return;
-    api.get(`/patients/${patient.id}/procedures`).then((rows) => setProcs(rows.filter((p) => /^D(2[5-7]|29[5-6]|5|6[2-7])/.test(p.code) && p.status !== 'cancelled'))).catch(() => setProcs([]));
+    api.get(`/patients/${patient.id}/procedures`).then((rows) => setProcs(rows.filter((p) => LAB_WORK.test(p.code) && p.status !== 'cancelled'))).catch(() => setProcs([]));
   }, [patient?.id]);
+  const dueFor = (lab, sent) => (lab?.turnaround_days && sent ? new Date(Date.parse(`${sent}T12:00:00Z`) + lab.turnaround_days * 86400000).toISOString().slice(0, 10) : '');
+  // Smart defaults for a new case, once the labs and the patient's work have loaded; nothing the person typed is replaced.
+  const [defaulted, setDefaulted] = useState({ lab: !!labCase, proc: !!labCase });
+  useEffect(() => {
+    if (defaulted.lab || !labs.length) return;
+    const active = labs.filter((l) => l.active);
+    const lab = active.find((l) => lastLab && l.id === lastLab.lab_id) || (active.length === 1 ? active[0] : null);
+    setDefaulted((d) => ({ ...d, lab: true }));
+    if (lab) setForm((f) => (f.lab_id ? f : { ...f, lab_id: String(lab.id), lab_name: lab.name, due_date: f.due_date || dueFor(lab, f.sent_date) }));
+    else if (lastLab?.lab_name && !lastLab.lab_id) setForm((f) => (f.lab_name ? f : { ...f, lab_name: lastLab.lab_name }));
+  }, [labs, lastLab, defaulted.lab]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (defaulted.proc || !procs.length) return;
+    setDefaulted((d) => ({ ...d, proc: true }));
+    // Planned or in-progress work not on a case yet; the most recent first.
+    const p = [...procs].reverse().find((x) => ['planned', 'in_progress'].includes(x.status)) || null;
+    if (p) setForm((f) => (f.procedure_id ? f : { ...f, procedure_id: String(p.id), description: f.description || `${p.code} ${p.description}`, tooth: f.tooth || p.tooth || '', provider_id: f.provider_id || p.provider_id || '' }));
+    // The case is filled in from the work: the shade is usually all that's left to type.
+    if (p) setTimeout(() => shadeRef.current?.focus(), 0);
+  }, [procs, defaulted.proc]);
   const pickLab = (e) => {
     const lab = labs.find((l) => String(l.id) === e.target.value);
-    const due = lab?.turnaround_days && form.sent_date && !form.due_date
-      ? new Date(Date.parse(`${form.sent_date}T12:00:00Z`) + lab.turnaround_days * 86400000).toISOString().slice(0, 10) : form.due_date;
+    const due = !form.due_date ? dueFor(lab, form.sent_date) : form.due_date;
     setForm({ ...form, lab_id: e.target.value, lab_name: lab ? lab.name : form.lab_name, due_date: due });
   };
   const pickProc = (e) => {
     const p = procs.find((x) => String(x.id) === e.target.value);
     setForm({ ...form, procedure_id: e.target.value, ...(p ? { description: form.description || `${p.code} ${p.description}`, tooth: form.tooth || p.tooth || '', provider_id: form.provider_id || p.provider_id || '' } : {}) });
   };
-  const { submit, busy, error } = useSubmit(async () => {
+  const { submit, busy, error } = useSubmit(async (print) => {
     if (!patient) throw new Error('Choose a patient');
     const body = {
       ...form, patient_id: patient.id, provider_id: form.provider_id ? Number(form.provider_id) : null, cost: form.cost === '' ? null : toCents(form.cost),
       lab_id: form.lab_id ? Number(form.lab_id) : null, procedure_id: form.procedure_id ? Number(form.procedure_id) : null,
     };
-    const saved = labCase ? await api.put(`/lab-cases/${labCase.id}`, body) : await api.post('/lab-cases', body);
-    if (!labCase && window.confirm('Case logged. Print the lab slip now?')) window.open(`/lab-cases/${saved.id}/slip`, '_blank');
+    if (labCase) await api.put(`/lab-cases/${labCase.id}`, body);
+    else {
+      // Undo cancels the case (status, audited) — nothing is deleted.
+      const saved = await undoable(`Lab case logged for ${patient.first_name} ${patient.last_name} · ${body.description}`,
+        () => api.post('/lab-cases', body), (c) => api.put(`/lab-cases/${c.id}`, { status: 'cancelled' }).then(() => onDone()));
+      rememberLab({ lab_id: body.lab_id, lab_name: form.lab_name });
+      if (print === true) window.open(`/lab-cases/${saved.id}/slip`, '_blank');
+    }
     onDone();
   });
   return (
@@ -71,7 +105,7 @@ export function LabCaseForm({ labCase, patient: fixedPatient, onDone }) {
         )}
         <label>Case<input required value={form.description} onChange={set('description')} placeholder="e.g. Zirconia crown" /></label>
         <label>Tooth<input value={form.tooth} onChange={set('tooth')} /></label>
-        <label>Shade<input value={form.shade} onChange={set('shade')} /></label>
+        <label>Shade<input ref={shadeRef} value={form.shade} onChange={set('shade')} /></label>
         <label>Provider<select value={form.provider_id} onChange={set('provider_id')}><option value="">—</option>{providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
         <label>Status<select value={form.status} onChange={set('status')}>{LAB_STATUSES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></label>
         <label>Sent<input type="date" value={form.sent_date} onChange={set('sent_date')} /></label>
@@ -79,7 +113,10 @@ export function LabCaseForm({ labCase, patient: fixedPatient, onDone }) {
         <label>Lab fee ($)<input type="number" step="0.01" value={form.cost} onChange={set('cost')} /></label>
         <label className="full">Notes<input value={form.notes} onChange={set('notes')} /></label>
       </div>
-      <div className="form-actions"><button className="primary" disabled={busy}>{labCase ? 'Save' : 'Log lab case'}</button></div>
+      <div className="form-actions">
+        {!labCase && <button type="button" disabled={busy} onClick={() => submit(true)}>Log & print slip</button>}
+        <button className="primary" disabled={busy}>{labCase ? 'Save' : 'Log lab case'}</button>
+      </div>
       {labCase && <LabRx labCase={labCase} />}
     </form>
   );

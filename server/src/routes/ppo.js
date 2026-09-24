@@ -5,6 +5,7 @@ import { estimateCoverage } from '../services.js';
 import { build837D } from '../x12.js';
 import { recordFeeChange } from '../fees.js';
 import { ensureBaseline, snapshotVersion, requireDay } from '../feeversions.js';
+import { FOLLOW_UP_AFTER_DAYS } from '../monthlywork.js';
 
 const requireAdmin = (req, _res, next) => (req.user.role === 'admin' ? next() : next(new HttpError(403, 'Administrator access required')));
 
@@ -169,7 +170,7 @@ export default function ppoRoutes({ db, config }) {
     res.set({ 'Content-Type': 'text/plain; charset=utf-8', 'Content-Disposition': `attachment; filename="predetermination-${pa.id}.837"` }).send(file);
   });
 
-  // Insurance follow-up: submitted claims by age.
+  // Insurance follow-up (workflow 45): sent claims still waiting on the payer, due calls first.
   r.get('/reports/outstanding-claims', requirePermission('billing:read'), async (req, res) => {
     const today = (await practiceNow(db, req.user.practice_id)).slice(0, 10);
     const rows = await db.all(
@@ -180,11 +181,18 @@ export default function ppoRoutes({ db, config }) {
        WHERE c.practice_id = ? AND c.status IN ('submitted','partially_paid')${req.query.carrier_id ? ' AND ic.id = ?' : ''} ORDER BY c.submitted_at`,
       req.user.practice_id, ...(req.query.carrier_id ? [Number(req.query.carrier_id)] : []),
     );
-    for (const c of rows) c.days_out = c.submitted_at ? Math.round((Date.parse(`${today}T00:00:00Z`) - Date.parse(`${c.submitted_at.slice(0, 10)}T00:00:00Z`)) / 86400_000) : null;
+    for (const c of rows) {
+      c.days_out = c.submitted_at ? Math.round((Date.parse(`${today}T00:00:00Z`) - Date.parse(`${c.submitted_at.slice(0, 10)}T00:00:00Z`)) / 86400_000) : null;
+      // Due for a call: the follow-up date someone set has come, or nobody has called and it's been out 30+ days.
+      c.due = c.follow_up_date ? c.follow_up_date <= today : (c.days_out ?? 0) >= FOLLOW_UP_AFTER_DAYS;
+    }
     const bucket = (d) => (d <= 30 ? 'd0_30' : d <= 60 ? 'd31_60' : d <= 90 ? 'd61_90' : 'd90_plus');
     const totals = { d0_30: 0, d31_60: 0, d61_90: 0, d90_plus: 0 };
     for (const r2 of rows) totals[bucket(r2.days_out ?? 0)] += r2.estimated_amount - r2.paid_amount;
-    res.json({ as_of: today, totals, rows: paged(req, res, rows, { dflt: 500, max: 100_000 }), total_rows: rows.length });
+    // The work list comes in the order it should be worked: calls that are due (oldest first), then the rest by age.
+    if (req.query.order !== 'submitted') rows.sort((a, b) => Number(b.due) - Number(a.due) || (b.days_out ?? 0) - (a.days_out ?? 0) || a.id - b.id);
+    const list = req.query.due === '1' ? rows.filter((c) => c.due) : rows;
+    res.json({ as_of: today, totals, due_count: rows.filter((c) => c.due).length, rows: paged(req, res, list, { dflt: 500, max: 100_000 }), total_rows: list.length });
   });
 
   return r;

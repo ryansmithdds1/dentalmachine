@@ -4,12 +4,15 @@ import { useApi, useLookup } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
 import { fmtDate, practiceToday, shiftDate } from '../format.js';
 import { ErrorBox, Modal, useSubmit } from './ui.jsx';
+import { toast } from '../toast.js';
 
 const hm = (t) => (t ? t.slice(11, 16) : '—');
 const dur = (m) => (m == null ? '—' : `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m`);
 const monday = (d) => shiftDate(d, -((new Date(`${d}T12:00:00Z`).getUTCDay() + 6) % 7));
 
-// Sidebar button: clock in, or see how long you've been in and clock out.
+// Sidebar button: clock in, or see how long you've been in and clock out — one click either way (workflow 44,
+// docs/workflows/specs/44-clock.md). Breaks are punched as they happen (Time clock → Start break), so clocking out
+// no longer asks for break minutes from memory; on a break, the button ends it.
 export function ClockButton() {
   const [me, setMe] = useState(null);
   const [err, setErr] = useState(null);
@@ -19,17 +22,15 @@ export function ClockButton() {
   const go = async () => {
     setErr(null);
     try {
-      if (me.clocked_in) {
-        const brk = window.prompt('Minutes of unpaid break this shift?', '0');
-        if (brk === null) return;
-        await api.post('/timeclock/out', { break_minutes: Number(brk) || 0 });
-      } else await api.post('/timeclock/in');
+      const path = me.on_break ? '/timeclock/break/end' : me.clocked_in ? '/timeclock/out' : '/timeclock/in';
+      const r = await api.post(path);
+      toast(r.message || (me.on_break ? 'Back from break' : me.clocked_in ? 'Clocked out' : 'Clocked in'));
       load();
     } catch (e) { setErr(e.message); }
   };
   return (
     <div className="clock-button">
-      <button className="small" onClick={go}>{me.clocked_in ? `Clock out (in since ${hm(me.clocked_in)})` : 'Clock in'}</button>
+      <button className="small" onClick={go}>{me.on_break ? 'I’m back from break' : me.clocked_in ? `Clock out (in since ${hm(me.clocked_in)})` : 'Clock in'}</button>
       <div style={{ fontSize: 11 }}>{me.week_hours}h this week</div>
       {err && <div className="error-text" style={{ fontSize: 11 }}>{err}</div>}
     </div>
@@ -116,7 +117,8 @@ function PunchForm({ init, users, onClose, onDone }) {
         <label>Why (kept with the change)<input value={f.note || ''} onChange={(e) => setF({ ...f, note: e.target.value })} placeholder="e.g. forgot to clock out" /></label>
       </div>
       <div className="form-actions">
-        {init.id && <button className="danger" disabled={remove.busy} onClick={() => { const why = window.prompt('Remove this punch from the timesheet? It stays on record as removed. Why?'); if (why?.trim()) remove.submit(why.trim()); }}>Delete</button>}
+        {/* Removing needs the why above (kept on the record, which stays as "removed") — no prompt box. */}
+        {init.id && <button className="danger" disabled={remove.busy || !f.note?.trim()} title={f.note?.trim() ? 'Remove this punch; it stays on record as removed' : 'Say why first'} onClick={() => remove.submit(f.note.trim())}>Remove</button>}
         <button className="primary" disabled={save.busy} onClick={save.submit}>Save</button>
       </div>
     </Modal>

@@ -14,6 +14,7 @@ import { useShortcuts } from '../../shortcuts.js';
 import { toast, undoable } from '../../toast.js';
 import { Settings2, GripVertical, ChevronUp, ChevronDown, Plus } from 'lucide-react';
 import FinDesk from './FinDesk.jsx';
+import { sendPreauth } from '../preauthSend.js';
 import StaffCompare from './StaffCompare.jsx';
 import FinOptionsSettings from '../FinOptionsSettings.jsx';
 import './treatment.css';
@@ -121,7 +122,12 @@ export default function TreatmentTab({ patient, onChange }) {
               <div className="actions">
                 {!plan.signed_at && <button className="small primary" onClick={() => setPresenting(plan)}>Present & e-sign…</button>}
                 {plan.estimate?.policy && can('billing:write') && plan.procedures.some((p) => p.status === 'planned') && (
-                  <button className="small" onClick={() => act(async () => { await api.post('/preauths', { patient_insurance_id: plan.estimate.policy.id, treatment_plan_id: plan.id }); setNote('Pre-authorization created — send it from Billing → Pre-authorizations.'); })}>Pre-authorize</button>
+                  <button className="small" title="Makes the pre-authorization and sends it to the payer" onClick={() => act(async () => {
+                    // Workflow 38: made and sent in one step (the 837 file only when no clearinghouse is connected).
+                    const pa = await api.post('/preauths', { patient_insurance_id: plan.estimate.policy.id, treatment_plan_id: plan.id });
+                    const out = await sendPreauth(pa);
+                    setNote(out.sent ? `Pre-authorization #${pa.id} sent to ${plan.estimate.policy.carrier_name || 'the payer'} — the answer is recorded in Billing → Pre-authorizations.` : `Pre-authorization #${pa.id} saved as an 837 file to upload.`);
+                  })}>Pre-authorize</button>
                 )}
                 <button className="small" onClick={() => window.open(`/treatment-plans/${plan.id}/print`, '_blank')}>Print</button>
                 <button className="small" onClick={() => download(`/treatment-plans/${plan.id}/pdf`, 'treatment-plan.pdf')}>PDF</button>

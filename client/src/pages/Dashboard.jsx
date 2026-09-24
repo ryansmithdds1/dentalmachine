@@ -15,6 +15,7 @@ import MomentsCard from '../components/MomentsCard.jsx';
 import CapacityWidget from '../components/CapacityWidget.jsx';
 import HuddlePlanCard from '../components/optimizer/HuddlePlanCard.jsx';
 import { getLocationId } from '../api.js';
+import { useHuddleFixes, HuddleFixButtons } from '../components/huddle/HuddleActions.jsx';
 
 export const FLAG_INFO = {
   new_patient: ['New patient', 'info'],
@@ -59,6 +60,8 @@ export default function Dashboard() {
   const rows = (h?.rows || []).filter((r) => !filter || r.flags.includes(filter));
   const goalPct = h?.daily_goal ? Math.round((h.production / h.daily_goal) * 100) : null;
   const flagCounts = Object.fromEntries(Object.keys(FLAG_INFO).map((f) => [f, (h?.rows || []).filter((r) => r.flags.includes(f)).length]));
+  // Workflow 36: every flag is a one-key fix on its row (J/K to pick the row).
+  const fix = useHuddleFixes(rows, { onChanged: reload });
 
   return (
     <>
@@ -104,6 +107,7 @@ export default function Dashboard() {
       <div className="card" style={{ marginTop: 16, padding: 0 }}>
         <div className="page-header" style={{ padding: '14px 16px', marginBottom: 0 }}>
           <h2 style={{ margin: 0 }}>Patients {date === today ? 'today' : 'this day'}</h2>
+          {rows.length > 0 && <span className="muted kb-hint no-print" style={{ fontSize: 12 }}><kbd>J</kbd> <kbd>K</kbd> pick a patient · the key on each fix does it</span>}
           <div className="chips no-print">
             <button className={`chip${!filter ? ' active' : ''}`} onClick={() => setFilter('')}>All {h?.rows.length ?? ''}</button>
             {Object.entries(FLAG_INFO).filter(([f]) => flagCounts[f]).map(([f, [label]]) => (
@@ -113,8 +117,8 @@ export default function Dashboard() {
         </div>
         {!h ? <div className="empty">Loading…</div> : !rows.length ? <div className="empty">{h.rows.length ? 'Nobody matches this filter.' : 'No appointments.'}</div> : (
           <div className="huddle">
-            {rows.map((r) => (
-              <div key={r.id} className="huddle-row" style={{ '--c': r.type_color || r.provider_color }}>
+            {rows.map((r, i) => (
+              <div key={r.id} className={`huddle-row${i === fix.at ? ' kb-row' : ''}`} style={{ '--c': r.type_color || r.provider_color }} data-appt={r.id} onClick={() => fix.setCur(i)}>
                 <div className="huddle-time">
                   <strong>{fmtTime(r.start_time)}</strong>
                   <span className="muted">{fmtTime(r.end_time)}</span>
@@ -133,7 +137,7 @@ export default function Dashboard() {
                     </div>
                   )}
                   <div className="flag-row">
-                    {r.flags.filter((f) => FLAG_INFO[f]).map((f) => (
+                    {r.flags.filter((f) => FLAG_INFO[f] && !(fix.done[r.id] || []).includes(f)).map((f) => (
                       <span key={f} className={`badge ${FLAG_INFO[f][1]}`}>
                         {FLAG_INFO[f][0]}
                         {f === 'balance_due' ? ` ${money(r.family_balance).replace('.00', '')}` : ''}
@@ -143,6 +147,7 @@ export default function Dashboard() {
                   </div>
                 </div>
                 <div className="huddle-actions no-print">
+                  <HuddleFixButtons row={r} fixes={fix.fixes} run={fix.run} />
                   <Link to={`/appointments/${r.id}/route-slip`}><button className="small">Route slip</button></Link>
                   {can('schedule:read') && <Link to={`/schedule?date=${date}`}><button className="small">Schedule</button></Link>}
                 </div>

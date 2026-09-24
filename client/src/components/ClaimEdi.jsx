@@ -236,6 +236,11 @@ export function ClaimEdiCard({ claim, onChange }) {
                 </div>
                 {e.details?.note && <div>{e.details.note}</div>}
               </>
+            ) : e.source === 'appeal' ? (
+              <>
+                <div><strong>✉️ Appeal sent</strong> <span className="muted">· {e.user_name || 'staff'} · {fmtUtcDateTime(e.created_at, practice?.timezone)}</span></div>
+                <div className="muted">{[e.details?.reason && `Reason: ${e.details.reason}`, e.details?.follow_up_date && `follow up ${fmtDate(e.details.follow_up_date)}`, e.details?.drafted_by === 'ai' && 'drafted by AI, approved by staff'].filter(Boolean).join(' · ')}</div>
+              </>
             ) : e.source === 'edit' ? (
               <>
                 <div><strong>Edited</strong> <span className="muted">· {e.user_name || 'staff'} · {fmtUtcDateTime(e.created_at, practice?.timezone)}</span></div>

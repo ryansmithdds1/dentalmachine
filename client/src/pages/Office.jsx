@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import TimeClock from '../components/TimeClock.jsx';
 import Supplies from '../components/Supplies.jsx';
@@ -44,6 +44,13 @@ function OfficeBoard() {
   const { data: labs, reload: reloadLabs } = useApi(can('clinical:read') ? `/lab-cases${labFilter === 'open' ? '?open=true' : ''}` : null);
   const [modal, setModal] = useState(null);
   const [sel, setSel] = useState(0);
+  // ?lab=new (the command bar's "New lab case" for the active patient) opens the form (workflow 35).
+  const [params, setParams] = useSearchParams();
+  useEffect(() => {
+    if (params.get('lab') !== 'new' || !can('clinical:write')) return;
+    setModal({ type: 'lab' });
+    setParams({}, { replace: true });
+  }, [params, setParams, can]);
   const today = practiceToday(practice?.timezone);
 
   // Done (or reopened) at once, with Undo; both steps are on the task's record.
@@ -62,6 +69,7 @@ function OfficeBoard() {
     { combo: 'j', handler: () => setSel(Math.min(at + 1, count - 1)), label: 'Next task', section: 'To-do', enabled: quiet && count > 1 },
     { combo: 'k', handler: () => setSel(Math.max(at - 1, 0)), label: 'Previous task', section: 'To-do', enabled: quiet && count > 1 },
     { combo: 't', handler: () => setModal({ type: 'task' }), label: 'New task (or anywhere: Ctrl/⌘K, “task … @name”)', section: 'To-do', enabled: quiet },
+    { combo: 'l', handler: () => setModal({ type: 'lab' }), label: 'New lab case (for the active patient)', section: 'Lab cases', enabled: quiet && can('clinical:write') },
   ]);
 
   return (

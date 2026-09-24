@@ -172,7 +172,8 @@ export default function DepositBuilder({ onSubmitted }) {
               </label>
             )}
             <label>Bag or deposit slip number
-              <input value={bag} onChange={(e) => setBag(e.target.value)} placeholder="From the bag or the bank slip" autoComplete="off" required />
+              {/* Workflow 42: when it already balances (checks only, or verified drawers), the bag number is all that's left. */}
+              <input autoFocus={t.balanced} aria-label="Bag or deposit slip number" value={bag} onChange={(e) => setBag(e.target.value)} placeholder="From the bag or the bank slip" autoComplete="off" required />
             </label>
             <button className="primary" type="submit" disabled={busy || !bag.trim()}><ShieldCheck size={18} /> {busy ? 'Submitting…' : `Submit and lock ${money(t.total)}`}</button>
             <p className="muted" style={{ fontSize: 12, margin: 0 }}>Once submitted it’s locked. A second person verifies it; a manager can reopen it with a reason.</p>

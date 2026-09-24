@@ -1,8 +1,11 @@
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api.js';
 import { useApi, useLookup, invalidateLookup } from '../hooks.js';
-import { fmtDate, fullName } from '../format.js';
+import { fmtDate, fullName, money } from '../format.js';
+import { useShortcuts } from '../shortcuts.js';
+import { toast } from '../toast.js';
+import '../pages/monthly.css';
 import { ErrorBox, Modal, PatientPicker, useSubmit } from './ui.jsx';
 
 const TYPES = [['text', 'Text'], ['number', 'Number'], ['date', 'Date'], ['checkbox', 'Yes / no'], ['select', 'Pick list']];
@@ -150,32 +153,90 @@ export function CustomFieldsSettings() {
   );
 }
 
-// Settings: charts that look like the same person (same name and birthday), with a merge button.
+// Settings → Duplicate charts (workflow 51, docs/workflows/specs/51-merge-duplicates.md): charts that look like the
+// same person (same name and birthday), compared side by side with how much history each has. The chart to keep is
+// picked for you (the one with the most history); click the other one to keep that instead. A merge moves
+// everything and can't be undone (the other chart is archived, not deleted), so it takes one deliberate step:
+// type MERGE, Enter. J/K move between people, Enter opens the compare.
 export function DuplicateCharts() {
   const { data, reload } = useApi('/patients/duplicate-groups');
-  const [merge, setMerge] = useState(null);
+  const [at, setAt] = useState(0);
+  const [openAt, setOpenAt] = useState(null);
+  const groups = data || [];
+  const cur = Math.min(at, Math.max(groups.length - 1, 0));
+  useShortcuts([
+    { combo: 'j', handler: () => { setAt(Math.min(cur + 1, groups.length - 1)); setOpenAt(null); }, label: 'Next person', section: 'Duplicate charts', enabled: groups.length > 1 },
+    { combo: 'k', handler: () => { setAt(Math.max(cur - 1, 0)); setOpenAt(null); }, label: 'Previous person', section: 'Duplicate charts', enabled: groups.length > 1 },
+    { combo: 'enter', handler: () => setOpenAt(cur), label: 'Compare their charts', section: 'Duplicate charts', enabled: groups.length > 0 && openAt !== cur },
+  ]);
   return (
     <div className="card" style={{ padding: 0 }}>
       <div style={{ padding: '14px 16px' }}>
         <h2 style={{ margin: 0 }}>Possible duplicate charts</h2>
-        <div className="muted" style={{ fontSize: 13 }}>Patients with the same name and birthday — common after importing from another system. Merge keeps the first chart you pick and moves everything from the other.</div>
+        <div className="muted" style={{ fontSize: 13 }}>Patients with the same name and birthday — common after importing from another system. <kbd>J</kbd>/<kbd>K</kbd> move · <kbd>Enter</kbd> compare. The chart with the most history is kept; the other is archived and points to it.</div>
       </div>
-      {!data ? <div className="empty">Loading…</div> : data.length === 0 ? <div className="empty">No duplicates found.</div> : (
+      {!data ? <div className="empty">Loading…</div> : groups.length === 0 ? <div className="empty">No duplicates found.</div> : (
         <table>
           <thead><tr><th>Patient</th><th>Birthday</th><th>Charts</th><th /></tr></thead>
           <tbody>
-            {data.map((g) => (
-              <tr key={g[0].id}>
-                <td><strong>{fullName(g[0])}</strong></td>
-                <td>{fmtDate(g[0].dob)}</td>
-                <td>{g.map((p) => <div key={p.id}><Link to={`/patients/${p.id}`}>#{p.id}</Link> <span className="muted">{[p.phone, p.email].filter(Boolean).join(' · ') || 'no contact info'} · added {fmtDate(p.created_at?.slice(0, 10))}</span></div>)}</td>
-                <td><button className="small" onClick={() => setMerge({ keep: g[0], from: g[1] })}>Merge…</button></td>
-              </tr>
+            {groups.map((g, i) => (
+              <Fragment key={g[0].id}>
+                <tr aria-selected={i === cur} className={`wl-row${i === cur ? ' current' : ''}`} onClick={() => setAt(i)}>
+                  <td><strong>{fullName(g[0])}</strong></td>
+                  <td>{fmtDate(g[0].dob)}</td>
+                  <td>{g.length} charts: {g.map((p) => `#${p.id}`).join(', ')}</td>
+                  <td><button className="small" onClick={(e) => { e.stopPropagation(); setAt(i); setOpenAt(openAt === i ? null : i); }}>{openAt === i ? 'Hide' : 'Compare & merge'}</button></td>
+                </tr>
+                {openAt === i && <tr><td colSpan={4}><CompareCharts group={g} onDone={() => { setOpenAt(null); reload(); }} /></td></tr>}
+              </Fragment>
             ))}
           </tbody>
         </table>
       )}
-      {merge && <MergeDialog patient={merge.keep} initial={merge.from} onClose={() => setMerge(null)} onDone={() => { setMerge(null); reload(); }} />}
+    </div>
+  );
+}
+
+// The charts side by side, the one to keep ticked, and the merge — inline, no dialog.
+function CompareCharts({ group, onDone }) {
+  const [keepId, setKeepId] = useState((group.find((p) => p.suggested_keep) || group[0]).id);
+  const [typed, setTyped] = useState('');
+  const keep = group.find((p) => p.id === keepId);
+  const others = group.filter((p) => p.id !== keepId);
+  const { submit, busy, error } = useSubmit(async () => {
+    // One at a time: each merge is its own audited step.
+    for (const o of others) await api.post(`/patients/${keep.id}/merge`, { from_id: o.id });
+    toast(`Merged ${others.map((o) => `#${o.id}`).join(', ')} into ${fullName(keep)} (#${keep.id}) — the other chart is archived`);
+    onDone();
+  });
+  const ready = typed.trim().toUpperCase() === 'MERGE';
+  return (
+    <div>
+      <ErrorBox error={error} />
+      <div className="wl-compare" role="radiogroup" aria-label="Which chart to keep">
+        {group.map((p) => (
+          <div key={p.id} role="radio" aria-checked={p.id === keepId} tabIndex={-1} className={`chart${p.id === keepId ? ' keep' : ''}`} onClick={() => setKeepId(p.id)}>
+            <div className="inline" style={{ justifyContent: 'space-between' }}>
+              <strong><Link to={`/patients/${p.id}`} onClick={(e) => e.stopPropagation()}>#{p.id}</Link> {fullName(p)}</strong>
+              {p.id === keepId ? <span className="badge ok nocap">Keep</span> : <span className="badge nocap">Merge into the kept one</span>}
+            </div>
+            <dl>
+              <dt>Added</dt><dd>{fmtDate(p.created_at?.slice(0, 10))}</dd>
+              <dt>Phone</dt><dd>{p.phone || '—'}</dd>
+              <dt>Email</dt><dd>{p.email || '—'}</dd>
+              <dt>Visits</dt><dd>{p.visits ?? '—'}{p.last_visit ? ` · last ${fmtDate(p.last_visit)}` : ''}</dd>
+              <dt>Ledger</dt><dd>{p.ledger_entries ?? '—'} entries{p.balance ? ` · balance ${money(p.balance)}` : ''}</dd>
+              <dt>Notes / docs</dt><dd>{p.notes ?? '—'} / {p.documents ?? '—'}</dd>
+              <dt>Insurance</dt><dd>{p.insurance ? `${p.insurance} active` : 'none'}</dd>
+            </dl>
+          </div>
+        ))}
+      </div>
+      <form className="inline" style={{ gap: 8, flexWrap: 'wrap' }} onSubmit={(e) => { e.preventDefault(); if (ready && !busy) submit(); }}>
+        <span className="muted" style={{ fontSize: 13 }}>Everything on {others.map((o) => `#${o.id}`).join(', ')} moves to #{keep.id}; missing details are copied over. This can’t be undone.</span>
+        <label className="inline" style={{ gap: 6 }}>Type <strong>MERGE</strong><input autoFocus aria-label="Type MERGE to merge" value={typed} onChange={(e) => setTyped(e.target.value)} style={{ width: 110 }} /></label>
+        <button className="danger" disabled={busy || !ready}>{busy ? 'Merging…' : `Merge into #${keep.id}`}</button>
+      </form>
     </div>
   );
 }

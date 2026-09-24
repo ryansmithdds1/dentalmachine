@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { openDb } from '../src/db.js';
 import { createApp } from '../src/app.js';
 
-export function harness({ config: extra = {}, messenger, fetchImpl } = {}) {
+export function harness({ config: extra = {}, messenger, fetchImpl, clearinghouse } = {}) {
   const h = { sent: [] };
   const uploadDir = mkdtempSync(join(tmpdir(), 'dm-test-'));
   let server;
@@ -14,7 +14,7 @@ export function harness({ config: extra = {}, messenger, fetchImpl } = {}) {
     h.db = await openDb(':memory:');
     h.messenger = messenger || { status: { sms: 'test', email: 'test' }, send: async (m) => { h.sent.push(m); return { provider_id: `test-${h.sent.length}` }; } };
     h.config = { appUrl: 'https://app.example.com', uploadDir, ediMode: 'sandbox', ...extra };
-    h.app = createApp({ db: h.db, secret: 'test-secret', config: h.config, messenger: h.messenger, ...(fetchImpl ? { fetchImpl } : {}) });
+    h.app = createApp({ db: h.db, secret: 'test-secret', config: h.config, messenger: h.messenger, ...(fetchImpl ? { fetchImpl } : {}), ...(clearinghouse ? { clearinghouse } : {}) });
     await new Promise((resolve) => {
       server = h.app.listen(0, resolve);
     });

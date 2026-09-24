@@ -43,6 +43,7 @@ export const HIGH_RISK = [
   ['POST', /^\/fees\/(increases|changes\/\d+\/(approve|cancel))$/, 'fee changes'],
   ['PUT', /^\/fees\/changes\/\d+$/, 'fee changes'],
   ['PUT', /^\/(fee-schedules|procedure-codes)\/\d+$/, 'fee changes'],
+  ['POST', /^\/daily\/preauths\/\d+\/send$/, 'claims'],
   ['POST', /^\/billing\/(setup|replace-card|recurring\/\d+\/charge-now|dunning\/\d+\/(retry|resume)|fees(\/\d+\/apply)?|fee-charges\/\d+\/waive|authorizations\/\d+\/revoke)$/, 'setting up automatic payments, charging cards and office fees'],
   ['PUT', /^\/billing\/(settings|fees\/\d+)$/, 'card surcharges and office fees'],
   ['POST', /^\/benchmarks\/(join|leave|send-now)$/, 'sharing practice numbers outside the practice'],

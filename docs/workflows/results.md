@@ -30,6 +30,29 @@ into one field.
 | 28 | Staff task | ~9 | 3 ("task … @name"); done 1 key with undo | — | < 0.5 s | 3 | Assignee sees a badge |
 | 30 | Intake review | per-chart hunting | 1–2 per item on one list (/intake: J/K, A) | — | — | 2 | Browser test still to seed an item; server tests cover it |
 | 31 | Insurance card → policy | ~12 typed fields | ≤ 4 (S, photo, read, confirm) | — | < 5 s | 4 | A person confirms; carrier added inline if missing |
+| 32 | New patient + insurance | 16–20 over 2 modals and 2 screens | 5 (Ctrl/⌘K "new patient", Enter, one typed line, Enter) | — | ~1 s | 8 | Policy made from the same line; eligibility checked in the background |
+| 33 | Post insurance payments | ERA automatic or 3; paper EOB ~5 + 2 per claim | ERA 0; exceptions 1 key (measured by A-eob-autopilot) | — | — | 0 / 3 + 1 per claim | Duplicate-check `confirm()` is now an inline choice |
+| 34 | Prescription | 4–7 | 2 (favorite's number key, Enter) | — | < 0.1 s | 3 | Prescriber is the signed-in dentist / patient's dentist, not the first provider |
+| 35 | Lab case | 12–15 | 3 (L, shade, Enter) | — | < 0.2 s | 6 | Patient, lab, work, tooth, provider filled in; Undo cancels (never deletes); no `confirm()` |
+| 36 | Morning huddle | 0 to view; each fix on another screen | 0 to view; 1 key per fix on the row (C, V, B, P, M, L) | — | < 0.3 s | 1 per fix | J/K pick the row; confirm has Undo |
+| 37 | Recall / unscheduled lists | 7–9 per patient | 3 (measured by RF-recall); 0 when the autopilot books them | — | — | 3 | |
+| 38 | Pre-authorization | ~7 over 2 screens + manual 837 upload | 1 (Pre-authorize: made and sent to the clearinghouse) | — | < 0.2 s | 2 | File download only when no clearinghouse is connected |
+| 39 | Financing application | 5–6 | 2 (Send an application, Enter) | — | < 0.2 s | 2 | Amount = plan's patient share, linked to the plan |
+| 40 | Adjustment / write-off | 5 (dialog) | 3 (A, amount, Enter) inline | — | < 0.2 s | 3 | Last type remembered; reason required; Undo = void/reversal |
+| 41 | Referral out | 6–10 | 2 routine, 3 critical (measured by RT-referrals) | — | — | 4 | |
+| 42 | End-of-day deposit | 10–12 over 3 screens | 3 when it balances (Deposits & cash, bag #, Enter) | — | ~0.5 s | 4 | Bag # focused when it balances; closing the books is Undo, not `confirm()` (with #54) |
+| 43 | Review request | 0 (automatic), no manual ask | 0; 1 by hand (measured by RV-reviews) | — | — | 0 | Reputation page now counts the requests (was always 0) |
+| 44 | Clock in/out | In 1; out 3 (`window.prompt` for breaks) | 1 each way (I); user menu 1 click after opening it | — | < 0.1 s | 1 | Breaks are punched as they happen |
+| 45 | Claim follow-up / insurance aging | 2 to reach; ~6 per claim in a modal; sorted by submit date | 4 for the first claim (L, 1–8, reference, Enter), 3 for each next; due calls first | — | 0.2 s per claim | 3/claim + 1 | Side panel moves on to the next claim; "N claims due a call" in Needs attention |
+| 46 | Denied claim appeal | ~7–11; letter lost on leaving | 2 on the claim (D, Ctrl/⌘+Enter); 1 key (A) from the ERA worklist | — | 0.1 s | 4 | Filed on the chart as a PDF, in the claim history, follow-up in 30 days; template when AI is off |
+| 47 | Patient statements | 3 + 2 per print-only account | 2 (Enter send, Enter print all as one PDF) | — | 0.1 s | 2 | One PDF for every paper statement of a run |
+| 48 | Refunds | 6, from each ledger | 2 (R, Enter) from the Credits & refunds queue | — | < 0.1 s | 3 | No Undo (money out); audit has balance before/after |
+| 49 | Production/collection reports | 4–6 for P&C | 1 from Reports, 3 from anywhere (Ctrl/⌘K); 1 per drill-down | — | 1 s | 1–2 | Feature spec PR-production |
+| 50 | Schedule templates / provider hours | time off ~6 | day off 3 once the Settings.jsx line is in (test skips until then) | — | 0.1 s | 4 | Templates: S2-perfect-day test |
+| 51 | Merge duplicate patients | 5–6; kept chart not chosen | 3 (Enter, type MERGE, Enter); side-by-side, the chart with history kept | — | < 0.1 s | 3 | Archived, never deleted; duplicates raised in Needs attention |
+| 52 | Inventory ordering | 4 + ordering outside; receive 2–3 per item via prompt | order 2 (O, Enter) with Undo; receive 1 with Undo | — | < 0.1 s | 3 | "On order" state kept in the item history |
+| 53 | Fee schedule updates | 4 + 1 per code | 2 (FS-fees test) | — | — | 4 | Feature spec FS-fees |
+| 54 | Month-end close | 5 + confirm box; reports one by one | packet on screen (4 from anywhere, 3 with the palette line); close 1 key with Undo | — | 1 s | 3 | Reminder in Needs attention from day 5 |
 
 ## Couldn't hit the budget
 
@@ -43,3 +66,7 @@ into one field.
 - **#10, moving into blocked time: 4** — the extra Enter on "Move it there" is the deliberate replacement for the old
   confirm() dialog.
 - **#23, consent forms from the command bar: 4 actions** (Ctrl/⌘K, "consent", Enter, Enter). From the plan it's 2.
+- **#45, the first claim is 4 actions** (L opens the call panel); every claim after it is 3, the budget per claim.
+- **#50, a provider's day off can't be measured yet:** "To" doesn't follow "From" when a date is typed (Settings.jsx,
+  a shared file — the line is in `specs/50-schedule-hours.md`). With it, 3 actions (checked on a copy).
+- **#54, opening the packet from the command bar is 4** until "Month-end close" goes to `?tab=close&type=month`.

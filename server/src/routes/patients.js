@@ -179,16 +179,34 @@ export default function patientRoutes({ db }) {
   r.get('/patients/duplicate-groups', requirePermission('patients:read'), async (req, res) => {
     const rows = await db.all(
       `SELECT id, first_name, last_name, dob, phone, email, created_at FROM patients
-       WHERE practice_id = ? AND status != 'archived' AND dob IS NOT NULL ORDER BY lower(last_name), lower(first_name), dob, id`,
+       WHERE practice_id = ? AND status != 'archived' AND merged_into_id IS NULL AND dob IS NOT NULL ORDER BY lower(last_name), lower(first_name), dob, id`,
       req.user.practice_id,
     );
     const groups = new Map();
     for (const r0 of rows) {
-      const key = `${r0.last_name.toLowerCase()}|${r0.first_name.toLowerCase()}|${r0.dob}`;
+      const key = `${r0.last_name.trim().toLowerCase()}|${r0.first_name.trim().toLowerCase()}|${r0.dob}`;
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key).push(r0);
     }
-    res.json([...groups.values()].filter((g) => g.length > 1).slice(0, 200));
+    const found = [...groups.values()].filter((g) => g.length > 1).slice(0, 200);
+    // For the side-by-side compare (workflow 51): how much history each chart has, and which one to keep —
+    // the one with the most history (visits, ledger, notes, documents, insurance), the older one on a tie.
+    const count = async (sql, id) => Number((await db.get(sql, id)).n);
+    for (const g of found) {
+      for (const p of g) {
+        p.visits = await count('SELECT COUNT(*) AS n FROM appointments WHERE patient_id = ?', p.id);
+        p.last_visit = (await db.get("SELECT MAX(substr(start_time, 1, 10)) AS d FROM appointments WHERE patient_id = ? AND status = 'completed'", p.id)).d || null;
+        p.ledger_entries = await count('SELECT COUNT(*) AS n FROM ledger_entries WHERE patient_id = ?', p.id);
+        p.balance = await count('SELECT COALESCE(SUM(amount), 0) AS n FROM ledger_entries WHERE patient_id = ?', p.id);
+        p.notes = await count('SELECT COUNT(*) AS n FROM clinical_notes WHERE patient_id = ?', p.id);
+        p.documents = await count('SELECT COUNT(*) AS n FROM documents WHERE patient_id = ? AND deleted_at IS NULL', p.id);
+        p.insurance = await count('SELECT COUNT(*) AS n FROM patient_insurance WHERE patient_id = ? AND active = 1', p.id);
+        p.history = p.visits + p.ledger_entries + p.notes + p.documents + p.insurance;
+      }
+      g.sort((a, b) => b.history - a.history || String(a.created_at).localeCompare(String(b.created_at)) || a.id - b.id);
+      g[0].suggested_keep = true;
+    }
+    res.json(found);
   });
 
   // Merge a duplicate chart into this one: everything that belonged to the duplicate (visits, charting,

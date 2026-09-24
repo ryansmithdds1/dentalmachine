@@ -1,7 +1,9 @@
 import { Router } from 'express';
 import { requirePermission, HttpError } from '../auth.js';
-import { findOr404, audit } from '../util.js';
-import { structured } from '../ai.js';
+import { createHash } from 'node:crypto';
+import { findOr404, audit, insert, recorded, practiceNow, isRealDate } from '../util.js';
+import { structured, aiClient } from '../ai.js';
+import { PdfDoc } from '../pdf.js';
 import { scrubClaim } from '../scrubber.js';
 import { chartContext } from './scribe.js';
 
@@ -34,6 +36,30 @@ const APPEAL_TOOL = {
   },
 };
 const SYSTEM = `You write insurance documentation for a US dental office from its own chart. Use only facts in the chart given; never invent findings, measurements or dates. Where a fact a payer would want is missing, leave it out of the text and list it under "missing". Write plainly and clinically, as the treating dentist.`;
+
+export const APPEAL_FOLLOW_UP_DAYS = 30;
+const addDays = (date, n) => new Date(Date.parse(`${date}T12:00:00Z`) + n * 86400_000).toISOString().slice(0, 10);
+const $ = (c) => `$${(Number(c || 0) / 100).toFixed(2)}`;
+
+// The appeal when AI is off: a plain letter from the claim's own facts, for the office to finish and sign.
+export function templateAppeal(f, why) {
+  const p = f.practice;
+  const lines = f.items.map((i) => `  - ${i.date || ''} ${i.code}${i.tooth ? ` tooth #${i.tooth}` : ''}${i.surfaces ? ` ${i.surfaces}` : ''}: ${i.description || ''} (billed ${$(i.fee)}, paid ${$(i.paid_amount)})`);
+  const letter = [
+    p.name, [p.address, [p.city, p.state, p.zip].filter(Boolean).join(', ')].filter(Boolean).join(', '), p.phone || '', '',
+    `${f.policy.carrier_name} — Appeals Department`, f.policy.carrier_address || '', '',
+    `Re: Request for reconsideration of claim #${f.claim.id}${f.claim.payer_claim_number ? ` (payer claim ${f.claim.payer_claim_number})` : ''}`,
+    `Patient: ${f.chart.patient?.name || ''}   Subscriber: ${f.policy.subscriber_name || ''}   Member ID: ${f.policy.subscriber_id || ''}${f.policy.group_number ? `   Group: ${f.policy.group_number}` : ''}`, '',
+    'To the appeals reviewer:', '',
+    `We ask you to reconsider this claim. ${why ? `The reason given was: "${why}". ` : ''}We believe the services below were necessary and are covered under the patient's plan.`, '',
+    'Services:', ...lines, '',
+    'Clinical reason: [the treating dentist’s findings — tooth, extent, x-ray findings — and why this treatment was needed]', '',
+    'Enclosed: [x-rays, perio chart, narrative, the explanation of benefits].', '',
+    'Please reprocess the claim and contact our office with any questions.', '',
+    'Sincerely,', '', f.provider?.name || '', f.provider?.npi ? `NPI ${f.provider.npi}` : '',
+  ].join('\n');
+  return { letter, enclosures: f.onFile.slice(0, 3).map((d) => `X-ray${d.tooth ? ` of #${d.tooth}` : ''} (${d.date})`), missing: ['The clinical reason in the dentist’s words (the template leaves a space for it)'] };
+}
 
 export default function claimAiRoutes({ db, config }) {
   const r = Router();
@@ -86,14 +112,62 @@ export default function claimAiRoutes({ db, config }) {
     res.json({ narrative: out.narrative, missing: out.missing || [], attach: out.attach || [] });
   });
 
+  // Appeals (workflow 46). Without a letter: a draft to read and edit — written by AI from the chart and the
+  // payer's reason, or from a plain template when AI is off. With a letter: the office sends it — the letter is
+  // filed on the chart as a PDF, the claim's history records the appeal, and the claim comes back up for a
+  // follow-up call on the date given (default APPEAL_FOLLOW_UP_DAYS). The same letter twice is one appeal.
   r.post('/claims/:cid/appeal', requirePermission('billing:write'), async (req, res) => {
     const f = await claimFacts(req);
     if (!['denied', 'partially_paid', 'paid'].includes(f.claim.status)) throw new HttpError(409, 'Appeal a claim once the payer has answered it');
     const why = String(req.body?.reason || f.claim.denial_reason || '').slice(0, 1000);
+    if (req.body?.letter !== undefined) return res.status(201).json(await recordAppeal(req, f, why));
+    if (!aiClient(config)) {
+      await audit(db, req, 'claim.appeal_draft', 'claims', f.claim.id, { drafted_by: 'template' });
+      return res.json({ ...templateAppeal(f, why), drafted_by: 'template' });
+    }
     const out = await structured(config, { system: SYSTEM, tool: APPEAL_TOOL, effort: 'medium', maxTokens: 12000, content: `Write the appeal. The payer's reason or the office's concern: ${why || '(see claim)'}\n\n${factsText(f)}` });
     if (!out.letter) throw new HttpError(502, 'The AI didn’t return a letter — try again');
-    await audit(db, req, 'claim.ai_appeal', 'claims', f.claim.id);
-    res.json({ letter: out.letter, enclosures: out.enclosures || [], missing: out.missing || [] });
+    await audit(db, req, 'claim.ai_appeal', 'claims', f.claim.id, { drafted_by: 'AI', status: 'draft for review' });
+    res.json({ letter: out.letter, enclosures: out.enclosures || [], missing: out.missing || [], drafted_by: 'ai' });
   });
+
+  const recordAppeal = async (req, f, why) => {
+    const letter = String(req.body.letter || '').trim();
+    if (letter.length < 40) throw new HttpError(400, 'Write the appeal letter first');
+    if (letter.length > 20000) throw new HttpError(400, 'The letter is too long (20,000 characters at most)');
+    const today = (await practiceNow(db, req.user.practice_id)).slice(0, 10);
+    const followUp = req.body.follow_up_date ? String(req.body.follow_up_date) : addDays(today, APPEAL_FOLLOW_UP_DAYS);
+    if (!isRealDate(followUp) || followUp < today) throw new HttpError(400, 'Follow-up date must be a real date (YYYY-MM-DD), today or later');
+    const hash = createHash('sha256').update(letter).digest('hex').slice(0, 16);
+    // A double click or a resend of the same letter is the same appeal.
+    const again = (await db.all("SELECT id, details FROM claim_events WHERE claim_id = ? AND source = 'appeal'", f.claim.id))
+      .map((e) => ({ id: e.id, ...JSON.parse(e.details || '{}') })).find((e) => e.hash === hash);
+    if (again) return { event_id: again.id, document_id: again.document_id, follow_up_date: again.follow_up_date, already: true };
+    const drafted = ['ai', 'template', 'staff'].includes(req.body.drafted_by) ? req.body.drafted_by : 'staff';
+    const storage = req.app.locals.storage;
+    let documentId = null;
+    if (storage) {
+      const doc = new PdfDoc({ footer: `${f.practice.name} · appeal of claim #${f.claim.id}` });
+      for (const para of letter.split(/\n/)) doc.text(para || ' ', { size: 11, gap: 1 });
+      const pdf = doc.toBuffer();
+      const saved = await storage.save(req.user.practice_id, pdf);
+      documentId = await insert(db, 'documents', {
+        practice_id: req.user.practice_id, patient_id: f.claim.patient_id, category: 'correspondence', folder: 'Insurance',
+        filename: `Appeal claim ${f.claim.id} ${today}.pdf`, mime: 'application/pdf', size: pdf.length, storage_key: saved.storageKey,
+        encrypted: saved.encrypted ? 1 : 0, uploaded_by: req.user.id, source: 'appeal', notes: `Appeal of claim #${f.claim.id} to ${f.policy.carrier_name}`.slice(0, 500),
+      });
+    }
+    const details = { hash, document_id: documentId, follow_up_date: followUp, reason: why || null, drafted_by: drafted };
+    const eventId = await insert(db, 'claim_events', {
+      practice_id: f.claim.practice_id, claim_id: f.claim.id, source: 'appeal', status: 'sent',
+      message: `Appeal sent${why ? `: ${why}` : ''} · follow up ${followUp}`.slice(0, 500), details: JSON.stringify(details), user_id: req.user.id,
+    });
+    await recorded(db, 'claims', f.claim.id, () => db.run('UPDATE claims SET follow_up_date = ? WHERE id = ?', followUp, f.claim.id));
+    // Who sent it is the person signed in; an AI draft they approved says so.
+    await audit(db, req, 'claim.appeal', 'claims', f.claim.id, { document_id: documentId, drafted_by: drafted, approved_by: req.user.id, reason: why || null }, {
+      before: { follow_up_date: f.claim.follow_up_date || null }, after: { follow_up_date: followUp },
+    });
+    return { event_id: eventId, document_id: documentId, follow_up_date: followUp };
+  };
   return r;
 }

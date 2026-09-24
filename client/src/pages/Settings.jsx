@@ -1632,7 +1632,7 @@ function TimeOff({ canWrite }) {
       <p className="muted" style={{ fontSize: 13 }}>Vacations, CE days and one-off schedule changes. The calendar shades them and booking into them needs a deliberate override.</p>
       {canWrite && (
         <form className="form-grid" onSubmit={(e) => { e.preventDefault(); submit(); }}>
-          <label>From<input type="date" required value={form.from} onChange={(e) => setForm({ ...form, from: e.target.value, to: form.to < e.target.value ? e.target.value : form.to })} /></label>
+          <label>From<input type="date" required value={form.from} onChange={(e) => setForm({ ...form, from: e.target.value, to: !form.to || form.to === form.from || form.to < e.target.value ? e.target.value : form.to })} /></label>
           <label>To<input type="date" value={form.to} min={form.from} onChange={set('to')} /></label>
           <label>
             That day

@@ -1,18 +1,25 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '../../api.js';
 import { useApi } from '../../hooks.js';
 import { money, fmtDate } from '../../format.js';
 import { ErrorBox, Modal, useSubmit } from '../ui.jsx';
+import { toast } from '../../toast.js';
 
 // Outside financing (CareCredit, Sunbit, Cherry…): send the application, follow it, post the money.
 const STATUS = { sent: ['', 'Sent'], started: ['warn', 'Started'], approved: ['ok', 'Approved'], declined: ['danger', 'Declined'], funded: ['ok', 'Funded'], cancelled: ['', 'Cancelled'], expired: ['', 'Expired'] };
 
-export default function Financing({ patient, canWrite, onChange }) {
+export default function Financing({ patient, canWrite, onChange, open, onOpened }) {
   const { data: apps, reload } = useApi(`/patients/${patient.id}/financing`);
   const { data: meta } = useApi('/financing/lenders');
   const [sending, setSending] = useState(false);
   const [editing, setEditing] = useState(null);
   const ready = (meta?.lenders || []).filter((l) => l.link);
+  // ?finance=1 (the command bar's "Send a financing application" for the active patient) opens the form.
+  useEffect(() => {
+    if (!open || !meta) return;
+    if (canWrite && ready.length) setSending(true);
+    onOpened?.();
+  }, [open, meta]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!apps || !meta) return null;
   if (!apps.length && !ready.length) return null;
   return (
@@ -44,19 +51,33 @@ export default function Financing({ patient, canWrite, onChange }) {
   );
 }
 
+// Workflow 39 (docs/workflows/specs/39-financing.md): the amount starts at the patient's share of their open
+// treatment plan (after insurance and any discount), linked to that plan; sent by text when there's a mobile
+// number, else email. Send has the focus, so it's one click (or Enter) once the form opens.
 function SendForm({ patient, lenders, onDone }) {
-  const [f, setF] = useState({ lender: lenders[0].key, amount: '', channel: 'sms' });
-  const send = useSubmit(async () => { await api.post(`/patients/${patient.id}/financing`, f); onDone(); });
+  const channel = patient.phone ? 'sms' : patient.email ? 'email' : '';
+  const [f, setF] = useState({ lender: lenders[0].key, amount: '', channel, treatment_plan_id: null });
+  const [from, setFrom] = useState(null);
+  useEffect(() => {
+    api.get(`/patients/${patient.id}/treatment-plans`).then((plans) => {
+      const plan = plans.find((p) => !['completed', 'rejected'].includes(p.status) && (p.estimate?.patient_after_discount ?? 0) > 0);
+      if (!plan) return;
+      setFrom(plan.name);
+      setF((x) => (x.amount ? x : { ...x, amount: (plan.estimate.patient_after_discount / 100).toFixed(2), treatment_plan_id: plan.id }));
+    }).catch(() => { /* no clinical access: the amount is typed */ });
+  }, [patient.id]);
+  const send = useSubmit(async () => { await api.post(`/patients/${patient.id}/financing`, f); toast(`${lenders.find((l) => l.key === f.lender)?.name} application sent to ${patient.first_name}`); onDone(); });
   return (
     <Modal title="Send a financing application" onClose={onDone}>
       <ErrorBox error={send.error} />
       <div className="form-grid">
         <label>Lender<select value={f.lender} onChange={(e) => setF({ ...f, lender: e.target.value })}>{lenders.map((l) => <option key={l.key} value={l.key}>{l.name}</option>)}</select></label>
-        <label>Amount ($)<input type="number" min="1" step="0.01" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} /></label>
+        <label>Amount ($)<input type="number" min="1" step="0.01" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} aria-label="Amount to finance" /></label>
         <label>Send by<select value={f.channel} onChange={(e) => setF({ ...f, channel: e.target.value })}><option value="sms">Text</option><option value="email">Email</option><option value="">Don’t send (in office)</option></select></label>
       </div>
+      {from && <div className="muted" style={{ fontSize: 12 }}>Amount is {patient.first_name}’s share of “{from}” after insurance.</div>}
       <div className="muted" style={{ fontSize: 12 }}>{lenders.find((l) => l.key === f.lender)?.note}</div>
-      <div className="form-actions"><button onClick={onDone}>Cancel</button><button className="primary" disabled={!f.amount || send.busy} onClick={send.submit}>Send</button></div>
+      <div className="form-actions"><button onClick={onDone}>Cancel</button><SendButton ready={!!f.amount} busy={send.busy} onClick={send.submit} /></div>
     </Modal>
   );
 }
@@ -78,4 +99,16 @@ function UpdateForm({ app, onDone }) {
       <div className="form-actions"><button onClick={onDone}>Cancel</button><button className="primary" disabled={save.busy} onClick={save.submit}>Save</button></div>
     </Modal>
   );
+}
+
+// Takes the focus once the amount is filled in for them, so Enter sends — never while someone is typing in a field.
+function SendButton({ ready, busy, onClick }) {
+  const [el, setEl] = useState(null);
+  const [moved, setMoved] = useState(false);
+  useEffect(() => {
+    if (!ready || !el || moved) return;
+    setMoved(true);
+    if (!/^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName || '')) el.focus();
+  }, [ready, el, moved]);
+  return <button ref={setEl} className="primary" disabled={!ready || busy} onClick={onClick}>Send</button>;
 }

@@ -97,11 +97,88 @@ export default function inventoryRoutes({ db }) {
     res.json({ changed });
   });
 
-  // What to order: items at or below their reorder point, by supplier.
+  // What to order: items at or below their reorder point, by supplier — and what's already on order (workflow 52).
   r.get('/inventory/reorder', requirePermission('schedule:read'), async (req, res) => {
-    const rows = (await db.all('SELECT * FROM inventory_items WHERE practice_id = ? AND active = 1 AND reorder_at > 0 AND on_hand <= reorder_at ORDER BY supplier, name', req.user.practice_id))
-      .map((i) => ({ ...i, order_qty: Math.max(i.reorder_qty || 0, i.reorder_at - i.on_hand + 1) }));
-    res.json({ rows, total: rows.reduce((t, i) => t + (i.cost || 0) * i.order_qty, 0) });
+    const rows = [];
+    for (const i of await db.all("SELECT * FROM inventory_items WHERE practice_id = ? AND active = 1 ORDER BY COALESCE(supplier, ''), name", req.user.practice_id)) {
+      const on_order = await openOrder(i.id);
+      const low = i.reorder_at > 0 && i.on_hand <= i.reorder_at;
+      if (low || on_order) rows.push({ ...i, low, on_order, order_qty: on_order?.qty ?? Math.max(i.reorder_qty || 0, i.reorder_at - i.on_hand + 1) });
+    }
+    const toOrder = rows.filter((i) => !i.on_order);
+    res.json({ rows, total: toOrder.reduce((t, i) => t + (i.cost || 0) * i.order_qty, 0), on_order: rows.length - toOrder.length });
+  });
+
+  // ---- Orders (workflow 52) ----
+  // An order is kept in the item's history (inventory_moves, change 0): 'ordered' with "Ordered N" in the note,
+  // 'order_cancelled', and the delivery ('received'). A receipt taken back ('receive_undone') reopens the order.
+  const openOrder = async (itemId) => {
+    let open = null;
+    let closed = null;
+    for (const m of await db.all("SELECT id, reason, note, created_at FROM inventory_moves WHERE item_id = ? AND reason IN ('ordered','order_cancelled','received','receive_undone') ORDER BY id", itemId)) {
+      if (m.reason === 'ordered') open = { qty: Number(/^Ordered (\d+)/.exec(m.note || '')?.[1]) || 0, at: m.created_at, move_id: m.id };
+      else if (m.reason === 'order_cancelled') open = null;
+      else if (m.reason === 'received') { closed = open; open = null; } else if (m.reason === 'receive_undone') open = closed;
+    }
+    return open;
+  };
+
+  // Mark items ordered (from the reorder list). An item already on order is left as it is, so a double click
+  // or a second person doesn't order twice.
+  r.post('/inventory/orders', requirePermission('schedule:write'), async (req, res) => {
+    const list = Array.isArray(req.body?.items) ? req.body.items : [];
+    if (!list.length || list.length > 500) throw new HttpError(400, 'Choose what to order');
+    const done = [];
+    await db.tx(async () => {
+      for (const it of list) {
+        const item = await findOr404(db, 'inventory_items', it.id, req.user.practice_id, 'Item');
+        const qty = Math.round(Number(it.qty));
+        if (!Number.isFinite(qty) || qty < 1 || qty > 100000) throw new HttpError(400, `How many ${item.name}?`);
+        if (await openOrder(item.id)) continue;
+        await insert(db, 'inventory_moves', { practice_id: item.practice_id, item_id: item.id, change: 0, reason: 'ordered', note: `Ordered ${qty} ${item.unit}${item.supplier ? ` from ${item.supplier}` : ''}`.slice(0, 200), created_by: req.user.id });
+        done.push({ id: item.id, qty });
+      }
+    });
+    await audit(db, req, 'inventory.order', 'practices', req.user.practice_id, { items: done });
+    res.status(201).json({ ordered: done });
+  });
+
+  // Take orders back (the Undo on "Marked ordered", or an order that won't come).
+  r.post('/inventory/orders/cancel', requirePermission('schedule:write'), async (req, res) => {
+    const ids = (Array.isArray(req.body?.ids) ? req.body.ids : []).slice(0, 500);
+    const done = [];
+    for (const id of ids) {
+      const item = await findOr404(db, 'inventory_items', id, req.user.practice_id, 'Item');
+      if (!(await openOrder(item.id))) continue;
+      await insert(db, 'inventory_moves', { practice_id: item.practice_id, item_id: item.id, change: 0, reason: 'order_cancelled', note: req.body?.note ? String(req.body.note).slice(0, 200) : null, created_by: req.user.id });
+      done.push(item.id);
+    }
+    await audit(db, req, 'inventory.order_cancel', 'practices', req.user.practice_id, { items: done });
+    res.json({ cancelled: done });
+  });
+
+  // The delivery came: add what was ordered (or the quantity given) to the shelf.
+  r.post('/inventory/:iid/receive', requirePermission('schedule:write'), async (req, res) => {
+    const item = await findOr404(db, 'inventory_items', req.params.iid, req.user.practice_id, 'Item');
+    const order = await openOrder(item.id);
+    const qty = req.body?.quantity != null ? Math.round(Number(req.body.quantity)) : order?.qty || item.reorder_qty || 0;
+    if (!Number.isFinite(qty) || qty < 1 || qty > 100000) throw new HttpError(400, 'How many came?');
+    const on_hand = await moveStock(db, item, qty, { reason: 'received', note: order ? 'Order received' : null, userId: req.user.id, today: await today(req) });
+    const move = await db.get("SELECT id FROM inventory_moves WHERE item_id = ? AND reason = 'received' ORDER BY id DESC LIMIT 1", item.id);
+    await audit(db, req, 'inventory.receive', 'inventory_items', item.id, { quantity: qty, on_order: order?.qty ?? null, before: item.on_hand, after: on_hand });
+    res.status(201).json({ on_hand, quantity: qty, move_id: move.id });
+  });
+
+  // Undo a receipt entered by mistake: a counter-move (the history keeps both), and the order is open again.
+  r.post('/inventory/moves/:mid/undo', requirePermission('schedule:write'), async (req, res) => {
+    const move = await findOr404(db, 'inventory_moves', req.params.mid, req.user.practice_id, 'Stock move');
+    if (move.reason !== 'received') throw new HttpError(400, 'Only a delivery can be taken back here');
+    const later = await db.get("SELECT id FROM inventory_moves WHERE item_id = ? AND id > ? AND reason IN ('received','receive_undone')", move.item_id, move.id);
+    if (later) throw new HttpError(409, 'Something else was received since — correct it with a count instead');
+    const item = await db.get('SELECT * FROM inventory_items WHERE id = ?', move.item_id);
+    const on_hand = await moveStock(db, item, -move.change, { reason: 'receive_undone', note: `Undo of delivery #${move.id}`, userId: req.user.id });
+    await audit(db, req, 'inventory.receive_undone', 'inventory_items', item.id, { move_id: move.id, quantity: move.change, before: item.on_hand, after: on_hand });
+    res.json({ on_hand });
   });
   return r;
 }

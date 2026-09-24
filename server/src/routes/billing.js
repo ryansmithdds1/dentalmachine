@@ -9,6 +9,7 @@ import { portalKey } from './portal.js';
 import { payCodeFor, formatCode, guarantorIdOf } from '../billpay.js';
 import { receiptData, receiptPdf, sendReceipt } from '../receipts.js';
 import nextSlotRoutes from './nextslots.js';
+import { patientScope } from '../officeaccess.js';
 
 export const PAYMENT_METHODS = ['cash', 'check', 'credit_card', 'debit_card', 'ach', 'care_credit', 'financing', 'other'];
 
@@ -135,6 +136,32 @@ export default function billingRoutes({ db, payments = { enabled: false }, confi
     res.status(201).json({ entry: await db.get('SELECT * FROM ledger_entries WHERE id = ?', id), balance: await patientBalance(db, req.user.practice_id, patient.id) });
   });
 
+  // The refund queue (workflow 48): every account the practice owes money to, largest first, with the card
+  // payment a refund would go back to (the latest one with money left to refund). Read-only; the refund itself
+  // is POST /patients/:id/refunds below.
+  r.get('/billing/credit-balances', requirePermission('billing:read'), async (req, res) => {
+    const scope = patientScope(req.user);
+    const rows = await db.all(
+      `SELECT p.id AS patient_id, p.first_name, p.last_name, p.phone, SUM(l.amount) AS balance, MAX(CASE WHEN l.amount < 0 THEN l.entry_date END) AS last_credit
+       FROM ledger_entries l JOIN patients p ON p.id = l.patient_id
+       WHERE l.practice_id = ?${scope.sql} GROUP BY p.id, p.first_name, p.last_name, p.phone HAVING SUM(l.amount) < 0`,
+      req.user.practice_id, ...scope.args,
+    );
+    const out = [];
+    for (const r0 of rows) {
+      const cards = await db.all(
+        `SELECT l.id, l.entry_date, l.amount, l.method, l.reference, (SELECT COALESCE(SUM(x.amount), 0) FROM ledger_entries x WHERE x.refund_of_id = l.id) AS refunded
+         FROM ledger_entries l WHERE l.patient_id = ? AND l.practice_id = ? AND l.type = 'payment' AND l.amount < 0 AND l.voided_at IS NULL
+           AND l.method IN ('credit_card','debit_card') ORDER BY l.entry_date DESC, l.id DESC`,
+        r0.patient_id, req.user.practice_id,
+      );
+      // Only card payments taken through the processor can be refunded to the card.
+      const card = cards.filter((c) => /^(pi_|sbx_)/.test(c.reference || '')).map((c) => ({ id: c.id, entry_date: c.entry_date, method: c.method, left: -c.amount - Number(c.refunded) })).find((c) => c.left > 0) || null;
+      out.push({ ...r0, credit: -Number(r0.balance), card_payment: card });
+    }
+    res.json(out.sort((a, b) => b.credit - a.credit));
+  });
+
   // Refund of a credit balance. With `payment_id` of a card payment, the money goes back to that card
   // through the processor; otherwise it's recorded as paid out by cash or check.
   r.post('/patients/:id/refunds', requirePermission('billing:write'), async (req, res) => {
@@ -165,8 +192,10 @@ export default function billingRoutes({ db, payments = { enabled: false }, confi
       description: row.description || (original ? `Refund of ${original.entry_date} payment` : 'Refund to patient'), method, reference,
       refund_of_id: original?.id ?? null, entry_date: (await practiceNow(db, req.user.practice_id)).slice(0, 10), created_by: req.user.id,
     });
-    await audit(db, req, 'ledger.refund', 'ledger_entries', id, { amount, payment_id: original?.id ?? null });
-    res.status(201).json({ entry: await db.get('SELECT * FROM ledger_entries WHERE id = ?', id), balance: await patientBalance(db, req.user.practice_id, patient.id) });
+    const after = await patientBalance(db, req.user.practice_id, patient.id);
+    // Before and after, so the audit shows what the account looked like on each side of the refund.
+    await audit(db, req, 'ledger.refund', 'ledger_entries', id, { amount, payment_id: original?.id ?? null, method, to_card: !!original, balance_before: -credit, balance_after: Number(after), patient_id: patient.id });
+    res.status(201).json({ entry: await db.get('SELECT * FROM ledger_entries WHERE id = ?', id), balance: after });
   });
 
   // Moves part of a balance (or credit) to another member of the same family, e.g. a parent's overpayment

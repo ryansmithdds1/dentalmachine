@@ -26,6 +26,7 @@ import verificationRoutes from './routes/verification.js';
 import feeScheduleRoutes from './routes/feeschedules.js';
 import marketingRoutes from './routes/marketing.js';
 import bonusRoutes from './routes/bonus.js';
+import dailyRoutes from './routes/daily.js';
 import benchmarkRoutes from './routes/benchmarks.js';
 import billingAutoRoutes, { billingPublicRoutes } from './routes/billingauto.js';
 import cardRoutes from './routes/cards.js';
@@ -411,6 +412,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(familyRoutes({ db }));
   api.use(conversationRoutes({ db, messenger }));
   api.use(ediRoutes({ db, config, clearinghouse }));
+  api.use(dailyRoutes({ db, config, clearinghouse }));
   api.use(officeRoutes({ db }));
   api.use(chatRoutes({ db, storage, fetchImpl }));
   api.use(checklistRoutes({ db, storage, messenger }));

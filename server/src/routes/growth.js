@@ -11,6 +11,7 @@ import { portalKey } from './portal.js';
 import { pendingInsurance } from '../services.js';
 import { allocationsForRange } from '../allocation.js';
 import { computeMetrics, adjustmentKind } from '../metrics.js';
+import { PdfDoc } from '../pdf.js';
 
 const requireAdmin = (req, _res, next) => (req.user.role === 'admin' ? next() : next(new HttpError(403, 'Administrator access required')));
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -188,6 +189,52 @@ export default function growthRoutes({ db, messenger, config, mailer = { enabled
     await db.run('UPDATE statement_runs SET emailed = ?, mailed = ?, printed = ? WHERE id = ?', counts.email, counts.mail, counts.print, runId);
     await audit(db, req, 'statements.run', 'statement_runs', runId, { accounts: accounts.length, ...counts });
     res.status(201).json({ ...(await db.get('SELECT * FROM statement_runs WHERE id = ?', runId)), print_ids: printIds, mail: mailer.name });
+  });
+
+  // Every statement of a run that the office prints itself, in one PDF (workflow 47): one print, not one per
+  // account. The deliveries are marked printed; printing again is allowed (a jammed printer) and audited.
+  r.get('/statements/runs/:rid/print', requirePermission('billing:read'), async (req, res) => {
+    const pid = req.user.practice_id;
+    const run = await db.get('SELECT * FROM statement_runs WHERE id = ? AND practice_id = ?', Number(req.params.rid) || 0, pid);
+    if (!run) throw new HttpError(404, 'Statement run not found');
+    let rows = await db.all("SELECT d.id, d.patient_id, d.status FROM statement_deliveries d WHERE d.run_id = ? AND d.practice_id = ? AND d.method = 'print' ORDER BY d.id", run.id, pid);
+    if (restricted(req.user)) {
+      const mine = [];
+      for (const d of rows) if (await canSeePatient(db, req.user, d.patient_id)) mine.push(d);
+      rows = mine;
+    }
+    if (!rows.length) throw new HttpError(404, 'Nothing in this run is printed at the office');
+    const today = (await practiceNow(db, pid)).slice(0, 10);
+    const doc = new PdfDoc({ footer: `Statements · run #${run.id}` });
+    const $ = (c) => `$${(Number(c || 0) / 100).toFixed(2)}`;
+    for (const [n, d] of rows.entries()) {
+      if (n) doc.newPage();
+      const account = await db.get('SELECT * FROM patients WHERE id = ?', d.patient_id);
+      const since = addDays(today, -90);
+      const data = await statementData(db, pid, account, { family: true, since, appUrl: config?.appUrl });
+      const pr = data.practice;
+      doc.text(pr.name, { size: 15, bold: true });
+      doc.text([pr.address, [pr.city, pr.state, pr.zip].filter(Boolean).join(', '), pr.phone].filter(Boolean).join(' · '), { size: 9.5 });
+      doc.space(10);
+      doc.text(`${account.first_name} ${account.last_name}`, { bold: true });
+      doc.text([account.address, [account.city, account.state, account.zip].filter(Boolean).join(', ')].filter(Boolean).join(', ') || ' ', { size: 10 });
+      doc.space(6);
+      doc.text(`Statement date ${today} · Account #${account.id}`, { size: 10 });
+      doc.rule();
+      doc.row(['Date', 'Patient', 'Description', 'Amount'], { at: [0, 0.14, 0.36, 0.84], right: [3], bold: true, size: 9.5 });
+      doc.row([since, '', 'Balance forward', $(data.previous_balance)], { at: [0, 0.14, 0.36, 0.84], right: [3], size: 9.5 });
+      for (const e of data.entries) doc.row([e.entry_date, `${e.patient_first_name || ''}`, e.description || e.type, $(e.amount)], { at: [0, 0.14, 0.36, 0.84], right: [3], size: 9.5 });
+      doc.rule();
+      doc.row(['', '', 'Account balance', $(data.balance)], { at: [0, 0.14, 0.36, 0.84], right: [3], size: 10 });
+      if (data.pending_insurance || data.pending_write_off) doc.row(['', '', 'Insurance still expected', $(-(data.pending_insurance + data.pending_write_off))], { at: [0, 0.14, 0.36, 0.84], right: [3], size: 10 });
+      doc.row(['', '', 'Amount due', $(data.amount_due)], { at: [0, 0.14, 0.36, 0.84], right: [3], size: 11, bold: true });
+      doc.space(10);
+      if (data.billpay_page && data.pay_code) doc.text(`Pay online at ${data.billpay_page} with code ${data.pay_code}, or call ${pr.phone || 'the office'}.`, { size: 10 });
+      else if (data.pay_url) doc.text(`Pay online at ${data.pay_url}, or call ${pr.phone || 'the office'}.`, { size: 10 });
+    }
+    await db.run(`UPDATE statement_deliveries SET status = 'printed' WHERE id IN (${rows.map(() => '?').join(',')}) AND status = 'to_print'`, ...rows.map((d) => d.id));
+    await audit(db, req, 'statements.print', 'statement_runs', run.id, { accounts: rows.length });
+    res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': `inline; filename="statements-run-${run.id}.pdf"` }).send(doc.toBuffer());
   });
 
   r.get('/statements/runs', requirePermission('billing:read'), async (req, res) => {

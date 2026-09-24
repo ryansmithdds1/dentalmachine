@@ -26,6 +26,7 @@ import { runFeeSchedules } from './feeimport.js';
 import { runSecondLook } from './xrayai.js';
 import { createBenchmarkClient, runBenchmarkSends } from './benchmarks.js';
 import { runBillingAutopilot } from './billingauto.js';
+import { runMonthlyWorkJobs } from './monthlywork.js';
 import { runScheduledReports } from './savedreports.js';
 import { runSurveys } from './surveys.js';
 import { runOrthoBilling } from './ortho.js';
@@ -291,6 +292,13 @@ if (process.env.BILLING_AUTOPILOT !== 'off') {
     .catch(jobFailed('Billing autopilot'));
   setInterval(run, 60 * 60 * 1000).unref();
   setTimeout(run, 140_000).unref();
+}
+// Weekly & monthly work (workflows 45-54): claims due a follow-up call, possible duplicate charts, last month's
+// books not closed (from day 5) become Needs attention items. Every 6 hours.
+if (process.env.MONTHLY_JOBS !== 'off') {
+  const monthly = () => runExclusive('monthly-work', 30 * 60 * 1000, () => runMonthlyWorkJobs(db)).catch(jobFailed('Weekly & monthly work'));
+  setInterval(monthly, 6 * 60 * 60 * 1000).unref();
+  setTimeout(monthly, 140_000).unref();
 }
 // Payment-plan late fees: an installment still unpaid after the plan's grace days gets its fee once.
 if (process.env.PLAN_LATE_FEES !== 'off') {

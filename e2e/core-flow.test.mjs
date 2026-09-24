@@ -159,8 +159,8 @@ test('a new patient from first visit to paid claim and statement', async () => {
     await page.goto(`${base}/checkout/${appt.id}`);
     await page.click('button:has-text("planned procedure")');
     await page.locator('text=charges posted').waitFor();
-    await page.click('button:has-text("Create claim")');
-    await page.locator('text=/Claim #\\d+ created/').waitFor();
+    await page.click('button:has-text("claim to")'); // "Send claim to …" with a clearinghouse, else "Create claim to …"
+    await page.locator('text=/Claim #\\d+ (created|sent|saved)/').first().waitFor();
     await page.click('button:has-text("Mark checked out")');
     await page.locator('.badge:has-text("Checked out")').waitFor();
   });
@@ -173,14 +173,25 @@ test('a new patient from first visit to paid claim and statement', async () => {
   const claimId = claims[0].id;
   await step('send claim', async () => {
     await page.goto(`${base}/claims/${claimId}`);
-    await page.click('button:has-text("Send to clearinghouse")');
+    // Checkout already sends it when a clearinghouse is connected (workflow 24); send by hand only a draft.
+    if ((await api(`/claims/${claimId}`)).status === 'draft') await page.click('button:has-text("Send to clearinghouse")');
     for (let i = 0; i < 40 && (await api(`/claims/${claimId}`)).status === 'draft'; i++) await page.waitForTimeout(250);
     await page.locator('.timeline li', { hasText: /accepted|sent|paid/i }).first().waitFor();
   });
   await step('ERA', async () => {
     await page.goto(`${base}/claims?tab=claims`);
-    await page.click('button:has-text("Check for responses")');
-    await page.locator('button:has-text("Check for responses")').waitFor();
+    // The sandbox's answers can take a moment after the send: check again until the ERA has posted.
+    for (let i = 0; i < 10 && !['paid', 'partially_paid'].includes((await api(`/claims/${claimId}`)).status); i++) {
+      await page.click('button:has-text("Check for responses")');
+      await page.locator('button:has-text("Check for responses")').waitFor();
+      for (let j = 0; j < 4 && !['paid', 'partially_paid'].includes((await api(`/claims/${claimId}`)).status); j++) await page.waitForTimeout(250);
+    }
+  });
+  // Clean ERA payments wait on the insurance autopilot for one "Post all" (a person posts the money).
+  await step('post ERA', async () => {
+    if (['paid', 'partially_paid'].includes((await api(`/claims/${claimId}`)).status)) return;
+    await page.goto(`${base}/insurance-autopilot`);
+    await page.click('button:has-text("Post all")');
     for (let i = 0; i < 20 && !['paid', 'partially_paid'].includes((await api(`/claims/${claimId}`)).status); i++) await page.waitForTimeout(250);
   });
   const paid = await api(`/claims/${claimId}`);

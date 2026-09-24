@@ -1,21 +1,36 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../../api.js';
 import { useApi, useLookup } from '../../hooks.js';
 import { useAuth } from '../../auth.jsx';
 import { fmtUtcDate } from '../../format.js';
 import { ErrorBox, Modal, useSubmit } from '../ui.jsx';
+import { useShortcuts } from '../../shortcuts.js';
 
 const EMPTY = { provider_id: '', drug: '', strength: '', sig: '', quantity: '', refills: 0, dispense_as_written: false, notes: '', schedule: '' };
 const RX_STATUS = { printed: ['Printed', ''], signed: ['Signed', 'info'], transmitted: ['Sent to pharmacy', 'ok'], error: ['Not sent', 'danger'] };
 
 // Prescriptions: favorites, allergy check, pharmacy, e-prescribing (with EPCS signing) or printed Rx.
 export default function RxTab({ patient, onChange }) {
-  const { can, practice } = useAuth();
+  const { can, practice, user } = useAuth();
   const { data: list, reload } = useApi(`/patients/${patient.id}/prescriptions`);
   const { data: erx } = useApi('/erx');
   const favorites = useLookup('/rx/favorites');
   const providers = useLookup('/providers?active=true').filter((p) => p.type !== 'hygienist');
   const [form, setForm] = useState(EMPTY);
+  // Workflow 34 (docs/workflows/specs/34-prescriptions.md): the prescriber is the dentist signed in, else the
+  // patient's own dentist, else the first one — never just "the first provider".
+  const mine = providers.find((p) => p.user_id === user?.id) || providers.find((p) => p.id === patient.primary_provider_id) || providers[0];
+  const prescriber = form.provider_id || mine?.id || '';
+  const sendRef = useRef(null);
+  const printRef = useRef(null);
+  const [picked, setPicked] = useState(0);
+  // A favorite picked (click or its number key) puts the focus on sending it, so Enter finishes.
+  useEffect(() => {
+    if (!picked) return;
+    (sendRef.current && !sendRef.current.disabled ? sendRef.current : printRef.current)?.focus();
+  }, [picked]);
+  const pickFavorite = (f) => { setForm({ ...form, ...f, refills: f.refills ?? 0, schedule: f.schedule || '' }); setPicked((n) => n + 1); };
+  useShortcuts(can('clinical:sign') ? favorites.slice(0, 9).map((f, i) => ({ combo: String(i + 1), handler: () => pickFavorite(f), label: `Prescribe ${f.drug}`, section: 'Rx' })) : []);
   const [warning, setWarning] = useState(null);
   const [otp, setOtp] = useState(null); // null = not asked; '' = asking
   const [choosePharmacy, setChoosePharmacy] = useState(false);
@@ -28,9 +43,10 @@ export default function RxTab({ patient, onChange }) {
     setNotice(null);
     try {
       const rx = await api.post(`/patients/${patient.id}/prescriptions`, {
-        ...form, schedule: form.schedule || null, provider_id: Number(form.provider_id || providers[0]?.id), override_allergy: override, send, ...(otp ? { otp } : {}),
+        ...form, schedule: form.schedule || null, provider_id: Number(prescriber), override_allergy: override, send, ...(otp ? { otp } : {}),
       });
       setForm({ ...EMPTY, provider_id: form.provider_id });
+      setPicked(0);
       setOtp(null);
       reload();
       if (send) setNotice(rx.status === 'transmitted' ? `${rx.drug} sent to ${rx.pharmacy?.name}.` : `Not sent: ${rx.erx_error}`);
@@ -81,9 +97,9 @@ export default function RxTab({ patient, onChange }) {
             )}
             {patient.allergies && <div className="alert-chip" style={{ margin: '10px 0' }}>Allergies: {patient.allergies}</div>}
             <div className="chips" style={{ margin: '10px 0 12px' }}>
-              {favorites.map((f) => (
-                <button key={f.drug} type="button" className="chip" onClick={() => setForm({ ...form, ...f, refills: f.refills ?? 0, schedule: f.schedule || '' })}>
-                  {f.drug}{f.schedule ? <span className="csched">C-{f.schedule}</span> : null}
+              {favorites.map((f, i) => (
+                <button key={f.drug} type="button" className="chip" onClick={() => pickFavorite(f)} title={i < 9 ? `Press ${i + 1}` : undefined}>
+                  {i < 9 && <kbd style={{ marginRight: 4 }}>{i + 1}</kbd>}{f.drug}{f.schedule ? <span className="csched">C-{f.schedule}</span> : null}
                 </button>
               ))}
             </div>
@@ -96,7 +112,7 @@ export default function RxTab({ patient, onChange }) {
             )}
             {notice && <div className="public-notice ok" style={{ marginBottom: 10 }}>{notice}</div>}
             <form onSubmit={(e) => { e.preventDefault(); submit({ send: false }); }} className="form-grid">
-              <label>Prescriber<select value={form.provider_id} onChange={set('provider_id')}>{providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
+              <label>Prescriber<select value={prescriber} onChange={set('provider_id')}>{providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
               <label>Drug<input required value={form.drug} onChange={set('drug')} /></label>
               <label>Strength / form<input value={form.strength} onChange={set('strength')} /></label>
               <label>Quantity<input required value={form.quantity} onChange={set('quantity')} placeholder="write it out, e.g. 12 (twelve)" /></label>
@@ -119,9 +135,9 @@ export default function RxTab({ patient, onChange }) {
                 </div>
               )}
               <div className="form-actions full">
-                <button type="submit" disabled={busy}>Save & print</button>
+                <button ref={printRef} type="submit" disabled={busy}>Save & print</button>
                 {erx?.in_app && (
-                  <button type="button" className="primary" disabled={busy || !pharmacy || (otp !== null && otp.length !== 6)} title={pharmacy ? '' : 'Choose a pharmacy first'}
+                  <button ref={sendRef} type="button" className="primary" disabled={busy || !pharmacy || (otp !== null && otp.length !== 6)} title={pharmacy ? '' : 'Choose a pharmacy first'}
                     onClick={() => submit({ send: true })}>
                     {otp !== null ? 'Sign & send' : `Send to ${pharmacy ? pharmacy.name : 'pharmacy'}`}
                   </button>

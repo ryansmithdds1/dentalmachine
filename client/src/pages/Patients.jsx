@@ -4,7 +4,7 @@ import { useApi } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
 import { money, fullName, age, fmtDateTime } from '../format.js';
 import { Modal } from '../components/ui.jsx';
-import PatientForm from '../components/PatientForm.jsx';
+import NewPatientQuick from '../components/NewPatientQuick.jsx';
 
 const PAGE = 25;
 
@@ -80,7 +80,8 @@ export default function Patients() {
       </div>
       {adding && (
         <Modal title="New patient" wide onClose={() => setAdding(false)}>
-          <PatientForm defaults={prefill} onCancel={() => setAdding(false)} onSaved={(p) => nav(`/patients/${p.id}`)} />
+          {/* Workflow 32: one line typed the way the caller says it, with their insurance (docs/workflows/specs/32-new-patient.md). */}
+          <NewPatientQuick defaults={prefill} onCancel={() => setAdding(false)} onSaved={(p) => nav(`/patients/${p.id}`)} />
         </Modal>
       )}
     </>

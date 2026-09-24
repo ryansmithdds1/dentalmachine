@@ -1,4 +1,4 @@
-import { Fragment, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { api, getToken } from '../api.js';
 import { useApi } from '../hooks.js';
@@ -6,11 +6,14 @@ import { useAuth } from '../auth.jsx';
 import { money, fmtDate, fmtDateTime, toCents } from '../format.js';
 import { Badge, ErrorBox, Modal, MoreRows } from '../components/ui.jsx';
 import { PlanSummary } from '../components/patient/PaymentPlans.jsx';
-import { ChStatus, ClearinghousePanel, sendClaims, describeResponses, CallForm, CALL_OUTCOMES } from '../components/ClaimEdi.jsx';
+import { ChStatus, ClearinghousePanel, sendClaims, describeResponses } from '../components/ClaimEdi.jsx';
+import ClaimFollowup from '../components/billing/ClaimFollowup.jsx';
+import RefundQueue from '../components/billing/RefundQueue.jsx';
+import { sendPreauth } from '../components/preauthSend.js';
 import InsurancePlanForm from '../components/InsurancePlanForm.jsx';
 import AiFileRead from '../components/AiFileRead.jsx';
 import { useLookup } from '../hooks.js';
-import { downloadCsv, dollars } from '../api.js';
+import { downloadCsv, dollars, openFile } from '../api.js';
 import Collections from '../components/Collections.jsx';
 import EligibilityBatch from '../components/EligibilityBatch.jsx';
 import Deposits from '../components/Deposits.jsx';
@@ -18,14 +21,20 @@ import Deposits from '../components/Deposits.jsx';
 const FILTERS = [['attention', 'Needs attention'], ['draft', 'Ready to send'], ['submitted', 'Submitted'], ['partially_paid', 'Partially paid'], ['denied', 'Denied'], ['paid', 'Paid'], ['void', 'Void'], ['', 'All']];
 
 // Billing workspace: claims (with 837 batches), ERA remittance posting and payment plans.
+const TABS = [['claims', 'Claims'], ['checks', 'Insurance payments'], ['eligibility', 'Eligibility'], ['followup', 'Insurance follow-up'], ['preauths', 'Pre-authorizations'], ['era', 'Remittance (ERA)'], ['insplans', 'Insurance plans'], ['statements', 'Statements'], ['refunds', 'Credits & refunds'], ['plans', 'Payment plans'], ['deposits', 'Deposits'], ['collections', 'Collections']];
+// Billing opens where this person last worked (G B goes straight back to the follow-up list, say). Per-browser only.
+const TAB_KEY = 'dm.billing.tab';
+const lastTab = () => { try { const t = localStorage.getItem(TAB_KEY); return TABS.some(([k]) => k === t) ? t : null; } catch { return null; } };
+
 export default function Claims() {
   const [params, setParams] = useSearchParams();
-  const tab = params.get('tab') || 'claims';
+  const tab = params.get('tab') || lastTab() || 'claims';
+  useEffect(() => { try { localStorage.setItem(TAB_KEY, tab); } catch { /* a convenience only */ } }, [tab]);
   return (
     <>
       <div className="page-header"><h1>Billing</h1></div>
       <div className="tabs">
-        {[['claims', 'Claims'], ['checks', 'Insurance payments'], ['eligibility', 'Eligibility'], ['followup', 'Insurance follow-up'], ['preauths', 'Pre-authorizations'], ['era', 'Remittance (ERA)'], ['insplans', 'Insurance plans'], ['statements', 'Statements'], ['plans', 'Payment plans'], ['deposits', 'Deposits'], ['collections', 'Collections']].map(([k, l]) => (
+        {TABS.map(([k, l]) => (
           <button key={k} className={tab === k ? 'active' : ''} onClick={() => setParams({ tab: k })}>{l}</button>
         ))}
       </div>
@@ -34,7 +43,8 @@ export default function Claims() {
       {tab === 'plans' && <Plans />}
       {tab === 'insplans' && <InsurancePlans />}
       {tab === 'checks' && <InsuranceChecks />}
-      {tab === 'followup' && <InsuranceFollowup />}
+      {tab === 'followup' && <ClaimFollowup />}
+      {tab === 'refunds' && <RefundQueue />}
       {tab === 'preauths' && <Preauths />}
       {tab === 'statements' && <Statements />}
       {tab === 'collections' && <Collections />}
@@ -289,66 +299,13 @@ function Plans() {
   );
 }
 
-function InsuranceFollowup() {
-  const { can } = useAuth();
-  const [carrier, setCarrier] = useState('');
-  const [calling, setCalling] = useState(null);
-  const [limit, setLimit] = useState(500);
-  const { data, reload } = useApi(`/reports/outstanding-claims?limit=${limit}${carrier ? `&carrier_id=${carrier}` : ''}`);
-  const carriers = useLookup('/carriers');
-  if (!data) return <div className="empty">Loading…</div>;
-  const B = [['d0_30', '0–30 days'], ['d31_60', '31–60 days'], ['d61_90', '61–90 days'], ['d90_plus', '90+ days']];
-  return (
-    <>
-      <div className="grid grid-4" style={{ marginBottom: 16 }}>
-        {B.map(([k, l]) => <div key={k} className={`card stat${k === 'd90_plus' && data.totals[k] ? ' stat-danger' : k === 'd61_90' && data.totals[k] ? ' stat-warn' : ''}`}><div className="label">{l}</div><div className="value">{money(data.totals[k])}</div><div className="sub">expected from insurance</div></div>)}
-      </div>
-      <div className="card" style={{ padding: 0 }}>
-        <div className="inline no-print" style={{ justifyContent: 'flex-end', padding: '10px 16px 0' }}>
-          <select value={carrier} onChange={(e) => setCarrier(e.target.value)} aria-label="Payer">
-            <option value="">All payers</option>
-            {carriers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
-          <button className="small" disabled={!data.rows.length} onClick={() => downloadCsv('outstanding-claims', data.rows, [['Claim #', (c) => c.id], ['Patient', (c) => `${c.first_name} ${c.last_name}`], ['Carrier', (c) => c.carrier_name], ['Carrier phone', (c) => c.carrier_phone || ''], ['Submitted', (c) => c.submitted_at || ''], ['Days out', (c) => c.days_out], ['Expected', (c) => dollars(c.estimated_amount - c.paid_amount)], ['Status', (c) => c.status]])}>⬇ CSV</button>
-          <button className="small" onClick={() => window.print()}>Print / PDF</button>
-        </div>
-        <div className="table-wrap">
-          <table>
-            <thead><tr><th>Claim</th><th>Patient</th><th>Carrier</th><th>Submitted</th><th className="num">Days out</th><th className="num">Expected</th><th>Status</th><th>Last call</th><th className="no-print" /></tr></thead>
-            <tbody>
-              {data.rows.map((c) => (
-                <tr key={c.id}>
-                  <td><Link to={`/claims/${c.id}`}>#{c.id}</Link></td>
-                  <td><Link to={`/patients/${c.patient_id}`}>{c.first_name} {c.last_name}</Link></td>
-                  <td>{c.carrier_name}{c.carrier_phone ? <div className="muted"><a href={`tel:${c.carrier_phone}`}>{c.carrier_phone}</a></div> : null}</td>
-                  <td>{fmtDate(c.submitted_at)}</td>
-                  <td className="num" style={{ color: c.days_out > 60 ? 'var(--danger)' : c.days_out > 30 ? 'var(--warn)' : undefined, fontWeight: c.days_out > 30 ? 700 : 400 }}>{c.days_out}</td>
-                  <td className="num">{money(c.estimated_amount - c.paid_amount)}</td>
-                  <td><Badge value={c.status} /></td>
-                  <td style={{ fontSize: 13 }}>
-                    {c.last_call_at ? <>{CALL_OUTCOMES[c.last_call_outcome] || c.last_call_outcome} <span className="muted">· {fmtDate(c.last_call_at.slice(0, 10))}</span></> : <span className="muted">—</span>}
-                    {c.follow_up_date && <div className={c.follow_up_date <= data.as_of ? 'text-danger' : 'muted'}>Follow up {fmtDate(c.follow_up_date)}</div>}
-                  </td>
-                  <td className="no-print">{can('billing:write') && <button className="small" onClick={() => setCalling(c)}>Log call</button>}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {data.rows.length === 0 && <div className="empty">No outstanding claims. 🎉</div>}
-          <MoreRows shown={data.rows.length} total={data.total_rows} step={500} onMore={(n) => setLimit(limit + n)} />
-          {calling && <Modal title={`Call about claim #${calling.id} · ${calling.first_name} ${calling.last_name}`} wide onClose={() => setCalling(null)}><CallForm claim={calling} onCancel={() => setCalling(null)} onDone={() => { setCalling(null); reload(); }} /></Modal>}
-        </div>
-      </div>
-    </>
-  );
-}
-
 function Preauths() {
   const { can } = useAuth();
   const { data: rows, reload } = useApi('/preauths');
   const [edit, setEdit] = useState(null);
+  // Workflow 38: straight to the clearinghouse; the 837 file only when none is connected (preauthSend.js).
   const exportFile = async (pa) => {
-    await download(`/preauths/${pa.id}/837`, {}, `predetermination-${pa.id}.837`);
+    await sendPreauth(pa).catch(() => { /* sendPreauth showed why */ });
     reload();
   };
   return (
@@ -370,7 +327,7 @@ function Preauths() {
                   <td className="num">{pa.approved_amount != null ? money(pa.approved_amount) : '—'}</td>
                   <td><span className={`badge ${pa.status === 'approved' ? 'ok' : pa.status === 'denied' ? 'danger' : pa.status === 'submitted' ? 'warn' : 'info'}`}>{pa.status}</span>{pa.payer_reference && <div className="muted" style={{ fontSize: 11 }}>{pa.payer_reference}</div>}</td>
                   <td style={{ whiteSpace: 'nowrap' }}>
-                    {can('billing:write') && pa.status === 'draft' && <button className="small primary" onClick={() => exportFile(pa)}>Send (837)</button>}{' '}
+                    {can('billing:write') && pa.status === 'draft' && <button className="small primary" onClick={() => exportFile(pa)}>Send</button>}{' '}
                     {can('billing:write') && ['draft', 'submitted'].includes(pa.status) && <button className="small" onClick={() => setEdit(pa)}>Record answer</button>}
                   </td>
                 </tr>
@@ -424,7 +381,11 @@ function Statements() {
   const [err, setErr] = useState(null);
   const { data: payCfg } = useApi('/payments/config');
   const mailOn = payCfg?.mail?.enabled;
+  // Statements go out by email and mail, so a double click must not send twice: one run at a time.
+  const [sending, setSending] = useState(false);
   const run = async () => {
+    if (sending) return;
+    setSending(true);
     setErr(null);
     try {
       const r = await api.post('/statements/run', { min_balance: toCents(min || 0), since_days: since });
@@ -433,9 +394,15 @@ function Statements() {
       reloadRuns();
     } catch (e) {
       setErr(e);
+    } finally {
+      setSending(false);
     }
   };
   const total = (rows || []).reduce((s, r) => s + r.patient_portion, 0);
+  // Enter sends: the button has the focus once the list is in (keyboard path for workflow 47).
+  const sendRef = useRef(null);
+  const ready = !!rows?.length;
+  useEffect(() => { if (ready) sendRef.current?.focus(); }, [ready]);
   return (
     <>
       <div className="card inline" style={{ flexWrap: 'wrap', gap: 12, marginBottom: 12 }}>
@@ -444,14 +411,14 @@ function Statements() {
         <div style={{ marginLeft: 'auto', textAlign: 'right' }}>
           <div><strong>{rows?.length ?? 0}</strong> accounts · <strong>{money(total)}</strong> patient portion</div>
           <div className="muted" style={{ fontSize: 12 }}>{mailOn ? `Accounts without email are printed and mailed by ${payCfg.mail.name}.` : 'Accounts without email are printed here.'}</div>
-          {can('billing:write') && <button className="primary" style={{ marginTop: 6 }} disabled={!rows?.length} onClick={run}>Send statements</button>}
+          {can('billing:write') && <button className="primary" style={{ marginTop: 6 }} disabled={!rows?.length || sending} onClick={run} ref={sendRef}>{sending ? 'Sending…' : 'Send statements'}</button>}
         </div>
       </div>
       <ErrorBox error={err} />
       {result && (
         <div className="public-notice ok" style={{ marginBottom: 12 }}>
           {result.accounts} statement{result.accounts === 1 ? '' : 's'}: {result.emailed} emailed{result.mailed ? `, ${result.mailed} mailed by ${result.mail}` : ''}, {result.printed} to print.{' '}
-          {result.print_ids.length > 0 && <>Print: {result.print_ids.map((id) => <Link key={id} to={`/patients/${id}/statement?family=1`} style={{ marginRight: 8 }}>#{id}</Link>)}</>}
+          {result.print_ids.length > 0 && <PrintRun id={result.id} n={result.print_ids.length} focus onError={setErr} />}
         </div>
       )}
       <div className="card" style={{ padding: 0 }}>
@@ -461,7 +428,7 @@ function Statements() {
             <tbody>
               {rows?.map((r) => (
                 <tr key={r.id}>
-                  <td><Link to={`/patients/${r.id}`}>{r.first_name} {r.last_name}</Link><div className="muted">{[r.address, r.city, r.state].filter(Boolean).join(', ') || 'no address'}</div></td>
+                  <td><Link to={`/patients/${r.id}`}>{r.first_name} {r.last_name}</Link> <Link className="muted" style={{ fontSize: 12 }} to={`/patients/${r.id}/statement?family=1`}>preview</Link><div className="muted">{[r.address, r.city, r.state].filter(Boolean).join(', ') || 'no address'}</div></td>
                   <td>{r.email && r.email_opt_in ? 'Email' : mailOn && r.address && r.zip ? <span className="badge info nocap">Mailed for you</span> : <span className="badge warn nocap">Print & mail</span>}</td>
                   <td>{r.statement_sent_at ? fmtDate(r.statement_sent_at) : 'Never'}</td>
                   <td className="num">{money(r.balance)}</td><td className="num">{money(r.pending_insurance)}</td><td className="num"><strong>{money(r.patient_portion)}</strong></td>
@@ -475,11 +442,21 @@ function Statements() {
       {runs?.length > 0 && (
         <div className="card">
           <h3>Recent statement runs</h3>
-          {runs.map((r) => <div key={r.id} className="muted" style={{ padding: '3px 0' }}>{fmtDateTime(r.created_at)} · {r.accounts} accounts · {r.emailed} emailed · {r.printed} printed · {money(r.total)} · {r.created_by_name}</div>)}
+          {runs.map((r) => <div key={r.id} className="muted inline" style={{ padding: '3px 0' }}>{fmtDateTime(r.created_at)} · {r.accounts} accounts · {r.emailed} emailed · {r.printed} printed · {money(r.total)} · {r.created_by_name}{r.printed > 0 && <PrintRun id={r.id} n={r.printed} small onError={setErr} />}</div>)}
         </div>
       )}
     </>
   );
+}
+
+// Every statement of a run that the office prints, as one PDF (workflow 47) — one print instead of one per account.
+function PrintRun({ id, n, small, focus, onError }) {
+  const [busy, setBusy] = useState(false);
+  const go = async () => {
+    setBusy(true);
+    try { await openFile(`/statements/runs/${id}/print`); } catch (e) { onError?.(e); } finally { setBusy(false); }
+  };
+  return <button className={small ? 'small' : 'primary small'} style={{ marginLeft: 8 }} disabled={busy} autoFocus={focus} onClick={go}>{busy ? 'Making the PDF…' : `Print ${n === 1 ? 'it' : `all ${n}`} (one PDF)`}</button>;
 }
 
 // Employer group plans: the benefits every patient enrolled in them shares.
@@ -596,8 +573,12 @@ function CheckForm({ onDone }) {
   const chosen = (open || []).filter((c) => row(c.id).paid !== '' || row(c.id).write_off !== '');
   const total = chosen.reduce((s, c) => s + toCents(row(c.id).paid || 0), 0);
   const diff = toCents(head.amount || 0) - total;
-  const submit = async () => {
+  // Workflow 33: a check that looks already posted asks right here (not a confirm box): post it again only if the
+  // payer really sent the same check twice.
+  const [dup, setDup] = useState(null);
+  const submit = async (again = false) => {
     setErr(null);
+    setDup(null);
     setBusy(true);
     try {
       const body = {
@@ -609,11 +590,10 @@ function CheckForm({ onDone }) {
         }),
       };
       try {
-        await api.post('/insurance-checks', body);
+        await api.post('/insurance-checks', again === true ? { ...body, confirm_duplicate: true } : body);
       } catch (e) {
-        // Already posted: only post again if the payer really sent the same check twice.
-        if (e.status !== 409 || !e.details?.duplicate_of || !window.confirm(`${e.message}\n\nPost it again anyway?`)) throw e;
-        await api.post('/insurance-checks', { ...body, confirm_duplicate: true });
+        if (e.status === 409 && e.details?.duplicate_of && again !== true) return setDup(e);
+        throw e;
       }
       onDone();
     } catch (e) {
@@ -632,6 +612,13 @@ function CheckForm({ onDone }) {
   return (
     <div>
       <ErrorBox error={err} />
+      {dup && (
+        <div className="public-notice" role="alert" style={{ marginBottom: 10 }}>
+          {dup.message}{' '}
+          <button className="small" disabled={busy} onClick={() => submit(true)}>The payer sent it twice — post it again</button>{' '}
+          <button className="small" onClick={() => setDup(null)}>Don’t post</button>
+        </div>
+      )}
       <AiFileRead path="/eobs/read" label="Read a paper EOB" hint="Upload a scan or photo of the EOB and the check fills in below, matched to your claims, for you to check and post." onRead={fromEob} />
       {eob && (
         <div className="public-notice" style={{ marginBottom: 10 }}>
