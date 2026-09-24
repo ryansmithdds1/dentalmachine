@@ -6,6 +6,7 @@ import { toolByName } from '../datatools.js';
 import { agingReport } from '../aging.js';
 import { financeOverview } from '../finance/metrics.js';
 import { recordFeeChange } from '../fees.js';
+import { ensureBaseline, snapshotVersion } from '../feeversions.js';
 import orgBillingRoutes from './orgbilling.js';
 
 // Groups of practices (a DSO, or one owner with several offices, each its own practice): the owners see the
@@ -48,6 +49,7 @@ async function copyInto(db, kind, from, to, userId) {
     await db.run(`UPDATE practices SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, ...keys.map((k) => src[k]), to);
     n = 1;
   } else if (kind === 'fees') {
+    await ensureBaseline(db, to, null, { createdBy: userId });
     for (const c of await db.all('SELECT code, description, category, fee, requires_tooth, requires_surface FROM procedure_codes WHERE practice_id = ?', from)) {
       const have = await db.get('SELECT id, fee FROM procedure_codes WHERE practice_id = ? AND code = ?', to, c.code);
       if (have) {
@@ -62,6 +64,7 @@ async function copyInto(db, kind, from, to, userId) {
         n++;
       }
     }
+    if (n) await snapshotVersion(db, { practiceId: to, fsId: null, source: 'copied from the group', note: `Fees copied from practice ${from}`, userId });
   }
   return n;
 }

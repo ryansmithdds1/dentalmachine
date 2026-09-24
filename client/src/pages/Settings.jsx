@@ -22,6 +22,7 @@ import MfaSetup from '../components/MfaSetup.jsx';
 import SensorTest from '../components/imaging/SensorTest.jsx';
 import BridgeSetup from '../components/imaging/BridgeSetup.jsx';
 import DayTemplates from '../components/settings/DayTemplates.jsx';
+import FeeScheduleManager from '../components/settings/FeeScheduleManager.jsx';
 import OpportunityRules from '../components/opportunities/OpportunityRules.jsx';
 import Digests from '../components/settings/Digests.jsx';
 import JourneySettings from '../components/JourneySettings.jsx';
@@ -83,6 +84,7 @@ const KEYWORDS = {
   referrals: 'referral contacts specialists referring doctors',
   codes: 'fee schedule procedure codes cdt fees ucr import codes',
   ppo: 'fee schedules ppo contracted fees insurance fees office fees fee history',
+  fees: 'fee increase raise fees percent rounding schedule january ppo import payer fee schedule pdf csv xlsx versions history compare last updated write-offs',
   carriers: 'insurance carriers payers payer id',
   memberships: 'membership plans in-house plans subscription',
   messaging: 'messages reminders recall reviews google yelp templates spanish text email review link threshold',
@@ -102,7 +104,7 @@ export default function Settings() {
     ['You', [['account', 'My account', true]]],
     ['Practice', [['practice', 'Practice & security', admin], ['users', 'Users & roles', admin], ['locations', 'Offices', admin], ['providers', 'Providers', true], ['operatories', 'Operatories', true], ['types', 'Appointment types', true], ['daytemplates', 'Perfect day & late patients', can('schedule:read')], ['import', 'Import from another system', admin]]],
     ['Clinical', [['templates', 'Note templates', can('clinical:write')], ['forms', 'Forms & consents', can('patients:read')], ['labs', 'Labs', can('clinical:read')], ['education', 'Patient education', can('patients:read')], ['referrals', 'Referral contacts', can('patients:read')], ['opportunities', 'Opportunities', can('clinical:read')], ['chartshortcuts', 'Chart shortcuts & bundles', can('clinical:read')]]],
-    ['Billing', [['codes', 'Fee schedule', true], ['ppo', 'Fee schedules', can('billing:read')], ['carriers', 'Insurance carriers', can('billing:read')], ['memberships', 'Membership plans', can('billing:read')]]],
+    ['Billing', [['codes', 'Fee schedule', true], ['ppo', 'Fee schedules', can('billing:read')], ['fees', 'Fee updates & history', can('billing:read')], ['carriers', 'Insurance carriers', can('billing:read')], ['memberships', 'Membership plans', can('billing:read')]]],
     ['Patients', [['messaging', 'Messages & reviews', admin], ['digests', 'Metric emails', admin], ['phone', 'Phone line', admin], ['checkin', 'Mobile check-in', admin], ['journeys', 'Patient journeys', can('patients:read')], ['booking', 'Online booking links', admin], ['custom', 'Custom patient fields', admin], ['duplicates', 'Duplicate charts', admin]]],
     ['Connections', [['integrations', 'Integrations', admin], ['imaging', 'Imaging bridges', admin], ['assistant', 'Assistant', admin], ['developer', 'API & webhooks', admin], ['activity', 'Connection activity', admin]]],
     ['Compliance', [['audit', 'Audit log', admin], ['backups', 'Backups', admin]]],
@@ -159,6 +161,7 @@ export default function Settings() {
       {tab === 'memberships' && <MembershipPlans />}
       {tab === 'labs' && <Labs canWrite={can('clinical:write')} />}
       {tab === 'ppo' && <FeeSchedules admin={admin} />}
+      {tab === 'fees' && <FeeScheduleManager />}
       {tab === 'messaging' && <Messaging />}
       {tab === 'phone' && <PhoneLineSettings />}
       {tab === 'education' && <EducationSettings />}

@@ -19,9 +19,7 @@ import { canSeePatient, patientScope } from './officeaccess.js';
 import { sendMessage, recipientFor } from './messaging.js';
 import { readText } from './docsearch.js';
 import { officeFee } from './fees.js';
-// Today's fee on the plan's schedule. (Swapped for feeversions.js resolveFee — the fee on the referral's
-// date — once fee schedule history lands.)
-const resolveFee = async (db, _practiceId, fsId, code) => (await db.get('SELECT fee FROM fee_schedule_items WHERE fee_schedule_id = ? AND code = ?', fsId, code))?.fee ?? null;
+import { resolveFee } from './feeversions.js';
 import { primaryPolicy } from './services.js';
 import { aiClient, structured } from './ai.js';
 

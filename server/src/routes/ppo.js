@@ -4,6 +4,7 @@ import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, to
 import { estimateCoverage } from '../services.js';
 import { build837D } from '../x12.js';
 import { recordFeeChange } from '../fees.js';
+import { ensureBaseline, snapshotVersion, requireDay } from '../feeversions.js';
 
 const requireAdmin = (req, _res, next) => (req.user.role === 'admin' ? next() : next(new HttpError(403, 'Administrator access required')));
 
@@ -34,6 +35,8 @@ export default function ppoRoutes({ db, config }) {
         await db.run('INSERT INTO fee_schedule_items (fee_schedule_id, code, fee) VALUES (?, ?, ?)', id, c.code, Math.round((c.fee * pct) / 100));
       }
     }
+    // Its first fees are version 1 (fee history: feeversions.js).
+    await snapshotVersion(db, { practiceId: req.user.practice_id, fsId: id, source: 'created', userId: req.user.id });
     await audit(db, req, 'fee_schedule.create', 'fee_schedules', id);
     res.status(201).json(await withItems(await db.get('SELECT * FROM fee_schedules WHERE id = ?', id)));
   });
@@ -42,6 +45,10 @@ export default function ppoRoutes({ db, config }) {
     const fs = await findOr404(db, 'fee_schedules', req.params.fid, req.user.practice_id, 'Fee schedule');
     await update(db, 'fee_schedules', fs.id, req.user.practice_id, pick(req.body, ['name', 'notes', 'active']));
     if (Array.isArray(req.body.items)) {
+      // Fees edited by hand become a new version (effective today, or from `effective_from` for a correction);
+      // the fees they replace are kept as the version before.
+      const effectiveFrom = req.body.effective_from ? requireDay(req.body.effective_from, 'effective_from') : null;
+      await ensureBaseline(db, req.user.practice_id, fs.id, { createdBy: req.user.id });
       await db.tx(async () => {
         for (const it of req.body.items) {
           const code = String(it.code || '').toUpperCase();
@@ -53,6 +60,7 @@ export default function ppoRoutes({ db, config }) {
           if (fee === null) await db.run('DELETE FROM fee_schedule_items WHERE fee_schedule_id = ? AND code = ?', fs.id, code);
           else await db.run('INSERT INTO fee_schedule_items (fee_schedule_id, code, fee) VALUES (?, ?, ?) ON CONFLICT(fee_schedule_id, code) DO UPDATE SET fee = excluded.fee', fs.id, code, fee);
         }
+        await snapshotVersion(db, { practiceId: req.user.practice_id, fsId: fs.id, source: 'manual', note: req.body.change_reason || 'Edited in Settings', userId: req.user.id, effectiveFrom });
       });
     }
     if (Array.isArray(req.body.carrier_ids)) {

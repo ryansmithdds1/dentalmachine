@@ -22,6 +22,25 @@ export const MIGRATIONS = [
     // Nothing to undo that matters: it only filled blanks, and the columns stay (additive schema).
     down: null,
   },
+  {
+    id: 2,
+    name: 'Fee schedule versions: the fees on file become version 1 of each schedule (standard fees and every fee schedule)',
+    // Additive: creates the version tables when missing, and a baseline version ("from the beginning") for any
+    // schedule that has fees and no version yet. Running it again finds the baselines and adds nothing.
+    async up(db) {
+      const { ensureFeeSchema, ensureBaseline } = await import('./feeversions.js');
+      await ensureFeeSchema(db);
+      for (const p of await db.all('SELECT id FROM practices')) {
+        if ((await db.get('SELECT COUNT(*) AS n FROM procedure_codes WHERE practice_id = ?', p.id)).n) await ensureBaseline(db, p.id, null);
+        for (const fs of await db.all('SELECT id FROM fee_schedules WHERE practice_id = ?', p.id)) await ensureBaseline(db, p.id, fs.id);
+      }
+    },
+    // Undo: the baselines copy what's live, so dropping them loses nothing (versions made after are kept).
+    async down(db) {
+      await db.run("DELETE FROM fee_schedule_version_items WHERE version_id IN (SELECT id FROM fee_schedule_versions WHERE source = 'baseline')");
+      await db.run("DELETE FROM fee_schedule_versions WHERE source = 'baseline'");
+    },
+  },
 ];
 
 export async function runMigrations(db, list = MIGRATIONS) {

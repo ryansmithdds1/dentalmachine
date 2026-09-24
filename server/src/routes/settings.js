@@ -10,6 +10,7 @@ import { validateRecallSteps, recallTypes } from '../recalls.js';
 import { PROVIDERS, sealSecret } from '../sso.js';
 import { validateTemplates, DEFAULT_TEMPLATES, TEMPLATE_META } from '../templates.js';
 import { recordFeeChange } from '../fees.js';
+import { ensureBaseline, snapshotVersion } from '../feeversions.js';
 import { cleanRoomUrl } from '../video.js';
 import { cleanPattern, parseDurations } from '../patterns.js';
 import { assertPublicUrl, localUrlsAllowed } from '../netguard.js';
@@ -401,6 +402,11 @@ export default function settingsRoutes({ db, secret, config = {}, messenger = nu
     fields: ['code', 'description', 'category', 'fee', 'requires_tooth', 'requires_surface', 'active', 'area', 'time_units'],
     afterUpdate: async (existing, row, req) => {
       if (row.fee != null) await recordFeeChange(db, { practiceId: req.user.practice_id, code: existing.code, oldFee: existing.fee, newFee: row.fee, userId: req.user.id });
+      // A changed standard fee is a new version of the standard fees (the old fee stays in the one before).
+      if (row.fee != null && row.fee !== existing.fee) {
+        await ensureBaseline(db, req.user.practice_id, null, { overrides: { [existing.code]: existing.fee }, createdBy: req.user.id });
+        await snapshotVersion(db, { practiceId: req.user.practice_id, fsId: null, source: 'manual', note: `${existing.code} edited in Settings`, userId: req.user.id });
+      }
     },
     validate: (row) => {
       requireOneOf(row.category, CATEGORIES, 'category');

@@ -1,6 +1,7 @@
 import { HttpError } from './auth.js';
 import { coverageTier } from './defaults.js';
 import { insert, addMonths, practiceNow, mapSeq, recorded } from './util.js';
+import { resolveFee } from './feeversions.js';
 
 // ---- Insurance plans ----
 // A plan is the employer group's coverage (shared by every subscriber and dependant on it); a policy is
@@ -211,10 +212,12 @@ export async function estimateCoverage(db, rawPolicy, procedures, { primary = nu
   const today = asOf || (await practiceNow(db, policy.practice_id)).slice(0, 10);
   // In-network (PPO) carriers pay from their fee schedule; the difference is written off.
   const scheduleId = policy.fee_schedule_id ?? (await db.get('SELECT fee_schedule_id FROM insurance_carriers WHERE id = ?', policy.carrier_id))?.fee_schedule_id;
-  const scheduleFee = async (code) => (scheduleId ? (await db.get('SELECT fee FROM fee_schedule_items WHERE fee_schedule_id = ? AND code = ?', scheduleId, code))?.fee : null);
-  const officeFee = async (code) => (await db.get('SELECT fee FROM procedure_codes WHERE practice_id = ? AND code = ?', policy.practice_id, code))?.fee;
-  const allowedFor = async (p) => {
-    const f = await scheduleFee(p.code);
+  // Both read the fee schedule version in effect on the date of service (resolveFee, feeversions.js), so a
+  // claim for last year's work uses last year's contracted fees.
+  const scheduleFee = async (code, dos) => (scheduleId ? resolveFee(db, policy.practice_id, scheduleId, code, dos) : null);
+  const officeFee = async (code, dos) => resolveFee(db, policy.practice_id, null, code, dos);
+  const allowedFor = async (p, dos) => {
+    const f = await scheduleFee(p.code, dos);
     return f != null ? Math.min(f, p.fee) : p.fee;
   };
   const freqs = json(plan.frequencies, DEFAULT_FREQUENCIES);
@@ -233,7 +236,7 @@ export async function estimateCoverage(db, rawPolicy, procedures, { primary = nu
     const dos = (p.completed_at || today).slice(0, 10);
     const tier = coverageTier(p.category);
     const ortho = p.category === 'orthodontics';
-    const contracted = await allowedFor(p);
+    const contracted = await allowedFor(p, dos);
     let writeOff = p.fee - contracted;
     let covered = true;
     // Percentage: a per-code override, else ortho or the category tier.
@@ -279,7 +282,7 @@ export async function estimateCoverage(db, rawPolicy, procedures, { primary = nu
     let base = contracted;
     if (covered && plan.downgrade_composites && AMALGAM_FOR[p.code] && POSTERIOR.has(String(p.tooth || '').toUpperCase())) {
       const alt = AMALGAM_FOR[p.code];
-      const altFee = (await scheduleFee(alt)) ?? (await officeFee(alt));
+      const altFee = (await scheduleFee(alt, dos)) ?? (await officeFee(alt, dos));
       if (altFee != null && altFee < base) {
         base = altFee;
         notes.push(`Paid as amalgam (${alt}, ${(altFee / 100).toFixed(2)}): posterior composite downgrade`);

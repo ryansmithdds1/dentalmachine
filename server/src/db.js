@@ -1019,6 +1019,93 @@ CREATE TABLE IF NOT EXISTS fee_history (
   changed_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_fee_history ON fee_history(practice_id, code);
+-- Every version of every fee schedule, never overwritten. fee_schedule_id NULL = the office's standard fees
+-- (procedure_codes); schedule_key ('standard' or 'fs<id>') numbers the versions of one schedule.
+CREATE TABLE IF NOT EXISTS fee_schedule_versions (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  fee_schedule_id INTEGER REFERENCES fee_schedules(id),
+  schedule_key TEXT NOT NULL,
+  version_no INTEGER NOT NULL,
+  effective_from TEXT NOT NULL,
+  source TEXT NOT NULL,
+  note TEXT,
+  change_id INTEGER,
+  item_count INTEGER NOT NULL DEFAULT 0,
+  created_by INTEGER REFERENCES users(id),
+  approved_by INTEGER REFERENCES users(id),
+  actor_source TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (practice_id, schedule_key, version_no)
+);
+CREATE TABLE IF NOT EXISTS fee_schedule_version_items (
+  version_id INTEGER NOT NULL REFERENCES fee_schedule_versions(id),
+  code TEXT NOT NULL,
+  fee INTEGER NOT NULL,
+  PRIMARY KEY (version_id, code)
+);
+-- Planned fee changes: % increases (scheduled or applied now) and imported payer schedules (draft until approved).
+CREATE TABLE IF NOT EXISTS fee_changes (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  fee_schedule_id INTEGER REFERENCES fee_schedules(id),
+  schedule_key TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('increase','import')),
+  status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','scheduled','applied','cancelled','rejected')),
+  effective_date TEXT,
+  params TEXT,
+  note TEXT,
+  group_id TEXT,
+  source TEXT NOT NULL DEFAULT 'manual',
+  file_name TEXT,
+  file_hash TEXT,
+  reader TEXT,
+  ai_reason TEXT,
+  summary TEXT,
+  created_by INTEGER REFERENCES users(id),
+  approved_by INTEGER REFERENCES users(id),
+  approved_at TEXT,
+  cancelled_by INTEGER REFERENCES users(id),
+  cancelled_at TEXT,
+  cancel_reason TEXT,
+  applied_at TEXT,
+  applied_version_id INTEGER REFERENCES fee_schedule_versions(id),
+  attempts INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- The lines of a planned change (derived rows: recomputed while the change is still editable).
+CREATE TABLE IF NOT EXISTS fee_change_items (
+  change_id INTEGER NOT NULL REFERENCES fee_changes(id),
+  code TEXT NOT NULL,
+  old_fee INTEGER,
+  new_fee INTEGER,
+  ucr INTEGER,
+  flag TEXT,
+  warn TEXT,
+  skip INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (change_id, code)
+);
+-- A payer schedule's upload inbox: files dropped here are read into drafts by the fee job (never applied).
+CREATE TABLE IF NOT EXISTS fee_import_inbox (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  fee_schedule_id INTEGER NOT NULL REFERENCES fee_schedules(id),
+  file_name TEXT NOT NULL,
+  mime TEXT,
+  file_hash TEXT NOT NULL,
+  content TEXT,
+  status TEXT NOT NULL DEFAULT 'waiting' CHECK (status IN ('waiting','processed','failed','duplicate')),
+  change_id INTEGER REFERENCES fee_changes(id),
+  attempts INTEGER NOT NULL DEFAULT 0,
+  error TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  processed_at TEXT,
+  UNIQUE (practice_id, fee_schedule_id, file_hash)
+);
+CREATE INDEX IF NOT EXISTS idx_fee_versions_eff ON fee_schedule_versions(practice_id, schedule_key, effective_from);
+CREATE INDEX IF NOT EXISTS idx_fee_changes_status ON fee_changes(status, effective_date);
 
 -- Orthodontics: the treatment contract (billed monthly, optionally by card) and the adjustment log.
 CREATE TABLE IF NOT EXISTS ortho_cases (

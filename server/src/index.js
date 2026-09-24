@@ -22,6 +22,7 @@ import { runVerificationAutomation } from './verification.js';
 import { runRecallAgeRules } from './recallsync.js';
 import { runMissedCallCheck } from './phonecoach.js';
 import { runMarketingJobs } from './marketing.js';
+import { runFeeSchedules } from './feeimport.js';
 import { runScheduledReports } from './savedreports.js';
 import { runSurveys } from './surveys.js';
 import { runOrthoBilling } from './ortho.js';
@@ -253,6 +254,14 @@ if (process.env.MARKETING_JOBS !== 'off') {
   const marketing = () => runExclusive('marketing', 30 * 60 * 1000, () => runMarketingJobs(db)).catch(jobFailed('Marketing capture'));
   setInterval(marketing, 60 * 60 * 1000).unref();
   setTimeout(marketing, 130_000).unref();
+}
+// Fee schedules: scheduled increases / approved payer schedules take effect at each practice's local midnight (applied once);
+// files in a schedule's inbox are read into drafts awaiting approval. Every 15 minutes.
+if (process.env.FEE_CHANGES !== 'off') {
+  const run = () => runExclusive('fee-changes', 10 * 60 * 1000, () => runFeeSchedules(db, { config }))
+    .then((r) => r?.applied?.length && log.info(`Fee changes: ${r.applied.length} applied`)).catch(jobFailed('Fee schedule changes'));
+  setInterval(run, 15 * 60 * 1000).unref();
+  setTimeout(run, 25_000).unref();
 }
 // Payment-plan late fees: an installment still unpaid after the plan's grace days gets its fee once.
 if (process.env.PLAN_LATE_FEES !== 'off') {

@@ -22,6 +22,7 @@ import clinicalRoutes from './routes/clinical.js';
 import billingRoutes from './routes/billing.js';
 import insuranceRoutes from './routes/insurance.js';
 import verificationRoutes from './routes/verification.js';
+import feeScheduleRoutes from './routes/feeschedules.js';
 import marketingRoutes from './routes/marketing.js';
 import recallFreqRoutes from './routes/recallfreq.js';
 import settingsRoutes from './routes/settings.js';
@@ -236,7 +237,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   // Large bodies from the public form page are rate-limited before they're read (no sign-in there).
   const bigPublicBody = rateLimit({ windowMs: 60_000, max: 12, name: 'public-big-body' });
   app.use((req, res, next) => (/^\/api\/public\/forms\/[^/]+\/\d+$|^\/api\/public\/(papers\/[^/]+|forms-kiosk\/sessions\/\d+)\/(history|forms\/\d+)$/.test(req.path) ? bigPublicBody(req, res, next) : next()));
-  app.use((req, res, next) => (/^\/api\/public\/forms\/[^/]+\/\d+$|^\/api\/insurance-plans\/\d+\/read-benefits$|^\/api\/eobs\/read$|^\/api\/patients\/\d+\/insurance-card\/read$|^\/api\/public\/(papers\/[^/]+|forms-kiosk\/sessions\/\d+)\/(history|forms\/\d+)$|^\/api\/public\/os\/[^/]+\/book$/.test(req.path) ? formBody : jsonBody)(req, res, next));
+  app.use((req, res, next) => (/^\/api\/public\/forms\/[^/]+\/\d+$|^\/api\/insurance-plans\/\d+\/read-benefits$|^\/api\/eobs\/read$|^\/api\/patients\/\d+\/insurance-card\/read$|^\/api\/public\/(papers\/[^/]+|forms-kiosk\/sessions\/\d+)\/(history|forms\/\d+)$|^\/api\/public\/os\/[^/]+\/book$|^\/api\/fees\/(imports|inbox\/\d+)$/.test(req.path) ? formBody : jsonBody)(req, res, next));
   app.use('/api', idempotency(db, secret));
   app.use((req, res, next) => {
     // Patient data isn't left in the browser's or a proxy's disk cache.
@@ -398,6 +399,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(chatRoutes({ db, storage, fetchImpl }));
   api.use(checklistRoutes({ db, storage, messenger }));
   api.use(ppoRoutes({ db, config }));
+  api.use(feeScheduleRoutes({ db, config }));
   api.use(frontDeskRoutes({ db, messenger }));
   api.use(casePresentationRoutes({ db, messenger, config, erx, secret }));
   api.use(growthRoutes({ db, messenger, config, mailer }));

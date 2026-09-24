@@ -53,6 +53,11 @@ Rules that apply to all of them are in `/CLAUDE.md`.
 - `insurance_carriers` (payer) → `insurance_plans` (employer group: shared benefits, frequencies, fee schedule)
   → `patient_insurance` (a person's policy: priority primary/secondary, subscriber). Estimates: `estimateCoverage`.
 - `fee_schedules` / `fee_schedule_items`: PPO allowed amounts; office fees on `procedure_codes`; changes in `fee_history`.
+  Every change to a schedule (standard fees included) is also a never-edited **version** (`fee_schedule_versions` +
+  items, `effective_from`, source, who made / approved it); the live tables are always the newest version. Planned
+  changes — % increases and payer imports — are `fee_changes` (draft → scheduled → applied, or cancelled/rejected),
+  applied once by the fee job at the practice's local midnight. **Fees for a date of service come from `resolveFee`
+  (`feeversions.js`)** — estimates and claims use it; don't read `fee_schedule_items` directly for pricing.
 - `claims` + `claim_items` (one per procedure): draft → submitted → paid / partially_paid / denied, or void.
   Corrections use frequency codes 7/8 and `corrected_from_id`; secondary claims link `primary_claim_id`.
 - Payments: `insurance_checks` (one check/EFT across claims) post `insurance_payment` and write-off entries via
