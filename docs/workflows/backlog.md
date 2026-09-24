@@ -745,6 +745,22 @@ PX6. **Feedback that improves things:** quick 1-question surveys after visits, N
 PX7. **Team prompts:** a daily "moments" list in the huddle — today's birthdays, first visits, milestones, patients
      who had a hard last visit, personal notes to mention — so the team can make it personal in person.
 
+## Patient portal 2.0 and "Pay my bill" from the website (asked for)
+Builds on the existing portal (code sign-in by text, visits confirm/cancel/reschedule, messages, insurance + card upload,
+statement PDF, payments + receipts, record export, memberships, forms, treatment plans, pay) and Stripe payments.
+PT1. **Account at a glance:** balance (patient portion vs pending insurance, explained in plain words), itemized
+     activity (charges, insurance paid, adjustments, payments) per visit, statements, receipts, the household view
+     for the guarantor (each family member's balance and visits), upcoming visits, treatment plans with costs.
+PT2. **Pay any way, beautifully:** pay the balance or a chosen amount, card or bank (ACH), Apple Pay/Google Pay (Stripe),
+     save a card for next time, set up autopay or a payment plan (from the owner's allowed options, BL1), manage saved
+     cards; receipts by email; posts to the ledger idempotently (processor charge id) and reconciles daily.
+PT3. **"Pay my bill" button for the website:** a small embed/link (like the online booking embed) → a fast page that finds
+     the account without an account login: statement code (printed on statements/texts) or last name + date of birth +
+     ZIP/phone, then a one-time code by text/email if needed; pay in under a minute; nothing about the account beyond the
+     amount due is shown until verified; rate-limited and bot-protected.
+PT4. **Smooth and safe:** mobile-first, English/Spanish, accessible; every view/payment audited as source 'patient'; any
+     failure (declined card, processor down) is shown kindly to the patient and becomes a Needs attention item for billing.
+
 ## Then: remaining workflow batches
 9. Batch 4 (32–44): new patient setup, ERA/EOB posting, prescriptions, lab cases, huddle actions, recall lists,
    pre-auths, financing, adjustments, referrals, end-of-day, review requests (fix the count bug), clock in/out.
