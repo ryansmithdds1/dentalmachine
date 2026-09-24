@@ -3,6 +3,11 @@
 // instead of quietly storing PHI unprotected.
 const LOCAL = /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
 
+// A copy that isn't holding real patients' data: APP_ENV says demo or staging, or the demo practice is loaded
+// and nothing claims to be production.
+export const isDemoOrStaging = (env = process.env) => ['demo', 'staging'].includes(String(env.APP_ENV || '').toLowerCase())
+  || (env.DEMO_SEED === 'on' && env.APP_ENV !== 'production');
+
 export function productionProblems(env = process.env) {
   const problems = [];
   const secret = env.JWT_SECRET || '';
@@ -22,7 +27,9 @@ export function productionProblems(env = process.env) {
   }
   // Sign-in and public-page limits are counted in Redis when there's more than one server; on a host that
   // runs many copies (serverless), counts kept in each copy's memory can be multiplied by spreading requests.
-  if ((env.VERCEL || env.SERVERLESS === '1') && !env.REDIS_URL) problems.push('REDIS_URL must be set on serverless hosting so sign-in and public-page limits are shared by every copy of the server');
+  // Required where real patient data lives. A demo or staging copy (APP_ENV=demo/staging, or the demo practice
+  // loaded with DEMO_SEED=on and no APP_ENV=production) starts without it; api/index.js logs a warning instead.
+  if ((env.VERCEL || env.SERVERLESS === '1') && !env.REDIS_URL && !isDemoOrStaging(env)) problems.push('REDIS_URL must be set on serverless hosting so sign-in and public-page limits are shared by every copy of the server');
   if (env.BACKUP_DIR && (env.BACKUP_ENCRYPTION_KEY || '').length < 32) problems.push('BACKUP_ENCRYPTION_KEY (at least 32 characters) must be set when BACKUP_DIR is, so backups are encrypted');
   return problems;
 }

@@ -12,6 +12,7 @@ async function boot() {
   if (!process.env.JWT_SECRET) throw new Error('JWT_SECRET must be set');
   const problems = process.env.NODE_ENV === 'production' || process.env.VERCEL_ENV === 'production' ? productionProblems() : [];
   if (problems.length) throw new Error(`Refusing to start: ${problems.join('; ')}`);
+  if (!process.env.REDIS_URL) console.warn('REDIS_URL is not set: sign-in and public-page limits are counted per server copy (acceptable for a demo; required with real patient data)');
   const db = await openDb();
   if (process.env.DEMO_SEED === 'on') await seedDemo(db);
   return createApp({ db, secret: process.env.JWT_SECRET, config: loadConfig(), messenger: createMessenger() });

@@ -163,6 +163,12 @@ test('production refuses to start without its security settings', () => {
   // A server that says it's production can't run pretend payers or card processing; staging and demo can.
   assert.match(productionProblems({ ...ok, APP_ENV: 'production', PAYMENTS: 'sandbox', EDI_MODE: 'sandbox' }).join(), /sandbox.*PAYMENTS/);
   assert.deepEqual(productionProblems({ ...ok, APP_ENV: 'demo', PAYMENTS: 'sandbox' }), []);
+  // Serverless needs shared Redis for real patient data; a demo copy (APP_ENV=demo, or DEMO_SEED=on) may start without it.
+  assert.match(productionProblems({ ...ok, VERCEL: '1' }).join(), /REDIS_URL/);
+  assert.match(productionProblems({ ...ok, VERCEL: '1', APP_ENV: 'production', DEMO_SEED: 'on' }).join(), /REDIS_URL/);
+  assert.deepEqual(productionProblems({ ...ok, VERCEL: '1', DEMO_SEED: 'on' }), []);
+  assert.deepEqual(productionProblems({ ...ok, VERCEL: '1', APP_ENV: 'staging' }), []);
+  assert.deepEqual(productionProblems({ ...ok, VERCEL: '1', REDIS_URL: 'redis://r' }), []);
 });
 
 test('restore drills: the newest stored backup is read back and restored weekly; a bad file raises an item', async () => {
