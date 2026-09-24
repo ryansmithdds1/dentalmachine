@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Mic, MicOff, Send, X, Sparkles, RotateCcw, Check, Settings2, Undo2 } from 'lucide-react';
-import { api } from '../../api.js';
+import { api, approved } from '../../api.js';
 import { useAuth } from '../../auth.jsx';
 import { WRITERS, screenPath } from './tools.js';
 import { localCommand, isYes, isNo, isUndo } from './intents.js';
@@ -90,13 +90,13 @@ export default function Assistant() {
 
   // Make the changes (after a yes, or at once for low-risk ones), keep their results for the next request,
   // and remember how to take them back.
-  const execute = async (items, logId) => {
+  const execute = async (items, logId, yes = false) => {
     const undos = [];
     const lines = [];
     let failed = false;
     for (const it of items) {
       try {
-        const { result, undo } = await WRITERS[it.name](it.input);
+        const { result, undo } = await (yes ? approved(() => WRITERS[it.name](it.input)) : WRITERS[it.name](it.input));
         carry.current.push({ type: 'tool_result', tool_use_id: it.id, content: JSON.stringify(result) });
         if (undo) undos.push(undo);
         lines.push(done(it.line));
@@ -112,7 +112,7 @@ export default function Assistant() {
       const label = lines.join(' · ');
       add({ kind: 'done', text: label });
       const id = undos.length ? `${Date.now()}` : null;
-      lastUndo.current = id ? { id, label, logId, run: async () => { for (const u of undos.reverse()) await u(); } } : null;
+      lastUndo.current = id ? { id, label, logId, run: () => approved(async () => { for (const u of undos.reverse()) await u(); }) } : null;
       setUndoId(id);
       toast({ kind: 'done', text: label, undo: id || undefined });
     }
@@ -163,7 +163,7 @@ export default function Assistant() {
     const p = pendingRef.current;
     if (!p) return;
     setPending(null);
-    if (yes) await execute(p.items, p.logId);
+    if (yes) await execute(p.items, p.logId, true);
     else {
       for (const it of p.items) carry.current.push({ type: 'tool_result', tool_use_id: it.id, content: 'Not done: the person did not confirm. Nothing was changed.', is_error: true });
       logOutcome(p.logId, 'cancelled');

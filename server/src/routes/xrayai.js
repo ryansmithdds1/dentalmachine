@@ -48,7 +48,7 @@ export default function xrayAiRoutes({ db, xrayAi }) {
       const condition = TO_CONDITION[f.kind] || 'watch';
       conditionId = await insert(db, 'tooth_conditions', {
         practice_id: f.practice_id, patient_id: f.patient_id, tooth: f.tooth, surfaces: f.surfaces, condition, recorded_by: req.user.id,
-        notes: `${LABELS[f.kind]} seen on x-ray (AI finding, confirmed)${f.measurement_mm ? ` · ${f.measurement_mm} mm` : ''}`,
+        notes: `${LABELS[f.kind]} seen on x-ray (AI finding, confirmed)${f.measurement_mm ? ` · ${f.measurement_mm} mm` : ''}${f.note ? ` — ${f.note}` : ''}`.slice(0, 500),
       });
     }
     await db.run("UPDATE xray_findings SET status = ?, reviewed_by = ?, reviewed_at = datetime('now'), condition_id = COALESCE(?, condition_id) WHERE id = ?", status, req.user.id, conditionId, f.id);

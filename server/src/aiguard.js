@@ -1,0 +1,51 @@
+import { currentActor, setActor } from './actor.js';
+import { HttpError } from './auth.js';
+
+// The AI may suggest anything, but it may not do something high-risk on its own: money, claims, signing,
+// prescribing, merging charts, insurance details and removals need a person's yes. A request the assistant
+// makes carries X-Acting-For: assistant; one the person approved on screen also carries X-Human-Approved.
+// Without it, a high-risk change is refused (428) — whatever path the AI took to get here. The approval is
+// written into the audit trail with the change.
+export const HIGH_RISK = [
+  ['POST', /^\/patients\/\d+\/(payments|refunds|adjustments|terminal-payments|transfer|prescriptions|merge|insurance|payment-plans)$/, 'money, prescriptions, merges and insurance'],
+  ['POST', /^\/ledger\/\d+\/void$/, 'voiding a charge or payment'],
+  ['POST', /^\/payment-plans\/\d+\/charge-now$/, 'charging a card'],
+  ['POST', /^\/claims(\/submit|\/837|\/\d+\/(submit|void|payment|deny|correct|reopen|appeal))?$/, 'claims'],
+  ['PUT', /^\/claims\/\d+$/, 'claims'],
+  ['POST', /^\/insurance-checks$/, 'posting insurance payments'],
+  ['POST', /^\/collections\/\d+\/(write-off|agency)$/, 'collections'],
+  ['POST', /^\/procedures\/\d+\/(complete|uncomplete)$/, 'completing procedures (posts charges)'],
+  ['POST', /^\/notes\/\d+\/sign$/, 'signing clinical notes'],
+  ['POST', /^\/statements\/run$/, 'sending statements'],
+  ['PUT', /^\/(insurance|insurance-plans|payment-plans)\/\d+$/, 'insurance and payment plans'],
+  ['DELETE', /./, 'removing records'],
+];
+
+export const riskOf = (method, path, body) => {
+  // Adding procedures is fine; adding them as already completed posts charges.
+  if (method === 'POST' && /^\/patients\/\d+\/procedures$/.test(path) && body?.complete) return 'completing procedures (posts charges)';
+  return HIGH_RISK.find(([m, re]) => m === method && re.test(path))?.[2] || null;
+};
+
+// The same rule inside the code that moves money or posts charges, for AI that doesn't come through a
+// request (a server-side agent): it can suggest, not do.
+export function requireHuman(what) {
+  const ctx = currentActor();
+  if (ctx?.source === 'ai' && !ctx.approvedBy) {
+    throw new HttpError(428, `The AI can’t do this without a person’s OK (${what})`);
+  }
+}
+
+export function aiGuard() {
+  return (req, res, next) => {
+    const ctx = currentActor();
+    if (ctx?.source !== 'ai') return next();
+    const risk = riskOf(req.method, req.path, req.body);
+    if (!risk) return next();
+    if (req.get('X-Human-Approved') !== '1') {
+      return res.status(428).json({ error: `The assistant can’t do this without your OK (${risk}). Confirm it, or do it yourself.`, needs_approval: true });
+    }
+    setActor({ actor: `Assistant (for ${req.user.name}, approved by ${req.user.name})`, approvedBy: req.user.id });
+    next();
+  };
+}

@@ -35,10 +35,15 @@ who did it · what happened · when · what was there before · what is there no
    approves an AI draft is recorded as the approver.
 10. **AI recommends; people approve high-risk changes** (money, write-offs, refunds, final notes, diagnoses,
     treatment, prescriptions, unusual claims, patient identity). Store a short plain-language reason with
-    significant AI suggestions — never hidden reasoning.
+    significant AI suggestions — never hidden reasoning. Enforced in `server/src/aiguard.js`: a high-risk
+    request made by the assistant needs `X-Human-Approved` (sent only after a yes on screen) or gets 428,
+    and `requireHuman()` guards the money/charge/claim functions for server-side AI. New high-risk
+    endpoints go in `HIGH_RISK` there.
 11. **Multi-office:** records carry `practice_id` (tenant) and `location_id` (office) where it applies.
 12. **Never fail silently.** A failed claim, payment, message, import, sync or AI job becomes a visible work
-    item (task / needs-attention queue), not just a log line. No bare `.catch(() => {})` on anything important.
+    item in Needs attention (`raiseIssue` in `server/src/issues.js`, resolved when a later attempt works),
+    not just a log line. No bare `.catch(() => {})` on anything important. Calls to outside services go
+    through `loggedFetch` so they appear in Settings → Connection activity.
 13. **Integrations:** behind an adapter in its own module (swappable vendor), each call logged (time,
     destination, result, external id, retries) without PHI. Sandbox mode for demos and tests.
 14. **Reconcile** wherever money or data crosses a boundary (processor vs ledger, ERA vs ledger, claims

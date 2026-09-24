@@ -35,9 +35,9 @@ const FINDINGS_TOOL = {
             confidence: { type: 'number', description: '0-1' },
             box: { type: 'array', items: { type: 'number' }, description: '[x, y, width, height] as fractions of the image (0-1), top-left origin.' },
             measurement_mm: { type: 'number', description: 'For bone loss: estimated mm from the CEJ, if scale allows.' },
-            note: { type: 'string' },
+            note: { type: 'string', description: 'Why: what in the image shows it, in a short phrase (e.g. "radiolucency into dentin under the distal contact").' },
           },
-          required: ['kind', 'confidence', 'box'],
+          required: ['kind', 'confidence', 'box', 'note'],
         },
       },
     },
@@ -48,6 +48,7 @@ const FINDINGS_TOOL = {
 const CLAUDE_SYSTEM = `You are reviewing a dental radiograph as a second reader for a dentist. Report what is visible: suspected caries (with surfaces), calculus, horizontal or vertical bone loss, periapical radiolucencies, and existing restorations, crowns, root canals and implants.
 - Mark each finding with a box around it as fractions of the image width and height.
 - Only number teeth when the image type and anatomy make the number clear; otherwise leave tooth empty.
+- Give each finding a short note saying what in the image shows it, so the dentist can check your reasoning.
 - Use confidence honestly; skip anything you can't see well. This is decision support for the dentist, who makes the diagnosis.`;
 
 const clamp = (v) => Math.max(0, Math.min(1, Number(v) || 0));

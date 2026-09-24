@@ -1,4 +1,5 @@
 import { HttpError } from './auth.js';
+import { requireHuman } from './aiguard.js';
 import { raiseIssue, resolveIssue, failed } from './issues.js';
 import { insert, practiceNow, recorded } from './util.js';
 import { benefitYear, deductibleMet, estimateCoverage } from './benefits.js';
@@ -43,6 +44,7 @@ export async function primaryPolicy(db, practiceId, patientId) {
 export const isExtraction = (code) => /^D7(1[1-4]\d|2[0-5]\d)$/.test(String(code || ''));
 
 export async function completeProcedure(db, user, procedure, { providerId, appointmentId, locationId = null } = {}) {
+  requireHuman('completing procedures');
   if (procedure.status === 'completed') throw new HttpError(409, 'Procedure already completed');
   if (procedure.status === 'cancelled') throw new HttpError(409, 'Cancelled procedures cannot be completed');
   const provider = providerId ?? procedure.provider_id;
@@ -208,6 +210,7 @@ async function postClaimLines(db, claim, { amount, writeOff, lines }) {
 // Creates a claim for completed procedures on one policy, with the estimate. For a secondary policy the
 // estimate covers what the primary leaves (from the primary claim's payment when it has paid).
 export async function createClaim(db, { practiceId, policyId, procedureIds, userId = null, extra = {} }) {
+  requireHuman('creating claims');
   const policy = await db.get('SELECT * FROM patient_insurance WHERE id = ? AND practice_id = ?', policyId, practiceId);
   if (!policy) throw new HttpError(404, 'Policy not found');
   if (!Array.isArray(procedureIds) || !procedureIds.length) throw new HttpError(400, 'procedure_ids is required');
@@ -287,6 +290,7 @@ export async function checkPostingDate(db, practiceId, date) {
 // Reverses a ledger entry. The original stays (marked void) and an equal and opposite entry of the same
 // type is posted today, so past day sheets and closed periods never change.
 export async function reverseEntry(db, entry, { userId, reason, date }) {
+  requireHuman('voiding ledger entries');
   if (entry.reverses_id) throw new HttpError(409, "A reversal can't itself be voided");
   const marked = await recorded(db, 'ledger_entries', entry.id, () => db.run("UPDATE ledger_entries SET voided_at = datetime('now'), voided_by = ?, void_reason = ? WHERE id = ? AND voided_at IS NULL", userId ?? null, reason, entry.id));
   if (!marked.changes) throw new HttpError(409, 'That entry was already voided');

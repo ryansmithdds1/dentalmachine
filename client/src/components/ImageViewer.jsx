@@ -521,7 +521,7 @@ export default function ImageViewer({ doc, canEdit = false, height = '70vh', com
           {ai?.findings.map((f) => (
             <div key={f.id} className={`viewer-ai-row ${f.status}`}>
               <i style={{ background: AI_COLOR[f.kind] }} />
-              <span>{f.label}{f.tooth ? ` #${f.tooth}` : ''}{f.surfaces ? ` ${f.surfaces}` : ''}{f.measurement_mm ? ` · ${f.measurement_mm} mm` : ''} · {Math.round(f.confidence * 100)}%</span>
+              <span title={f.note ? `Why: ${f.note}` : undefined}>{f.label}{f.tooth ? ` #${f.tooth}` : ''}{f.surfaces ? ` ${f.surfaces}` : ''}{f.measurement_mm ? ` · ${f.measurement_mm} mm` : ''} · {Math.round(f.confidence * 100)}%{f.note && <small className="muted" style={{ display: 'block', fontSize: 11 }}>{f.note}</small>}</span>
               {canEdit && f.status === 'suggested' && (
                 <>
                   <button type="button" className="small" onClick={() => decide(f, 'accepted')} title={f.tooth ? 'Agree, and add it to the tooth chart' : 'Agree'}>Agree</button>

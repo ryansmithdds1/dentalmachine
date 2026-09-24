@@ -2,6 +2,7 @@ import express from 'express';
 import { loggedFetch } from './issues.js';
 import { idempotency } from './idempotency.js';
 import { actorMiddleware, setActor } from './actor.js';
+import { aiGuard } from './aiguard.js';
 import { flushChanges } from './util.js';
 import { existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -246,6 +247,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
     });
     next();
   });
+  api.use(aiGuard());
   api.use(officeAccess(db));
   api.use((_req, res, next) => {
     res.set('Cache-Control', 'no-store'); // PHI must not be cached by intermediaries

@@ -90,13 +90,24 @@ export const api = {
 };
 
 // What the assistant does on someone's behalf is recorded as the AI acting for them, not as them.
-const AI = { 'X-Acting-For': 'assistant' };
+// High-risk changes (money, claims, signing…) are refused by the server unless the person approved them:
+// only changes run inside approved() — after a yes on screen, or an Undo they asked for — say so.
+let approving = 0;
+const ai = () => (approving ? { 'X-Acting-For': 'assistant', 'X-Human-Approved': '1' } : { 'X-Acting-For': 'assistant' });
+export async function approved(fn) {
+  approving++;
+  try {
+    return await fn();
+  } finally {
+    approving--;
+  }
+}
 export const assistantApi = {
-  get: (p) => request('GET', p, undefined, AI),
-  post: (p, b = {}) => request('POST', p, b, AI),
-  put: (p, b) => request('PUT', p, b, AI),
-  patch: (p, b) => request('PATCH', p, b, AI),
-  del: (p) => request('DELETE', p, undefined, AI),
+  get: (p) => request('GET', p, undefined, ai()),
+  post: (p, b = {}) => request('POST', p, b, ai()),
+  put: (p, b) => request('PUT', p, b, ai()),
+  patch: (p, b) => request('PATCH', p, b, ai()),
+  del: (p) => request('DELETE', p, undefined, ai()),
 };
 
 // Downloads a file from the API (with the session token) and saves it.
