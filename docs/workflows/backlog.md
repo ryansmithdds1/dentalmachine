@@ -204,6 +204,13 @@ CA3. **AI reads the notes, people decide:** a structured check compares note tex
      (AI where wording varies, clearly labelled, with the quoted sentence it relied on); it only recommends — it never
      edits a note (rule 10). Rules the office can tune (which checks, intervals, which procedures need consent).
 
+CA4. **"Check my chart" before the doctor sees it (asked for):** a button (and key) on the visit/note for the
+     assistant: it runs every chart-audit check on this visit right now plus spelling and grammar, missing template
+     fields, tooth/surface mismatches, codes vs note, missing anesthetic/consent/x-ray interpretation, and lists
+     each problem with a one-click fix or a jump to the field. The assistant fixes them and marks the chart "ready
+     for doctor"; the doctor's queue shows which charts were checked clean, which still have open items, and who
+     prepared them — so the doctor reviews and signs instead of correcting. Per-assistant quality trends
+     (first-pass clean rate) for coaching, visible to managers.
 ## Long recordings: a whole exam into the note (asked for)
 Builds on the ambient AI scribe and dictation transcription.
 LR1. Record an entire exam or procedure (60–90+ minutes) on a computer, phone or iPad: recorded in short chunks that
