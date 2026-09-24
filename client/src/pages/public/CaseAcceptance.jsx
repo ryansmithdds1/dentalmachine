@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { money } from '../../format.js';
 import { ErrorBox, useSubmit } from '../../components/ui.jsx';
@@ -6,6 +6,8 @@ import SignaturePad from '../../components/SignaturePad.jsx';
 import PublicLayout from './PublicLayout.jsx';
 import { locale, suggestLang, useLang, useT } from './i18n.js';
 import { DobGate, publicCall, readPass, savePass } from './LinkPass.jsx';
+import { BackToOffice, useHandoff } from './HandOff.jsx';
+import './handoff.css';
 
 const call = (method, path, body, pass) => publicCall(method, path, body, 'X-Plan-Pass', pass);
 
@@ -17,20 +19,28 @@ export default function CaseAcceptance() {
   const [plan, setPlan] = useState(null);
   const [loadError, setLoadError] = useState(null);
   const [pass, setPass] = useState(() => readPass('tp', token));
+  // Opened on the office device by staff: no birth-date step.
+  const hand = useHandoff('tp', token);
+  const usePass = hand.pass || pass;
   const [locked, setLocked] = useState(null);
   const [name, setName] = useState('');
   const [image, setImage] = useState(null);
   const [consent, setConsent] = useState(false);
   useEffect(() => {
-    call('GET', `/tp/${token}`, null, pass)
+    if (hand.checking) return;
+    call('GET', `/tp/${token}`, null, usePass)
       .then((p) => { suggestLang(p.language); setLocked(null); setPlan(p); })
       .catch((err) => (err.details?.dob_required ? setLocked(err.details) : setLoadError(err)));
-  }, [token, pass]);
+  }, [token, usePass, hand.checking]);
+  // Handed the office tablet: the cursor waits in the name box (without scrolling past the plan).
+  const nameBox = useRef(null);
+  const ready = !!plan && !plan.signed_at;
+  useEffect(() => { if (ready && hand.back) nameBox.current?.focus({ preventScroll: true }); }, [ready, hand.back]);
   const { submit, busy, error } = useSubmit(async () => {
-    setPlan(await call('POST', `/tp/${token}`, { signature_name: name, signature_image: image, consent }, pass));
+    setPlan(await call('POST', `/tp/${token}`, { signature_name: name, signature_image: image, consent }, usePass));
     window.scrollTo(0, 0);
   });
-  if (loadError) return <PublicLayout title={t('Treatment plan')}><ErrorBox error={loadError} /></PublicLayout>;
+  if (loadError) return <PublicLayout title={t('Treatment plan')}><ErrorBox error={loadError} /><BackToOffice back={hand.back} /></PublicLayout>;
   if (locked && !plan) {
     return (
       <DobGate title={t('Treatment plan')} practice={locked.practice} onPass={(p) => { savePass('tp', token, p); setPass(p); }}
@@ -43,7 +53,7 @@ export default function CaseAcceptance() {
 
   return (
     <PublicLayout title={plan.signed_at ? t('Thank you!') : t('Your treatment plan, {name}', { name: plan.first_name })} practice={plan.practice}>
-      {plan.signed_at && <div className="public-notice ok" style={{ marginBottom: 16 }}>{t('You accepted this plan on {date}. We’ll be in touch to schedule — or call us at {phone}.', { date: new Date(plan.signed_at.replace(' ', 'T') + 'Z').toLocaleDateString(locale(lang)), phone: plan.practice.phone })} <a href={`/api/public/tp/${token}/pdf${pass ? `?pass=${encodeURIComponent(pass)}` : ''}`}>{t('Download a copy (PDF)')}</a></div>}
+      {plan.signed_at && <div className="public-notice ok" style={{ marginBottom: 16 }}>{t('You accepted this plan on {date}. We’ll be in touch to schedule — or call us at {phone}.', { date: new Date(plan.signed_at.replace(' ', 'T') + 'Z').toLocaleDateString(locale(lang)), phone: plan.practice.phone })} <a href={`/api/public/tp/${token}/pdf${usePass ? `?pass=${encodeURIComponent(usePass)}` : ''}`}>{t('Download a copy (PDF)')}</a></div>}
       <div className="card">
         <h2>{plan.name}</h2>
         {planned.map((p, i) => (
@@ -75,12 +85,14 @@ export default function CaseAcceptance() {
             <input type="checkbox" checked={consent} onChange={(ev) => setConsent(ev.target.checked)} style={{ marginTop: 3 }} />
             {t('I have reviewed this treatment plan, my questions have been answered, and I understand the estimated costs are my responsibility if insurance pays less.')}
           </label>
-          <label style={{ marginTop: 12 }}>{t('Type your full name')}<input required value={name} onChange={(ev) => setName(ev.target.value)} autoComplete="name" /></label>
+          <label style={{ marginTop: 12 }}>{t('Type your full name')}<input required value={name} onChange={(ev) => setName(ev.target.value)} autoComplete="name" ref={nameBox} /></label>
           <div style={{ marginTop: 10 }}><SignaturePad onChange={setImage} /></div>
           <ErrorBox error={error} />
           <button className="primary big" style={{ marginTop: 12 }} disabled={busy || !consent || name.trim().length < 2}>{t('Accept & sign')}</button>
         </form>
       )}
+      {plan.signed_at && hand.back && <div className="public-notice" style={{ marginTop: 8 }}>{t('Please hand the device back to the office.')}</div>}
+      <BackToOffice back={hand.back} />
     </PublicLayout>
   );
 }

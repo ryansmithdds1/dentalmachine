@@ -6,6 +6,9 @@ import { useAuth } from '../auth.jsx';
 import { money, fmtDate, toCents, fromCents } from '../format.js';
 import { ChStatus, ClaimEdiCard, sendClaims } from '../components/ClaimEdi.jsx';
 import { Badge, ErrorBox, Modal, useSubmit } from '../components/ui.jsx';
+import { useShortcuts } from '../shortcuts.js';
+import { undoable } from '../toast.js';
+import './claimdetail.css';
 
 export default function ClaimDetail() {
   const { id } = useParams();
@@ -260,10 +263,28 @@ function Attachments({ claim, onChange }) {
   const { data: docs } = useApi(`/patients/${claim.patient_id}/documents`);
   const [form, setForm] = useState(null);
   const [err, setErr] = useState(null);
-  const run = async (fn) => { setErr(null); try { await fn(); reload(); onChange(); } catch (e) { setErr(e); } };
-  if (!data) return null;
   const editable = can('billing:write') && !['paid', 'void'].includes(claim.status);
+  // What the validator says payers will want, matched to the chart: recent films of these teeth, the perio chart.
+  const { data: sug, reload: reloadSug } = useApi(editable ? `/claims/${claim.id}/attachments/suggest` : null);
+  const [ticked, setTicked] = useState(null);
+  const refreshAll = () => { reload(); reloadSug(); onChange(); };
+  const run = async (fn) => { setErr(null); try { await fn(); refreshAll(); } catch (e) { setErr(e); } };
+  const suggestions = sug?.suggestions || [];
+  const picks = ticked || new Set(suggestions.filter((x) => x.preselected).map((x) => x.key));
+  const attachPicked = () => {
+    const items = suggestions.filter((x) => picks.has(x.key)).map((x) => (x.kind === 'perio' ? { perio_exam_id: x.perio_exam_id } : { document_id: x.document_id, report_type: x.report_type }));
+    if (!items.length) return;
+    setErr(null);
+    // Attached at once; Undo takes them off again (only while they haven't been sent).
+    undoable(`Attached ${items.length} to claim #${claim.id}`,
+      async () => { const r = await api.post(`/claims/${claim.id}/attachments/batch`, { items }); setTicked(null); refreshAll(); return r; },
+      async (r) => { for (const aid of r.added) await api.del(`/claim-attachments/${aid}`); refreshAll(); })
+      .catch((e) => setErr(e));
+  };
+  useShortcuts([{ combo: 'a', handler: attachPicked, label: 'Attach the suggested x-rays / perio chart', section: 'Claim', enabled: editable && picks.size > 0 && !form }]);
+  if (!data) return null;
   const pending = data.attachments.filter((a) => ['pending', 'rejected'].includes(a.status));
+  const toggle = (key) => { const next = new Set(picks); if (next.has(key)) next.delete(key); else next.add(key); setTicked(next); };
   return (
     <div className="card">
       <div className="inline" style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
@@ -275,6 +296,24 @@ function Attachments({ claim, onChange }) {
         </div>
       </div>
       <ErrorBox error={err} />
+      {editable && sug?.needs?.length > 0 && (
+        <div className="attach-suggest">
+          <div><strong>Payers usually want:</strong> {sug.needs.map((n) => `${n.label}${n.teeth.length ? ` of #${n.teeth.join(', #')}` : ''}`).join(' · ')}</div>
+          {suggestions.length > 0 ? (
+            <>
+              {suggestions.map((x) => (
+                <label key={x.key} className="checkbox">
+                  <input type="checkbox" checked={picks.has(x.key)} onChange={() => toggle(x.key)} />
+                  {x.label} <span className="muted">· {x.why} · {fmtDate(x.date)}</span>
+                </label>
+              ))}
+              <button className="small primary" disabled={!picks.size} title="Shortcut: A" onClick={attachPicked}>Attach {picks.size} suggested</button>
+            </>
+          ) : (
+            <div className="muted">Nothing on file from the year around the service date{sug.needs.some((n) => n.type === 'RB') ? ' — take or import an x-ray of the tooth' : ''}{sug.needs.some((n) => n.type === 'P6') ? ' — chart perio' : ''}, or add a narrative.</div>
+          )}
+        </div>
+      )}
       {data.attachments.length === 0 ? <div className="muted" style={{ marginTop: 6 }}>None. {data.mode === 'manual' ? 'Attachments are mailed or faxed with a printed cover sheet (no attachment service is connected).' : ''}</div> : (
         <table style={{ marginTop: 8 }}>
           <thead><tr><th>What</th><th>File / narrative</th><th>Sent</th><th>Control number</th><th /></tr></thead>

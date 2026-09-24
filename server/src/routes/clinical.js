@@ -271,18 +271,27 @@ export default function clinicalRoutes({ db }) {
   r.post('/patients/:id/treatment-plans', requirePermission('clinical:write'), async (req, res) => {
     const patient = await patientOr404(req);
     const row = pick(req.body, ['name', 'notes', 'discount_pct']);
-    requireFields(row, ['name']);
+    // Nobody has to think of a name: "Treatment plan — 2026-09-24" unless they give one.
+    row.name = String(row.name || '').trim().slice(0, 120) || `Treatment plan — ${(await practiceNow(db, req.user.practice_id)).slice(0, 10)}`;
     if (row.discount_pct != null) row.discount_pct = checkDiscount(row.discount_pct);
+    // "All unplanned treatment": every planned procedure on the chart that isn't on a plan yet, in one step.
+    let procedureIds = Array.isArray(req.body.procedure_ids) ? req.body.procedure_ids : [];
+    if (req.body.all_unplanned) {
+      const loose = await db.all("SELECT id FROM procedures WHERE patient_id = ? AND practice_id = ? AND status = 'planned' AND treatment_plan_id IS NULL ORDER BY priority, id", patient.id, req.user.practice_id);
+      procedureIds = [...new Set([...procedureIds.map(Number), ...loose.map((p) => p.id)])];
+    }
+    const newWork = Array.isArray(req.body.procedures) ? req.body.procedures : [];
+    if (req.body.all_unplanned && !procedureIds.length && !newWork.length) throw new HttpError(409, 'There is no unplanned treatment to put on a plan');
     const id = await db.tx(async () => {
       const planId = await insert(db, 'treatment_plans', { ...row, patient_id: patient.id, practice_id: req.user.practice_id });
-      for (const [i, p] of (req.body.procedures || []).entries()) {
+      for (const [i, p] of newWork.entries()) {
         await insert(db, 'procedures', await buildProcedure(req, patient.id, { priority: i + 1, ...p, treatment_plan_id: planId }));
       }
       // Existing planned procedures (e.g. charted on the odontogram) can be gathered into the new plan.
-      await attachProcedures(req, planId, patient.id, req.body.procedure_ids);
+      await attachProcedures(req, planId, patient.id, procedureIds);
       return planId;
     });
-    await audit(db, req, 'treatment_plan.create', 'treatment_plans', id);
+    await audit(db, req, 'treatment_plan.create', 'treatment_plans', id, { patient_id: patient.id, added: newWork.length, gathered: procedureIds.length, ...(req.body.all_unplanned ? { all_unplanned: true } : {}) });
     res.status(201).json(await planWithDetails(await db.get('SELECT * FROM treatment_plans WHERE id = ?', id)));
   });
 
@@ -313,14 +322,16 @@ export default function clinicalRoutes({ db }) {
     return n;
   };
 
-  async function attachProcedures(req, planId, patientId, ids) {
+  // keepOrder: an undo putting work back where it was (its old place and phase are still on the row).
+  async function attachProcedures(req, planId, patientId, ids, { keepOrder = false } = {}) {
     if (!Array.isArray(ids) || !ids.length) return;
     const top = (await db.get('SELECT MAX(priority) AS m FROM procedures WHERE treatment_plan_id = ?', planId)).m || 0;
     for (const [i, raw] of ids.entries()) {
       const p = await findOr404(db, 'procedures', raw, req.user.practice_id, 'Procedure');
       if (p.patient_id !== patientId) throw new HttpError(400, 'Procedure belongs to another patient');
       if (p.status !== 'planned') throw new HttpError(409, `${p.code} is ${p.status}; only planned work can be added to a plan`);
-      await db.run('UPDATE procedures SET treatment_plan_id = ?, priority = ? WHERE id = ?', planId, top + i + 1, p.id);
+      if (Number(p.treatment_plan_id) === Number(planId)) continue; // already there (a repeated request or an undo that already ran)
+      await recorded(db, 'procedures', p.id, () => db.run('UPDATE procedures SET treatment_plan_id = ?, priority = ? WHERE id = ?', planId, keepOrder ? p.priority : top + i + 1, p.id));
     }
   }
 
@@ -328,7 +339,7 @@ export default function clinicalRoutes({ db }) {
   r.post('/treatment-plans/:tid/procedures', requirePermission('clinical:write'), async (req, res) => {
     const plan = await editablePlan(req);
     await db.tx(async () => {
-      await attachProcedures(req, plan.id, plan.patient_id, req.body?.procedure_ids);
+      await attachProcedures(req, plan.id, plan.patient_id, req.body?.procedure_ids, { keepOrder: !!req.body?.keep_order });
       let top = (await db.get('SELECT MAX(priority) AS m FROM procedures WHERE treatment_plan_id = ?', plan.id)).m || 0;
       for (const p of req.body?.procedures || []) {
         await insert(db, 'procedures', await buildProcedure(req, plan.patient_id, { ...p, priority: ++top, treatment_plan_id: plan.id }));

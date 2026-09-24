@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { useLookup } from '../hooks.js';
-import { fromCents, toCents } from '../format.js';
+import { fromCents, toCents, practiceToday } from '../format.js';
+import { useAuth } from '../auth.jsx';
+import { useActivePatient } from '../activePatient.jsx';
 import { ErrorBox, PatientPicker, useSubmit } from './ui.jsx';
 
 export const LAB_STATUSES = [['sent', 'Sent to lab'], ['received', 'Received'], ['returned_for_adjustment', 'Returned for adjustment'], ['delivered', 'Delivered to patient'], ['cancelled', 'Cancelled']];
@@ -85,8 +87,12 @@ export function LabCaseForm({ labCase, patient: fixedPatient, onDone }) {
 
 export function TaskForm({ task, patient: fixedPatient, onDone }) {
   const users = useLookup('/users');
-  const [patient, setPatient] = useState(fixedPatient || (task?.patient_id ? { id: task.patient_id, first_name: task.first_name, last_name: task.last_name } : null));
-  const [form, setForm] = useState({ title: task?.title || '', notes: task?.notes || '', due_date: task?.due_date || '', priority: task?.priority || 'normal', assigned_to: task?.assigned_to || '' });
+  const { practice } = useAuth();
+  const { patientId, recent } = useActivePatient();
+  // A new task is about the patient being worked on, if there is one (clear it to make it general).
+  const [patient, setPatient] = useState(fixedPatient || (task ? (task.patient_id ? { id: task.patient_id, first_name: task.first_name, last_name: task.last_name } : null) : recent.find((r) => r.id === patientId) || null));
+  // New tasks are due today unless changed (most office to-dos are for today).
+  const [form, setForm] = useState({ title: task?.title || '', notes: task?.notes || '', due_date: task ? task.due_date || '' : practiceToday(practice?.timezone), priority: task?.priority || 'normal', assigned_to: task?.assigned_to || '' });
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
   const { submit, busy, error } = useSubmit(async () => {
     const body = { ...form, patient_id: patient?.id ?? null, assigned_to: form.assigned_to ? Number(form.assigned_to) : null };

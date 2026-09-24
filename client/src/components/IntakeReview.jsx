@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../api.js';
 import { useApi } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
@@ -72,13 +72,21 @@ export default function IntakeReview({ compact = false }) {
   };
   const move = (d) => setAt((i) => Math.max(0, Math.min(items.length - 1, i + d)));
   useShortcuts([
-    { combo: 'j', handler: () => move(1), label: 'Next intake item', section: 'Intake' },
-    { combo: 'k', handler: () => move(-1), label: 'Previous intake item', section: 'Intake' },
-    { combo: 'enter', handler: () => open(), label: 'Open the patient', section: 'Intake', enabled: !!cur },
-    { combo: 'a', handler: () => accept(), label: 'Accept (review history / enter insurance / read card)', section: 'Intake', enabled: !!cur },
-    { combo: 'x', handler: () => setAside(), label: 'Set a card photo aside', section: 'Intake', enabled: cur?.kind === 'card' },
+    { combo: 'j', handler: () => move(1), label: 'Next intake item', section: 'Intake', enabled: !compact },
+    { combo: 'k', handler: () => move(-1), label: 'Previous intake item', section: 'Intake', enabled: !compact },
+    { combo: 'enter', handler: () => open(), label: 'Open the patient', section: 'Intake', enabled: !compact && !!cur },
+    { combo: 'a', handler: () => accept(), label: 'Accept (review history / enter insurance / read card)', section: 'Intake', enabled: !compact && !!cur },
+    { combo: 'x', handler: () => setAside(), label: 'Set a card photo aside', section: 'Intake', enabled: !compact && cur?.kind === 'card' },
   ]);
 
+  // On other pages (the To-do list), just a link when something is waiting: the list and its keys live on /intake.
+  if (compact) {
+    return items.length ? (
+      <Link to="/intake" className="card intake-link" style={{ display: 'block', marginBottom: 12 }}>
+        <strong>{items.length} sent in online</strong> <span className="muted">— health histories, insurance and card photos to review →</span>
+      </Link>
+    ) : null;
+  }
   return (
     <div className="card">
       <div className="page-header" style={{ marginBottom: 6 }}>

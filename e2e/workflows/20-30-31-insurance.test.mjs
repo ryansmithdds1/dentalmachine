@@ -101,7 +101,7 @@ test('#31 scan a new insurance card: photo → read → confirm in ≤ 4 actions
   assert.deepEqual(s.errors, []);
 });
 
-// TODO(#30): the intake worklist (components/IntakeReview.jsx, GET /intake/pending in routes/intakereview.js)
-// isn't mounted in app.js or placed on a page yet. Once it is (office To-do page), measure: J to the item,
+// #30: the intake worklist (components/IntakeReview.jsx on the To-do page, GET /intake/pending) is mounted.
+// TODO: seed a pending item from the browser (a public booking with insurance for an existing patient) and measure J to the item,
 // A to accept — 1–2 actions per item. The server side is covered in server/test/intakeinsurance.test.js.
-test.skip('#30 intake worklist: J/K, A accepts — waiting for the route to be mounted and the list placed on a page');
+test.skip('#30 intake worklist: J/K, A accepts — needs a seeded pending item (server side covered)');

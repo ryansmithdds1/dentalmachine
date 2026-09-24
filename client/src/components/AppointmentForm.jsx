@@ -106,7 +106,9 @@ export default function AppointmentForm({ appointment, defaults = {}, patient: i
         ...(!keepChair && s.operatory_id ? { operatory_id: s.operatory_id } : {}),
         ...(!keepType && s.appointment_type_id ? { appointment_type_id: s.appointment_type_id } : {}),
         ...(!keepLength && s.duration ? { duration: s.duration } : {}),
-        ...(!timeFixed && s.start_time ? { date: s.start_time.slice(0, 10), time: s.start_time.slice(11, 16) } : {}),
+        // A date the person typed is kept: the opening only fills the time, and only when it's on that day.
+        ...(!timeFixed && s.start_time && !touched.date ? { date: s.start_time.slice(0, 10), time: s.start_time.slice(11, 16) } : {}),
+        ...(!timeFixed && s.start_time && touched.date && s.start_time.slice(0, 10) === f.date ? { time: s.start_time.slice(11, 16) } : {}),
       }));
       setSuggested(s);
       setLoadedKey(suggestKey);

@@ -9,6 +9,11 @@ import { useAuth } from '../auth.jsx';
 import { fmtDate, fmtDateTime, money, practiceToday } from '../format.js';
 import { Modal } from '../components/ui.jsx';
 import { LabCaseForm, TaskForm, LAB_STATUSES } from '../components/OfficeForms.jsx';
+import { useShortcuts } from '../shortcuts.js';
+import { undoable } from '../toast.js';
+import { tasksChanged } from '../components/QuickCommands.jsx';
+import IntakeReview from '../components/IntakeReview.jsx';
+import './office.css';
 
 // Team to-do list and lab case tracking, and the time clock.
 export default function Office() {
@@ -36,16 +41,32 @@ function OfficeBoard() {
   const [labFilter, setLabFilter] = useState('open');
   const { data: labs, reload: reloadLabs } = useApi(can('clinical:read') ? `/lab-cases${labFilter === 'open' ? '?open=true' : ''}` : null);
   const [modal, setModal] = useState(null);
+  const [sel, setSel] = useState(0);
   const today = practiceToday(practice?.timezone);
 
-  const toggle = async (t) => {
-    await api.put(`/tasks/${t.id}`, { status: t.status === 'done' ? 'open' : 'done' });
-    reloadTasks();
+  // Done (or reopened) at once, with Undo; both steps are on the task's record.
+  const toggle = (t) => {
+    const next = t.status === 'done' ? 'open' : 'done';
+    undoable(next === 'done' ? `Done: ${t.title}` : `Reopened: ${t.title}`,
+      async () => { const r = await api.put(`/tasks/${t.id}`, { status: next }); reloadTasks(); tasksChanged(); return r; },
+      async () => { await api.put(`/tasks/${t.id}`, { status: t.status }); reloadTasks(); tasksChanged(); })
+      .catch(() => { /* shown as a toast by undoable() */ });
   };
+  const count = tasks?.length || 0;
+  const at = Math.min(sel, Math.max(0, count - 1));
+  const quiet = !modal;
+  useShortcuts([
+    { combo: 'x', handler: () => tasks?.[at] && toggle(tasks[at]), label: showDone ? 'Reopen the highlighted task' : 'Mark the highlighted task done (Undo with Ctrl/⌘Z)', section: 'To-do', enabled: quiet && count > 0 },
+    { combo: 'j', handler: () => setSel(Math.min(at + 1, count - 1)), label: 'Next task', section: 'To-do', enabled: quiet && count > 1 },
+    { combo: 'k', handler: () => setSel(Math.max(at - 1, 0)), label: 'Previous task', section: 'To-do', enabled: quiet && count > 1 },
+    { combo: 't', handler: () => setModal({ type: 'task' }), label: 'New task (or anywhere: Ctrl/⌘K, “task … @name”)', section: 'To-do', enabled: quiet },
+  ]);
 
   return (
     <>
       <div className="page-header"><h1>To-do & lab cases</h1></div>
+      {/* #30: forms, cards and insurance changes waiting for a person (shows nothing when there are none). */}
+      <IntakeReview compact />
       <div className="grid grid-2" style={{ alignItems: 'start' }}>
         <div className="card">
           <div className="page-header" style={{ marginBottom: 8 }}>
@@ -56,12 +77,12 @@ function OfficeBoard() {
                 <button className={mine ? 'active' : ''} onClick={() => setMine(true)}>Mine</button>
               </div>
               <button className="small" onClick={() => setShowDone(!showDone)}>{showDone ? 'Show open' : 'Show done'}</button>
-              <button className="primary" onClick={() => setModal({ type: 'task' })}>+ Task</button>
+              <button className="primary" title="Shortcut: T" onClick={() => setModal({ type: 'task' })}>+ Task</button>
             </div>
           </div>
           {tasks?.length === 0 && <div className="empty">{showDone ? 'Nothing completed yet.' : 'All caught up. 🎉'}</div>}
-          {tasks?.map((t) => (
-            <div key={t.id} className="task-row">
+          {tasks?.map((t, i) => (
+            <div key={t.id} className={`task-row${i === at ? ' task-sel' : ''}`} aria-current={i === at ? 'true' : undefined} onMouseDown={() => setSel(i)}>
               <input type="checkbox" checked={t.status === 'done'} onChange={() => toggle(t)} aria-label="Done" />
               <div style={{ flex: 1 }}>
                 <button className="link" style={{ textAlign: 'left', whiteSpace: 'normal', color: 'var(--text)' }} onClick={() => setModal({ type: 'task', item: t })}>
@@ -117,7 +138,7 @@ function OfficeBoard() {
 
       {modal?.type === 'task' && (
         <Modal title={modal.item ? 'Task' : 'New task'} onClose={() => setModal(null)}>
-          <TaskForm task={modal.item} onDone={() => { setModal(null); reloadTasks(); }} />
+          <TaskForm task={modal.item} onDone={() => { setModal(null); reloadTasks(); tasksChanged(); }} />
         </Modal>
       )}
       {modal?.type === 'lab' && (

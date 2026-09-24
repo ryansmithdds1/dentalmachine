@@ -9,6 +9,8 @@ import { sendMessage, preferredChannel } from '../messaging.js';
 import { checkEpcs } from '../erx.js';
 import { allergyWarning, controlledSchedule, stricterSchedule } from '../drugs.js';
 import { PdfDoc, dataUrlImage } from '../pdf.js';
+import { mintHandoff, redeemHandoff, HANDOFF_MINUTES } from '../handoff.js';
+import { formPass } from './public.js';
 
 // Common dental prescriptions for one-click entry.
 export const RX_FAVORITES = [
@@ -110,6 +112,12 @@ export default function casePresentationRoutes({ db, messenger, config, erx, sec
     await db.run("UPDATE treatment_plans SET sign_token_hash = ?, sign_token_expires_at = ?, sign_token_failures = 0, presented_at = datetime('now') WHERE id = ?", hash, expires, plan.id);
     const url = `${config.appUrl}/tp/${token}`;
     let message = null;
+    // "On this screen": the patient is here, so this signed-in device gets a one-time pass past the birth-date step.
+    if (req.body?.here && !req.body?.send) {
+      const handoff = await mintHandoff(db, req, 'plan', plan.id);
+      await audit(db, req, 'treatment_plan.handoff', 'treatment_plans', plan.id, { patient_id: plan.patient_id, minutes: HANDOFF_MINUTES });
+      return res.json({ url, handoff, message });
+    }
     if (req.body?.send) {
       const patient = await db.get('SELECT * FROM patients WHERE id = ?', plan.patient_id);
       const target = preferredChannel(patient, req.body.send === 'auto' ? undefined : req.body.send);
@@ -127,6 +135,24 @@ export default function casePresentationRoutes({ db, messenger, config, erx, sec
 
   // This benefit year vs next: what insurance has left, and whether doing part of the plan after the
   // year renews would get more of it paid (work in the plan's order until this year's maximum runs out).
+  // The device the plan or forms were handed over on trades its one-time pass for the patient's viewing pass.
+  // Only the same signed-in session can, once, within 15 minutes (see handoff.js).
+  r.post('/signing-passes/redeem', requirePermission('patients:read'), async (req, res) => {
+    const got = await redeemHandoff(db, req, req.body?.code);
+    if (!got) throw new HttpError(410, 'This hand-off has expired or was already used — open it again from the chart, or the patient can confirm their birth date');
+    const ttl = 30 * 60;
+    if (got.kind === 'plan') {
+      const plan = await db.get('SELECT id, patient_id FROM treatment_plans WHERE id = ? AND practice_id = ?', got.id, req.user.practice_id);
+      if (!plan) throw new HttpError(404, 'Treatment plan not found');
+      await audit(db, req, 'treatment_plan.handoff_opened', 'treatment_plans', plan.id, { patient_id: plan.patient_id, handed_over_by: got.user_id });
+      return res.json({ kind: 'plan', pass: signToken({ sub: plan.id, aud: 'tp-view' }, secret, ttl), back: `/patients/${plan.patient_id}?tab=treatment` });
+    }
+    const f = await db.get('SELECT id, patient_id FROM form_requests WHERE id = ? AND practice_id = ?', got.id, req.user.practice_id);
+    if (!f) throw new HttpError(404, 'Forms not found');
+    await audit(db, req, 'form_request.handoff_opened', 'form_requests', f.id, { patient_id: f.patient_id, handed_over_by: got.user_id });
+    res.json({ kind: 'forms', pass: formPass(f.id, secret), back: `/patients/${f.patient_id}?tab=treatment` });
+  });
+
   r.get('/treatment-plans/:tid/benefit-years', requirePermission('clinical:read'), async (req, res) => {
     const plan = await findOr404(db, 'treatment_plans', req.params.tid, req.user.practice_id, 'Treatment plan');
     const policy = await primaryPolicy(db, plan.practice_id, plan.patient_id);

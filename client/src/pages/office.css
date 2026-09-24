@@ -1,0 +1,2 @@
+/* To-do list keyboard highlight (J/K move, X marks done). */
+.task-row.task-sel { box-shadow: inset 3px 0 0 var(--primary); background: color-mix(in srgb, var(--primary) 7%, transparent); }

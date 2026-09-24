@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { api, download } from '../../api.js';
 import { useApi, useLookup } from '../../hooks.js';
 import { useAuth } from '../../auth.jsx';
@@ -8,6 +9,10 @@ import AppointmentForm from '../AppointmentForm.jsx';
 import { CodePicker } from './ChartTab.jsx';
 import SendForms from '../FormsSend.jsx';
 import { codeArea, QUADRANT_LABELS } from '../Odontogram.jsx';
+import { parseEntry } from './chartShorthand.js';
+import { useShortcuts } from '../../shortcuts.js';
+import { toast, undoable } from '../../toast.js';
+import './treatment.css';
 
 export default function TreatmentTab({ patient, onChange }) {
   const { can, practice } = useAuth();
@@ -34,12 +39,35 @@ export default function TreatmentTab({ patient, onChange }) {
   };
 
   const unplanned = loose?.filter((p) => !p.treatment_plan_id) || [];
+  const canWrite = can('clinical:write');
+  // Changes happen at once with an Undo toast (Ctrl/⌘Z); undo goes through the normal routes, so both are on record.
+  // A failure already shows as a red toast from undoable(), so there's nothing more to do with it here.
+  const withUndo = (message, doIt, undoIt) => undoable(message, async () => { const r = await doIt(); refresh(); return r; }, async () => { await undoIt(); refresh(); })
+    .catch(() => { /* shown as a toast by undoable() */ });
+  const planAll = async () => {
+    setErr(null);
+    try {
+      const plan = await api.post(`/patients/${patient.id}/treatment-plans`, { all_unplanned: true });
+      toast(`“${plan.name}” made with ${plan.procedures.length} procedure${plan.procedures.length === 1 ? '' : 's'}`);
+      refresh();
+    } catch (e) { setErr(e); }
+  };
+  const quiet = !creating && !adding && !booking && !presenting && !consent;
+  useShortcuts([
+    { combo: 'n', handler: () => setCreating(true), label: 'New treatment plan (type “14 D2740”, Enter for each)', section: 'Treatment', enabled: canWrite && quiet },
+    { combo: 'a', handler: planAll, label: 'Put all unplanned work on a new plan', section: 'Treatment', enabled: canWrite && quiet && unplanned.length > 0 },
+  ]);
 
   return (
     <>
       <div className="page-header">
         <h2 style={{ margin: 0 }}>Treatment plans</h2>
-        {can('clinical:write') && <button className="primary" onClick={() => setCreating(true)}>+ New treatment plan</button>}
+        {canWrite && (
+          <div className="actions">
+            {unplanned.length > 0 && <button onClick={planAll} title="Shortcut: A">Plan all unplanned work ({unplanned.length})</button>}
+            <button className="primary" onClick={() => setCreating(true)} title="Shortcut: N">+ New treatment plan</button>
+          </div>
+        )}
       </div>
       <ErrorBox error={err} />
       {note && <div className="public-notice ok" style={{ marginBottom: 12 }}>{note}</div>}
@@ -50,7 +78,7 @@ export default function TreatmentTab({ patient, onChange }) {
       {plans?.length === 0 && unplanned.length === 0 && <div className="card empty">No treatment planned.</div>}
 
       {plans?.map((plan) => (
-        <div className="card" key={plan.id}>
+        <div className="card" key={plan.id} data-plan={plan.id}>
           <div className="page-header" style={{ marginBottom: 10 }}>
             <div>
               <h3 style={{ margin: 0 }}>{plan.name}{plan.option_label ? <span className="badge info" style={{ marginLeft: 6 }}>{plan.option_label}</span> : null} <Badge value={plan.status} />{plan.discount_pct > 0 && <span className="badge ok" style={{ marginLeft: 6 }}>{plan.discount_pct}% discount</span>}</h3>
@@ -73,17 +101,19 @@ export default function TreatmentTab({ patient, onChange }) {
                 {plan.status !== 'rejected' && <button className="small" onClick={() => setAdding(plan)}>+ Add work</button>}
                 {plan.status === 'proposed' && <button className="small" title="A copy of this plan's unstarted work to change into another option (e.g. implant vs bridge). Accepting one option declines the others." onClick={() => act(() => api.post(`/treatment-plans/${plan.id}/duplicate`, {}))}>+ Alternative</button>}
                 {plan.status !== 'rejected' && (
-                  <button className="small" onClick={() => {
-                    const v = window.prompt("Discount on the patient's share of this plan (%) — posted as an adjustment as each procedure is done:", String(plan.discount_pct || 0));
-                    if (v != null && v.trim() !== '') act(() => api.put(`/treatment-plans/${plan.id}`, { discount_pct: Number(v) }));
-                  }}>Discount…</button>
+                  <InlineEdit
+                    label="Discount on the patient's share (%) — posted as an adjustment as each procedure is done" suffix="%" width={64}
+                    value={String(plan.discount_pct || 0)} display={<span className="small-button">Discount{plan.discount_pct ? ` ${plan.discount_pct}%` : '…'}</span>}
+                    valid={(v) => /^\d{1,3}$/.test(v) && Number(v) <= 100}
+                    onSave={(v) => withUndo(`Discount set to ${Number(v)}%`, () => api.put(`/treatment-plans/${plan.id}`, { discount_pct: Number(v) }), () => api.put(`/treatment-plans/${plan.id}`, { discount_pct: plan.discount_pct || 0 }))}
+                  />
                 )}
                 {plan.status === 'proposed' && <button className="small" onClick={() => act(() => api.put(`/treatment-plans/${plan.id}`, { status: 'accepted' }))}>Accepted verbally</button>}
                 {plan.status === 'proposed' && <button className="small danger" onClick={() => act(() => api.put(`/treatment-plans/${plan.id}`, { status: 'rejected' }))}>Declined</button>}
               </div>
             )}
           </div>
-          <PlanTable plan={plan} codes={codes} canEdit={can('clinical:write') && !['completed', 'rejected'].includes(plan.status)} act={act}
+          <PlanTable plan={plan} codes={codes} canEdit={canWrite && !['completed', 'rejected'].includes(plan.status)} act={act} withUndo={withUndo}
             onBook={(procs) => setBooking({ plan, procs })} canBook={can('schedule:write')} />
           {['proposed', 'accepted'].includes(plan.status) && plan.procedures?.some((p) => p.status === 'planned') && <PlanMoney plan={plan} patient={patient} onChange={refresh} />}
         </div>
@@ -109,7 +139,7 @@ export default function TreatmentTab({ patient, onChange }) {
       {unplanned.length > 0 && (
         <div className="card">
           <h3>Other planned procedures</h3>
-          <ProcTable procs={unplanned} canEdit={can('clinical:write')} act={act} />
+          <ProcTable procs={unplanned} canEdit={canWrite} act={act} withUndo={withUndo} />
         </div>
       )}
 
@@ -180,7 +210,7 @@ const bookingMinutes = (procs, codes) => {
 };
 
 // A plan's work by phase, in order: move rows, change phases, override fees, take work off the plan.
-function PlanTable({ plan, codes, canEdit, act, onBook, canBook }) {
+function PlanTable({ plan, codes, canEdit, act, withUndo, onBook, canBook }) {
   const est = Object.fromEntries((plan.estimate?.items || []).map((i) => [i.procedure_id, i]));
   const procs = plan.procedures;
   const phases = [...new Set(procs.map((p) => p.phase || 1))].sort((a, b) => a - b);
@@ -227,10 +257,12 @@ function PlanTable({ plan, codes, canEdit, act, onBook, canBook }) {
                   <td><Badge value={p.status} />{p.appointment_id && p.status === 'planned' ? <div className="muted" style={{ fontSize: 11 }}>scheduled</div> : null}</td>
                   <td className="num">
                     {canEdit && p.status === 'planned' ? (
-                      <button className="link-button" title="Change the fee for this patient" onClick={() => {
-                        const v = window.prompt(`Fee for ${p.code}${p.tooth ? ` #${p.tooth}` : ''} ($):`, fromCents(p.fee));
-                        if (v != null && v.trim() !== '' && Number.isFinite(Number(v))) act(() => api.put(`/procedures/${p.id}`, { fee: toCents(v) }));
-                      }}>{money(p.fee)}</button>
+                      <InlineEdit
+                        label={`Fee for ${p.code}${p.tooth ? ` #${p.tooth}` : ''} ($)`} value={fromCents(p.fee)} width={90} display={money(p.fee)}
+                        valid={(v) => v.trim() !== '' && Number.isFinite(Number(v)) && Number(v) >= 0}
+                        onSave={(v) => toCents(v) !== p.fee && withUndo(`Fee for ${p.code}${p.tooth ? ` #${p.tooth}` : ''} is now ${money(toCents(v))}`,
+                          () => api.put(`/procedures/${p.id}`, { fee: toCents(v) }), () => api.put(`/procedures/${p.id}`, { fee: p.fee }))}
+                      />
                     ) : money(p.fee)}
                   </td>
                   {showEst && <>{plan.estimate.total_write_off > 0 && <td className="num muted">{est[p.id]?.write_off ? `−${money(est[p.id].write_off)}` : '—'}</td>}<td className="num">{est[p.id] ? money(est[p.id].insurance) : '—'}{est[p.id]?.notes?.length ? <div className="est-note" title={est[p.id].notes.join('\n')}>{est[p.id].notes.join(' · ')}</div> : null}</td><td className="num">{est[p.id] ? money(est[p.id].patient) : '—'}</td></>}
@@ -243,8 +275,10 @@ function PlanTable({ plan, codes, canEdit, act, onBook, canBook }) {
                           {[1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>Phase {n}</option>)}
                         </select>
                         <button className="small" onClick={() => act(() => api.post(`/procedures/${p.id}/complete`))}>Complete</button>
-                        <button className="small" title="Take it off this plan (stays on the chart)" onClick={() => act(() => api.del(`/treatment-plans/${plan.id}/procedures/${p.id}`))}>Remove</button>
-                        <button className="small danger" title="Delete from the chart" onClick={() => confirm('Delete this procedure from the chart?') && act(() => api.post(`/procedures/${p.id}/cancel`))}>✕</button>
+                        <button className="small" title="Take it off this plan (stays on the chart)" onClick={() => withUndo(`${label(p)} taken off the plan`,
+                          () => api.del(`/treatment-plans/${plan.id}/procedures/${p.id}`), () => api.post(`/treatment-plans/${plan.id}/procedures`, { procedure_ids: [p.id], keep_order: true }))}>Remove</button>
+                        <button className="small danger" title="Remove from the chart (Undo puts it back)" aria-label={`Remove ${label(p)} from the chart`} onClick={() => withUndo(`${label(p)} removed from the chart`,
+                          () => api.post(`/procedures/${p.id}/cancel`), () => api.post(`/procedures/${p.id}/restore`))}>✕</button>
                       </div>
                     )}
                   </td>
@@ -327,7 +361,9 @@ function AddWork({ plan, patient, unplanned, onDone }) {
   );
 }
 
-function ProcTable({ procs, estimate, canEdit, act }) {
+const label = (p) => `${p.code}${p.tooth ? ` #${p.tooth}` : ''}`;
+
+function ProcTable({ procs, estimate, canEdit, act, withUndo }) {
   const est = Object.fromEntries((estimate?.items || []).map((i) => [i.procedure_id, i]));
   return (
     <div className="table-wrap">
@@ -349,7 +385,8 @@ function ProcTable({ procs, estimate, canEdit, act }) {
                 {canEdit && p.status === 'planned' && (
                   <>
                     <button className="small" onClick={() => act(() => api.post(`/procedures/${p.id}/complete`))}>Complete</button>{' '}
-                    <button className="small danger" onClick={() => confirm('Remove this procedure from the plan?') && act(() => api.post(`/procedures/${p.id}/cancel`))}>✕</button>
+                    <button className="small danger" title="Remove from the chart (Undo puts it back)" aria-label={`Remove ${label(p)} from the chart`} onClick={() => withUndo(`${label(p)} removed from the chart`,
+                      () => api.post(`/procedures/${p.id}/cancel`), () => api.post(`/procedures/${p.id}/restore`))}>✕</button>
                   </>
                 )}
               </td>
@@ -371,64 +408,154 @@ function ProcTable({ procs, estimate, canEdit, act }) {
   );
 }
 
+// Click (or Enter) to edit in place; Enter saves, Esc puts it back. No prompt boxes.
+function InlineEdit({ value, display, label, valid = () => true, onSave, width = 80, suffix = '' }) {
+  const [editing, setEditing] = useState(false);
+  const [v, setV] = useState(value);
+  const done = useRef(false);
+  if (!editing) {
+    return <button type="button" className="link-button" title={label} aria-label={label} onClick={() => { setV(value); done.current = false; setEditing(true); }}>{display}</button>;
+  }
+  const finish = (save) => {
+    if (done.current) return;
+    done.current = true;
+    setEditing(false);
+    if (save && v !== value && valid(v)) onSave(v.trim());
+  };
+  return (
+    <span className="inline-edit">
+      <input
+        autoFocus aria-label={label} value={v} inputMode="decimal" style={{ width }} className={valid(v) ? '' : 'invalid'}
+        onChange={(e) => setV(e.target.value)} onFocus={(e) => e.target.select()} onBlur={() => finish(true)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+          if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finish(false); }
+        }}
+      />{suffix}
+    </span>
+  );
+}
+
+// "UR", "UL", "LL", "LR" in a typed line are the quadrant for scaling and root planing and the like.
+const pullArea = (text) => {
+  let area = '';
+  const rest = text.replace(/\b(UR|UL|LL|LR)\b/gi, (m) => { area = m.toUpperCase(); return ' '; });
+  return { area, rest: rest.trim() };
+};
+let rowSeq = 0;
+
+// Building a plan by typing it the way it's called out: "14 D2740", "30 MO filling", "2-4 sealant", "D4341 UR"
+// and Enter for each; or search for a code by name. Ctrl/⌘+Enter makes the plan. Charted work that isn't on a
+// plan yet starts ticked.
 function PlanBuilder({ patient, unplanned = [], onDone, onCancel }) {
+  const { practice } = useAuth();
   const codes = useLookup('/procedure-codes?active=true');
   const providers = useLookup('/providers?active=true');
-  const [name, setName] = useState('Treatment plan');
+  const [name, setName] = useState(() => `Treatment plan — ${practiceToday(practice?.timezone)}`);
   const [providerId, setProviderId] = useState(patient.primary_provider_id || '');
-  const [items, setItems] = useState([{ code_id: '', tooth: '', surfaces: '' }]);
+  const [items, setItems] = useState([]);
+  const [line, setLine] = useState('');
+  const [lineErr, setLineErr] = useState(null);
+  const [focusRow, setFocusRow] = useState(null);
+  const rowInputs = useRef({});
+  const byCode = useMemo(() => new Map(codes.map((c) => [c.code, c])), [codes]);
+  const byId = useMemo(() => new Map(codes.map((c) => [String(c.id), c])), [codes]);
   // Work already charted on the odontogram starts ticked.
   const [attach, setAttach] = useState(() => unplanned.map((p) => p.id));
+  useEffect(() => {
+    if (focusRow != null) rowInputs.current[focusRow]?.focus();
+  }, [focusRow]);
+
   const { submit, busy, error } = useSubmit(async () => {
     await api.post(`/patients/${patient.id}/treatment-plans`, {
       name,
       procedure_ids: attach,
-      procedures: items.filter((i) => i.code_id).map((i) => ({
-        code_id: Number(i.code_id), tooth: i.tooth || null, surfaces: i.surfaces || null, provider_id: providerId ? Number(providerId) : null,
+      procedures: items.map((i) => ({
+        code_id: i.code_id, tooth: i.tooth || null, surfaces: i.surfaces || null, area: i.area || null, provider_id: providerId ? Number(providerId) : null,
       })),
     });
     onDone();
   });
-  const setItem = (idx, k, v) => setItems(items.map((it, i) => (i === idx ? { ...it, [k]: v } : it)));
-  const total = items.reduce((s, i) => s + (codes.find((c) => String(c.id) === String(i.code_id))?.fee || 0), 0);
+  useShortcuts([{ combo: 'mod+enter', handler: () => !busy && submit(), label: 'Make the plan', section: 'Treatment', inInputs: true }]);
+
+  const addLine = () => {
+    const text = line.trim();
+    if (!text) return;
+    try {
+      const { area, rest } = pullArea(text);
+      // Everything in a plan is work to do, so "14 crown" means a planned crown here.
+      const said = /\b(plan|planned|tx|done|existing|ex)\b/i.test(rest) ? rest : `${rest} plan`;
+      const add = parseEntry(said).map((p) => {
+        if (p.type !== 'procedure') throw new Error(`That's a finding, not work — chart it on the Chart tab (“${text}”)`);
+        const code = byCode.get(p.code);
+        if (!code) throw new Error(`${p.code} isn't in your procedure codes`);
+        return { key: ++rowSeq, code_id: code.id, tooth: p.tooth || '', surfaces: p.surfaces || '', area };
+      });
+      setItems((list) => [...list, ...add]);
+      setLine('');
+      setLineErr(null);
+    } catch (e) {
+      setLineErr(e.message);
+    }
+  };
+  const pick = (c) => {
+    if (!c) return;
+    const key = ++rowSeq;
+    setItems((list) => [...list, { key, code_id: c.id, tooth: '', surfaces: '', area: '' }]);
+    // Straight to the tooth (or quadrant) for codes that need one.
+    if (codeArea(c) !== 'mouth') setFocusRow(key);
+  };
+  const setItem = (key, k, v) => setItems(items.map((it) => (it.key === key ? { ...it, [k]: v } : it)));
+  const chosen = unplanned.filter((p) => attach.includes(p.id));
+  const total = items.reduce((sum, i) => sum + (byId.get(String(i.code_id))?.fee || 0), 0) + chosen.reduce((sum, p) => sum + (p.fee || 0), 0);
 
   return (
     <form onSubmit={(e) => { e.preventDefault(); submit(); }}>
       <ErrorBox error={error} />
-      <div className="form-grid">
-        <label>Plan name<input value={name} onChange={(e) => setName(e.target.value)} required /></label>
-        <label>
-          Provider
-          <select value={providerId} onChange={(e) => setProviderId(e.target.value)}>
-            <option value="">—</option>
-            {providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
-        </label>
+      <label className="plan-quick">
+        Add work — tooth and code or what it is, Enter for each
+        <input
+          value={line} onChange={(e) => { setLine(e.target.value); setLineErr(null); }} aria-label="Add work to the plan"
+          placeholder="14 D2740 · 30 MO filling · 2-4 sealant · 19 rct · D4341 UR"
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey) { e.preventDefault(); addLine(); }
+          }}
+        />
+      </label>
+      {lineErr && <div className="text-danger" style={{ fontSize: 13, marginTop: 4 }}>{lineErr}</div>}
+      <div className="plan-search">
+        <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>Or find a code by name</div>
+        <CodePicker value={null} onChange={pick} codes={codes} />
       </div>
-      <table style={{ marginTop: 14 }}>
-        <thead><tr><th>Procedure</th><th style={{ width: 90 }}>Tooth</th><th style={{ width: 110 }}>Surfaces</th><th className="num">Fee</th><th /></tr></thead>
-        <tbody>
-          {items.map((it, idx) => {
-            const code = codes.find((c) => String(c.id) === String(it.code_id));
-            return (
-              <tr key={idx}>
-                <td>
-                  <select value={it.code_id} onChange={(e) => setItem(idx, 'code_id', e.target.value)}>
-                    <option value="">Select…</option>
-                    {codes.map((c) => <option key={c.id} value={c.id}>{c.code} – {c.description}</option>)}
-                  </select>
-                </td>
-                <td><input value={it.tooth} onChange={(e) => setItem(idx, 'tooth', e.target.value)} placeholder={code?.requires_tooth ? 'req.' : ''} /></td>
-                <td><input value={it.surfaces} onChange={(e) => setItem(idx, 'surfaces', e.target.value.toUpperCase())} placeholder={code?.requires_surface ? 'e.g. MOD' : ''} /></td>
-                <td className="num">{code ? money(code.fee) : ''}</td>
-                <td><button type="button" className="small" onClick={() => setItems(items.filter((_, i) => i !== idx))}>✕</button></td>
-              </tr>
-            );
-          })}
-          <tr className="totals-row"><td colSpan={3}>Total</td><td className="num">{money(total)}</td><td /></tr>
-        </tbody>
-      </table>
-      <button type="button" className="small" style={{ marginTop: 8 }} onClick={() => setItems([...items, { code_id: '', tooth: '', surfaces: '' }])}>+ Add procedure</button>
+
+      {items.length > 0 && (
+        <table style={{ marginTop: 12 }}>
+          <thead><tr><th>Procedure</th><th style={{ width: 90 }}>Tooth / area</th><th style={{ width: 110 }}>Surfaces</th><th className="num">Fee</th><th /></tr></thead>
+          <tbody>
+            {items.map((it) => {
+              const code = byId.get(String(it.code_id));
+              const kind = codeArea(code);
+              return (
+                <tr key={it.key}>
+                  <td><strong>{code?.code}</strong> {code?.description}</td>
+                  <td>
+                    {kind === 'tooth' && <input ref={(el) => { rowInputs.current[it.key] = el; }} aria-label={`Tooth for ${code?.code}`} value={it.tooth} onChange={(e) => setItem(it.key, 'tooth', e.target.value.toUpperCase())} placeholder={code?.requires_tooth ? 'req.' : ''} />}
+                    {['quadrant', 'arch'].includes(kind) && (
+                      <select ref={(el) => { rowInputs.current[it.key] = el; }} aria-label={kind === 'quadrant' ? 'Quadrant' : 'Arch'} value={it.area} onChange={(e) => setItem(it.key, 'area', e.target.value)}>
+                        <option value="">Choose…</option>
+                        {(kind === 'quadrant' ? ['UR', 'UL', 'LL', 'LR'] : ['U', 'L']).map((a) => <option key={a} value={a}>{QUADRANT_LABELS[a]}</option>)}
+                      </select>
+                    )}
+                  </td>
+                  <td>{kind === 'tooth' && <input aria-label={`Surfaces for ${code?.code}`} value={it.surfaces} onChange={(e) => setItem(it.key, 'surfaces', e.target.value.toUpperCase())} placeholder={code?.requires_surface ? 'e.g. MOD' : ''} />}</td>
+                  <td className="num">{code ? money(code.fee) : ''}</td>
+                  <td><button type="button" className="small" aria-label={`Take ${code?.code} off`} onClick={() => setItems(items.filter((x) => x.key !== it.key))}>✕</button></td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
       {unplanned.length > 0 && (
         <>
           <h3 style={{ marginTop: 14 }}>Charted work to include</h3>
@@ -440,40 +567,62 @@ function PlanBuilder({ patient, unplanned = [], onDone, onCancel }) {
           ))}
         </>
       )}
+      <div className="form-grid" style={{ marginTop: 14 }}>
+        <label>Plan name<input value={name} onChange={(e) => setName(e.target.value)} /></label>
+        <label>
+          Provider
+          <select value={providerId} onChange={(e) => setProviderId(e.target.value)}>
+            <option value="">—</option>
+            {providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        </label>
+      </div>
       <div className="form-actions">
+        <span className="muted" style={{ marginRight: 'auto' }}>{items.length + chosen.length} procedure{items.length + chosen.length === 1 ? '' : 's'} · {money(total)}</span>
         <button type="button" onClick={onCancel}>Cancel</button>
-        <button className="primary" disabled={busy}>Create plan</button>
+        <button className="primary" disabled={busy || (!items.length && !chosen.length)} title="Ctrl/⌘+Enter">Create plan</button>
       </div>
     </form>
   );
 }
 
+// Present: open it right here for the patient in the chair (no birth date on this signed-in device, and a way back
+// to the chart when they're done), or text/email it to review at home (the birth date is asked there).
 function PresentModal({ plan, patient, onClose }) {
+  const navigate = useNavigate();
   const [result, setResult] = useState(null);
   const [err, setErr] = useState(null);
+  const [busy, setBusy] = useState(false);
   const go = async (send) => {
     setErr(null);
+    setBusy(true);
     try {
-      const r = await api.post(`/treatment-plans/${plan.id}/present`, send ? { send } : {});
+      const r = await api.post(`/treatment-plans/${plan.id}/present`, send ? { send } : { here: true });
+      if (!send) {
+        navigate(`${new URL(r.url, window.location.origin).pathname}#here=${encodeURIComponent(r.handoff)}`);
+        return;
+      }
       setResult(r);
-      if (!send) window.open(r.url, '_blank');
     } catch (e) {
       setErr(e);
+    } finally {
+      setBusy(false);
     }
   };
   return (
     <Modal title={`Present “${plan.name}”`} onClose={onClose}>
       <ErrorBox error={err} />
-      <p>The patient sees each procedure in plain language with their estimated insurance and out-of-pocket cost, then signs to accept.</p>
       {!result ? (
-        <div className="inline" style={{ flexWrap: 'wrap' }}>
-          <button className="primary" onClick={() => go(null)}>Open on this screen / tablet</button>
-          <button onClick={() => go('auto')} disabled={!patient.phone && !patient.email}>Text or email to {patient.first_name}</button>
-        </div>
+        <>
+          <div className="inline" style={{ flexWrap: 'wrap' }}>
+            <button className="primary" disabled={busy} onClick={() => go(null)}>Open here for {patient.first_name} to sign</button>
+            <button disabled={busy || (!patient.phone && !patient.email)} onClick={() => go('auto')}>Text or email to {patient.first_name}</button>
+          </div>
+          <p className="muted" style={{ fontSize: 13 }}>They see each procedure in plain language with their estimated insurance and cost, then sign. On this device they won't be asked for their birth date; “Back to the chart” at the bottom brings you back.</p>
+        </>
       ) : (
         <div className="public-notice ok">
-          {result.message ? `Sent by ${result.message.channel === 'sms' ? 'text' : 'email'}. ` : 'Opened in a new tab. '}
-          Link: <a href={result.url} target="_blank" rel="noreferrer">{result.url}</a>
+          Sent by {result.message?.channel === 'sms' ? 'text' : 'email'}. Link: <a href={result.url} target="_blank" rel="noreferrer">{result.url}</a>
         </div>
       )}
     </Modal>

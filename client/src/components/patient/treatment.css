@@ -1,0 +1,8 @@
+/* Treatment tab: typed plan entry and in-place edits (workflow 21). */
+.plan-quick { display: block; font-weight: 600; }
+.plan-quick input { width: 100%; margin-top: 4px; font-size: 15px; }
+.plan-search { margin-top: 10px; }
+.inline-edit { display: inline-flex; align-items: center; gap: 2px; }
+.inline-edit input { padding: 2px 6px; text-align: right; }
+.inline-edit input.invalid { border-color: var(--danger); }
+.small-button { font-size: 12px; }

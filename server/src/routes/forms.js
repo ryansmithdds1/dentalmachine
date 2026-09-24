@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { requirePermission, HttpError } from '../auth.js';
 import { findOr404, audit } from '../util.js';
+import { mintHandoff, HANDOFF_MINUTES } from '../handoff.js';
 import { cleanFields, cleanCodes, seedTemplates, createPacket, templateMatches, procContext, FORM_KINDS } from '../formtemplates.js';
 
 // Form templates (consents, policies, intake) and sending them to patients.
@@ -95,6 +96,12 @@ export default function formRoutes({ db, messenger, config }) {
       appointmentId, context: procContext(procs, providerName), userId: req.user.id, send: b.send || null, appUrl: config.appUrl,
     });
     await audit(db, req, 'form_request.create', 'form_requests', packet.id, { forms: packet.ids.length, sent: !!packet.message });
+    // Signing here on the office device: a one-time pass past the birth-date step, for this packet and this
+    // signed-in session only (see handoff.js). Who handed the device over is on the record.
+    if (b.here && !b.send) {
+      packet.handoff = await mintHandoff(db, req, 'forms', packet.id);
+      await audit(db, req, 'form_request.handoff', 'form_requests', packet.id, { patient_id: patient.id, minutes: HANDOFF_MINUTES });
+    }
     res.status(201).json(packet);
   });
 

@@ -9,6 +9,7 @@ import PatientBar from './components/PatientBar.jsx';
 import { ActivePatientProvider } from './activePatient.jsx';
 import CommandPalette from './components/CommandPalette.jsx';
 import IntranetCommands from './components/intranet/IntranetCommands.jsx';
+import QuickCommands, { TaskBadge } from './components/QuickCommands.jsx';
 import Assistant from './components/assistant/Assistant.jsx';
 import CallPop from './components/CallPop.jsx';
 import KeyboardHelp from './components/KeyboardHelp.jsx';
@@ -36,6 +37,7 @@ const Ask = lazy(() => import('./pages/Ask.jsx'));
 const Calls = lazy(() => import('./pages/Calls.jsx'));
 const Group = lazy(() => import('./pages/Group.jsx'));
 const Intranet = lazy(() => import('./pages/Intranet.jsx'));
+const IntakeReview = lazy(() => import('./components/IntakeReview.jsx'));
 const Reputation = lazy(() => import('./pages/Reputation.jsx'));
 const Campaigns = lazy(() => import('./pages/Campaigns.jsx'));
 const UnsubscribePage = lazy(() => import('./pages/public/UnsubscribePage.jsx'));
@@ -348,6 +350,7 @@ function Shell({ nav }) {
       <a href="#main" className="skip-link">Skip to content</a>
       <CommandPalette />
       <IntranetCommands />
+      <QuickCommands />
       <KeyboardHelp />
       <Toasts />
       <Assistant />
@@ -370,6 +373,7 @@ function Shell({ nav }) {
               <span className="rail-label">{text}</span>
               {to === '/messages' && <UnreadBadge />}
               {to === '/attention' && <Suspense fallback={null}><AttentionBadge /></Suspense>}
+              {to === '/office' && <TaskBadge />}
             </NavLink>
           ))}
         </nav>
@@ -417,6 +421,7 @@ function Shell({ nav }) {
             <Route path="/help" element={<Help />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/intranet/*" element={<Intranet />} />
+            <Route path="/intake" element={<><div className="page-header"><h1>Sent in online</h1></div><IntakeReview /></>} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Suspense>

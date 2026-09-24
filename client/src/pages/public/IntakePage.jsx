@@ -6,6 +6,8 @@ import FormFields, { formComplete } from '../../components/FormFields.jsx';
 import PublicLayout from './PublicLayout.jsx';
 import { suggestLang, useT, HEARD_FROM } from './i18n.js';
 import { DobGate, publicCall, readPass, savePass } from './LinkPass.jsx';
+import { BackToOffice, useHandoff } from './HandOff.jsx';
+import './handoff.css';
 
 const formCall = (method, path, body, pass) => publicCall(method, path, body, 'X-Form-Pass', pass);
 
@@ -15,14 +17,18 @@ export default function IntakePage() {
   const [info, setInfo] = useState(null);
   const [loadError, setLoadError] = useState(null);
   const [finished, setFinished] = useState([]);
-  const [pass, setPass] = useState(() => readPass('form', token));
+  const [stored, setPass] = useState(() => readPass('form', token));
   const [locked, setLocked] = useState(null);
+  // Opened on the office device by staff: their one-time pass stands in for the birth date.
+  const hand = useHandoff('form', token);
+  const pass = hand.pass || stored;
 
   useEffect(() => {
+    if (hand.checking) return;
     formCall('GET', `/forms/${token}`, null, pass)
       .then((i) => { suggestLang(i.language); setLocked(null); setInfo(i); })
       .catch((err) => (err.details?.dob_required ? (suggestLang(err.details.language), setLocked(err.details)) : setLoadError(err)));
-  }, [token, pass]);
+  }, [token, pass, hand.checking]);
 
   if (locked && !info) {
     return (
@@ -41,6 +47,7 @@ export default function IntakePage() {
     return (
       <PublicLayout title={t('All done!')} practice={practice}>
         <div className="public-notice ok">{t(forms.length > 1 ? 'Thank you, {name}. Your forms have been securely sent to {practice}.' : forms[0].kind === 'medical_history' ? 'Thank you, {name}. Your health history has been securely sent to {practice}.' : 'Thank you, {name}. Your form has been securely sent to {practice}.', { name: info.first_name, practice: info.practice_name })}</div>
+        <BackToOffice back={hand.back} />
       </PublicLayout>
     );
   }

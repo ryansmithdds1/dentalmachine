@@ -1,0 +1,8 @@
+/* The staff way back after the patient signs on the office device (HandOff.jsx). */
+.handoff-back {
+  margin-top: 20px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border, #d7dbe3);
+  font-size: 13px;
+  text-align: center;
+}

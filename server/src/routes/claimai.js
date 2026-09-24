@@ -51,9 +51,16 @@ export default function claimAiRoutes({ db, config }) {
       `SELECT kind, tooth, surfaces, measurement_mm, status, substr(created_at, 1, 10) AS date FROM xray_findings
        WHERE patient_id = ? AND status != 'dismissed' AND tooth IN (${teeth.map(() => '?').join(',')}) LIMIT 20`, claim.patient_id, ...teeth,
     ) : [];
+    // What's on file to send with it, so the draft's "send with it" list names real films, not wished-for ones.
+    const onFile = await db.all(
+      `SELECT d.category, d.tooth, substr(COALESCE(d.taken_at, d.created_at), 1, 10) AS date, CASE WHEN a.id IS NULL THEN 0 ELSE 1 END AS attached
+       FROM documents d LEFT JOIN claim_attachments a ON a.document_id = d.id AND a.claim_id = ? AND a.removed_at IS NULL
+       WHERE d.patient_id = ? AND d.practice_id = ? AND d.deleted_at IS NULL AND d.category = 'xray' ORDER BY COALESCE(d.taken_at, d.created_at) DESC LIMIT 12`,
+      claim.id, claim.patient_id, req.user.practice_id,
+    );
     const practice = await db.get('SELECT name, address, city, state, zip, phone, npi FROM practices WHERE id = ?', req.user.practice_id);
     const provider = await db.get('SELECT pv.name, pv.npi FROM claim_items ci JOIN procedures pr ON pr.id = ci.procedure_id JOIN providers pv ON pv.id = pr.provider_id WHERE ci.claim_id = ? LIMIT 1', claim.id);
-    return { claim, policy, items, chart, notes, findings, practice, provider };
+    return { claim, policy, items, chart, notes, findings, practice, provider, onFile };
   };
   const factsText = (f) => JSON.stringify({
     practice: f.practice, treating_dentist: f.provider,
@@ -61,6 +68,7 @@ export default function claimAiRoutes({ db, config }) {
     payer: { name: f.policy.carrier_name, address: f.policy.carrier_address }, subscriber: { name: f.policy.subscriber_name, id: f.policy.subscriber_id, group: f.policy.group_number },
     procedures: f.items.map((i) => ({ ...i, fee: i.fee / 100, paid: i.paid_amount / 100, adjustments: i.adjustments ? JSON.parse(i.adjustments) : undefined, paid_amount: undefined })),
     chart: { patient: f.chart.patient, conditions: f.chart.charted_conditions, recent_history: f.chart.recent_history, last_perio: f.chart.last_perio }, clinical_notes: f.notes, xray_ai_findings: f.findings,
+    xrays_on_file: f.onFile.map((d) => ({ tooth: d.tooth || 'full mouth', date: d.date, attached_to_this_claim: !!d.attached })),
   }, null, 1);
 
   r.get('/claims/:cid/scrub', requirePermission('billing:read'), async (req, res) => {
@@ -73,7 +81,8 @@ export default function claimAiRoutes({ db, config }) {
     const focus = req.body?.code ? `Focus on ${String(req.body.code).slice(0, 10)}${req.body.tooth ? ` on #${String(req.body.tooth).slice(0, 3)}` : ''}.` : '';
     const out = await structured(config, { system: SYSTEM, tool: NARRATIVE_TOOL, effort: 'medium', content: `Write the claim narrative. ${focus}\n\n${factsText(f)}` });
     if (!out.narrative) throw new HttpError(502, 'The AI didn’t return a narrative — try again');
-    await audit(db, req, 'claim.ai_narrative', 'claims', f.claim.id);
+    // A draft only: nothing is attached until a person reads it and adds it (recorded then as approved by them).
+    await audit(db, req, 'claim.ai_narrative', 'claims', f.claim.id, { drafted_by: 'AI', status: 'draft for review' });
     res.json({ narrative: out.narrative, missing: out.missing || [], attach: out.attach || [] });
   });
 

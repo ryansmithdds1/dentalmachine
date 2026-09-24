@@ -12,7 +12,7 @@ const PAGES = [
   ['Unscheduled treatment', '/followups?tab=unscheduled'], ['Campaigns', '/campaigns'], ['Online requests', '/requests'], ['Needs attention', '/attention'], ['Calls', '/calls'],
   ['Billing & claims', '/claims'], ['Statements', '/claims?tab=statements'], ['Insurance follow-up', '/claims?tab=followup'], ['Import ERA', '/claims?tab=era'],
   ['Insurance checks (EOB)', '/claims?tab=checks'], ['Eligibility', '/claims?tab=eligibility'], ['Pre-authorizations', '/claims?tab=preauths'], ['Deposits', '/claims?tab=deposits'],
-  ['Practice KPIs', '/reports'], ['Day sheet', '/reports?tab=ops'], ['Month-end close', '/reports?tab=close'], ['To-do & labs', '/office'], ['Supplies', '/office?tab=supplies'],
+  ['Practice KPIs', '/reports'], ['Day sheet', '/reports?tab=ops'], ['Month-end close', '/reports?tab=close'], ['To-do & labs', '/office'], ['Sent in online (intake review)', '/intake'], ['Supplies', '/office?tab=supplies'],
   ['Time clock', '/office?tab=time'], ['Finance', '/finance'], ['Settings', '/settings'], ['Help', '/help'],
 ];
 

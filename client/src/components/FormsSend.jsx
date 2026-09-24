@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { api, download } from '../api.js';
 import { useLookup } from '../hooks.js';
 import { fmtDate } from '../format.js';
@@ -8,7 +9,10 @@ const KIND_LABEL = { consent: 'Consents', policy: 'Policies', intake: 'Intake', 
 
 // Choose forms for a patient and send them as one link (or open it on this device for the patient to sign).
 // From a treatment plan, the consents that match its procedures are picked already.
+// "Sign here" opens them in this tab for the patient, with a one-time pass instead of the birth-date step
+// (only this signed-in device can use it); the page has a way back to the chart when they're done.
 export default function SendForms({ patient, procedureIds = [], appointmentId = null, title, onClose, onSent }) {
+  const navigate = useNavigate();
   const templates = useLookup('/form-templates');
   const [picked, setPicked] = useState(null);
   const [history, setHistory] = useState(!procedureIds.length);
@@ -21,10 +25,13 @@ export default function SendForms({ patient, procedureIds = [], appointmentId = 
   }, [patient.id, procedureIds.join(',')]);
 
   const { submit, busy, error } = useSubmit(async (send) => {
-    const r = await api.post(`/patients/${patient.id}/form-packets`, { template_ids: [...picked], history, procedure_ids: procedureIds, appointment_id: appointmentId, send });
-    setResult(r);
+    const r = await api.post(`/patients/${patient.id}/form-packets`, { template_ids: [...picked], history, procedure_ids: procedureIds, appointment_id: appointmentId, send, here: !send });
     onSent?.();
-    if (!send) window.open(r.url, '_blank', 'noopener');
+    if (!send) {
+      navigate(`${new URL(r.url, window.location.origin).pathname}#here=${encodeURIComponent(r.handoff)}`);
+      return;
+    }
+    setResult(r);
   });
   const toggle = (id) => { const next = new Set(picked); if (next.has(id)) next.delete(id); else next.add(id); setPicked(next); };
   const count = (picked?.size || 0) + (history ? 1 : 0);
@@ -36,7 +43,7 @@ export default function SendForms({ patient, procedureIds = [], appointmentId = 
       {result ? (
         <>
           <div className="public-notice ok">
-            {result.message ? `Sent by ${result.message.channel === 'sms' ? 'text' : 'email'}. ` : 'Opened in a new tab for the patient to sign. '}
+            {result.message ? `Sent by ${result.message.channel === 'sms' ? 'text' : 'email'}. ` : ''}
             The link works until {fmtDate(result.expires_at)}.
           </div>
           <div style={{ marginTop: 8, wordBreak: 'break-all' }}><a href={result.url} target="_blank" rel="noreferrer">{result.url}</a></div>
@@ -63,7 +70,7 @@ export default function SendForms({ patient, procedureIds = [], appointmentId = 
             );
           })}
           <div className="form-actions">
-            <button type="button" disabled={busy || !count} onClick={() => submit(null)}>Sign here on this device</button>
+            <button type="button" autoFocus disabled={busy || !count} title="Opens here for the patient — no birth date needed on this device" onClick={() => submit(null)}>Sign here on this device</button>
             <button className="primary" disabled={busy || !count || !reachable} title={reachable ? '' : 'No phone or email the patient accepts messages on'} onClick={() => submit('auto')}>
               Send {count > 1 ? `${count} forms` : 'form'} by {patient.phone && patient.sms_opt_in ? 'text' : 'email'}
             </button>
