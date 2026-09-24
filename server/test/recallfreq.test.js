@@ -286,6 +286,29 @@ test('per-patient interval override needs a reason, is audited, and moves the du
   assert.equal(back.data.interval_overridden, 0);
 });
 
+test('the recall edit screen (PUT /recalls/:id) also needs clinical permission and a reason to change the interval', async () => {
+  const s = await setUp();
+  const pt = await s.patient(45);
+  const last = addMonths(s.today, -1);
+  await s.doneOn(pt, 'D1110', last);
+  const r = await s.recall(pt, 'prophy');
+  assert.equal((await s.api.put(`/recalls/${r.id}`, { interval_months: 4 })).status, 400, 'reason required');
+  const desk = await member(s, 'front_desk');
+  assert.equal((await h.client(desk.token).put(`/recalls/${r.id}`, { interval_months: 4, reason: 'Heavy calculus' })).status, 403);
+  // Status-only edits still need neither.
+  assert.equal((await h.client(desk.token).put(`/recalls/${r.id}`, { status: 'contacted' })).status, 200);
+  const res = await s.api.put(`/recalls/${r.id}`, { interval_months: 4, reason: 'Heavy calculus' });
+  assert.equal(res.status, 200, JSON.stringify(res.data));
+  assert.equal(res.data.interval_months, 4);
+  assert.equal(res.data.interval_overridden, 1);
+  assert.equal(res.data.interval_reason, 'Heavy calculus');
+  assert.equal(res.data.due_date, addMonths(last, 4));
+  const a = await h.db.get("SELECT * FROM audit_log WHERE action = 'recall.interval' AND entity_id = ?", r.id);
+  assert.equal(a.reason, 'Heavy calculus');
+  // Sending the same interval back is not a change.
+  assert.equal((await s.api.put(`/recalls/${r.id}`, { interval_months: 4, notes: 'ok' })).status, 200);
+});
+
 test('x-rays taken elsewhere: entered with a date (source outside), audited, reset the recall, voidable', async () => {
   const s = await setUp();
   const pt = await s.patient(35);

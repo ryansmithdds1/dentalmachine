@@ -7,6 +7,7 @@ import { publish, eventStream } from '../events.js';
 import { emitAppointment } from '../webhooks.js';
 import { completeProcedure } from '../services.js';
 import { recallTypes, typesForCode } from '../recalls.js';
+import { setRecallInterval } from '../recallsync.js';
 import { officeFee } from '../fees.js';
 import { videoRoomFor } from '../video.js';
 import { cleanPattern, fitPattern, providerOverlap, typeDuration } from '../patterns.js';
@@ -983,8 +984,24 @@ export default function scheduleRoutes({ db }) {
     if (row.interval_months != null && !(Number.isInteger(Number(row.interval_months)) && Number(row.interval_months) >= 1 && Number(row.interval_months) <= 120)) throw new HttpError(400, 'interval_months must be 1-120');
     if (row.notes != null) row.notes = String(row.notes).slice(0, 1000);
     if (row.status === 'contacted') row.last_contacted_at = new Date().toISOString();
-    await update(db, 'recalls', existing.id, req.user.practice_id, row);
-    await audit(db, req, 'recall.update', 'recalls', existing.id);
+    // A different interval for one patient is a clinical decision: same rule as PUT /recalls/:id/interval —
+    // clinical permission and a reason, recorded with before/after.
+    let changedInterval = null;
+    if (row.interval_months != null && Number(row.interval_months) !== existing.interval_months) {
+      if (!can(req.user, 'clinical:write')) throw new HttpError(403, 'Changing how often a patient is recalled needs clinical permission');
+      const reason = String(req.body?.reason ?? '').trim();
+      if (reason.length < 3) throw new HttpError(400, 'Give the reason for a different interval (a few words)');
+      changedInterval = await setRecallInterval(db, existing, Number(row.interval_months), reason.slice(0, 300));
+      await audit(db, req, 'recall.interval', 'recalls', existing.id, { type: existing.type, reason: reason.slice(0, 300) }, {
+        reason: reason.slice(0, 300), patientId: existing.patient_id,
+        before: { interval_months: existing.interval_months, due_date: existing.due_date }, after: { interval_months: changedInterval.interval_months, due_date: changedInterval.due_date },
+      });
+      // The new interval sets the due date unless one was typed too.
+      if (row.due_date == null) delete row.due_date;
+    }
+    delete row.interval_months;
+    if (Object.keys(row).length) await update(db, 'recalls', existing.id, req.user.practice_id, row);
+    if (Object.keys(row).length || !changedInterval) await audit(db, req, 'recall.update', 'recalls', existing.id);
     res.json(await db.get('SELECT * FROM recalls WHERE id = ?', existing.id));
   });
 

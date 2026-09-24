@@ -133,9 +133,12 @@ export const deductibleMet = (policy, date) => {
 
 // Benefits used in the benefit year containing `date`, by date of service: what paid claims paid plus
 // what open claims are expected to pay. Orthodontics has its own lifetime maximum and isn't counted.
-export async function benefitsUsed(db, policy, date) {
+// `from` narrows it to dates of service on or after that day (what a payer's figure from that day can't include yet).
+export async function benefitsUsed(db, policy, date, { from = null } = {}) {
   const today = date || (await practiceNow(db, policy.practice_id)).slice(0, 10);
-  const { start, end } = benefitYear(policy, today);
+  const year = benefitYear(policy, today);
+  const start = from && from > year.start ? from : year.start;
+  const { end } = year;
   const dos = '(SELECT MIN(pr.completed_at) FROM claim_items ci JOIN procedures pr ON pr.id = ci.procedure_id WHERE ci.claim_id = c.id)';
   return (await db.get(
     `SELECT COALESCE(SUM(CASE WHEN c.status = 'paid' THEN c.paid_amount
@@ -225,6 +228,15 @@ export async function estimateCoverage(db, rawPolicy, procedures, { primary = nu
   const patient = await db.get('SELECT dob FROM patients WHERE id = ?', procedures[0]?.patient_id ?? policy.patient_id);
 
   let remainingMax = Math.max(0, policy.annual_max - (await benefitsUsed(db, policy, today)));
+  // The payer's own "maximum left" from the latest verification this benefit year, less what our claims since
+  // that day will use. We take the lower of the two: the payer knows about work done at other offices, and our
+  // claims know about work the payer hasn't processed yet.
+  let maxSource = 'claims';
+  const payer = await payerMaxRemaining(db, policy, today);
+  if (payer) {
+    const payerNow = Math.max(0, payer.max_remaining - (await benefitsUsed(db, policy, today, { from: payer.as_of })));
+    if (payerNow < remainingMax) { remainingMax = payerNow; maxSource = 'payer'; }
+  }
   let remainingDeductible = Math.max(0, policy.deductible - deductibleMet(policy, today));
   if (plan.family_deductible > 0) remainingDeductible = Math.min(remainingDeductible, Math.max(0, plan.family_deductible - (await familyDeductibleMet(db, policy, today))));
   let remainingOrtho = plan.ortho_max > 0 ? Math.max(0, plan.ortho_max - (await orthoUsed(db, policy))) : 0;
@@ -312,7 +324,7 @@ export async function estimateCoverage(db, rawPolicy, procedures, { primary = nu
       insurance = Math.min(insurance, owed);
     }
     if (!ortho) {
-      if (insurance > remainingMax) notes.push('Limited by the annual maximum');
+      if (insurance > remainingMax) notes.push(maxSource === 'payer' ? 'Limited by the annual maximum (what the insurer says is left)' : 'Limited by the annual maximum');
       insurance = Math.min(insurance, remainingMax);
       remainingMax -= insurance;
     }
@@ -331,8 +343,29 @@ export async function estimateCoverage(db, rawPolicy, procedures, { primary = nu
     total_deductible: sum('deductible'),
     total_insurance: sum('insurance'),
     total_patient: sum('patient'),
-    remaining: { annual_max: remainingMax, deductible: remainingDeductible, ortho: plan.ortho_max > 0 ? remainingOrtho : null },
+    remaining: { annual_max: remainingMax, deductible: remainingDeductible, ortho: plan.ortho_max > 0 ? remainingOrtho : null, annual_max_source: maxSource },
   };
+}
+
+// The payer's latest "maximum left" for this patient (benefit_verifications.patient_detail, from a 271, a portal
+// page or a phone call), if it was taken in the current benefit year. Cents, and the day it was true.
+async function payerMaxRemaining(db, policy, today) {
+  if (!policy.id) return null;
+  const { start, end } = benefitYear(policy, today);
+  let rows;
+  try {
+    rows = await db.all("SELECT patient_detail, created_at FROM benefit_verifications WHERE patient_insurance_id = ? AND patient_detail IS NOT NULL AND created_at >= ? AND created_at < ? ORDER BY created_at DESC, id DESC LIMIT 5", policy.id, start, end);
+  } catch (err) {
+    if (/benefit_verifications/.test(String(err?.message))) return null; // older database without the table
+    throw err;
+  }
+  for (const r of rows) {
+    let d;
+    try { d = JSON.parse(r.patient_detail); } catch { continue; }
+    const v = Number(d?.max_remaining);
+    if (d?.max_remaining != null && Number.isFinite(v) && v >= 0) return { max_remaining: Math.round(v), as_of: String(r.created_at).slice(0, 10) };
+  }
+  return null;
 }
 
 // Applies an edit to a policy: benefit fields go to its plan (and so to everyone on it), the rest to the
