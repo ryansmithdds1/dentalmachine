@@ -17,6 +17,26 @@ items), tests and a before/after row where it applies.
 7. DSO scale: central billing work queues across practices, cross-practice patient lookup, group-wide reports.
 8. Keep working during an internet outage: today's schedule and charts readable offline, notes and payments queued.
 
+## Scheduling efficiency (asked for; right after the six comparison items)
+What exists to build on: time patterns per visit type (X = doctor, / = assistant, 10-minute slots, Open Dental
+style) with double-booking only where assistant time lines up; "reserved" blocks limited to visit types; walkout
+printing from the appointment drawer.
+S1. **Assistant and doctor time on the schedule:** each card shows its doctor (X) and assistant (/) time as shaded
+    segments; the pattern is editable on the card by dragging or typing ("//XXXX//"); the doctor's column shows only
+    their X time so overlapping visits read clearly; booking finds slots where the doctor's X time is free even if
+    the chair is double-booked; hygiene visits carry the doctor's exam window, and the doctor sees "exam ready" queue.
+S2. **Perfect day / block scheduling:** named day templates per provider (e.g. "Dr. Chen Tuesday": 8–10 crowns,
+    10–12 fillings, 2–3 new patients, emergency slot 11:00) with production goals; the week applies templates
+    automatically; blocks show on the schedule as tinted lanes with their goal, only matching visit types book there
+    until a release time (e.g. 24 h before, then open to anything); the day's scheduled vs goal production shows live.
+S3. **Walkouts on the schedule:** one key from a visit (or a batch for the day) to print or text/email the walkout
+    (what was done today, paid, insurance pending, next visit); auto-send after checkout if the practice turns it on.
+S4. **More ideas:** short-call/ASAP list matched to a gap (length, provider, type); "next available" that respects
+    blocks and patterns; buffer and sterilisation time per chair; colour by type/provider/status toggle; utilisation
+    heatmap by chair and hour; unscheduled-treatment and due-recall patients suggested for each open gap; drag a
+    patient from any list onto the schedule; family appointments booked back to back in one step; recurring
+    blocks (lunch, meetings) from templates; schedule notes/huddle notes per day.
+
 ## Then: remaining workflow batches
 9. Batch 4 (32–44): new patient setup, ERA/EOB posting, prescriptions, lab cases, huddle actions, recall lists,
    pre-auths, financing, adjustments, referrals, end-of-day, review requests (fix the count bug), clock in/out.
