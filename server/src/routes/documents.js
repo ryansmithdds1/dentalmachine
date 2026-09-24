@@ -1,7 +1,7 @@
 import express, { Router } from 'express';
 import { autoAnalyze } from '../xrayai.js';
 import { requirePermission, HttpError } from '../auth.js';
-import { findOr404, insert, audit, requireOneOf, validTooth, newToken } from '../util.js';
+import { findOr404, insert, audit, requireOneOf, validTooth, newToken, recorded } from '../util.js';
 import { sniffMime } from './imaging.js';
 import { dicomToImage } from '../dicomimage.js';
 import { makeThumbnail, imageSize } from '../thumbnails.js';
@@ -314,7 +314,7 @@ export default function documentRoutes({ db, storage, config = {} }) {
       row.exposure = e ? JSON.stringify(e) : null;
     }
     if (!Object.keys(row).length) throw new HttpError(400, 'Nothing to change');
-    await db.run(`UPDATE documents SET ${Object.keys(row).map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, ...Object.values(row), doc.id);
+    await recorded(db, 'documents', doc.id, () => db.run(`UPDATE documents SET ${Object.keys(row).map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, ...Object.values(row), doc.id));
     await audit(db, req, 'document.update', 'documents', doc.id, { patient_id: doc.patient_id, ...row });
     publish(req.user.practice_id, { type: 'documents', patient_id: doc.patient_id });
     const out = await db.get('SELECT id, category, tooth, taken_at, filename, notes, tags, exposure FROM documents WHERE id = ?', doc.id);
@@ -332,11 +332,23 @@ export default function documentRoutes({ db, storage, config = {} }) {
     res.status(201).json({ url: `${config.appUrl}/scan/${token}`, expires_at: expires, category });
   });
 
-  // Soft delete: the file is retained for record-keeping but hidden from the chart.
+  // Soft delete: the file is retained for record-keeping but hidden from the chart. Removing twice is harmless.
   r.delete('/documents/:did', requirePermission('clinical:write'), async (req, res) => {
     const doc = await findOr404(db, 'documents', req.params.did, req.user.practice_id, 'Document');
-    await db.run("UPDATE documents SET deleted_at = datetime('now') WHERE id = ?", doc.id);
-    await audit(db, req, 'document.delete', 'documents', doc.id, { patient_id: doc.patient_id });
+    if (doc.deleted_at) return res.json({ ok: true, already: true });
+    await recorded(db, 'documents', doc.id, () => db.run("UPDATE documents SET deleted_at = datetime('now') WHERE id = ? AND deleted_at IS NULL", doc.id));
+    await audit(db, req, 'document.delete', 'documents', doc.id, { patient_id: doc.patient_id, filename: doc.filename, category: doc.category });
+    publish(req.user.practice_id, { type: 'documents', patient_id: doc.patient_id });
+    res.json({ ok: true });
+  });
+
+  // Undo a removal: the same file comes back to the chart (the removal and the restore both stay in the audit trail).
+  r.post('/documents/:did/restore', requirePermission('clinical:write'), async (req, res) => {
+    const doc = await findOr404(db, 'documents', req.params.did, req.user.practice_id, 'Document');
+    if (!doc.deleted_at) return res.json({ ok: true, already: true });
+    await recorded(db, 'documents', doc.id, () => db.run('UPDATE documents SET deleted_at = NULL WHERE id = ?', doc.id));
+    await audit(db, req, 'document.restore', 'documents', doc.id, { patient_id: doc.patient_id, filename: doc.filename, reason: req.body?.reason ? String(req.body.reason).slice(0, 200) : null });
+    publish(req.user.practice_id, { type: 'documents', patient_id: doc.patient_id });
     res.json({ ok: true });
   });
 

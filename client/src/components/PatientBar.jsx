@@ -42,6 +42,7 @@ export default function PatientBar() {
         <span className="muted">{p.dob ? `${age(p.dob)}y` : ''} · #{p.id}</span>
       </button>
       {alerts.length > 0 && <span className="pb-alert" title={alerts.join(' · ')}><AlertTriangle size={14} aria-hidden /> {alerts[0].length > 40 ? `${alerts[0].slice(0, 40)}…` : alerts[0]}{alerts.length > 1 ? ` +${alerts.length - 1}` : ''}</span>}
+      {p.medical_review_due && <span className="pb-chip" title="Health history hasn't been reviewed in a year"><b style={{ color: 'var(--warn)' }}>History review due</b></span>}
       {p.balance != null && <span className={`pb-chip${p.balance > 0 ? ' owed' : ''}`}>Balance <b>{money(p.balance)}</b></span>}
       {p.insurance !== undefined && (
         <span className="pb-chip" title={p.insurance?.checked_at ? `Checked ${fmtDate(p.insurance.checked_at.slice(0, 10))}` : 'Not checked yet'}>

@@ -5,6 +5,10 @@ import { useNavigate } from 'react-router-dom';
 import { ErrorBox, useSubmit } from './ui.jsx';
 import { CustomFieldInputs, DuplicateWarning, parseCustom } from './Switching.jsx';
 
+// On an existing chart the medical history (alerts, allergies, medications…) is changed in its own editor on the
+// chart, with clinical access, so this form leaves it alone; a new chart can start with what the patient told us.
+const MEDICAL = ['medical_alerts', 'allergies', 'medications'];
+
 const EMPTY = {
   first_name: '', last_name: '', preferred_name: '', dob: '', gender: '', phone: '', email: '', address: '', city: '', state: '', zip: '',
   emergency_contact: '', referral_source: '', office_alert: '', medical_alerts: '', allergies: '', medications: '', notes: '', primary_provider_id: '', status: 'active',
@@ -31,7 +35,7 @@ export default function PatientForm({ patient, defaults, onSaved, onCancel }) {
       const found = await api.get(`/patients/duplicates?${q}`);
       if (found.length) return setDupes(found);
     }
-    const body = { ...form, custom, primary_provider_id: form.primary_provider_id ? Number(form.primary_provider_id) : null, primary_hygienist_id: form.primary_hygienist_id ? Number(form.primary_hygienist_id) : null, fee_schedule_id: form.fee_schedule_id ? Number(form.fee_schedule_id) : null,
+    const body = { ...(patient ? Object.fromEntries(Object.entries(form).filter(([k]) => !MEDICAL.includes(k))) : form), custom, primary_provider_id: form.primary_provider_id ? Number(form.primary_provider_id) : null, primary_hygienist_id: form.primary_hygienist_id ? Number(form.primary_hygienist_id) : null, fee_schedule_id: form.fee_schedule_id ? Number(form.fee_schedule_id) : null,
       // A new chart without a choice belongs to the office this screen is working in.
       location_id: form.location_id ? Number(form.location_id) : patient ? null : undefined };
     const saved = patient ? await api.put(`/patients/${patient.id}`, body) : await api.post('/patients', body);
@@ -131,9 +135,10 @@ export default function PatientForm({ patient, defaults, onSaved, onCancel }) {
           </label>
         )}
         <CustomFieldInputs value={custom} onChange={setCustom} />
-        {area('medical_alerts', 'Medical alerts (shown prominently)')}
-        {area('allergies', 'Allergies')}
-        {area('medications', 'Medications')}
+        {!patient && area('medical_alerts', 'Medical alerts (shown prominently)')}
+        {!patient && area('allergies', 'Allergies')}
+        {!patient && area('medications', 'Medications')}
+        {patient && <p className="full muted" style={{ margin: 0, fontSize: 13 }}>Medical alerts, allergies and medications are updated under Medical history on the chart (press M there).</p>}
         {area('notes', 'Notes')}
         <label className="full">
           Pop-up office alert (shown to staff when the chart opens)

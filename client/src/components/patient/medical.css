@@ -1,0 +1,19 @@
+/* Workflow 15: the medical history block on the chart overview and its inline editor. */
+.med-history { margin-top: 18px; border-radius: var(--radius-sm); }
+.med-history.due { outline: 2px solid var(--warn); outline-offset: 8px; }
+.med-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.med-head h2 { margin: 0; }
+.med-head kbd { margin-left: 4px; }
+.med-status { font-size: 12px; color: var(--muted); margin: 4px 0 8px; display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+.med-status.due { color: var(--warn); background: var(--warn-soft); padding: 6px 9px; border-radius: 6px; font-size: 13px; }
+.med-kv dd { min-width: 0; }
+.med-value { all: unset; cursor: pointer; display: block; width: 100%; border-radius: 4px; padding: 1px 4px; margin: -1px -4px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.med-value:hover { background: var(--hover); }
+.med-value:focus-visible { box-shadow: var(--ring); }
+.med-badges { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.med-editor { display: flex; flex-direction: column; gap: 10px; margin: 6px 0 12px; }
+.med-editor textarea { min-height: 50px; }
+.med-conditions { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 10px; margin: 0; }
+.med-conditions legend { font-size: 13px; color: var(--muted); padding: 0 4px; }
+.med-editor .form-actions kbd { margin-left: 4px; }
+.med-due-chip { background: var(--warn-soft); color: var(--warn); border: 0; cursor: pointer; }

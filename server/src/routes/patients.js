@@ -20,6 +20,22 @@ export const MEDICAL_CONDITIONS = [
   'Radiation to head or neck', 'Bisphosphonates', 'Osteoporosis', 'Pregnant', 'Thyroid disorder', 'Tobacco use', 'Sleep apnea',
 ];
 
+// The medical history (alerts, allergies, medications, conditions, ASA, premed) is clinical data: it is
+// edited together in one place, by someone with clinical access, and saving it counts as reviewing it.
+export const MEDICAL_FIELDS = ['medical_alerts', 'allergies', 'medications', 'medical_conditions', 'asa_class', 'premed_required'];
+// A history not reviewed in a year (or never) is due; the morning huddle uses the same year.
+export const MEDICAL_REVIEW_DAYS = 365;
+export function medicalReviewDue(reviewedAt, today) {
+  if (!reviewedAt) return true;
+  const cutoff = new Date(`${today}T00:00:00Z`);
+  cutoff.setUTCDate(cutoff.getUTCDate() - MEDICAL_REVIEW_DAYS);
+  return String(reviewedAt).slice(0, 10) < cutoff.toISOString().slice(0, 10);
+}
+const utcNow = () => new Date().toISOString().replace('T', ' ').slice(0, 19);
+// Whether a medical field would really change (no conditions and an empty list are the same; so are 0 and no premed).
+const medicalValue = (k, v) => (v == null || v === '' || (k === 'medical_conditions' && v === '[]') || (k === 'premed_required' && !Number(v)) ? '' : String(v));
+const medicalChanges = (row, existing) => MEDICAL_FIELDS.filter((k) => k in row && medicalValue(k, row[k]) !== medicalValue(k, existing[k]));
+
 // A patient's own fees (e.g. cash / uninsured) come from an office fee schedule.
 async function checkFeeSchedule(db, row, req) {
   if (!('fee_schedule_id' in row)) return;
@@ -294,7 +310,10 @@ export default function patientRoutes({ db }) {
     res.json({
       id: p.id, first_name: p.first_name, last_name: p.last_name, preferred_name: p.preferred_name, dob: p.dob, phone: p.phone, email: p.email,
       photo: p.photo || null, office_alert: p.office_alert, language: p.language,
-      ...(clinical ? { medical_alerts: p.medical_alerts, allergies: p.allergies, premed_required: !!p.premed_required, medical_reviewed_at: p.medical_reviewed_at } : {}),
+      ...(clinical ? {
+        medical_alerts: p.medical_alerts, allergies: p.allergies, premed_required: !!p.premed_required, medical_reviewed_at: p.medical_reviewed_at,
+        medical_review_due: medicalReviewDue(p.medical_reviewed_at, today),
+      } : {}),
       ...(billing ? {
         balance: await patientBalance(db, pid, p.id),
         insurance: policy ? { carrier: policy.carrier_name, eligibility: elig?.status ?? null, checked_at: elig?.created_at ?? null } : null,
@@ -340,6 +359,8 @@ export default function patientRoutes({ db }) {
     const existing = await findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient');
     const row = pick(req.body, FIELDS);
     validate(row);
+    // Changing the medical history needs clinical access (the same values sent back unchanged are fine).
+    if (medicalChanges(row, existing).length && !can(req.user, 'clinical:write')) throw new HttpError(403, 'Changing the medical history needs clinical access');
     await validateCustom(db, req.user.practice_id, row, existing.custom);
     if (row.first_name === null || row.last_name === null) throw new HttpError(400, 'Name cannot be blank');
     await checkHomeOffice(req, row);
@@ -364,6 +385,32 @@ export default function patientRoutes({ db }) {
     await audit(db, req, 'patient.update', 'patients', existing.id, { fields: Object.keys(row) });
     await emitPatient(db, existing.id, 'patient.updated');
     res.json(await db.get('SELECT * FROM patients WHERE id = ?', existing.id));
+  });
+
+  // The one medical history editor: alerts, allergies, medications, conditions, ASA and premed together.
+  // Only fields sent are changed (before/after recorded on the audit entry); saving counts as a review
+  // unless `reviewed: false` (an undo puts the old values back without claiming a new review).
+  r.put('/patients/:id/medical', requirePermission('clinical:write'), async (req, res) => {
+    const existing = await findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient');
+    const row = pick(req.body, MEDICAL_FIELDS);
+    for (const k of ['medical_alerts', 'allergies', 'medications']) {
+      if (k in row) row[k] = row[k] == null ? null : String(row[k]).trim() || null;
+    }
+    if ('asa_class' in row && !row.asa_class) row.asa_class = null;
+    if ('premed_required' in row && ![0, 1, null].includes(row.premed_required)) throw new HttpError(400, 'premed_required must be true or false');
+    if ('medical_conditions' in row && row.medical_conditions === null) row.medical_conditions = [];
+    validate(row);
+    const reviewed = req.body?.reviewed !== false;
+    if (!Object.keys(row).length && !reviewed) throw new HttpError(400, 'Nothing to change');
+    const changed = medicalChanges(row, existing);
+    const patch = Object.fromEntries(changed.map((k) => [k, row[k]]));
+    if (changed.length) patch.updated_at = new Date().toISOString();
+    if (reviewed) patch.medical_reviewed_at = utcNow();
+    if (Object.keys(patch).length) await update(db, 'patients', existing.id, req.user.practice_id, patch);
+    await audit(db, req, reviewed ? 'patient.medical_update' : 'patient.medical_revert', 'patients', existing.id, { fields: changed, reviewed });
+    if (changed.length) await emitPatient(db, existing.id, 'patient.updated');
+    const out = await db.get(`SELECT id, ${MEDICAL_FIELDS.join(', ')}, medical_reviewed_at FROM patients WHERE id = ?`, existing.id);
+    res.json({ ...out, premed_required: !!out.premed_required, changed, medical_review_due: medicalReviewDue(out.medical_reviewed_at, (await practiceNow(db, req.user.practice_id)).slice(0, 10)) });
   });
 
   // Medical records are retained; "deleting" archives the patient.

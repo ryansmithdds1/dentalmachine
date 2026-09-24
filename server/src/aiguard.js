@@ -18,6 +18,7 @@ export const HIGH_RISK = [
   ['POST', /^\/notes\/\d+\/sign$/, 'signing clinical notes'],
   ['POST', /^\/statements\/run$/, 'sending statements'],
   ['PUT', /^\/(insurance|insurance-plans|payment-plans)\/\d+$/, 'insurance and payment plans'],
+  ['PUT', /^\/patients\/\d+\/medical$/, 'changing the medical history'],
   ['DELETE', /./, 'removing records'],
 ];
 

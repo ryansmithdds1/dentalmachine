@@ -1,0 +1,12 @@
+/* Workflow 14: drop files anywhere on the Documents tab; the viewer's details panel sits under the image. */
+.docs-drop { position: relative; border-radius: var(--radius); }
+.docs-drop.over { outline: 2px dashed var(--primary); outline-offset: 4px; background: var(--primary-soft); }
+.docs-drop-hint {
+  position: absolute; inset: 0; z-index: 5; display: flex; align-items: center; justify-content: center; pointer-events: none;
+  font-size: 18px; font-weight: 600; color: var(--primary-ink); background: color-mix(in srgb, var(--primary-soft) 85%, transparent); border-radius: var(--radius);
+}
+.docs-drop-note { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; }
+.doc-actions { flex-wrap: wrap; }
+.doc-position { color: var(--text); }
+.doc-details { border-top: 1px solid var(--border); margin-top: 12px; padding-top: 10px; }
+.doc-details h3 { margin: 0 0 8px; font-size: 14px; }

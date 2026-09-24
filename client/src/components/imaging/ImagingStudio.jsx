@@ -159,7 +159,8 @@ export default function ImagingStudio({ patient, docs, canEdit, initial, onClose
       if (e.defaultPrevented || e.target.closest?.('input, select, textarea, .modal')) return;
       if (e.key === 'Escape') {
         if (document.fullscreenElement) return;
-        if (selected != null) setSelected(null); else onClose();
+        // Opened straight onto an image (X on the Documents tab): Esc goes back to where you were.
+        if (selected != null && !initial?.quick) setSelected(null); else onClose();
       }
       if (e.target.closest?.('.image-viewer')) return;
       if (e.key === 'ArrowRight') step(1);
