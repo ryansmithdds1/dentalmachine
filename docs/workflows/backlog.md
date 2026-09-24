@@ -151,6 +151,15 @@ F5. **Office settings with guardrails:** discount limits, which options show, le
     max months — set by the owner; the numbers shown to the patient are stored exactly as presented (with the
     fee schedule and estimate version) so the agreement can always be reproduced.
 
+F6. **Compare options by voice, shown on the patient's screen (asked for):** the dentist says "the patient wants to
+    compare: option one, extraction and bone graft; option two, root canal, buildup and crown on 19" → two alternative
+    plans are created (through the same entry engine as TE, previewed and confirmed on screen), linked as alternatives
+    for the same tooth/problem. A **comparison mode** shows them side by side on a second monitor or the chair screen
+    (a patient-facing window the staff open with one click, no printing): for each option — what's done (small tooth
+    picture), number of visits and total time, cost to the patient after insurance, monthly with financing, what
+    comes later (e.g. extraction → implant or bridge later, with that future cost shown as "likely next step"),
+    typical longevity and plain pros/cons the office can edit per procedure; the patient taps the option they choose,
+    which flows into accept/sign (F4). Works with 2–3 options.
 ## Online scheduling that beats the others (asked for, high priority)
 Builds on the booking widget (public booking requests), public availability, provider patterns/blocks, the recall
 self-booking link (RC2) and intake forms. Parity target: Open Dental Web Sched (new patient, recall, ASAP, existing
