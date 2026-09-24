@@ -672,7 +672,16 @@ BL3. **Never silent (dunning):** a declined or failed charge immediately: posts 
 BL4. **Merchant services:** processors behind one adapter (Stripe today; others dental offices commonly use can be
      added, e.g. Rectangle Health, Global Payments/OpenEdge, Worldpay, Square, Payrix) — surcharge/convenience-fee
      rules by state, card-present terminals, text-to-pay and online payments through the same adapter; the owner
-     picks the processor in Settings; sandbox mode for demos and tests.
+     picks the processor in Settings; sandbox mode for demos and tests. **Owner's choice: Stripe only for now**
+     (the adapter stays so another processor can be added later).
+BL5. **Pass-through and custom fees (owner's choice):** an option to pass card processing costs on to the patient
+     (a surcharge % on card payments, or a convenience fee) where the state allows it — the software knows the states
+     that ban or cap surcharges and card-brand rules (disclosed before payment, shown on the receipt, never on debit
+     where not allowed); plus custom fees the office defines: a fixed $ amount or a % of the total collectible amount
+     (e.g. payment-plan setup fee, late fee, returned-payment fee, missed-appointment fee, statement fee), each with
+     when it applies (automatic or offered), caps, and whether staff can waive it (waivers need a reason and are
+     audited). Fees post as their own ledger lines (reversible, never hidden inside a procedure fee) and show
+     clearly to the patient before they agree.
 
 ## Then: remaining workflow batches
 9. Batch 4 (32–44): new patient setup, ERA/EOB posting, prescriptions, lab cases, huddle actions, recall lists,
