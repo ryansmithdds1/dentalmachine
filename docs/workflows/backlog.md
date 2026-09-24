@@ -53,6 +53,15 @@ S7. **Late is impossible to miss (asked for):** the current-time line (already t
     running-behind warnings: a patient checked in but not seated after N minutes, or still in the chair past the
     visit's end with the next patient waiting in that column ("Op 2 running 12 min behind"). Visible to everyone on
     the schedule, optional sound for the front desk.
+S8. **"We moved them" strikes (asked for):** when the office moves or cancels a patient's visit for its own reasons
+    (provider sick, emergency, double-booked, equipment down), the move/cancel asks "Whose reason?" (patient / office)
+    with office reasons listed (reuses the cancel-reason list from workflow 19); office moves are counted on the
+    patient: a small badge "Moved by us 2× in 12 mo" on the schedule card, patient bar and booking/move dialogs, with
+    the dates and reasons on hover. Moving that patient again warns first ("We moved Maria 5 weeks ago — try someone
+    else"). A **"Provider out today" tool** moves or reassigns a whole column at once: keep patients with another
+    provider where possible, and when some must be rescheduled, pick those with no recent strikes first; send a
+    warm apology text with rebooking link (and an optional goodwill note the office sets); report on office-caused
+    moves by reason and provider.
 S4. **More ideas:** short-call/ASAP list matched to a gap (length, provider, type); "next available" that respects
     blocks and patterns; buffer and sterilisation time per chair; colour by type/provider/status toggle; utilisation
     heatmap by chair and hour; unscheduled-treatment and due-recall patients suggested for each open gap; drag a
