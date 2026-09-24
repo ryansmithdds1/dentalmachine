@@ -608,6 +608,26 @@ EX3. **Enough exams to support production:** today's (and this week's/month's) e
      support about $96k of the $110k goal: add ~9 new patient exams or ~25 recall exams"; trends in metrics and the
      monthly email.
 
+## Benchmarks and a leaderboard across practices (asked for)
+Needs care: it shares numbers between practices, so it's opt-in, aggregate-only and de-identified.
+BM1. **Opt-in per practice (owner), and per doctor for being named:** off by default; practices that join share only
+     provider-level aggregates (rates, $ per exam, counts) — never patient data; names hidden (e.g. "Dr. #4821",
+     region and practice type only) unless a doctor chooses to show their name.
+BM2. **What's compared (one definition each, from docs/metrics.md, so everyone is measured the same way):**
+     diagnosis $ per new-patient / recall / emergency exam, case acceptance and conversion at each funnel step,
+     production per doctor-hour and per hygiene-hour, hygiene reappointment %, perio %, new patients per month,
+     collections %, broken-appointment %, schedule fill %, labor % (optional).
+BM3. **Fair comparisons:** peer groups by practice type (general, pediatric, perio, ortho…), size, region, payer mix
+     (PPO-heavy vs fee-for-service) and years in practice; a benchmark is shown only when at least N practices
+     (e.g. 10) are in the group, so nobody can be singled out; percentiles (25th/50th/75th/90th) with "you are at the
+     68th percentile for recall exam diagnosis".
+BM4. **Leaderboard and coaching:** monthly leaderboards per metric and peer group (anonymous by default, fun badges),
+     each doctor's own "above/below average" card with the 2–3 biggest opportunities and what top performers do
+     differently (from the numbers, not guesses), in the metrics page and monthly email.
+BM5. **Plumbing:** a separate benchmark service receives only the nightly aggregate rows from opted-in practices (signed,
+     over TLS, logged in Connection activity), with the practice able to see exactly what was sent and to leave at any
+     time (its rows removed from future benchmarks). Terms/BAA language reviewed before launch.
+
 ## Then: remaining workflow batches
 9. Batch 4 (32–44): new patient setup, ERA/EOB posting, prescriptions, lab cases, huddle actions, recall lists,
    pre-auths, financing, adjustments, referrals, end-of-day, review requests (fix the count bug), clock in/out.
