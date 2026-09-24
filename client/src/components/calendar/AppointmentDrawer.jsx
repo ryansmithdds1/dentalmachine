@@ -8,6 +8,8 @@ import { nextKind, NEXT_LABEL, READY_LABEL, STEP_KEYS, postsCharges } from './fl
 import BrokenPicker, { brokenLabel } from './BrokenPicker.jsx';
 import './workflow.css';
 import OpportunityPanel from '../opportunities/OpportunityPanel.jsx';
+import VisitExtras from '../cards/VisitExtras.jsx';
+import { useConnection } from '../cards/cardData.js';
 
 // Side panel for one appointment: keeps the calendar visible while the front desk works.
 const CONFIRM = [['phone', 'By phone'], ['text', 'By text'], ['email', 'By email'], ['in_person', 'In person']];
@@ -44,6 +46,11 @@ export default function AppointmentDrawer({ appt: a, can, onClose, onStatus, onS
     <button ref={completeRef} className="primary" title={`Completes ${a.procedure_summary} and posts ${money(a.production || 0)}`} onClick={() => onStatus('completed', null, { complete_procedures: true })}>Complete visit & procedures</button>
   );
   const kbd = (k) => <kbd>{k.replace('shift+', '⇧').toUpperCase()}</kbd>;
+  // Moving a patient the office already moved this year warns first (S8): "We moved Maria 5 weeks ago".
+  const conn = useConnection(a.patient_id);
+  const [moveWarn, setMoveWarn] = useState(false);
+  useEffect(() => setMoveWarn(false), [a.id]);
+  const askMove = () => (conn?.strike_warning && !moveWarn ? setMoveWarn(true) : onMove());
 
   return (
     <aside className="drawer" role="dialog" aria-label={`${a.first_name} ${a.last_name}`}>
@@ -65,6 +72,7 @@ export default function AppointmentDrawer({ appt: a, can, onClose, onStatus, onS
         {a.video_url && <div className="public-notice ok" style={{ marginBottom: 8 }}>📹 Video visit · <a href={a.video_url} target="_blank" rel="noreferrer">Join the call</a></div>}
         {!!a.premed_required && <div className="error"><strong>💊 Premedication required</strong> — confirm it was taken before treatment.</div>}
         {a.medical_alerts && <div className="error">⚠ {a.medical_alerts}</div>}
+        <VisitExtras appt={a} can={can} />
         <div className="inline" style={{ flexWrap: 'wrap', marginBottom: 12 }}>
           <Badge value={a.status} />
           {a.status === 'in_chair' && a.ready_for && <span className="badge ready-badge">{READY_LABEL[a.ready_for]}</span>}
@@ -134,12 +142,21 @@ export default function AppointmentDrawer({ appt: a, can, onClose, onStatus, onS
         {can('clinical:read') && <OpportunityPanel appointmentId={a.id} canAdd={can('clinical:write') && !['cancelled', 'no_show'].includes(a.status)} autoFocus={focusOpportunities} onChanged={onOpportunitiesChanged} />}
         <div className="drawer-actions">
           <button onClick={onChart}>Open chart</button>
-          {w && active && <button onClick={onMove}>Move…</button>}
+          {w && active && <button onClick={askMove}>Move…</button>}
           {w && active && onPin && <button onClick={onPin} title="Park it on the pinboard, then place it on any day">Pin</button>}
           {w && active && <button onClick={onEdit}>Edit</button>}
           {w && active && ['scheduled', 'confirmed'].includes(a.status) && <button onClick={onReminder}>Send reminder</button>}
           {w && active && <button onClick={onToggleAsap}>{a.asap ? 'Remove from ASAP' : 'Add to ASAP list'}</button>}
         </div>
+        {moveWarn && (
+          <div className="confirm-box move-warning" role="alert">
+            <strong>{conn.strike_warning}.</strong>
+            <div className="drawer-actions" style={{ marginTop: 6 }}>
+              <button type="button" className="primary" onClick={() => { setMoveWarn(false); onMove(); }}>Move anyway</button>
+              <button type="button" onClick={() => setMoveWarn(false)}>Keep it</button>
+            </div>
+          </div>
+        )}
         <ApptHistory id={a.id} />
         {w && active && (
           <div className="drawer-actions" style={{ marginTop: 16, borderTop: '1px solid var(--border)', paddingTop: 12 }}>

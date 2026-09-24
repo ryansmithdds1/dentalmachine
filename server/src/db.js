@@ -1834,6 +1834,101 @@ CREATE TABLE IF NOT EXISTS tracking_numbers (
   active INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+-- Marketing ROI (MK1-MK2, docs/marketing.md): where patients come from. A source is a channel the practice pays or
+-- hopes for (Google Ads, a mailer, patient referrals...); match_keys are the utm_source / ?src= / call-tracking line
+-- names that mean it. Retired (active 0), never deleted.
+CREATE TABLE IF NOT EXISTS marketing_sources (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  channel TEXT NOT NULL CHECK (channel IN ('google_ads','facebook','instagram','google_business','website_organic','referral_patient','referral_doctor','insurance_directory','mailer','event','walk_in','other')),
+  name TEXT NOT NULL,
+  match_keys TEXT,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (practice_id, name)
+);
+-- A marketing campaign under a source (a spring mailer, a Google Ads campaign): matched by its utm_campaign tag,
+-- promo code or call-tracking number while it runs. message_campaign_id links a campaign sent from the app.
+CREATE TABLE IF NOT EXISTS marketing_campaigns (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  source_id INTEGER NOT NULL REFERENCES marketing_sources(id),
+  name TEXT NOT NULL,
+  utm_campaign TEXT,
+  promo_code TEXT,
+  tracking_number_id INTEGER REFERENCES tracking_numbers(id),
+  message_campaign_id INTEGER REFERENCES campaigns(id),
+  starts_on TEXT,
+  ends_on TEXT,
+  notes TEXT,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (practice_id, name)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mk_campaign_utm ON marketing_campaigns(practice_id, utm_campaign) WHERE utm_campaign IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mk_campaign_promo ON marketing_campaigns(practice_id, promo_code) WHERE promo_code IS NOT NULL;
+-- What marketing cost, for a date range (spread evenly over its days for monthly figures). Integer cents.
+-- Corrected by voiding (voided_at) and entering again, never edited or deleted. client_key makes a resend safe.
+CREATE TABLE IF NOT EXISTS marketing_costs (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  source_id INTEGER NOT NULL REFERENCES marketing_sources(id),
+  campaign_id INTEGER REFERENCES marketing_campaigns(id),
+  starts_on TEXT NOT NULL,
+  ends_on TEXT NOT NULL,
+  amount INTEGER NOT NULL,
+  notes TEXT,
+  client_key TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  voided_at TEXT,
+  voided_by INTEGER REFERENCES users(id),
+  void_reason TEXT,
+  UNIQUE (practice_id, client_key)
+);
+-- Every piece of evidence of where a lead or patient came from (an online booking's UTM tags, a call to a tracking
+-- number, a promo code, a referral, the front desk's "how did you hear about us"), once each (touch_key).
+-- patients.marketing_first_touch_id / marketing_last_touch_id point at the ones that count (first and last touch).
+CREATE TABLE IF NOT EXISTS marketing_touches (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER REFERENCES patients(id),
+  touch_key TEXT NOT NULL,
+  method TEXT NOT NULL CHECK (method IN ('utm','tracking_number','promo_code','referral','staff','online_booking','call')),
+  source_id INTEGER REFERENCES marketing_sources(id),
+  campaign_id INTEGER REFERENCES marketing_campaigns(id),
+  lead INTEGER NOT NULL DEFAULT 0,
+  lead_kind TEXT,
+  entity TEXT,
+  entity_id INTEGER,
+  detail TEXT,
+  occurred_at TEXT NOT NULL,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (practice_id, touch_key)
+);
+CREATE INDEX IF NOT EXISTS idx_mk_touches_patient ON marketing_touches(patient_id, occurred_at);
+CREATE INDEX IF NOT EXISTS idx_mk_touches_lead ON marketing_touches(practice_id, lead, occurred_at);
+-- A patient's own referral link code (?rp=CODE on the booking page). Codes are random, never personal details.
+CREATE TABLE IF NOT EXISTS marketing_referral_codes (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  code TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (practice_id, code)
+);
+-- How far the marketing capture job has read each kind of record (derived bookkeeping).
+CREATE TABLE IF NOT EXISTS marketing_sync_state (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  name TEXT NOT NULL,
+  last_id INTEGER NOT NULL DEFAULT 0,
+  last_run_on TEXT,
+  UNIQUE (practice_id, name)
+);
 CREATE TABLE IF NOT EXISTS financing_applications (
   id INTEGER PRIMARY KEY,
   practice_id INTEGER NOT NULL REFERENCES practices(id),
@@ -3762,6 +3857,18 @@ CREATE TABLE IF NOT EXISTS lab_checkins (
 );
 CREATE INDEX IF NOT EXISTS idx_visit_req_appt ON visit_requirements(practice_id, appointment_id);
 CREATE INDEX IF NOT EXISTS idx_lab_checkins_case ON lab_checkins(practice_id, lab_case_id);
+-- Statement codes for website bill pay (PT3, billpay.js): one live code per family, printed on statements;
+-- replacing one sets revoked_at on the old code (never deleted).
+CREATE TABLE IF NOT EXISTS billpay_codes (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  code TEXT NOT NULL,
+  revoked_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (practice_id, code)
+);
+CREATE INDEX IF NOT EXISTS idx_billpay_codes_patient ON billpay_codes(practice_id, patient_id);
 
 
 -- Treatment plan phases (F1, routes/finoptions.js): the name, plain-words why, number of visits, planned month and
@@ -3835,328 +3942,6 @@ CREATE TABLE IF NOT EXISTS procedure_insights (
   cons TEXT NOT NULL DEFAULT '[]',
   updated_by INTEGER REFERENCES users(id),
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-  UNIQUE (practice_id, code)
-);
--- Referral tracker (RT1–RT5, referraltracker.js, docs/workflows/specs/RT-referrals.md). Settings per practice:
--- days until a referral is expected to be seen per urgency (only drive the past-due report unless nudges are on),
--- how often a critical referral re-alerts the team, and the letter/text wording.
-CREATE TABLE IF NOT EXISTS referral_settings (
-  id INTEGER PRIMARY KEY,
-  practice_id INTEGER NOT NULL REFERENCES practices(id),
-  routine_days INTEGER NOT NULL DEFAULT 30,
-  soon_days INTEGER NOT NULL DEFAULT 14,
-  critical_days INTEGER NOT NULL DEFAULT 7,
-  past_due_days INTEGER NOT NULL DEFAULT 30,
-  critical_alert_days INTEGER NOT NULL DEFAULT 7,
-  nudge_noncritical INTEGER NOT NULL DEFAULT 0,
-  text_patient INTEGER NOT NULL DEFAULT 1,
-  alert_user_ids TEXT,
-  patient_text TEXT,
-  thank_you_text TEXT,
-  report_back_text TEXT,
-  updated_by INTEGER REFERENCES users(id),
-  updated_at TEXT,
-  UNIQUE (practice_id)
-);
--- What a referral is for: procedure codes and teeth, with the office fee and the PPO allowed amount on the day it
--- was made (for the in-house opportunity report), and the planned procedure it came from.
-CREATE TABLE IF NOT EXISTS referral_items (
-  id INTEGER PRIMARY KEY,
-  practice_id INTEGER NOT NULL REFERENCES practices(id),
-  referral_id INTEGER NOT NULL REFERENCES referrals(id),
-  code TEXT NOT NULL,
-  category TEXT,
-  tooth TEXT,
-  surfaces TEXT,
-  procedure_id INTEGER REFERENCES procedures(id),
-  office_fee INTEGER,
-  ppo_fee INTEGER,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
--- A referral's timeline: every status move, letter, text, alert, nudge, report and note, with who and when.
--- Append-only (never edited or removed).
-CREATE TABLE IF NOT EXISTS referral_events (
-  id INTEGER PRIMARY KEY,
-  practice_id INTEGER NOT NULL REFERENCES practices(id),
-  referral_id INTEGER NOT NULL REFERENCES referrals(id),
-  kind TEXT NOT NULL,
-  from_status TEXT,
-  to_status TEXT,
-  on_date TEXT,
-  note TEXT,
-  user_id INTEGER REFERENCES users(id),
-  source TEXT NOT NULL DEFAULT 'human',
-  actor TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
--- Files that go with a referral (x-rays, notes sent along) and the specialist's report that came back.
-CREATE TABLE IF NOT EXISTS referral_documents (
-  id INTEGER PRIMARY KEY,
-  practice_id INTEGER NOT NULL REFERENCES practices(id),
-  referral_id INTEGER NOT NULL REFERENCES referrals(id),
-  document_id INTEGER NOT NULL REFERENCES documents(id),
-  role TEXT NOT NULL CHECK (role IN ('attachment','report')),
-  added_by INTEGER REFERENCES users(id),
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  UNIQUE (referral_id, document_id, role)
-);
--- A filed document that looks like the report for an open referral (rules, or the AI when unsure): a person
--- confirms or dismisses it. One row per referral and document, so a dismissed match is never suggested again.
-CREATE TABLE IF NOT EXISTS referral_report_matches (
-  id INTEGER PRIMARY KEY,
-  practice_id INTEGER NOT NULL REFERENCES practices(id),
-  referral_id INTEGER NOT NULL REFERENCES referrals(id),
-  document_id INTEGER NOT NULL REFERENCES documents(id),
-  score INTEGER NOT NULL DEFAULT 0,
-  reason TEXT,
-  source TEXT NOT NULL DEFAULT 'rules',
-  status TEXT NOT NULL DEFAULT 'suggested' CHECK (status IN ('suggested','confirmed','dismissed')),
-  decided_by INTEGER REFERENCES users(id),
-  decided_at TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  UNIQUE (referral_id, document_id)
-);
--- Insurance autopilot (eobauto.js, docs/eob-autopilot.md). A paper EOB (scan, PDF or phone photo) as read by AI:
--- the file (encrypted in storage), what the AI read from it, and who approved posting it ("Looks right — post").
--- file_hash makes the same file uploaded twice one EOB. Never deleted: status read → posted, or void.
-CREATE TABLE IF NOT EXISTS paper_eobs (
-  id INTEGER PRIMARY KEY,
-  practice_id INTEGER NOT NULL REFERENCES practices(id),
-  filename TEXT,
-  mime TEXT NOT NULL,
-  size INTEGER NOT NULL DEFAULT 0,
-  storage_key TEXT NOT NULL,
-  encrypted INTEGER NOT NULL DEFAULT 0,
-  file_hash TEXT NOT NULL,
-  payer_name TEXT,
-  carrier_id INTEGER REFERENCES insurance_carriers(id),
-  check_number TEXT,
-  check_date TEXT,
-  total_paid INTEGER NOT NULL DEFAULT 0,
-  method TEXT NOT NULL DEFAULT 'check',
-  provider_adjustments TEXT,
-  totals_match INTEGER NOT NULL DEFAULT 0,
-  status TEXT NOT NULL DEFAULT 'read' CHECK (status IN ('read','posted','void')),
-  insurance_check_id INTEGER REFERENCES insurance_checks(id),
-  approved_by INTEGER REFERENCES users(id),
-  approved_at TEXT,
-  created_by INTEGER REFERENCES users(id),
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  UNIQUE (practice_id, file_hash)
-);
--- One row per claim per remittance (an ERA's CLP lines for one claim, merged; a paper EOB's claim), and one per
--- line that matched no claim, with the autopilot's verdict: 'ready' (reconciles exactly, waiting to post),
--- 'posted', 'exception' (kind: denied, underpaid, overpaid, unmatched, partial, reversal, review — reason in
--- words) or 'resolved' (a person decided: resolution + note). Amounts in cents as the payer sent them.
--- dedupe_key (source, payer, trace/check number, claim or control number, line) makes each line arrive once.
--- line_no -1 is the check itself (provider-level adjustments, totals that don't match). Never deleted.
-CREATE TABLE IF NOT EXISTS remit_lines (
-  id INTEGER PRIMARY KEY,
-  practice_id INTEGER NOT NULL REFERENCES practices(id),
-  source TEXT NOT NULL CHECK (source IN ('era','paper')),
-  era_import_id INTEGER REFERENCES era_imports(id),
-  paper_eob_id INTEGER REFERENCES paper_eobs(id),
-  insurance_check_id INTEGER REFERENCES insurance_checks(id),
-  dedupe_key TEXT NOT NULL,
-  trace TEXT,
-  payer_name TEXT,
-  line_no INTEGER NOT NULL DEFAULT 0,
-  lines_count INTEGER NOT NULL DEFAULT 1,
-  control_number TEXT,
-  claim_id INTEGER REFERENCES claims(id),
-  patient_id INTEGER REFERENCES patients(id),
-  location_id INTEGER REFERENCES locations(id),
-  status_code TEXT,
-  billed INTEGER NOT NULL DEFAULT 0,
-  paid INTEGER NOT NULL DEFAULT 0,
-  contractual INTEGER NOT NULL DEFAULT 0,
-  patient_resp INTEGER NOT NULL DEFAULT 0,
-  other_adjustments INTEGER NOT NULL DEFAULT 0,
-  deductible INTEGER NOT NULL DEFAULT 0,
-  expected_allowed INTEGER,
-  payer_claim_number TEXT,
-  reason_codes TEXT,
-  services TEXT,
-  state TEXT NOT NULL DEFAULT 'exception' CHECK (state IN ('ready','posted','exception','resolved')),
-  kind TEXT,
-  reason TEXT,
-  posted_at TEXT,
-  posted_by INTEGER REFERENCES users(id),
-  posted_source TEXT,
-  resolution TEXT,
-  resolution_note TEXT,
-  resolved_by INTEGER REFERENCES users(id),
-  resolved_at TEXT,
-  task_id INTEGER REFERENCES tasks(id),
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  UNIQUE (practice_id, dedupe_key)
-);
--- Billing the patient after insurance (autobill.js): one row per closed claim the autopilot looked at, for the
--- account (guarantor) that owes. 'active' bills are sent by the cadence engine (type patient_balance) with a pay
--- link; one active bill per account (a later claim is 'merged' into it); 'skipped' says why not (nothing owed,
--- below the minimum, on a payment plan). paper_status tracks the one mailed statement (claimed before sending).
--- amount is what the account owed when it started — the balance itself always comes from the ledger.
-CREATE TABLE IF NOT EXISTS balance_bills (
-  id INTEGER PRIMARY KEY,
-  practice_id INTEGER NOT NULL REFERENCES practices(id),
-  patient_id INTEGER NOT NULL REFERENCES patients(id),
-  claim_id INTEGER NOT NULL REFERENCES claims(id),
-  location_id INTEGER REFERENCES locations(id),
-  closed_on TEXT NOT NULL,
-  anchor_date TEXT NOT NULL,
-  amount INTEGER NOT NULL DEFAULT 0,
-  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','paid','stopped','done','skipped','merged')),
-  stop_reason TEXT,
-  merged_into_id INTEGER REFERENCES balance_bills(id),
-  last_sent_at TEXT,
-  link_opened_at TEXT,
-  payment_request_id INTEGER REFERENCES payment_requests(id),
-  paper_status TEXT CHECK (paper_status IN ('sending','sent','to_print','failed')),
-  paper_attempts INTEGER NOT NULL DEFAULT 0,
-  paper_reference TEXT,
-  paper_error TEXT,
-  paper_at TEXT,
-  statement_run_id INTEGER REFERENCES statement_runs(id),
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  ended_at TEXT,
-  UNIQUE (claim_id)
-);
--- Reviews with a feedback screen and team shout-outs (RV1–RV3, reviewfunnel.js, shoutouts.js, docs/reviews.md).
--- Review-request settings, one row per practice. The happy threshold, the automatic-after-visit switch and the
--- Google review link stay on practices (review_threshold, review_requests, review_url). other_sites: JSON
--- [{name, url}] also offered to patients; notify_user_ids: JSON user ids told about private feedback (empty =
--- administrators and anyone with reviews:manage). There is deliberately no setting that hides the public review link.
-CREATE TABLE IF NOT EXISTS review_settings (
-  id INTEGER PRIMARY KEY,
-  practice_id INTEGER NOT NULL UNIQUE REFERENCES practices(id),
-  throttle_months INTEGER NOT NULL DEFAULT 6,
-  channel TEXT NOT NULL DEFAULT 'auto' CHECK (channel IN ('auto','sms','email')),
-  other_sites TEXT,
-  notify_user_ids TEXT,
-  followup_user_id INTEGER REFERENCES users(id),
-  points_per_mention INTEGER NOT NULL DEFAULT 10,
-  reward_note TEXT,
-  updated_by INTEGER REFERENCES users(id),
-  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
--- Nicknames staff go by ("Annie", "Dr. Bob") so shout-outs find the right person. Configuration: removing one
--- is a hard delete, audited.
-CREATE TABLE IF NOT EXISTS staff_nicknames (
-  id INTEGER PRIMARY KEY,
-  practice_id INTEGER NOT NULL REFERENCES practices(id),
-  user_id INTEGER NOT NULL REFERENCES users(id),
-  nickname TEXT NOT NULL,
-  created_by INTEGER REFERENCES users(id),
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  UNIQUE (practice_id, nickname)
-);
--- A staff member named in private feedback or an online review, with the quote. One row per person (match_key
--- 'u<user id>') or unclear name ('n<name>') per piece of feedback (source_key 'feedback:<id>' / 'review:<id>'),
--- so re-checking never double counts. points are fixed when found; positive = 0 for a low rating (kept for
--- coaching, no points). status: counted, needs_match (fits several people: candidate_ids), unlinked (the owner
--- said it wasn't them — kept, never deleted).
-CREATE TABLE IF NOT EXISTS review_shoutouts (
-  id INTEGER PRIMARY KEY,
-  practice_id INTEGER NOT NULL REFERENCES practices(id),
-  source TEXT NOT NULL CHECK (source IN ('feedback','review')),
-  source_key TEXT NOT NULL,
-  review_feedback_id INTEGER REFERENCES review_feedback(id),
-  review_id INTEGER REFERENCES reviews(id),
-  patient_id INTEGER REFERENCES patients(id),
-  user_id INTEGER REFERENCES users(id),
-  match_key TEXT NOT NULL,
-  matched_name TEXT NOT NULL,
-  candidate_ids TEXT,
-  quote TEXT NOT NULL,
-  rating INTEGER,
-  positive INTEGER NOT NULL DEFAULT 1,
-  points INTEGER NOT NULL DEFAULT 0,
-  month TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'counted' CHECK (status IN ('counted','needs_match','unlinked')),
-  decided_by INTEGER REFERENCES users(id),
-  decided_at TEXT,
-  decision_note TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  UNIQUE (practice_id, source_key, match_key)
-);
--- A reward noted for someone's shout-outs in a month ("$25 coffee card"): one per person per month.
-CREATE TABLE IF NOT EXISTS review_rewards (
-  id INTEGER PRIMARY KEY,
-  practice_id INTEGER NOT NULL REFERENCES practices(id),
-  user_id INTEGER NOT NULL REFERENCES users(id),
-  month TEXT NOT NULL,
-  note TEXT NOT NULL,
-  created_by INTEGER REFERENCES users(id),
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at TEXT,
-  UNIQUE (practice_id, user_id, month)
-);
-CREATE INDEX IF NOT EXISTS idx_fin_agreements_patient ON fin_agreements(practice_id, patient_id);
-CREATE INDEX IF NOT EXISTS idx_referral_items_ref ON referral_items(referral_id);
-CREATE INDEX IF NOT EXISTS idx_referral_events_ref ON referral_events(referral_id, id);
-CREATE INDEX IF NOT EXISTS idx_remit_lines_state ON remit_lines(practice_id, state);
-CREATE INDEX IF NOT EXISTS idx_remit_lines_claim ON remit_lines(claim_id);
-CREATE INDEX IF NOT EXISTS idx_remit_lines_era ON remit_lines(era_import_id);
-CREATE INDEX IF NOT EXISTS idx_remit_lines_paper ON remit_lines(paper_eob_id);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_balance_bills_one_active ON balance_bills(practice_id, patient_id) WHERE status = 'active';
--- Treatment entry (routes/treatmententry.js, chartengine.js): named packages of procedures charted in one step
--- ("Crown" = crown + optional buildup/post), the office's (user_id null) or one person's own (owner 'u<id>').
--- items is the recipe as JSON: [{ code | work | finding, tooth: same|range|ends|between|none|unsealed_molars,
--- surfaces, area, optional, default_on, phase, label }]. Retired (active 0), never deleted.
-CREATE TABLE IF NOT EXISTS procedure_bundles (
-  id INTEGER PRIMARY KEY,
-  practice_id INTEGER NOT NULL REFERENCES practices(id),
-  user_id INTEGER REFERENCES users(id),
-  owner TEXT NOT NULL DEFAULT 'office',
-  name TEXT NOT NULL,
-  alias TEXT,
-  items TEXT NOT NULL,
-  starter_key TEXT,
-  active INTEGER NOT NULL DEFAULT 1,
-  retired_at TEXT,
-  retired_by INTEGER REFERENCES users(id),
-  created_by INTEGER REFERENCES users(id),
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at TEXT,
-  UNIQUE (practice_id, owner, starter_key)
-);
--- The chart's quick buttons and typed/spoken aliases ("bu" = D2950 planned): the office's and each person's own,
--- in order; the first nine buttons are Alt+1…9. kind code|work|finding|bundle; target is the code, kind of work
--- or finding (bundle_id for a bundle); mode plan|done|existing. Retired (active 0), never deleted.
-CREATE TABLE IF NOT EXISTS chart_shortcuts (
-  id INTEGER PRIMARY KEY,
-  practice_id INTEGER NOT NULL REFERENCES practices(id),
-  user_id INTEGER REFERENCES users(id),
-  owner TEXT NOT NULL DEFAULT 'office',
-  label TEXT NOT NULL,
-  alias TEXT,
-  kind TEXT NOT NULL CHECK (kind IN ('code','work','finding','bundle')),
-  target TEXT NOT NULL,
-  bundle_id INTEGER REFERENCES procedure_bundles(id),
-  mode TEXT NOT NULL DEFAULT 'plan' CHECK (mode IN ('plan','done','existing')),
-  surfaces TEXT,
-  color TEXT,
-  icon TEXT,
-  button INTEGER NOT NULL DEFAULT 1,
-  position INTEGER NOT NULL DEFAULT 0,
-  starter_key TEXT,
-  active INTEGER NOT NULL DEFAULT 1,
-  retired_at TEXT,
-  retired_by INTEGER REFERENCES users(id),
-  created_by INTEGER REFERENCES users(id),
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at TEXT,
-  UNIQUE (practice_id, owner, starter_key)
-);
--- Statement codes for website bill pay (PT3, billpay.js): one live code per family, printed on statements;
--- replacing one sets revoked_at on the old code (never deleted).
-CREATE TABLE IF NOT EXISTS billpay_codes (
-  id INTEGER PRIMARY KEY,
-  practice_id INTEGER NOT NULL REFERENCES practices(id),
-  patient_id INTEGER NOT NULL REFERENCES patients(id),
-  code TEXT NOT NULL,
-  revoked_at TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE (practice_id, code)
 );
 -- Phones: every call saved, linked and coached (PH1-PH7, phonecoach.js, routes/phonecoach.js, docs/phones.md).
@@ -4312,186 +4097,85 @@ CREATE TABLE IF NOT EXISTS recall_resets (
   UNIQUE (recall_id, procedure_id),
   UNIQUE (recall_id, outside_id)
 );
--- Insurance verification center (IV1–IV4, verification.js / planverify.js). One row per verified benefit
--- breakdown: how (method), by whom (verified_by, source, actor), what it changed on the plan and so for everyone
--- on it (plan_changes before/after, patients_updated), the patient's own amounts (patient_detail), and — when the
--- plan's identity wasn't certain — the plan-level changes waiting for a person (group_status 'review', proposed).
--- Rows are never deleted; only the review decision is filled in later.
-CREATE TABLE IF NOT EXISTS benefit_verifications (
+-- Referral tracker (RT1–RT5, referraltracker.js, docs/workflows/specs/RT-referrals.md). Settings per practice:
+-- days until a referral is expected to be seen per urgency (only drive the past-due report unless nudges are on),
+-- how often a critical referral re-alerts the team, and the letter/text wording.
+CREATE TABLE IF NOT EXISTS referral_settings (
   id INTEGER PRIMARY KEY,
   practice_id INTEGER NOT NULL REFERENCES practices(id),
-  patient_id INTEGER NOT NULL REFERENCES patients(id),
-  patient_insurance_id INTEGER NOT NULL REFERENCES patient_insurance(id),
-  plan_id INTEGER REFERENCES insurance_plans(id),
-  location_id INTEGER REFERENCES locations(id),
-  method TEXT NOT NULL,
-  eligibility_check_id INTEGER REFERENCES eligibility_checks(id),
-  document_id INTEGER REFERENCES documents(id),
-  read_id INTEGER,
-  complete INTEGER NOT NULL DEFAULT 0,
-  plan_changes TEXT,
-  proposed TEXT,
-  patient_detail TEXT,
-  evidence TEXT,
-  review_reasons TEXT,
-  group_status TEXT NOT NULL DEFAULT 'none' CHECK (group_status IN ('none','applied','review','applied_after_review','kept')),
-  patients_updated INTEGER NOT NULL DEFAULT 0,
-  reference TEXT,
-  rep_name TEXT,
-  notes TEXT,
+  routine_days INTEGER NOT NULL DEFAULT 30,
+  soon_days INTEGER NOT NULL DEFAULT 14,
+  critical_days INTEGER NOT NULL DEFAULT 7,
+  past_due_days INTEGER NOT NULL DEFAULT 30,
+  critical_alert_days INTEGER NOT NULL DEFAULT 7,
+  nudge_noncritical INTEGER NOT NULL DEFAULT 0,
+  text_patient INTEGER NOT NULL DEFAULT 1,
+  alert_user_ids TEXT,
+  patient_text TEXT,
+  thank_you_text TEXT,
+  report_back_text TEXT,
+  updated_by INTEGER REFERENCES users(id),
+  updated_at TEXT,
+  UNIQUE (practice_id)
+);
+-- What a referral is for: procedure codes and teeth, with the office fee and the PPO allowed amount on the day it
+-- was made (for the in-house opportunity report), and the planned procedure it came from.
+CREATE TABLE IF NOT EXISTS referral_items (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  referral_id INTEGER NOT NULL REFERENCES referrals(id),
+  code TEXT NOT NULL,
+  category TEXT,
+  tooth TEXT,
+  surfaces TEXT,
+  procedure_id INTEGER REFERENCES procedures(id),
+  office_fee INTEGER,
+  ppo_fee INTEGER,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- A referral's timeline: every status move, letter, text, alert, nudge, report and note, with who and when.
+-- Append-only (never edited or removed).
+CREATE TABLE IF NOT EXISTS referral_events (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  referral_id INTEGER NOT NULL REFERENCES referrals(id),
+  kind TEXT NOT NULL,
+  from_status TEXT,
+  to_status TEXT,
+  on_date TEXT,
+  note TEXT,
+  user_id INTEGER REFERENCES users(id),
   source TEXT NOT NULL DEFAULT 'human',
   actor TEXT,
-  verified_by INTEGER REFERENCES users(id),
-  reviewed_by INTEGER REFERENCES users(id),
-  reviewed_at TEXT,
-  review_note TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
--- A benefit document (payer portal page, fax) read by AI: a draft until a person confirms it field by field
--- (then it becomes a benefit_verifications row) or sets it aside. Never applied on its own.
-CREATE TABLE IF NOT EXISTS benefit_reads (
+-- Files that go with a referral (x-rays, notes sent along) and the specialist's report that came back.
+CREATE TABLE IF NOT EXISTS referral_documents (
   id INTEGER PRIMARY KEY,
   practice_id INTEGER NOT NULL REFERENCES practices(id),
-  patient_id INTEGER NOT NULL REFERENCES patients(id),
-  patient_insurance_id INTEGER NOT NULL REFERENCES patient_insurance(id),
-  plan_id INTEGER REFERENCES insurance_plans(id),
-  document_id INTEGER REFERENCES documents(id),
-  proposed TEXT NOT NULL,
+  referral_id INTEGER NOT NULL REFERENCES referrals(id),
+  document_id INTEGER NOT NULL REFERENCES documents(id),
+  role TEXT NOT NULL CHECK (role IN ('attachment','report')),
+  added_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (referral_id, document_id, role)
+);
+-- A filed document that looks like the report for an open referral (rules, or the AI when unsure): a person
+-- confirms or dismisses it. One row per referral and document, so a dismissed match is never suggested again.
+CREATE TABLE IF NOT EXISTS referral_report_matches (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  referral_id INTEGER NOT NULL REFERENCES referrals(id),
+  document_id INTEGER NOT NULL REFERENCES documents(id),
+  score INTEGER NOT NULL DEFAULT 0,
   reason TEXT,
-  sandbox INTEGER NOT NULL DEFAULT 0,
-  status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','confirmed','discarded')),
-  created_by INTEGER REFERENCES users(id),
-  confirmed_by INTEGER REFERENCES users(id),
-  confirmed_at TEXT,
-  verification_id INTEGER REFERENCES benefit_verifications(id),
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
--- The automatic eligibility checks before each visit (days ahead, and the morning of): one row per policy,
--- visit day and window, claimed before the check runs so no pass (or second server) checks it twice. Job
--- bookkeeping: failed rows are retried (attempts) and then become a Needs attention item.
-CREATE TABLE IF NOT EXISTS verification_runs (
-  id INTEGER PRIMARY KEY,
-  practice_id INTEGER NOT NULL REFERENCES practices(id),
-  patient_id INTEGER NOT NULL REFERENCES patients(id),
-  patient_insurance_id INTEGER NOT NULL REFERENCES patient_insurance(id),
-  appointment_id INTEGER REFERENCES appointments(id),
-  visit_date TEXT NOT NULL,
-  run_window TEXT NOT NULL CHECK (run_window IN ('ahead','morning')),
-  status TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running','done','skipped','failed')),
-  eligibility_check_id INTEGER REFERENCES eligibility_checks(id),
-  attempts INTEGER NOT NULL DEFAULT 0,
-  error TEXT,
+  source TEXT NOT NULL DEFAULT 'rules',
+  status TEXT NOT NULL DEFAULT 'suggested' CHECK (status IN ('suggested','confirmed','dismissed')),
+  decided_by INTEGER REFERENCES users(id),
+  decided_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at TEXT,
-  UNIQUE (patient_insurance_id, visit_date, run_window)
+  UNIQUE (referral_id, document_id)
 );
-CREATE INDEX IF NOT EXISTS idx_billpay_codes_patient ON billpay_codes(practice_id, patient_id);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_phone_protocols_active ON phone_protocols(practice_id, call_type) WHERE status = 'active';
-CREATE UNIQUE INDEX IF NOT EXISTS idx_call_scores_current ON call_scores(call_id) WHERE status = 'current';
-CREATE INDEX IF NOT EXISTS idx_call_scores_practice ON call_scores(practice_id, created_at);
-CREATE INDEX IF NOT EXISTS idx_call_reviews_call ON call_reviews(call_id, id);
-CREATE INDEX IF NOT EXISTS idx_call_no_book ON call_no_book(practice_id, created_at);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_recall_outside_once ON recall_outside(practice_id, patient_id, code, done_on) WHERE status = 'active';
-CREATE INDEX IF NOT EXISTS idx_recall_resets_proc ON recall_resets(procedure_id);
-CREATE INDEX IF NOT EXISTS idx_recall_resets_recall ON recall_resets(recall_id);
-CREATE INDEX IF NOT EXISTS idx_benefit_verif_policy ON benefit_verifications(patient_insurance_id);
-CREATE INDEX IF NOT EXISTS idx_benefit_verif_plan ON benefit_verifications(plan_id, group_status);
-CREATE INDEX IF NOT EXISTS idx_verif_runs_day ON verification_runs(practice_id, visit_date);
--- Marketing ROI (MK1-MK2, docs/marketing.md): where patients come from. A source is a channel the practice pays or
--- hopes for (Google Ads, a mailer, patient referrals...); match_keys are the utm_source / ?src= / call-tracking line
--- names that mean it. Retired (active 0), never deleted.
-CREATE TABLE IF NOT EXISTS marketing_sources (
-  id INTEGER PRIMARY KEY,
-  practice_id INTEGER NOT NULL REFERENCES practices(id),
-  channel TEXT NOT NULL CHECK (channel IN ('google_ads','facebook','instagram','google_business','website_organic','referral_patient','referral_doctor','insurance_directory','mailer','event','walk_in','other')),
-  name TEXT NOT NULL,
-  match_keys TEXT,
-  active INTEGER NOT NULL DEFAULT 1,
-  created_by INTEGER REFERENCES users(id),
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  UNIQUE (practice_id, name)
-);
--- A marketing campaign under a source (a spring mailer, a Google Ads campaign): matched by its utm_campaign tag,
--- promo code or call-tracking number while it runs. message_campaign_id links a campaign sent from the app.
-CREATE TABLE IF NOT EXISTS marketing_campaigns (
-  id INTEGER PRIMARY KEY,
-  practice_id INTEGER NOT NULL REFERENCES practices(id),
-  source_id INTEGER NOT NULL REFERENCES marketing_sources(id),
-  name TEXT NOT NULL,
-  utm_campaign TEXT,
-  promo_code TEXT,
-  tracking_number_id INTEGER REFERENCES tracking_numbers(id),
-  message_campaign_id INTEGER REFERENCES campaigns(id),
-  starts_on TEXT,
-  ends_on TEXT,
-  notes TEXT,
-  active INTEGER NOT NULL DEFAULT 1,
-  created_by INTEGER REFERENCES users(id),
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  UNIQUE (practice_id, name)
-);
--- What marketing cost, for a date range (spread evenly over its days for monthly figures). Integer cents.
--- Corrected by voiding (voided_at) and entering again, never edited or deleted. client_key makes a resend safe.
-CREATE TABLE IF NOT EXISTS marketing_costs (
-  id INTEGER PRIMARY KEY,
-  practice_id INTEGER NOT NULL REFERENCES practices(id),
-  source_id INTEGER NOT NULL REFERENCES marketing_sources(id),
-  campaign_id INTEGER REFERENCES marketing_campaigns(id),
-  starts_on TEXT NOT NULL,
-  ends_on TEXT NOT NULL,
-  amount INTEGER NOT NULL,
-  notes TEXT,
-  client_key TEXT,
-  created_by INTEGER REFERENCES users(id),
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  voided_at TEXT,
-  voided_by INTEGER REFERENCES users(id),
-  void_reason TEXT,
-  UNIQUE (practice_id, client_key)
-);
--- Every piece of evidence of where a lead or patient came from (an online booking's UTM tags, a call to a tracking
--- number, a promo code, a referral, the front desk's "how did you hear about us"), once each (touch_key).
--- patients.marketing_first_touch_id / marketing_last_touch_id point at the ones that count (first and last touch).
-CREATE TABLE IF NOT EXISTS marketing_touches (
-  id INTEGER PRIMARY KEY,
-  practice_id INTEGER NOT NULL REFERENCES practices(id),
-  patient_id INTEGER REFERENCES patients(id),
-  touch_key TEXT NOT NULL,
-  method TEXT NOT NULL CHECK (method IN ('utm','tracking_number','promo_code','referral','staff','online_booking','call')),
-  source_id INTEGER REFERENCES marketing_sources(id),
-  campaign_id INTEGER REFERENCES marketing_campaigns(id),
-  lead INTEGER NOT NULL DEFAULT 0,
-  lead_kind TEXT,
-  entity TEXT,
-  entity_id INTEGER,
-  detail TEXT,
-  occurred_at TEXT NOT NULL,
-  created_by INTEGER REFERENCES users(id),
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  UNIQUE (practice_id, touch_key)
-);
--- A patient's own referral link code (?rp=CODE on the booking page). Codes are random, never personal details.
-CREATE TABLE IF NOT EXISTS marketing_referral_codes (
-  id INTEGER PRIMARY KEY,
-  practice_id INTEGER NOT NULL REFERENCES practices(id),
-  patient_id INTEGER NOT NULL REFERENCES patients(id),
-  code TEXT NOT NULL,
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  UNIQUE (practice_id, code)
-);
--- How far the marketing capture job has read each kind of record (derived bookkeeping).
-CREATE TABLE IF NOT EXISTS marketing_sync_state (
-  id INTEGER PRIMARY KEY,
-  practice_id INTEGER NOT NULL REFERENCES practices(id),
-  name TEXT NOT NULL,
-  last_id INTEGER NOT NULL DEFAULT 0,
-  last_run_on TEXT,
-  UNIQUE (practice_id, name)
-);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_mk_campaign_utm ON marketing_campaigns(practice_id, utm_campaign) WHERE utm_campaign IS NOT NULL;
-CREATE UNIQUE INDEX IF NOT EXISTS idx_mk_campaign_promo ON marketing_campaigns(practice_id, promo_code) WHERE promo_code IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_mk_touches_patient ON marketing_touches(patient_id, occurred_at);
-CREATE INDEX IF NOT EXISTS idx_mk_touches_lead ON marketing_touches(practice_id, lead, occurred_at);
 -- Owner's business view (businessdata.js): procedure costs, provider pay, staff roles, exam targets.
 -- Business view (PM1-PM4, BD1-BD4; business.js, businessdata.js, routes/business.js, docs/business-view.md).
 -- The owner's settings: color thresholds, fixed costs, labor target. One row per practice; changes are audited.
@@ -4590,8 +4274,496 @@ CREATE TABLE IF NOT EXISTS exam_values (
   set_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE (practice_id, exam_type, horizon_months)
 );
+-- Insurance autopilot (eobauto.js, docs/eob-autopilot.md). A paper EOB (scan, PDF or phone photo) as read by AI:
+-- the file (encrypted in storage), what the AI read from it, and who approved posting it ("Looks right — post").
+-- file_hash makes the same file uploaded twice one EOB. Never deleted: status read → posted, or void.
+CREATE TABLE IF NOT EXISTS paper_eobs (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  filename TEXT,
+  mime TEXT NOT NULL,
+  size INTEGER NOT NULL DEFAULT 0,
+  storage_key TEXT NOT NULL,
+  encrypted INTEGER NOT NULL DEFAULT 0,
+  file_hash TEXT NOT NULL,
+  payer_name TEXT,
+  carrier_id INTEGER REFERENCES insurance_carriers(id),
+  check_number TEXT,
+  check_date TEXT,
+  total_paid INTEGER NOT NULL DEFAULT 0,
+  method TEXT NOT NULL DEFAULT 'check',
+  provider_adjustments TEXT,
+  totals_match INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'read' CHECK (status IN ('read','posted','void')),
+  insurance_check_id INTEGER REFERENCES insurance_checks(id),
+  approved_by INTEGER REFERENCES users(id),
+  approved_at TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (practice_id, file_hash)
+);
+-- One row per claim per remittance (an ERA's CLP lines for one claim, merged; a paper EOB's claim), and one per
+-- line that matched no claim, with the autopilot's verdict: 'ready' (reconciles exactly, waiting to post),
+-- 'posted', 'exception' (kind: denied, underpaid, overpaid, unmatched, partial, reversal, review — reason in
+-- words) or 'resolved' (a person decided: resolution + note). Amounts in cents as the payer sent them.
+-- dedupe_key (source, payer, trace/check number, claim or control number, line) makes each line arrive once.
+-- line_no -1 is the check itself (provider-level adjustments, totals that don't match). Never deleted.
+CREATE TABLE IF NOT EXISTS remit_lines (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  source TEXT NOT NULL CHECK (source IN ('era','paper')),
+  era_import_id INTEGER REFERENCES era_imports(id),
+  paper_eob_id INTEGER REFERENCES paper_eobs(id),
+  insurance_check_id INTEGER REFERENCES insurance_checks(id),
+  dedupe_key TEXT NOT NULL,
+  trace TEXT,
+  payer_name TEXT,
+  line_no INTEGER NOT NULL DEFAULT 0,
+  lines_count INTEGER NOT NULL DEFAULT 1,
+  control_number TEXT,
+  claim_id INTEGER REFERENCES claims(id),
+  patient_id INTEGER REFERENCES patients(id),
+  location_id INTEGER REFERENCES locations(id),
+  status_code TEXT,
+  billed INTEGER NOT NULL DEFAULT 0,
+  paid INTEGER NOT NULL DEFAULT 0,
+  contractual INTEGER NOT NULL DEFAULT 0,
+  patient_resp INTEGER NOT NULL DEFAULT 0,
+  other_adjustments INTEGER NOT NULL DEFAULT 0,
+  deductible INTEGER NOT NULL DEFAULT 0,
+  expected_allowed INTEGER,
+  payer_claim_number TEXT,
+  reason_codes TEXT,
+  services TEXT,
+  state TEXT NOT NULL DEFAULT 'exception' CHECK (state IN ('ready','posted','exception','resolved')),
+  kind TEXT,
+  reason TEXT,
+  posted_at TEXT,
+  posted_by INTEGER REFERENCES users(id),
+  posted_source TEXT,
+  resolution TEXT,
+  resolution_note TEXT,
+  resolved_by INTEGER REFERENCES users(id),
+  resolved_at TEXT,
+  task_id INTEGER REFERENCES tasks(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (practice_id, dedupe_key)
+);
+-- Billing the patient after insurance (autobill.js): one row per closed claim the autopilot looked at, for the
+-- account (guarantor) that owes. 'active' bills are sent by the cadence engine (type patient_balance) with a pay
+-- link; one active bill per account (a later claim is 'merged' into it); 'skipped' says why not (nothing owed,
+-- below the minimum, on a payment plan). paper_status tracks the one mailed statement (claimed before sending).
+-- amount is what the account owed when it started — the balance itself always comes from the ledger.
+CREATE TABLE IF NOT EXISTS balance_bills (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  claim_id INTEGER NOT NULL REFERENCES claims(id),
+  location_id INTEGER REFERENCES locations(id),
+  closed_on TEXT NOT NULL,
+  anchor_date TEXT NOT NULL,
+  amount INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','paid','stopped','done','skipped','merged')),
+  stop_reason TEXT,
+  merged_into_id INTEGER REFERENCES balance_bills(id),
+  last_sent_at TEXT,
+  link_opened_at TEXT,
+  payment_request_id INTEGER REFERENCES payment_requests(id),
+  paper_status TEXT CHECK (paper_status IN ('sending','sent','to_print','failed')),
+  paper_attempts INTEGER NOT NULL DEFAULT 0,
+  paper_reference TEXT,
+  paper_error TEXT,
+  paper_at TEXT,
+  statement_run_id INTEGER REFERENCES statement_runs(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  ended_at TEXT,
+  UNIQUE (claim_id)
+);
+-- Insurance verification center (IV1–IV4, verification.js / planverify.js). One row per verified benefit
+-- breakdown: how (method), by whom (verified_by, source, actor), what it changed on the plan and so for everyone
+-- on it (plan_changes before/after, patients_updated), the patient's own amounts (patient_detail), and — when the
+-- plan's identity wasn't certain — the plan-level changes waiting for a person (group_status 'review', proposed).
+-- Rows are never deleted; only the review decision is filled in later.
+CREATE TABLE IF NOT EXISTS benefit_verifications (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  patient_insurance_id INTEGER NOT NULL REFERENCES patient_insurance(id),
+  plan_id INTEGER REFERENCES insurance_plans(id),
+  location_id INTEGER REFERENCES locations(id),
+  method TEXT NOT NULL,
+  eligibility_check_id INTEGER REFERENCES eligibility_checks(id),
+  document_id INTEGER REFERENCES documents(id),
+  read_id INTEGER,
+  complete INTEGER NOT NULL DEFAULT 0,
+  plan_changes TEXT,
+  proposed TEXT,
+  patient_detail TEXT,
+  evidence TEXT,
+  review_reasons TEXT,
+  group_status TEXT NOT NULL DEFAULT 'none' CHECK (group_status IN ('none','applied','review','applied_after_review','kept')),
+  patients_updated INTEGER NOT NULL DEFAULT 0,
+  reference TEXT,
+  rep_name TEXT,
+  notes TEXT,
+  source TEXT NOT NULL DEFAULT 'human',
+  actor TEXT,
+  verified_by INTEGER REFERENCES users(id),
+  reviewed_by INTEGER REFERENCES users(id),
+  reviewed_at TEXT,
+  review_note TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- A benefit document (payer portal page, fax) read by AI: a draft until a person confirms it field by field
+-- (then it becomes a benefit_verifications row) or sets it aside. Never applied on its own.
+CREATE TABLE IF NOT EXISTS benefit_reads (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  patient_insurance_id INTEGER NOT NULL REFERENCES patient_insurance(id),
+  plan_id INTEGER REFERENCES insurance_plans(id),
+  document_id INTEGER REFERENCES documents(id),
+  proposed TEXT NOT NULL,
+  reason TEXT,
+  sandbox INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','confirmed','discarded')),
+  created_by INTEGER REFERENCES users(id),
+  confirmed_by INTEGER REFERENCES users(id),
+  confirmed_at TEXT,
+  verification_id INTEGER REFERENCES benefit_verifications(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- The automatic eligibility checks before each visit (days ahead, and the morning of): one row per policy,
+-- visit day and window, claimed before the check runs so no pass (or second server) checks it twice. Job
+-- bookkeeping: failed rows are retried (attempts) and then become a Needs attention item.
+CREATE TABLE IF NOT EXISTS verification_runs (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  patient_insurance_id INTEGER NOT NULL REFERENCES patient_insurance(id),
+  appointment_id INTEGER REFERENCES appointments(id),
+  visit_date TEXT NOT NULL,
+  run_window TEXT NOT NULL CHECK (run_window IN ('ahead','morning')),
+  status TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running','done','skipped','failed')),
+  eligibility_check_id INTEGER REFERENCES eligibility_checks(id),
+  attempts INTEGER NOT NULL DEFAULT 0,
+  error TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT,
+  UNIQUE (patient_insurance_id, visit_date, run_window)
+);
+-- Reviews with a feedback screen and team shout-outs (RV1–RV3, reviewfunnel.js, shoutouts.js, docs/reviews.md).
+-- Review-request settings, one row per practice. The happy threshold, the automatic-after-visit switch and the
+-- Google review link stay on practices (review_threshold, review_requests, review_url). other_sites: JSON
+-- [{name, url}] also offered to patients; notify_user_ids: JSON user ids told about private feedback (empty =
+-- administrators and anyone with reviews:manage). There is deliberately no setting that hides the public review link.
+CREATE TABLE IF NOT EXISTS review_settings (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL UNIQUE REFERENCES practices(id),
+  throttle_months INTEGER NOT NULL DEFAULT 6,
+  channel TEXT NOT NULL DEFAULT 'auto' CHECK (channel IN ('auto','sms','email')),
+  other_sites TEXT,
+  notify_user_ids TEXT,
+  followup_user_id INTEGER REFERENCES users(id),
+  points_per_mention INTEGER NOT NULL DEFAULT 10,
+  reward_note TEXT,
+  updated_by INTEGER REFERENCES users(id),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- Nicknames staff go by ("Annie", "Dr. Bob") so shout-outs find the right person. Configuration: removing one
+-- is a hard delete, audited.
+CREATE TABLE IF NOT EXISTS staff_nicknames (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  nickname TEXT NOT NULL,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (practice_id, nickname)
+);
+-- A staff member named in private feedback or an online review, with the quote. One row per person (match_key
+-- 'u<user id>') or unclear name ('n<name>') per piece of feedback (source_key 'feedback:<id>' / 'review:<id>'),
+-- so re-checking never double counts. points are fixed when found; positive = 0 for a low rating (kept for
+-- coaching, no points). status: counted, needs_match (fits several people: candidate_ids), unlinked (the owner
+-- said it wasn't them — kept, never deleted).
+CREATE TABLE IF NOT EXISTS review_shoutouts (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  source TEXT NOT NULL CHECK (source IN ('feedback','review')),
+  source_key TEXT NOT NULL,
+  review_feedback_id INTEGER REFERENCES review_feedback(id),
+  review_id INTEGER REFERENCES reviews(id),
+  patient_id INTEGER REFERENCES patients(id),
+  user_id INTEGER REFERENCES users(id),
+  match_key TEXT NOT NULL,
+  matched_name TEXT NOT NULL,
+  candidate_ids TEXT,
+  quote TEXT NOT NULL,
+  rating INTEGER,
+  positive INTEGER NOT NULL DEFAULT 1,
+  points INTEGER NOT NULL DEFAULT 0,
+  month TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'counted' CHECK (status IN ('counted','needs_match','unlinked')),
+  decided_by INTEGER REFERENCES users(id),
+  decided_at TEXT,
+  decision_note TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (practice_id, source_key, match_key)
+);
+-- A reward noted for someone's shout-outs in a month ("$25 coffee card"): one per person per month.
+CREATE TABLE IF NOT EXISTS review_rewards (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  month TEXT NOT NULL,
+  note TEXT NOT NULL,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT,
+  UNIQUE (practice_id, user_id, month)
+);
+CREATE INDEX IF NOT EXISTS idx_chat_members_user ON chat_members(user_id);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_channel ON chat_messages(channel_id, id);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_parent ON chat_messages(parent_id);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_patient ON chat_messages(patient_id);
+CREATE INDEX IF NOT EXISTS idx_chat_mentions_user ON chat_mentions(user_id, seen_at);
+CREATE INDEX IF NOT EXISTS idx_task_checklist ON task_checklist_items(task_id);
+CREATE INDEX IF NOT EXISTS idx_time_breaks_punch ON time_breaks(punch_id);
+CREATE INDEX IF NOT EXISTS idx_time_corrections_punch ON time_punch_corrections(punch_id);
+CREATE INDEX IF NOT EXISTS idx_staff_shifts_date ON staff_shifts(practice_id, date);
+CREATE INDEX IF NOT EXISTS idx_checklist_items_template ON checklist_items(template_id);
+CREATE INDEX IF NOT EXISTS idx_checklist_occ_day ON checklist_occurrences(practice_id, due_date);
+CREATE INDEX IF NOT EXISTS idx_checklist_occ_open ON checklist_occurrences(practice_id, status, due_at);
+CREATE INDEX IF NOT EXISTS idx_checklist_events_occ ON checklist_events(occurrence_id);
+CREATE INDEX IF NOT EXISTS idx_pto_requests ON pto_requests(practice_id, user_id, start_date);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_pto_accrual_once ON pto_ledger(user_id, period_start) WHERE kind = 'accrual' AND voided_at IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_pto_used_once ON pto_ledger(request_id) WHERE kind = 'used' AND voided_at IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_period_approved_once ON pay_period_approvals(user_id, period_start) WHERE status = 'approved';
+CREATE INDEX IF NOT EXISTS idx_document_notes_doc ON document_notes(document_id, status);
+CREATE INDEX IF NOT EXISTS idx_document_terms ON document_terms(practice_id, term);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_one_open_drawer_session ON cash_drawer_sessions(drawer_id) WHERE status <> 'closed';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_chart_audit_live ON chart_audit_findings(practice_id, visit_key, check_code, subject) WHERE status <> 'resolved';
+CREATE INDEX IF NOT EXISTS idx_chart_audit_list ON chart_audit_findings(practice_id, status, visit_date);
+CREATE INDEX IF NOT EXISTS idx_chart_checks_visit ON chart_checks(practice_id, visit_key);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_chart_ready_live ON chart_ready(practice_id, visit_key) WHERE status = 'ready';
+CREATE INDEX IF NOT EXISTS idx_cadence_steps_seq ON cadence_steps(sequence_id, position);
+CREATE INDEX IF NOT EXISTS idx_cadence_enroll_status ON cadence_enrollments(practice_id, status);
+CREATE INDEX IF NOT EXISTS idx_cadence_enroll_patient ON cadence_enrollments(patient_id);
+CREATE INDEX IF NOT EXISTS idx_cadence_runs_status ON cadence_runs(practice_id, status);
+CREATE INDEX IF NOT EXISTS idx_cadence_holds_patient ON cadence_holds(patient_id);
+CREATE INDEX IF NOT EXISTS idx_opp_events_practice ON opportunity_events(practice_id, status);
+CREATE INDEX IF NOT EXISTS idx_fin_agreements_patient ON fin_agreements(practice_id, patient_id);
+CREATE INDEX IF NOT EXISTS idx_consents_patient ON consents(practice_id, patient_id, status);
+CREATE INDEX IF NOT EXISTS idx_consents_appt ON consents(appointment_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_consents_live ON consents(practice_id, context_key, template_id) WHERE status <> 'superseded';
+CREATE INDEX IF NOT EXISTS idx_paperwork_links_packet ON paperwork_links(packet_id);
+CREATE INDEX IF NOT EXISTS idx_kiosk_sessions_kiosk ON kiosk_sessions(kiosk_id, status);
+CREATE INDEX IF NOT EXISTS idx_edu_deliveries_patient ON education_deliveries(practice_id, patient_id);
+CREATE INDEX IF NOT EXISTS idx_online_bookings_created ON online_bookings(practice_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_online_booking_events_day ON online_booking_events(practice_id, day);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_phone_protocols_active ON phone_protocols(practice_id, call_type) WHERE status = 'active';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_call_scores_current ON call_scores(call_id) WHERE status = 'current';
+CREATE INDEX IF NOT EXISTS idx_call_scores_practice ON call_scores(practice_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_call_reviews_call ON call_reviews(call_id, id);
+CREATE INDEX IF NOT EXISTS idx_call_no_book ON call_no_book(practice_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_referral_items_ref ON referral_items(referral_id);
+CREATE INDEX IF NOT EXISTS idx_referral_events_ref ON referral_events(referral_id, id);
 CREATE INDEX IF NOT EXISTS idx_business_cost_profiles ON business_cost_profiles(practice_id, scope, scope_key);
 CREATE INDEX IF NOT EXISTS idx_business_provider_pay ON business_provider_pay(practice_id, provider_id);
+CREATE INDEX IF NOT EXISTS idx_remit_lines_state ON remit_lines(practice_id, state);
+CREATE INDEX IF NOT EXISTS idx_remit_lines_claim ON remit_lines(claim_id);
+CREATE INDEX IF NOT EXISTS idx_remit_lines_era ON remit_lines(era_import_id);
+CREATE INDEX IF NOT EXISTS idx_remit_lines_paper ON remit_lines(paper_eob_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_balance_bills_one_active ON balance_bills(practice_id, patient_id) WHERE status = 'active';
+-- Treatment entry (routes/treatmententry.js, chartengine.js): named packages of procedures charted in one step
+-- ("Crown" = crown + optional buildup/post), the office's (user_id null) or one person's own (owner 'u<id>').
+-- items is the recipe as JSON: [{ code | work | finding, tooth: same|range|ends|between|none|unsealed_molars,
+-- surfaces, area, optional, default_on, phase, label }]. Retired (active 0), never deleted.
+CREATE TABLE IF NOT EXISTS procedure_bundles (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  user_id INTEGER REFERENCES users(id),
+  owner TEXT NOT NULL DEFAULT 'office',
+  name TEXT NOT NULL,
+  alias TEXT,
+  items TEXT NOT NULL,
+  starter_key TEXT,
+  active INTEGER NOT NULL DEFAULT 1,
+  retired_at TEXT,
+  retired_by INTEGER REFERENCES users(id),
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT,
+  UNIQUE (practice_id, owner, starter_key)
+);
+-- The chart's quick buttons and typed/spoken aliases ("bu" = D2950 planned): the office's and each person's own,
+-- in order; the first nine buttons are Alt+1…9. kind code|work|finding|bundle; target is the code, kind of work
+-- or finding (bundle_id for a bundle); mode plan|done|existing. Retired (active 0), never deleted.
+CREATE TABLE IF NOT EXISTS chart_shortcuts (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  user_id INTEGER REFERENCES users(id),
+  owner TEXT NOT NULL DEFAULT 'office',
+  label TEXT NOT NULL,
+  alias TEXT,
+  kind TEXT NOT NULL CHECK (kind IN ('code','work','finding','bundle')),
+  target TEXT NOT NULL,
+  bundle_id INTEGER REFERENCES procedure_bundles(id),
+  mode TEXT NOT NULL DEFAULT 'plan' CHECK (mode IN ('plan','done','existing')),
+  surfaces TEXT,
+  color TEXT,
+  icon TEXT,
+  button INTEGER NOT NULL DEFAULT 1,
+  position INTEGER NOT NULL DEFAULT 0,
+  starter_key TEXT,
+  active INTEGER NOT NULL DEFAULT 1,
+  retired_at TEXT,
+  retired_by INTEGER REFERENCES users(id),
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT,
+  UNIQUE (practice_id, owner, starter_key)
+);
+
+-- Patient preferences (PP1): the practice's list of comfort / care / scheduling preferences (a starter set the
+-- office adds to; retired, never deleted), and each patient's own, markable urgent. Removing one keeps the row.
+CREATE TABLE IF NOT EXISTS patient_pref_options (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  label TEXT NOT NULL,
+  category TEXT NOT NULL DEFAULT 'comfort' CHECK (category IN ('comfort','care','scheduling','other')),
+  starter_key TEXT,
+  position INTEGER NOT NULL DEFAULT 0,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  retired_at TEXT,
+  retired_by INTEGER REFERENCES users(id),
+  UNIQUE (practice_id, starter_key)
+);
+CREATE TABLE IF NOT EXISTS patient_prefs (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  option_id INTEGER NOT NULL REFERENCES patient_pref_options(id),
+  urgent INTEGER NOT NULL DEFAULT 0,
+  note TEXT,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','removed')),
+  source TEXT NOT NULL DEFAULT 'human',
+  added_by INTEGER REFERENCES users(id),
+  added_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_by INTEGER REFERENCES users(id),
+  updated_at TEXT,
+  removed_by INTEGER REFERENCES users(id),
+  removed_at TEXT,
+  remove_reason TEXT
+);
+-- Personal connection notes (PP2): "new dog", "went to Disneyland". A timeline; removed notes stay (removed_at).
+CREATE TABLE IF NOT EXISTS personal_notes (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  location_id INTEGER REFERENCES locations(id),
+  body TEXT NOT NULL,
+  client_key TEXT,
+  source TEXT NOT NULL DEFAULT 'human',
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  removed_at TEXT,
+  removed_by INTEGER REFERENCES users(id),
+  remove_reason TEXT
+);
+-- Doctor's notes to the front desk on the schedule (DN1): on a visit or on an empty slot. open -> acknowledged ->
+-- done (turned into a booking or a task: result_kind/result_id), or withdrawn by its author. Never deleted.
+CREATE TABLE IF NOT EXISTS schedule_notes (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  location_id INTEGER REFERENCES locations(id),
+  kind TEXT NOT NULL CHECK (kind IN ('visit','slot')),
+  appointment_id INTEGER REFERENCES appointments(id),
+  patient_id INTEGER REFERENCES patients(id),
+  provider_id INTEGER REFERENCES providers(id),
+  operatory_id INTEGER REFERENCES operatories(id),
+  note_date TEXT NOT NULL,
+  start_time TEXT,
+  end_time TEXT,
+  body TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','acknowledged','done','withdrawn')),
+  client_key TEXT,
+  source TEXT NOT NULL DEFAULT 'human',
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  acked_by INTEGER REFERENCES users(id),
+  acked_at TEXT,
+  booking_started_by INTEGER REFERENCES users(id),
+  booking_started_at TEXT,
+  done_by INTEGER REFERENCES users(id),
+  done_at TEXT,
+  result_kind TEXT,
+  result_id INTEGER,
+  withdrawn_by INTEGER REFERENCES users(id),
+  withdrawn_at TEXT
+);
+-- "Provider out today" (S8): one run per click (client_key makes a retry return the same run).
+CREATE TABLE IF NOT EXISTS provider_out_runs (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  provider_id INTEGER NOT NULL REFERENCES providers(id),
+  out_date TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  goodwill_note TEXT,
+  client_key TEXT NOT NULL,
+  summary TEXT,
+  source TEXT NOT NULL DEFAULT 'human',
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (practice_id, client_key)
+);
+-- Office-caused moves and cancellations ("we moved them" strikes, S8). A move or cancel counts against the office
+-- for that patient; a reassign (same time, another provider) is kept for the report. Mistakes are voided.
+CREATE TABLE IF NOT EXISTS office_moves (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  location_id INTEGER REFERENCES locations(id),
+  appointment_id INTEGER NOT NULL REFERENCES appointments(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  provider_id INTEGER REFERENCES providers(id),
+  to_provider_id INTEGER REFERENCES providers(id),
+  kind TEXT NOT NULL CHECK (kind IN ('move','cancel','reassign')),
+  reason TEXT NOT NULL,
+  note TEXT,
+  from_time TEXT NOT NULL,
+  to_time TEXT,
+  happened_on TEXT NOT NULL,
+  run_id INTEGER REFERENCES provider_out_runs(id),
+  source TEXT NOT NULL DEFAULT 'human',
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  voided_at TEXT,
+  voided_by INTEGER REFERENCES users(id),
+  void_reason TEXT,
+  UNIQUE (appointment_id, kind, from_time)
+);
+-- What each appointment card shows (S6): the practice's layout (a person's own override is in user_prefs).
+CREATE TABLE IF NOT EXISTS card_layouts (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  layout TEXT NOT NULL,
+  updated_by INTEGER REFERENCES users(id),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (practice_id)
+);
+-- The office's own labels on a visit ("VIP", "Bring x-rays"): taken off with removed_at, never deleted.
+CREATE TABLE IF NOT EXISTS appointment_labels (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  appointment_id INTEGER NOT NULL REFERENCES appointments(id),
+  label_key TEXT NOT NULL,
+  added_by INTEGER REFERENCES users(id),
+  added_at TEXT NOT NULL DEFAULT (datetime('now')),
+  removed_by INTEGER REFERENCES users(id),
+  removed_at TEXT
+);
 -- Treatment follow-up (TF1–TF4, txfollow.js / txletter.js, docs/workflows/specs/TF-treatment-followup.md). The doctor's
 -- letter about treatment that hasn't been scheduled: a draft (from the cadence's letter step, or the doctor's own click)
 -- that the doctor reviews and approves; only then is it emailed and/or mailed, filed on the chart and recorded as the
@@ -4645,6 +4817,7 @@ CREATE TABLE IF NOT EXISTS txf_letters (
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE INDEX IF NOT EXISTS idx_txf_letters_status ON txf_letters(practice_id, status);
 -- How a doctor signs the letter: credentials (DDS), a line under the name, the closing, and the signature image (an
 -- encrypted file in document storage, like documents). Configuration: edited in place, every change audited.
 CREATE TABLE IF NOT EXISTS txf_doctors (
@@ -4670,11 +4843,14 @@ CREATE TABLE IF NOT EXISTS txf_settings (
   updated_by INTEGER REFERENCES users(id),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
-CREATE INDEX IF NOT EXISTS idx_txf_letters_status ON txf_letters(practice_id, status);
 `;
 
 // Columns added after the first release. SQLite has no ADD COLUMN IF NOT EXISTS, so check first.
 const COLUMNS = [
+  // Treatment follow-up (txfollow.js): the practice's switch, the oldest diagnosis date it picks up, a plan's urgency.
+  ['practices', 'treatment_cadence', 'INTEGER NOT NULL DEFAULT 0'],
+  ['practices', 'treatment_cadence_from', 'TEXT'],
+  ['treatment_plans', 'followup_urgency', 'TEXT'],
   ['practices', 'slug', 'TEXT'],
   ['practices', 'online_booking', 'INTEGER NOT NULL DEFAULT 0'],
   ['practices', 'reminder_hours', 'INTEGER NOT NULL DEFAULT 48'],
@@ -5142,6 +5318,13 @@ const COLUMNS = [
   ['booking_requests', 'answers', 'TEXT'],
   ['booking_requests', 'card_files', 'TEXT'],
   ['booking_requests', 'asap', 'INTEGER NOT NULL DEFAULT 0'],
+  // Marketing ROI (docs/marketing.md): promo code / referral link on an online booking; a patient's first and last
+  // touch (marketing_touches ids) and whether a person pinned them.
+  ['online_bookings', 'promo_code', 'TEXT'],
+  ['online_bookings', 'referral_code', 'TEXT'],
+  ['patients', 'marketing_first_touch_id', 'INTEGER'],
+  ['patients', 'marketing_last_touch_id', 'INTEGER'],
+  ['patients', 'marketing_pinned', 'INTEGER NOT NULL DEFAULT 0'],
   ['appointments', 'online_booking_id', 'INTEGER REFERENCES online_bookings(id)'],
   // Visit readiness and the schedule optimizer.
   ['lab_cases', 'check_status', 'TEXT'],
@@ -5151,6 +5334,27 @@ const COLUMNS = [
   ['practices', 'optimizer_ai', 'INTEGER NOT NULL DEFAULT 0'],
   ['practices', 'eob_autopilot', 'TEXT'],
   ['practices', 'fin_options', 'TEXT'],
+  ['calls', 'agent_id', 'INTEGER REFERENCES users(id)'],
+  ['calls', 'agent_source', 'TEXT'],
+  ['calls', 'answered_at', 'TEXT'],
+  ['calls', 'ring_seconds', 'INTEGER'],
+  ['calls', 'call_type', 'TEXT'],
+  ['calls', 'appointment_id', 'INTEGER REFERENCES appointments(id)'],
+  ['calls', 'linked_via', 'TEXT'],
+  ['calls', 'desk_result', 'TEXT'],
+  ['recall_types', 'age_until', 'INTEGER'],
+  ['recall_types', 'adult_key', 'TEXT'],
+  ['recall_types', 'retires', 'TEXT'],
+  ['recall_types', 'bundle', 'INTEGER NOT NULL DEFAULT 0'],
+  ['recalls', 'last_done_date', 'TEXT'],
+  ['recalls', 'last_done_code', 'TEXT'],
+  ['recalls', 'last_done_source', 'TEXT'],
+  ['recalls', 'last_done_location_id', 'INTEGER'],
+  ['recalls', 'interval_overridden', 'INTEGER NOT NULL DEFAULT 0'],
+  ['recalls', 'interval_reason', 'TEXT'],
+  ['recalls', 'status_reason', 'TEXT'],
+  ['practices', 'recall_due_soon_days', 'INTEGER NOT NULL DEFAULT 30'],
+  ['practices', 'recall_overdue_days', 'INTEGER NOT NULL DEFAULT 30'],
   ['referrals', 'location_id', 'INTEGER REFERENCES locations(id)'],
   ['referrals', 'expected_by', 'TEXT'],
   ['referrals', 'scheduled_on', 'TEXT'],
@@ -5177,6 +5381,7 @@ const COLUMNS = [
   ['referrals', 'patient_told_at', 'TEXT'],
   ['referrals', 'thank_you_sent_at', 'TEXT'],
   ['referrals', 'report_back_sent_at', 'TEXT'],
+  ['practices', 'verification_settings', 'TEXT'],
   ['review_feedback', 'location_id', 'INTEGER REFERENCES locations(id)'],
   ['review_feedback', 'requested_by', 'INTEGER REFERENCES users(id)'],
   ['review_feedback', 'request_source', 'TEXT'],
@@ -5198,36 +5403,10 @@ const COLUMNS = [
   ['review_feedback', 'resolution_note', 'TEXT'],
   ['review_feedback', 'notified_at', 'TEXT'],
   ['reviews', 'mentions_checked_at', 'TEXT'],
-  ['calls', 'agent_id', 'INTEGER REFERENCES users(id)'],
-  ['calls', 'agent_source', 'TEXT'],
-  ['calls', 'answered_at', 'TEXT'],
-  ['calls', 'ring_seconds', 'INTEGER'],
-  ['calls', 'call_type', 'TEXT'],
-  ['calls', 'appointment_id', 'INTEGER REFERENCES appointments(id)'],
-  ['calls', 'linked_via', 'TEXT'],
-  ['calls', 'desk_result', 'TEXT'],
-  ['recall_types', 'age_until', 'INTEGER'],
-  ['recall_types', 'adult_key', 'TEXT'],
-  ['recall_types', 'retires', 'TEXT'],
-  ['recall_types', 'bundle', 'INTEGER NOT NULL DEFAULT 0'],
-  ['recalls', 'last_done_date', 'TEXT'],
-  ['recalls', 'last_done_code', 'TEXT'],
-  ['recalls', 'last_done_source', 'TEXT'],
-  ['recalls', 'last_done_location_id', 'INTEGER'],
-  ['recalls', 'interval_overridden', 'INTEGER NOT NULL DEFAULT 0'],
-  ['recalls', 'interval_reason', 'TEXT'],
-  ['recalls', 'status_reason', 'TEXT'],
-  ['practices', 'recall_due_soon_days', 'INTEGER NOT NULL DEFAULT 30'],
-  ['practices', 'recall_overdue_days', 'INTEGER NOT NULL DEFAULT 30'],
-  ['practices', 'verification_settings', 'TEXT'],
-  ['online_bookings', 'promo_code', 'TEXT'],
-  ['online_bookings', 'referral_code', 'TEXT'],
-  ['patients', 'marketing_first_touch_id', 'INTEGER'],
-  ['patients', 'marketing_last_touch_id', 'INTEGER'],
-  ['patients', 'marketing_pinned', 'INTEGER NOT NULL DEFAULT 0'],
-  ['practices', 'treatment_cadence', 'INTEGER NOT NULL DEFAULT 0'],
-  ['practices', 'treatment_cadence_from', 'TEXT'],
-  ['treatment_plans', 'followup_urgency', 'TEXT'],
+  // Who a move or cancel was down to (S8): 'patient' or 'office', and the office's reason.
+  ['appointments', 'moved_by', 'TEXT'],
+  ['appointments', 'office_reason', 'TEXT'],
+  ['appointments', 'office_note', 'TEXT'],
 ];
 
 // CHECK constraints widened after release: [table, constraint name on Postgres, old text, new text].
@@ -5323,13 +5502,27 @@ CREATE INDEX IF NOT EXISTS idx_recall_contacts ON recall_contacts(recall_id);
 CREATE INDEX IF NOT EXISTS idx_ledger_by_patient ON ledger_entries(patient_id, entry_date);
 CREATE INDEX IF NOT EXISTS idx_proc_by_patient ON procedures(patient_id, status);
 CREATE INDEX IF NOT EXISTS idx_patients_status_name ON patients(practice_id, status, last_name, first_name);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_recall_outside_once ON recall_outside(practice_id, patient_id, code, done_on) WHERE status = 'active';
+CREATE INDEX IF NOT EXISTS idx_recall_resets_proc ON recall_resets(procedure_id);
+CREATE INDEX IF NOT EXISTS idx_recall_resets_recall ON recall_resets(recall_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_referrals_client_key ON referrals(practice_id, client_key);
 CREATE INDEX IF NOT EXISTS idx_referrals_board ON referrals(practice_id, direction, status);
 CREATE INDEX IF NOT EXISTS idx_referrals_patient ON referrals(patient_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_referrals_link ON referrals(link_token_hash);
+CREATE INDEX IF NOT EXISTS idx_benefit_verif_policy ON benefit_verifications(patient_insurance_id);
+CREATE INDEX IF NOT EXISTS idx_benefit_verif_plan ON benefit_verifications(plan_id, group_status);
+CREATE INDEX IF NOT EXISTS idx_verif_runs_day ON verification_runs(practice_id, visit_date);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_review_feedback_day ON review_feedback(practice_id, patient_id, request_day);
 CREATE INDEX IF NOT EXISTS idx_review_feedback_status ON review_feedback(practice_id, feedback_status);
 CREATE INDEX IF NOT EXISTS idx_review_shoutouts_month ON review_shoutouts(practice_id, month, status);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_patient_prefs_active ON patient_prefs(patient_id, option_id) WHERE status = 'active';
+CREATE INDEX IF NOT EXISTS idx_personal_notes_patient ON personal_notes(patient_id, created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_personal_notes_key ON personal_notes(practice_id, client_key);
+CREATE INDEX IF NOT EXISTS idx_schedule_notes_day ON schedule_notes(practice_id, note_date);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_schedule_notes_key ON schedule_notes(practice_id, client_key);
+CREATE INDEX IF NOT EXISTS idx_office_moves_patient ON office_moves(patient_id, happened_on);
+CREATE INDEX IF NOT EXISTS idx_office_moves_day ON office_moves(practice_id, happened_on);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_appt_labels_active ON appointment_labels(appointment_id, label_key) WHERE removed_at IS NULL;
 `;
 
 // ---------------------------------------------------------------------------

@@ -30,6 +30,7 @@ import { MembershipCard } from '../components/Memberships.jsx';
 import RecallPanel from '../components/RecallPanel.jsx';
 import AttributionCard from '../components/marketing/AttributionCard.jsx';
 import MedicalHistory, { medStale, MEDICAL_CONDITIONS } from '../components/patient/MedicalHistory.jsx';
+import ConnectionChips from '../components/cards/Connection.jsx';
 
 export { MEDICAL_CONDITIONS };
 
@@ -106,6 +107,8 @@ export default function PatientDetail() {
                 )}
                 {p.guarantor && <button className="link" style={{ fontSize: 12 }} onClick={() => setTab('family')}>Guarantor: {p.guarantor.first_name} {p.guarantor.last_name}</button>}
                 {!p.guarantor && p.family_size > 1 && <button className="link" style={{ fontSize: 12 }} onClick={() => setTab('family')}>Head of household · {p.family_size} in family</button>}
+                {/* Preferences (urgent first), "moved by us" strikes and the latest personal note — always here (PP1, PP2, S8). */}
+                <ConnectionChips patientId={p.id} />
               </div>
             </div>
           </div>

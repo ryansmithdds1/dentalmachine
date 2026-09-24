@@ -6,6 +6,7 @@ import { useActivePatient } from '../activePatient.jsx';
 import { useRemembered } from '../prefs.js';
 import { ErrorBox, PatientPicker, useSubmit } from './ui.jsx';
 import { toast } from '../toast.js';
+import { MovedByUsBadge } from './cards/Connection.jsx';
 import './calendar/workflow.css';
 import './recallfreq.css';
 
@@ -250,6 +251,7 @@ export default function AppointmentForm({ appointment, defaults = {}, patient: i
         <label className="full">
           Patient
           {appointment ? <strong style={{ color: 'var(--text)' }}>{patient.first_name} {patient.last_name}</strong> : <PatientPicker value={patient} onChange={setPatient} />}
+          {patient?.id && <MovedByUsBadge patientId={patient.id} />}
         </label>
         {activePatient && (
           // Outside the label: a click on a label's button would also "click" the picker's Change button after it.

@@ -4,6 +4,8 @@ import { fmtTime } from '../../format.js';
 import './workflow.css';
 
 // Why a visit was cancelled or missed (workflow 19). The codes match BROKEN_REASONS in server/src/routes/schedule.js.
+// "We had to move it" (office) is asked as "Whose reason?" → Ours, with the office's reasons (S8): the server
+// counts it on the patient ("Moved by us 2× in 12 mo").
 export const BROKEN_REASONS = [
   ['sick', 'Sick'],
   ['conflict', 'Work, school or a conflict'],
@@ -15,12 +17,17 @@ export const BROKEN_REASONS = [
   ['other', 'Other…'],
 ];
 export const brokenLabel = (code) => BROKEN_REASONS.find(([k]) => k === code)?.[1].replace('…', '') || code;
+// The office's own reasons (S8). The label goes to the server as the note (the server maps it back to the code).
+export const OFFICE_REASONS = [['provider_sick', 'Provider sick'], ['emergency', 'Emergency'], ['double_booked', 'Double-booked'], ['equipment_down', 'Equipment down'], ['other', 'Other…']];
 
 // The reason picker that stands in for "Are you sure?" on Cancel and No-show: choosing a reason is the
 // deliberate second step (a cancel releases the visit's procedures and recalls, which Undo can't restore).
 // Number keys pick a reason; "Book their next visit now" (remembered) opens the booking form right after.
 export default function BrokenPicker({ appt: a, kind, series, onDone, onClose }) {
-  const reasons = BROKEN_REASONS.filter(([, , only]) => !only || only === kind);
+  // Whose reason? The patient's (the usual list) or ours (the office's reasons). Only a cancel can be ours.
+  const [whose, setWhose] = useState('patient');
+  const ours = kind === 'cancelled' && whose === 'office';
+  const reasons = ours ? OFFICE_REASONS : BROKEN_REASONS.filter(([code, , only]) => (!only || only === kind) && code !== 'office');
   const [other, setOther] = useState(false);
   const [note, setNote] = useState('');
   const [scope, setScope] = useState('this');
@@ -33,7 +40,8 @@ export default function BrokenPicker({ appt: a, kind, series, onDone, onClose })
     if (busy) return;
     setBusy(true);
     try {
-      await onDone({ reason: code, note: code === 'other' ? note.trim() : null, scope, rebook: !!rebook });
+      if (ours) await onDone({ reason: 'office', note: code === 'other' ? note.trim() : OFFICE_REASONS.find(([k]) => k === code)[1], office_reason: code, scope, rebook: !!rebook });
+      else await onDone({ reason: code, note: code === 'other' ? note.trim() : null, scope, rebook: !!rebook });
     } finally {
       setBusy(false);
     }
@@ -51,6 +59,12 @@ export default function BrokenPicker({ appt: a, kind, series, onDone, onClose })
         }
       }}>
       <strong>{kind === 'no_show' ? `${name} didn’t come to the ${fmtTime(a.start_time)} visit — why?` : `Cancel ${name}’s ${fmtTime(a.start_time)} visit — why?`}</strong>
+      {kind === 'cancelled' && (
+        <div className="seg broken-whose" role="radiogroup" aria-label="Whose reason?" style={{ margin: '6px 0 2px' }}>
+          <button type="button" role="radio" aria-checked={!ours} className={!ours ? 'active' : ''} onClick={() => { setWhose('patient'); setOther(false); }}>The patient’s</button>
+          <button type="button" role="radio" aria-checked={ours} className={ours ? 'active' : ''} onClick={() => { setWhose('office'); setOther(false); }}>Ours (we had to move it)</button>
+        </div>
+      )}
       <div className="broken-reasons">
         {reasons.map(([code, text], i) => (
           <button key={code} type="button" className="reason" disabled={busy} onClick={() => choose(code)}>

@@ -7,6 +7,7 @@ import { useActivePatient } from '../activePatient.jsx';
 import { useShortcuts, comboLabel } from '../shortcuts.js';
 import { money, age, fmtDate } from '../format.js';
 import ReferralChip from './referrals/ReferralChip.jsx';
+import ConnectionChips from './cards/Connection.jsx';
 
 // Where each patient action goes (or, with `run`, what it does in place). Alt+letter works from any screen while a patient is active.
 export const PATIENT_ACTIONS = [
@@ -57,6 +58,7 @@ export default function PatientBar() {
       )}
       <span className="pb-chip">{p.next_visit ? <>Next <b>{when(p.next_visit.start_time)}</b></> : <span className="muted">No visit booked</span>}</span>
       <ReferralChip patientId={p.id} />
+      <ConnectionChips patientId={p.id} compact />
       <span className="pb-actions">
         {actions.map((a) => (
           <button key={a.key} type="button" className="pb-act" onClick={() => runPatientAction(a, p.id, nav)} title={`${a.title || a.label} (${comboLabel(`alt+${a.key}`).join(' ')})`}>

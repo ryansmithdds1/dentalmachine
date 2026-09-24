@@ -13,6 +13,8 @@ import { videoRoomFor } from '../video.js';
 import { cleanPattern, fitPattern, providerOverlap, typeDuration } from '../patterns.js';
 import { appointmentScope, checkOffice, canSeePatient } from '../officeaccess.js';
 import { checkDayBlocks } from '../production.js';
+import { recordOfficeMove, officeReasonFrom } from '../cards.js';
+import { linkNoteBookings } from './doctornotes.js';
 
 export const STATUSES = ['scheduled', 'confirmed', 'checked_in', 'in_chair', 'completed', 'cancelled', 'no_show'];
 export const INACTIVE = "('cancelled','no_show')";
@@ -512,6 +514,8 @@ export default function scheduleRoutes({ db }) {
     await db.run("UPDATE waitlist SET status = 'booked' WHERE practice_id = ? AND patient_id = ? AND status = 'waiting'", req.user.practice_id, row.patient_id);
     await audit(db, req, 'appointment.create', 'appointments', id, { start: row.start_time });
     await auditDayBlockOverride(db, req, id, checked.dayBlock);
+    // A doctor's note someone pressed "Book it" on is closed by this booking (DN1).
+    await linkNoteBookings(db, req, { ...row, id, patient_id: Number(row.patient_id) });
     changed(req, row.start_time, ...(series ? Array.from({ length: repeat.count }, (_, i) => shiftVisit(row.start_time, repeat, i)) : []));
     await emitAppointment(db, id, 'appointment.created');
     res.status(201).json({ ...(await db.get(`${SELECT} WHERE a.id = ?`, id)), ...(series ? { series } : {}) });
@@ -597,6 +601,13 @@ export default function scheduleRoutes({ db }) {
       ...(Number(row.provider_id) !== existing.provider_id ? { provider_id: Number(row.provider_id) } : {}),
     });
     await auditDayBlockOverride(db, req, existing.id, checked?.dayBlock);
+    // Whose reason (S8): a move the office caused counts on the patient ("moved by us"); a patient's own is noted.
+    if (row.start_time !== existing.start_time && req.body.moved_by != null) {
+      requireOneOf(req.body.moved_by, ['patient', 'office'], 'moved_by');
+      if (req.body.moved_by === 'office') {
+        await recordOfficeMove(db, { practiceId: req.user.practice_id, appt: existing, kind: 'move', reason: officeReasonFrom({ office_reason: req.body.office_reason ?? 'other' }), note: req.body.office_note ?? null, toTime: row.start_time, userId: req.user.id });
+      } else await recorded(db, 'appointments', existing.id, () => db.run("UPDATE appointments SET moved_by = 'patient', office_reason = NULL, office_note = NULL WHERE id = ?", existing.id));
+    }
     // "This and following": apply the same shift (and provider/chair/length changes) to later visits in the series.
     let seriesUpdate = null;
     if (req.body.scope === 'following' && existing.series_id) {
@@ -680,6 +691,11 @@ export default function scheduleRoutes({ db }) {
     if (brokenReason) await recorded(db, 'appointments', existing.id, () => db.run('UPDATE appointments SET broken_reason = ?, broken_note = ? WHERE id = ?', brokenReason, brokenNote, existing.id));
     // Back on the schedule (a mistaken cancel put right): the old reason no longer applies. The change log keeps it.
     else if (!broken && existing.broken_reason) await recorded(db, 'appointments', existing.id, () => db.run('UPDATE appointments SET broken_reason = NULL, broken_note = NULL WHERE id = ?', existing.id));
+    // Whose reason (S8): "We had to move it" is the office's doing and counts on the patient; any other reason is theirs.
+    if (status === 'cancelled' && brokenReason === 'office' && existing.status !== 'cancelled') {
+      const officeReason = officeReasonFrom(req.body);
+      await recordOfficeMove(db, { practiceId: req.user.practice_id, appt: existing, kind: 'cancel', reason: officeReason, note: req.body.office_note ?? (officeReason === 'other' ? brokenNote : null), userId: req.user.id });
+    } else if (broken && brokenReason && brokenReason !== 'office') await recorded(db, 'appointments', existing.id, () => db.run("UPDATE appointments SET moved_by = 'patient' WHERE id = ?", existing.id));
     if (status === 'cancelled' || status === 'no_show') await releaseAppointment(db, existing.id);
     if (status === 'cancelled' && existing.status !== 'cancelled') openSlotLater(db, existing.id);
     // Finishing the visit also completes the work planned for it (posting the charges), when the

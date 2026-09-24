@@ -356,8 +356,8 @@ export default function Schedule() {
   // Cancel or no-show with its reason (workflow 19), then — unless they said not now — the booking form for the
   // same patient, type, provider and length at the next open time after the broken one, with Book focused.
   // The freed time is still offered to the ASAP list automatically (fill.js).
-  const breakVisit = async (a, status, { reason, note, scope, rebook }) => {
-    const done = await setStatus(a, status, scope, { broken_reason: reason, ...(note ? { broken_note: note } : {}) });
+  const breakVisit = async (a, status, { reason, note, scope, rebook, office_reason: officeReason }) => {
+    const done = await setStatus(a, status, scope, { broken_reason: reason, ...(note ? { broken_note: note } : {}), ...(officeReason ? { office_reason: officeReason } : {}) });
     if (!done) return;
     setBrokenAsk(null);
     toast(`${a.first_name} ${a.last_name} ${status === 'no_show' ? 'marked as a no-show' : 'cancelled'} · ${brokenLabel(reason)}${note ? ` (${note})` : ''}`);

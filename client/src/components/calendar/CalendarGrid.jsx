@@ -1,20 +1,25 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Check, CheckCheck, DoorOpen, Armchair, Pill, TriangleAlert, Repeat, Lock, LockOpen, Hourglass } from 'lucide-react';
-import { eligibilityBadge } from '../../format.js';
+import { Lock, LockOpen, Hourglass, LayoutGrid, UserX } from 'lucide-react';
 import PatientHoverCard from './PatientHoverCard.jsx';
 import { ColumnProduction, dollars } from './ProductionBar.jsx';
-import { lateness, waitLabel } from './late.js';
+import { lateness } from './late.js';
 import './late.css';
-import { nextKind, NEXT_LABEL, READY_LABEL, READY_SHORT } from './flow.js';
+import { nextKind, NEXT_LABEL, READY_LABEL } from './flow.js';
 import './workflow.css';
-import OpportunityBadge, { OpportunityTotal } from '../opportunities/OpportunityBadge.jsx';
-import ReadinessBadge from '../readiness/ReadinessBadge.jsx';
+import { OpportunityTotal } from '../opportunities/OpportunityBadge.jsx';
 import OptimizerMarkers from '../optimizer/OptimizerMarkers.jsx';
+import { useAuth } from '../../auth.jsx';
+import { useShortcuts } from '../../shortcuts.js';
+import CardLines from '../cards/CardBody.jsx';
+import { useCardData } from '../cards/cardData.js';
+import { NoteComposer, NotesPopover, SlotNotes, useDoctorNoteAlerts } from '../cards/DoctorNotes.jsx';
+import CardLayoutEditor from '../cards/CardLayoutEditor.jsx';
+import ProviderOut from '../cards/ProviderOut.jsx';
+import MoveWhy from '../cards/MoveWhy.jsx';
 
 export const toMin = (t) => Number(t.slice(-5, -3)) * 60 + Number(t.slice(-2));
 export const fmtMin = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 export const label12 = (m) => `${((Math.floor(m / 60) + 11) % 12) + 1}${m % 60 ? `:${String(m % 60).padStart(2, '0')}` : ''}${m < 720 ? 'a' : 'p'}`;
-const STATUS_ICON = { confirmed: [Check, 'Confirmed'], checked_in: [DoorOpen, 'Checked in'], in_chair: [Armchair, 'In the chair'], completed: [CheckCheck, 'Completed'] };
 const hourLabel = (m) => `${((Math.floor(m / 60) + 11) % 12) + 1} ${m < 720 ? 'AM' : 'PM'}`;
 const clock = (m) => `${((Math.floor(m / 60) + 11) % 12) + 1}:${String(m % 60).padStart(2, '0')}`;
 const initialsOf = (name = '') => name.replace(/^(dr\.?|drs\.?)\s+/i, '').split(/[\s,]+/).filter((w) => w && !/^(dds|dmd|rdh|md|phd|jr|sr)\.?$/i.test(w)).slice(0, 2).map((w) => w[0].toUpperCase()).join('');
@@ -62,6 +67,59 @@ export default function CalendarGrid({
 }) {
   const [dragCol, setDragCol] = useState(null);
   const [overCol, setOverCol] = useState(null);
+  // What the cards show beyond the visit (PP1 preferences, PP2 personal notes, S8 strikes, DN1 doctor's notes) and
+  // the practice's (or the person's own) card layout (S6). The grid works the same without it.
+  const { can } = useAuth();
+  const dates = columns.map((c) => c.date).filter(Boolean).sort();
+  const cards = useCardData(dates[0], dates.at(-1));
+  const layout = cards.layout;
+  const colorMode = layout?.color_by || colorBy;
+  const [composer, setComposer] = useState(null); // { target, at }
+  const [notesPop, setNotesPop] = useState(null); // { notes, at }
+  const [panel, setPanel] = useState(null); // { kind: 'cards' } | { kind: 'out', providerId, date }
+  const [justMoved, setJustMoved] = useState(null); // { appt, warning }
+  useDoctorNoteAlerts();
+  const canNote = !readOnly || can('clinical:write');
+  const strikeWarn = (a) => {
+    const st = cards.by_appt?.[a.id]?.strikes;
+    if (!st?.count) return null;
+    const d = st.days_since;
+    return `We moved ${a.preferred_name || a.first_name} ${d <= 1 ? (d === 0 ? 'today' : 'yesterday') : d < 14 ? `${d} days ago` : d < 60 ? `${Math.round(d / 7)} weeks ago` : `${Math.round(d / 30)} months ago`}${st.count > 1 ? ` (${st.count}× this year)` : ''}`;
+  };
+  const movedHere = (a) => setJustMoved({ appt: a, warning: strikeWarn(a) });
+  const openNotes = (notes, el) => { const r = el.getBoundingClientRect(); setNotesPop({ notes, at: { x: r.left, y: r.bottom + 4 } }); };
+  // "Book it" on a slot note: the booking form for that column and time, as a drag over the slot would open.
+  const bookSlot = (b) => {
+    const col = columns.find((c) => c.date === b.date && ((b.operatory_id && c.assign?.operatory_id === b.operatory_id) || (b.provider_id && c.assign?.provider_id === b.provider_id)))
+      || columns.find((c) => c.date === b.date) || columns[0];
+    if (col && b.start_time) onSelectRange(col, b.start_time, b.end_time);
+  };
+  // A slot note shows in its chair's (or provider's) column; a whole-day column shows them all.
+  const slotNotesFor = (col) => (cards.slot_notes || []).filter((n) => n.date === col.date && (
+    !col.assign?.operatory_id && !col.assign?.provider_id ? true
+      : n.operatory_id ? col.assign.operatory_id === n.operatory_id
+        : n.provider_id ? col.assign.provider_id === n.provider_id
+          : columns.find((c) => c.date === col.date) === col));
+  // Right-click on an empty slot (or Shift+N): a note there. Right-click on a visit: a note on the visit.
+  const slotNoteAt = (e, ci) => {
+    if (!canNote) return;
+    e.preventDefault();
+    const m = Math.floor(geometry(e.clientX, e.clientY).minute / SNAP) * SNAP;
+    setComposer({ target: { kind: 'slot', col: columns[ci], start: m, end: Math.min(range.end, m + 60) }, at: { x: e.clientX, y: e.clientY } });
+  };
+  useShortcuts([{
+    combo: 'shift+n', label: 'Note to the front desk: on the selected visit, or on the next free time', section: 'Patient flow', enabled: canNote && columns.length > 0,
+    handler: () => {
+      const id = Number(document.activeElement?.closest?.('[data-appt-id]')?.dataset.apptId) || selectedId;
+      const a = appointments.find((x) => x.id === id);
+      const el = a && body.current?.querySelector(`[data-appt-id="${a.id}"]`);
+      const r = el?.getBoundingClientRect() || scroller.current?.getBoundingClientRect() || { left: 100, top: 100, bottom: 100 };
+      if (a) return setComposer({ target: { kind: 'visit', appt: a }, at: { x: r.left, y: r.bottom + 4 } });
+      const ci = Math.max(0, columns.findIndex((c) => c.isToday));
+      const start = Math.max(range.open ?? range.start, nowMin != null && columns[ci]?.isToday ? Math.ceil(nowMin / 30) * 30 : range.open ?? range.start);
+      setComposer({ target: { kind: 'slot', col: columns[ci], start, end: Math.min(range.end, start + 60) }, at: { x: r.left + 80, y: r.top + 60 } });
+    },
+  }]);
   // The grid step (5, 10 or 15 minutes) is what drags and new appointments snap to.
   const SNAP = step;
   const snap = (m) => Math.round(m / SNAP) * SNAP;
@@ -74,6 +132,10 @@ export default function CalendarGrid({
   const dragRef = useRef(null);
   dragRef.current = drag;
   const suppressClick = useRef(false); // a drag ends with a click event we must ignore
+  // Focus that comes from pressing a card with the pointer doesn't switch the active patient by itself: the click
+  // (which opens the visit) does. Otherwise the patient bar appears between press and release, the page shifts
+  // under the pointer and the click lands on the column instead of the card.
+  const pointerFocus = useRef(false);
   const touchTap = useRef(false);
   const height = (range.end - range.start) * pxPerMin;
   const hours = useMemo(() => {
@@ -193,6 +255,7 @@ export default function CalendarGrid({
         if (onPin && document.elementFromPoint(e.clientX, e.clientY)?.closest('[data-pin-drop]')) return onPin(d.appt);
         if (d.s2 === d.s && d.col === d.col0) return;
         onMove(d.appt, columns[d.col], fmtMin(d.s2), fmtMin(d.e2));
+        if (d.s2 !== d.s || columns[d.col].date !== columns[d.col0].date) movedHere(d.appt);
       } else if (d.kind === 'resize') {
         suppressClick.current = true;
         if (d.e2 !== d.e) onResize(d.appt, fmtMin(d.e2));
@@ -238,7 +301,7 @@ export default function CalendarGrid({
       touchTap.current = true;
       return;
     }
-    if (placing) return onPlace(columns[colIdx], fmtMin(m));
+    if (placing) { movedHere(placing); return onPlace(columns[colIdx], fmtMin(m)); }
     setDrag({ kind: 'select', col: colIdx, anchor: m, cur: m, x0: e.clientX, y0: e.clientY });
   };
 
@@ -246,8 +309,7 @@ export default function CalendarGrid({
     if (!touchTap.current || e.target !== e.currentTarget) return;
     touchTap.current = false;
     const m = Math.floor(geometry(e.clientX, e.clientY).minute / SNAP) * SNAP;
-    if (placing) onPlace(columns[colIdx], fmtMin(m));
-    else onSelectRange(columns[colIdx], fmtMin(m), null);
+    if (placing) { movedHere(placing); onPlace(columns[colIdx], fmtMin(m)); } else onSelectRange(columns[colIdx], fmtMin(m), null);
   };
 
   const perColumn = useMemo(() => columns.map((col) => layoutLanes(
@@ -276,9 +338,20 @@ export default function CalendarGrid({
   return (
     <div className="cal">
       {hover && <PatientHoverCard appt={hover.appt} anchor={hover.anchor} />}
+      {composer && <NoteComposer target={composer.target} at={composer.at} onClose={() => setComposer(null)} />}
+      {notesPop && <NotesPopover notes={notesPop.notes} at={notesPop.at} onClose={() => setNotesPop(null)} onBookSlot={bookSlot} />}
+      {panel?.kind === 'cards' && <CardLayoutEditor onClose={() => setPanel(null)} />}
+      {panel?.kind === 'out' && <ProviderOut date={panel.date} providerId={panel.providerId} onClose={() => setPanel(null)} />}
+      {justMoved && <MoveWhy appt={justMoved.appt} warning={justMoved.warning} onClose={() => setJustMoved(null)} />}
       <div className="cal-scroll" ref={scroller} onScroll={onScroll}>
         <div className="cal-head" style={{ gridTemplateColumns: `56px repeat(${columns.length}, minmax(var(--cal-col-min), 1fr))` }}>
-          <div className="cal-corner">{headerExtra}</div>
+          <div className="cal-corner">
+            {headerExtra}
+            <div className="cal-corner-tools no-print">
+              <button type="button" className="icon-btn tiny" onClick={() => setPanel({ kind: 'cards' })} title="Customize cards: what each appointment shows" aria-label="Customize cards"><LayoutGrid size={14} /></button>
+              {!readOnly && <button type="button" className="icon-btn tiny" onClick={() => setPanel({ kind: 'out', date: columns[0]?.date, providerId: columns.find((c) => c.assign?.provider_id)?.assign.provider_id })} title="Provider out: keep or reschedule a provider’s visits" aria-label="Provider out today"><UserX size={14} /></button>}
+            </div>
+          </div>
           {columns.map((c) => (
             <div key={c.key} className={`cal-col-head${c.isToday ? ' today' : ''}${onReorderColumn ? ' movable' : ''}${overCol === c.key && dragCol && dragCol !== c.key ? ' drop-before' : ''}`} style={c.color ? { '--col': c.color } : undefined}
               draggable={!!onReorderColumn}
@@ -287,6 +360,7 @@ export default function CalendarGrid({
               onDragLeave={onReorderColumn ? () => setOverCol((k) => (k === c.key ? null : k)) : undefined}
               onDrop={onReorderColumn ? (e) => { e.preventDefault(); const from = columns.find((x) => x.key === dragCol); if (from && from.key !== c.key) onReorderColumn(from, c); setDragCol(null); setOverCol(null); } : undefined}
               onDragEnd={() => { setDragCol(null); setOverCol(null); }}
+              onContextMenu={!readOnly && c.assign?.provider_id ? (e) => { e.preventDefault(); setPanel({ kind: 'out', date: c.date, providerId: c.assign.provider_id }); } : undefined}
               title={onReorderColumn ? 'Drag to move this chair' : undefined}>
               <div className="cal-col-title">
                 {c.color && <span className="cal-col-avatar" style={{ background: c.color }}>{initialsOf(c.label)}</span>}
@@ -324,7 +398,8 @@ export default function CalendarGrid({
               if (cursor < range.end) closed.push([cursor, range.end]);
               const sel = drag?.kind === 'select' && drag.col === ci && drag.active ? [Math.min(drag.anchor, drag.cur), Math.max(drag.anchor, drag.cur)] : null;
               return (
-                <div key={col.key} className={`cal-col${placing ? ' placing' : ''}`} onPointerDown={(e) => startSelect(e, ci)} onClick={(e) => tapColumn(e, ci)}>
+                <div key={col.key} className={`cal-col${placing ? ' placing' : ''}`} onPointerDown={(e) => startSelect(e, ci)} onClick={(e) => tapColumn(e, ci)}
+                  onContextMenu={(e) => { if (e.target === e.currentTarget || e.target.classList?.contains('cal-closed') || e.target.closest?.('.cal-lane')) slotNoteAt(e, ci); }}>
                   {closed.map(([a, b]) => <div key={a} className="cal-closed" style={{ top: (a - range.start) * pxPerMin, height: (b - a) * pxPerMin }} />)}
                   {(col.lanes || []).map((l) => {
                     const s = Math.max(range.start, toMin(l.start_time));
@@ -367,9 +442,10 @@ export default function CalendarGrid({
                       {label12(sel[0])}–{label12(Math.max(sel[1], sel[0] + SNAP))}
                     </div>
                   )}
+                  <SlotNotes notes={slotNotesFor(col)} range={range} pxPerMin={pxPerMin} onOpen={(n, el) => openNotes([n], el)} />
                   {perColumn[ci].map(({ appt: a, s, e, lane, lanes }) => {
                     const dragging = (drag?.appt?.id === a.id && drag.active) || carry?.id === a.id;
-                    const color = colorBy === 'provider' ? a.provider_color || '#64748b' : colorBy === 'status' ? STATUS_COLORS[a.status] || '#64748b' : a.type_color || a.provider_color || '#64748b';
+                    const color = colorMode === 'provider' ? a.provider_color || '#64748b' : colorMode === 'status' ? STATUS_COLORS[a.status] || '#64748b' : a.type_color || a.provider_color || '#64748b';
                     const h = (e - s) * pxPerMin;
                     // Late (S7): not checked in N minutes after the start; very late pulses.
                     const lt = col.isToday && now ? lateness(a, now, late || undefined) : null;
@@ -378,7 +454,7 @@ export default function CalendarGrid({
                         data-appt-id={a.id}
                         className={`cal-appt status-${a.status}${dragging ? ' dragging' : ''}${selectedId === a.id ? ' selected' : ''}${a._pending ? ' pending' : ''}${lt ? (lt.level === 'very_late' ? ' late very-late' : ' late') : ''}`}
                         style={{ top: (s - range.start) * pxPerMin, height: Math.max(h - 2, 14), left: `calc(${(lane / lanes) * 100}% + 2px)`, width: `calc(${100 / lanes}% - 4px)`, '--c': color, '--p': a.provider_color || color }}
-                        onPointerDown={(ev) => { hoverOut(); startMove(ev, a, ci, s, e); }}
+                        onPointerDown={(ev) => { hoverOut(); pointerFocus.current = true; startMove(ev, a, ci, s, e); }}
                         onPointerEnter={(ev) => hoverIn(ev, a)} onPointerLeave={hoverOut}
                         onClick={(ev) => {
                           ev.stopPropagation();
@@ -390,7 +466,9 @@ export default function CalendarGrid({
                           if (ev.key === 'Enter') onOpen(a);
                           else if (ev.key.startsWith('Arrow') && !ev.altKey && !ev.ctrlKey && !ev.metaKey) moveFocus(ev, ci, a);
                         }}
-                        onFocus={(ev) => ev.target === ev.currentTarget && onFocusAppt?.(a)}
+                        onFocus={(ev) => { if (pointerFocus.current) { pointerFocus.current = false; return; } if (ev.target === ev.currentTarget) onFocusAppt?.(a); }}
+                        onBlur={() => { pointerFocus.current = false; }}
+                        onContextMenu={canNote ? (ev) => { ev.preventDefault(); ev.stopPropagation(); setComposer({ target: { kind: 'visit', appt: a }, at: { x: ev.clientX, y: ev.clientY } }); } : undefined}
                         tabIndex={0} role="button"
                         aria-label={`${a.first_name} ${a.last_name}, ${label12(s)} to ${label12(e)}, ${a.status.replace('_', ' ')}${a.status === 'in_chair' && a.ready_for ? `, ${READY_LABEL[a.ready_for]}` : ''}${lt ? `, late ${lt.minutes} minutes` : ''}`}>
                         {a.pattern && a.pattern.includes('/') && (
@@ -399,28 +477,9 @@ export default function CalendarGrid({
                             {[...a.pattern].map((c, i) => <i key={i} className={c === 'X' ? 'x' : 'a'} style={{ height: `${Math.min(100, (10 / Math.max(10, e - s)) * 100)}%` }} />)}
                           </div>
                         )}
-                        <div className="cal-appt-line">
-                          {a.medical_alerts ? <TriangleAlert className="cal-alert" size={12} strokeWidth={2.5} aria-label="Medical alert" /> : null}
-                          {a.premed_required ? <Pill className="cal-alert" size={12} strokeWidth={2.5} aria-label="Premedication" /> : null}
-                          <strong>{a.first_name} {a.last_name}</strong>
-                          {STATUS_ICON[a.status] && (() => { const [Icon, text] = STATUS_ICON[a.status]; return <span className={`cal-status s-${a.status}`} title={text}><Icon size={11} strokeWidth={3} /></span>; })()}
-                          {a.status === 'in_chair' && a.ready_for ? <span className={`cal-ready r-${a.ready_for}`} title={READY_LABEL[a.ready_for]}>{READY_SHORT[a.ready_for]}</span> : null}
-                          {a.asap ? <span className="cal-asap" title="Wants an earlier time">ASAP</span> : null}
-                          {a.series_id ? <Repeat className="cal-repeat" size={11} strokeWidth={2.5} aria-label="Recurring visit" /> : null}
-                          {(() => { const b = eligibilityBadge(a.eligibility); return b ? <span className={`cal-elig ${b.tone}`} title={b.text}>{b.icon}</span> : null; })()}
-                          {readiness?.[a.id] ? <ReadinessBadge info={readiness[a.id]} compact={h < 28} onClick={onReadiness ? () => onReadiness(a, readiness[a.id]) : undefined} /> : null}
-                          {opportunities?.[a.id]?.count ? <OpportunityBadge count={opportunities[a.id].count} fee={opportunities[a.id].fee} compact={h < 28} onClick={() => onOpportunities?.(a)} /> : null}
-                          {col.isToday && nowMin != null && a.status === 'checked_in' && a.arrived_at && (
-                            <span className={`cal-flow${nowMin - toMin(a.arrived_at.slice(11, 16)) >= 15 ? ' long' : ''}`} title="Waiting since arrival">⏱ {Math.max(0, nowMin - toMin(a.arrived_at.slice(11, 16)))}m</span>
-                          )}
-                          {lt ? <span className="cal-late" title={`Not checked in — ${waitLabel(lt.minutes)} after their time`}>Late {waitLabel(lt.minutes)}</span>
-                            : !now && col.isToday && nowMin != null && ['scheduled', 'confirmed'].includes(a.status) && nowMin > s + 5 && nowMin < e && (
-                              <span className="cal-flow long" title="Not checked in yet">late</span>
-                            )}
-                        </div>
-                        {h >= 28 && <div className="cal-appt-meta"><span className="cal-time">{clock(s)}–{clock(e)}</span> {a.type_name || a.reason || ''}</div>}
-                        {h >= 44 && <div className="cal-appt-meta">{col.showProvider ? a.provider_name : a.operatory_name || a.provider_name}{a.production ? <b className="cal-prod"> ${Math.round(a.production / 100).toLocaleString()}</b> : ''}</div>}
-                        {h >= 60 && a.procedure_summary && <div className="cal-appt-meta cal-codes">{a.procedure_summary}</div>}
+                        <CardLines layout={layout} a={a} col={col} s={s} e={e} h={h} nowMin={nowMin} now={now} lt={lt} x={cards.by_appt?.[a.id]}
+                          readiness={readiness} onReadiness={onReadiness} opportunities={opportunities} onOpportunities={onOpportunities}
+                          onNotes={(appt, el) => openNotes(cards.by_appt?.[appt.id]?.notes || [], el)} />
                         {onNext && nextKind(a) && !dragging && (
                           // One click for the next step of the visit, without opening the drawer.
                           <button type="button" className="cal-next" tabIndex={-1}
@@ -437,11 +496,13 @@ export default function CalendarGrid({
                   {drag?.kind === 'move' && drag.active && drag.col === ci && (
                     <div className="cal-ghost" style={{ top: (drag.s2 - range.start) * pxPerMin, height: (drag.e2 - drag.s2) * pxPerMin - 2 }}>
                       {label12(drag.s2)}–{label12(drag.e2)}
+                      {strikeWarn(drag.appt) && <span className="ghost-warn">⚠ {strikeWarn(drag.appt)} — try someone else?</span>}
                     </div>
                   )}
                   {carry && carry.col === ci && (
                     <div className="cal-ghost carry" aria-hidden="true" style={{ top: (carry.s - range.start) * pxPerMin, height: (carry.e - carry.s) * pxPerMin - 2 }}>
                       {label12(carry.s)}–{label12(carry.e)}
+                      {(() => { const ca = appointments.find((x) => x.id === carry.id); const w = ca && strikeWarn(ca); return w ? <span className="ghost-warn">⚠ {w}</span> : null; })()}
                     </div>
                   )}
                   {drag?.kind === 'resize' && drag.col === ci && (
