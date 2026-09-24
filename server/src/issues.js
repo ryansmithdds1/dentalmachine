@@ -56,7 +56,7 @@ export const failed = (db, issue) => (err) => raiseIssue(db, { ...issue, detail:
 const SERVICES = [
   [/twilio\.com$/, 'Twilio'], [/sendgrid\.com$/, 'SendGrid'], [/stripe\.com$/, 'Stripe'], [/lob\.com$/, 'Lob'], [/plaid\.com$/, 'Plaid'],
   [/intuit\.com$|quickbooks/, 'QuickBooks'], [/deepgram\.com$/, 'Deepgram'], [/googleapis\.com$|google\.com$/, 'Google'], [/anthropic\.com$/, 'Claude'],
-  [/dosespot/, 'DoseSpot'],
+  [/dosespot/, 'DoseSpot'], [/hellopearl\.com$/, 'Pearl'], [/overjet\.(ai|com)$/, 'Overjet'], [/videa\.ai$|videahealth/, 'VideaHealth'],
 ];
 export const serviceFor = (host) => SERVICES.find(([re]) => re.test(host))?.[1] || host;
 

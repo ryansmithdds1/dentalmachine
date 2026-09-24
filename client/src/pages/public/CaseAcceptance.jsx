@@ -12,6 +12,7 @@ import { locale, suggestLang, useLang, useT } from './i18n.js';
 import { DobGate, publicCall, readPass, savePass } from './LinkPass.jsx';
 import { BackToOffice, useHandoff } from './HandOff.jsx';
 import './handoff.css';
+import '../../components/xray/xray.css';
 
 const call = (method, path, body, pass) => publicCall(method, path, body, 'X-Plan-Pass', pass);
 
@@ -179,6 +180,17 @@ export default function CaseAcceptance() {
               <div className="num">{money(e.items[i]?.patient ?? p.fee)}</div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* XR3: what the x-rays showed on the plan's teeth — only what the dentist confirmed. */}
+      {plan.xray_findings?.length > 0 && (
+        <div className="card xr-plan">
+          <h3 style={{ marginTop: 0 }}>{t('What your x-rays showed')}</h3>
+          <div className="muted" style={{ fontSize: 13 }}>{t('Your dentist reviewed your x-rays and confirmed:')}</div>
+          <ul>
+            {plan.xray_findings.map((f, i) => <li key={i}><strong>{t(f.label)}</strong>{f.where ? <span className="muted"> · {f.where}</span> : null}</li>)}
+          </ul>
         </div>
       )}
 

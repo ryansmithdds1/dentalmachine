@@ -13,6 +13,7 @@ import CompleteWork, { UncompleteForm, useTodaysWork } from './CompleteWork.jsx'
 import { undoable } from '../../toast.js';
 import Odontogram, { STATUS_COLORS, CONDITION_COLORS, codeArea, surfacesFor, QUADRANT_LABELS, baseTooth } from '../Odontogram.jsx';
 import NoteComposer from '../NoteComposer.jsx';
+import XrayReview from '../xray/XrayReview.jsx';
 import { Badge, ErrorBox, Modal, useSubmit } from '../ui.jsx';
 
 const QUADS = ['UR', 'UL', 'LL', 'LR'];
@@ -130,6 +131,9 @@ export default function ChartTab({ patient, onChange }) {
         <div className="card"><h2>{tooth ? `Tooth #${tooth}` : 'Chart'}</h2><p className="muted">{asOf ? 'Past charts are read-only.' : 'View only.'}</p></div>
       )}
       </div>
+
+      {/* What the x-ray AI saw that isn't on the chart (XR2): shown only when there's something to review. */}
+      {!asOf && <XrayReview patient={patient} onChange={refresh} />}
 
       <div className="card" style={{ gridColumn: '1 / -1' }}>
         <div className="inline" style={{ justifyContent: 'space-between' }}>

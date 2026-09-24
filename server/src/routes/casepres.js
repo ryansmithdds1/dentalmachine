@@ -12,6 +12,7 @@ import { PdfDoc, dataUrlImage } from '../pdf.js';
 import { mintHandoff, redeemHandoff, HANDOFF_MINUTES } from '../handoff.js';
 import { formPass } from './public.js';
 import { makeThumbnail } from '../thumbnails.js';
+import { acceptedForPlan } from '../xrayai.js';
 import finOptionRoutes, { planQuote, publicQuote, alternativesOf, acceptChoice, agreementView, phaseList } from './finoptions.js';
 import treatmentOptionRoutes, { compareFor, publicCompare } from './treatmentoptions.js';
 
@@ -381,6 +382,8 @@ export function publicCasePresentation({ db, storage, secret }) {
       name: v.name, status: v.status, notes: v.notes, signed_at: v.signed_at, signature_name: v.signature_name, first_name: patient.first_name, language: patientLang(patient), practice,
       procedures: v.procedures.map((p) => ({ code: p.code, description: p.description, tooth: p.tooth, surfaces: p.surfaces, fee: p.fee, status: p.status })),
       estimate: { ...v.estimate, items: v.estimate.items.map(({ procedure_id: _, ...rest }) => rest) },
+      // What the x-rays showed on the plan's teeth — only findings the dentist confirmed (XR3, xrayai.js).
+      xray_findings: await acceptedForPlan(db, plan, v.procedures),
     };
   };
 

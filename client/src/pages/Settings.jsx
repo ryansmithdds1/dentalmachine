@@ -1708,7 +1708,7 @@ function XrayAiSetting() {
             Read new x-rays automatically when they’re captured or uploaded
           </label>
         </>
-      ) : <div className="muted" style={{ fontSize: 13 }}>Off on this server. Set XRAY_AI=vendor (with XRAY_AI_URL, XRAY_AI_KEY) for an FDA-cleared service, or XRAY_AI=claude.</div>}
+      ) : <div className="muted" style={{ fontSize: 13 }}>{ai.reason || 'Off on this server. Set XRAY_AI=pearl, overjet or videahealth (with XRAY_AI_KEY) for an FDA-cleared service, or XRAY_AI=sandbox for demos.'}</div>}
     </div>
   );
 }

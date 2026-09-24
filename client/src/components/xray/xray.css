@@ -1,0 +1,72 @@
+/* X-ray AI review list, image overlay and chair screen (backlog XR1–XR3). Colours are tokens so dark mode is one
+   block; finding colours (kinds.js) are drawn on the x-ray itself, which is dark in both themes. */
+:root {
+  --xr-ai: #7c3aed;
+  --xr-ai-soft: #f3edff;
+  --xr-ai-ink: #5b21b6;
+  --xr-row-on: #eef2ff;
+  --xr-image-bg: #05070c;
+  --xr-chair-bg: #0b1220;
+  --xr-chair-text: #f1f5f9;
+}
+:root[data-theme='dark'] {
+  --xr-ai: #a78bfa;
+  --xr-ai-soft: rgba(167, 139, 250, 0.14);
+  --xr-ai-ink: #ddd6fe;
+  --xr-row-on: rgba(99, 102, 241, 0.18);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --xr-ai: #a78bfa;
+    --xr-ai-soft: rgba(167, 139, 250, 0.14);
+    --xr-ai-ink: #ddd6fe;
+    --xr-row-on: rgba(99, 102, 241, 0.18);
+  }
+}
+
+.xr-label { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--xr-ai-ink); background: var(--xr-ai-soft); border-radius: 999px; padding: 2px 10px; }
+.xr-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 10px; }
+.xr-head h2 { margin: 0; }
+.xr-head .xr-spacer { flex: 1; }
+.xr-tabs { display: inline-flex; gap: 4px; }
+.xr-tabs button[aria-pressed='true'] { background: var(--primary-soft); color: var(--primary-ink); border-color: var(--primary); }
+.xr-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 360px); gap: 14px; }
+.xr-body.solo { grid-template-columns: minmax(0, 1fr); }
+@media (max-width: 900px) { .xr-body { grid-template-columns: minmax(0, 1fr); } }
+.xr-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; outline: none; }
+.xr-group { font-size: 12px; font-weight: 600; color: var(--muted); padding: 10px 8px 4px; display: flex; gap: 8px; align-items: baseline; }
+.xr-row { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px; border-radius: var(--radius-sm); cursor: pointer; }
+.xr-row:hover { background: var(--hover); }
+.xr-row.on { background: var(--xr-row-on); box-shadow: inset 3px 0 0 var(--xr-ai); }
+.xr-row i { width: 10px; height: 10px; border-radius: 3px; }
+.xr-row .xr-sentence { font-weight: 550; color: var(--text); }
+.xr-row .xr-meta { font-size: 12px; color: var(--muted); }
+.xr-row .xr-actions { display: flex; gap: 6px; }
+.xr-row.charted .xr-sentence { color: var(--text-2); font-weight: 450; }
+.xr-empty { color: var(--muted); font-size: 13px; padding: 8px; }
+.xr-keys { font-size: 12px; color: var(--faint); display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 8px; }
+
+.xr-image { position: relative; background: var(--xr-image-bg); border-radius: var(--radius-sm); overflow: hidden; line-height: 0; }
+.xr-image img { width: 100%; height: auto; display: block; }
+.xr-image svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.xr-image .xr-tag { position: absolute; transform: translateY(-100%); font: 600 11px/1.3 system-ui, sans-serif; color: #0b1220; padding: 1px 5px; border-radius: 4px; white-space: nowrap; }
+.xr-image .xr-loading { color: #94a3b8; font-size: 13px; line-height: 1.4; padding: 40px 12px; text-align: center; }
+.xr-image-bar { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; font-size: 12px; color: var(--muted); margin-top: 6px; }
+
+/* The chair screen turned to the patient: the images big, only what the dentist confirmed. Esc gives it back. */
+.xr-chair { position: fixed; inset: 0; z-index: 60; background: var(--xr-chair-bg); color: var(--xr-chair-text); display: flex; flex-direction: column; padding: 20px 24px; gap: 14px; overflow: auto; }
+.xr-chair h1 { color: var(--xr-chair-text); font-size: 26px; }
+.xr-chair p { margin: 0; color: #cbd5e1; font-size: 16px; }
+.xr-chair-close { position: absolute; top: 16px; right: 16px; }
+.xr-chair-main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(240px, 340px); gap: 20px; align-items: start; }
+@media (max-width: 800px) { .xr-chair-main { grid-template-columns: minmax(0, 1fr); } }
+.xr-chair-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; font-size: 17px; }
+.xr-chair-list li { display: flex; gap: 10px; align-items: flex-start; }
+.xr-chair-list i { width: 14px; height: 14px; border-radius: 4px; margin-top: 5px; flex: none; }
+.xr-chair-list small { display: block; color: #94a3b8; font-size: 14px; }
+.xr-chair-nav { display: flex; gap: 8px; align-items: center; color: #94a3b8; font-size: 14px; }
+
+/* In the patient's treatment plan: what the x-rays showed on the plan's teeth. */
+.xr-plan { border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; background: var(--panel); }
+.xr-plan ul { margin: 6px 0 0; padding-left: 18px; }
+.xr-plan li { margin: 2px 0; }

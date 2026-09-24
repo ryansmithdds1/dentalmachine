@@ -6,6 +6,8 @@ import {
 } from 'lucide-react';
 import { api, getToken } from '../api.js';
 import { ErrorBox } from './ui.jsx';
+import { useAuth } from '../auth.jsx';
+import { AI_COLOR, DISCLAIMER } from './xray/kinds.js';
 import { PRESETS, COLORMAPS, NEUTRAL, withDefaults, compact, renderProcessed, dist, pathLength, angleAt, openPreset, setOpenPreset } from './imaging/imageproc.js';
 
 // Diagnostic x-ray / photo viewer. Pixels are enhanced on a copy (gamma, sharpen, auto-levels, false
@@ -27,8 +29,9 @@ const TOOLS = [
 ];
 const READ_ONLY_TOOLS = ['pan', 'measure', 'polyline', 'angle'];
 const MARK = '#facc15';
-// AI findings: a colour per kind; suggestions dashed, accepted solid, rejected hidden.
-const AI_COLOR = { caries: '#f43f5e', calculus: '#f59e0b', bone_loss: '#a855f7', periapical: '#ef4444', open_margin: '#fb923c', restoration: '#38bdf8', crown: '#38bdf8', root_canal: '#22d3ee', implant: '#94a3b8', impacted: '#eab308', other: '#e2e8f0' };
+// AI findings (XR1): a colour per kind (xray/kinds.js); suggestions dashed, accepted solid, dismissed hidden.
+// X toggles the overlay, N the confidence on it; a minimum confidence hides weak suggestions (never accepted ones).
+const MIN_CONF = [[0, 'All'], [0.5, '50%+'], [0.7, '70%+'], [0.85, '85%+']];
 
 async function loadImage(id) {
   const res = await fetch(`/api/documents/${id}/image`, { headers: { Authorization: `Bearer ${getToken()}` } });
@@ -42,7 +45,7 @@ async function loadImage(id) {
 const SHORTCUTS = [
   ['+ / −', 'Zoom'], ['0', 'Fit'], ['R', 'Rotate'], ['H', 'Flip'], ['I', 'Invert'], ['M', 'Magnifier'], ['F', 'Full screen'],
   ['1–5', 'Original · Clarity · Caries · Endo · Perio'], ['P L C A W O T E K', 'Tools'], ['Enter / double-click', 'Finish a canal length'],
-  ['Esc', 'Cancel the mark'], ['Ctrl+Z', 'Undo'], ['← →', 'Previous / next image'], ['?', 'These shortcuts'],
+  ['Esc', 'Cancel the mark'], ['Ctrl+Z', 'Undo'], ['← →', 'Previous / next image'], ['X', 'AI findings overlay'], ['N', 'AI confidence on the overlay'], ['?', 'These shortcuts'],
 ];
 
 export default function ImageViewer({ doc, canEdit = false, height = '70vh', compact: small = false, onPrev, onNext, onSaved, dark = false, autoFocus = false }) {
@@ -76,6 +79,12 @@ export default function ImageViewer({ doc, canEdit = false, height = '70vh', com
   const [ai, setAi] = useState(null);
   const [showAi, setShowAi] = useState(false);
   const [aiBusy, setAiBusy] = useState(false);
+  const [aiConf, setAiConf] = useState(true);
+  const [aiMin, setAiMin] = useState(0);
+  // Accepting or dismissing a finding is the dentist's call (clinical:sign); reading an image only needs canEdit.
+  const auth = useAuth();
+  const canDecide = auth?.can ? auth.can('clinical:sign') : canEdit;
+  const aiShown = (f) => f.status !== 'rejected' && (f.status === 'accepted' || (f.confidence ?? 1) >= aiMin);
   const [category, setCategory] = useState(doc.category || null);
 
   useEffect(() => {
@@ -117,7 +126,7 @@ export default function ImageViewer({ doc, canEdit = false, height = '70vh', com
   };
   const decide = async (f, status) => {
     try {
-      const next = await api.patch(`/ai-findings/${f.id}`, { status, chart: status === 'accepted' });
+      const next = await api.patch(`/ai-findings/${f.id}`, { status });
       setAi((a) => ({ ...a, findings: a.findings.map((x) => (x.id === f.id ? next : x)) }));
     } catch (e) { setError(e); }
   };
@@ -235,7 +244,7 @@ export default function ImageViewer({ doc, canEdit = false, height = '70vh', com
     // AI findings: a box on the image for each, with what and where.
     if (showAi && ai) {
       for (const f of ai.findings) {
-        if (!f.box || f.status === 'rejected') continue;
+        if (!f.box || !aiShown(f)) continue;
         const [bx, by, bw, bh] = f.box;
         const corners = [[bx, by], [bx + bw, by], [bx + bw, by + bh], [bx, by + bh]].map(([u, v]) => toScreen([u * img.width, v * img.height]));
         ctx.strokeStyle = AI_COLOR[f.kind] || '#fff';
@@ -247,7 +256,7 @@ export default function ImageViewer({ doc, canEdit = false, height = '70vh', com
         ctx.stroke();
         ctx.setLineDash([]);
         const top = corners.reduce((a, p) => (p[1] < a[1] ? p : a));
-        label(`${f.label}${f.tooth ? ` #${f.tooth}` : ''}${f.surfaces ? ` ${f.surfaces}` : ''}${f.measurement_mm ? ` ${f.measurement_mm}mm` : ''} · ${Math.round(f.confidence * 100)}%`, top[0], top[1] - 6 * ratio);
+        label(`${f.status === 'accepted' ? '' : 'AI: '}${f.label}${f.tooth ? ` #${f.tooth}` : ''}${f.surfaces ? ` ${f.surfaces}` : ''}${f.measurement_mm ? ` ${f.measurement_mm}mm` : ''}${aiConf ? ` · ${Math.round(f.confidence * 100)}%` : ''}`, top[0], top[1] - 6 * ratio);
       }
     }
     // Magnifier: the same view at 3× inside a circle that follows the pointer.
@@ -269,7 +278,7 @@ export default function ImageViewer({ doc, canEdit = false, height = '70vh', com
       ctx.arc(lx, ly, r, 0, Math.PI * 2);
       ctx.stroke();
     }
-  }, [img, processed, notes, draft, matrix, mm, magnify, showAi, ai]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [img, processed, notes, draft, matrix, mm, magnify, showAi, ai, aiConf, aiMin]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { draw(); }, [draw]);
   useEffect(() => {
@@ -444,6 +453,7 @@ export default function ImageViewer({ doc, canEdit = false, height = '70vh', com
     const t = TOOLS.find(([id, , , s]) => s === lower && (canEdit || READ_ONLY_TOOLS.includes(id)));
     if (t) { handled(); setDraft(null); setTool(t[0]); return; }
     const acts = { r: () => setA({ rotate: (adj.rotate + 90) % 360 }), h: () => setA({ flipH: !adj.flipH }), i: () => setA({ invert: !adj.invert }), m: () => setMagnify((v) => !v), f: toggleFull, '?': () => setHelp((v) => !v) };
+    if (aiStatus?.enabled && category === 'xray') Object.assign(acts, { x: () => setShowAi((v) => !v), n: () => setAiConf((v) => !v) });
     if (acts[lower] || acts[k]) { handled(); (acts[lower] || acts[k])(); }
   };
 
@@ -468,7 +478,7 @@ export default function ImageViewer({ doc, canEdit = false, height = '70vh', com
           <IconBtn on={adj.invert} title="Invert (I)" onClick={() => setA({ invert: !adj.invert })}><Contrast size={16} /></IconBtn>
           <IconBtn on={magnify} title="Magnifier (M)" onClick={() => setMagnify(!magnify)}><Search size={16} /></IconBtn>
           <IconBtn on={panel} title="Adjust image" onClick={() => setPanel(!panel)}><SlidersHorizontal size={16} /></IconBtn>
-          {aiStatus?.enabled && category === 'xray' && <IconBtn on={showAi} title={`AI findings (${aiStatus.label})`} onClick={() => setShowAi(!showAi)}><ScanSearch size={16} /></IconBtn>}
+          {aiStatus?.enabled && category === 'xray' && <IconBtn on={showAi} title={`AI findings (${aiStatus.label}) — ${DISCLAIMER} (X)`} onClick={() => setShowAi(!showAi)}><ScanSearch size={16} /></IconBtn>}
         </div>
         {!small && (
           <div className="vgroup presets" role="group" aria-label="Presets">
@@ -513,22 +523,27 @@ export default function ImageViewer({ doc, canEdit = false, height = '70vh', com
         <div className="viewer-ai">
           <div className="viewer-ai-head">
             <strong>AI findings</strong>
-            <span className="muted">{aiStatus.label}{aiStatus.cleared ? '' : ' · for the dentist’s review, not a diagnosis'}</span>
+            <span className="viewer-ai-tag">{DISCLAIMER}</span>
+            <span className="muted">{aiStatus.label}{aiStatus.cleared ? ' · FDA-cleared' : ' · made-up findings for demos'}</span>
+            <label className="vcheck" title="Show the AI's confidence on the image (N)"><input type="checkbox" checked={aiConf} onChange={(e) => setAiConf(e.target.checked)} /> Confidence</label>
+            <label className="vcheck" title="Hide suggestions the AI is less sure of">Show
+              <select value={aiMin} onChange={(e) => setAiMin(Number(e.target.value))}>{MIN_CONF.map(([v, t]) => <option key={v} value={v}>{t}</option>)}</select>
+            </label>
             {canEdit && <button type="button" className="small" disabled={aiBusy} onClick={readAi}>{aiBusy ? 'Reading…' : ai?.read_at || ai?.findings?.length ? 'Read again' : 'Read this x-ray'}</button>}
           </div>
           {ai?.quality && <div className="muted" style={{ fontSize: 12 }}>Image: {ai.quality}</div>}
           {ai && !ai.findings.length && <div className="muted" style={{ fontSize: 12 }}>{ai.read_at ? 'Nothing found.' : 'Not read yet.'}</div>}
-          {ai?.findings.map((f) => (
+          {ai?.findings.filter((f) => f.status !== 'suggested' || aiShown(f)).map((f) => (
             <div key={f.id} className={`viewer-ai-row ${f.status}`}>
               <i style={{ background: AI_COLOR[f.kind] }} />
-              <span title={f.note ? `Why: ${f.note}` : undefined}>{f.label}{f.tooth ? ` #${f.tooth}` : ''}{f.surfaces ? ` ${f.surfaces}` : ''}{f.measurement_mm ? ` · ${f.measurement_mm} mm` : ''} · {Math.round(f.confidence * 100)}%{f.note && <small className="muted" style={{ display: 'block', fontSize: 11 }}>{f.note}</small>}</span>
-              {canEdit && f.status === 'suggested' && (
+              <span title={f.note ? `Why: ${f.note}` : undefined}>{f.label}{f.tooth ? ` #${f.tooth}` : ''}{f.surfaces ? ` ${f.surfaces}` : ''}{f.measurement_mm ? ` · ${f.measurement_mm} mm` : ''}{aiConf ? ` · ${Math.round(f.confidence * 100)}%` : ''}{f.note && <small className="muted" style={{ display: 'block', fontSize: 11 }}>{f.note}</small>}</span>
+              {canDecide && f.status === 'suggested' && (
                 <>
-                  <button type="button" className="small" onClick={() => decide(f, 'accepted')} title={f.tooth ? 'Agree, and add it to the tooth chart' : 'Agree'}>Agree</button>
+                  <button type="button" className="small" onClick={() => decide(f, 'accepted')} title={f.tooth ? 'Accept, and add it to the tooth chart with this finding as the reason' : 'Accept'}>{f.tooth ? 'Chart it' : 'Accept'}</button>
                   <button type="button" className="small" onClick={() => decide(f, 'rejected')}>Dismiss</button>
                 </>
               )}
-              {f.status !== 'suggested' && <span className="muted" style={{ fontSize: 11 }}>{f.status === 'accepted' ? (f.condition_id ? 'on the chart' : 'agreed') : 'dismissed'}{canEdit && <button type="button" className="link" style={{ fontSize: 11, marginLeft: 6 }} onClick={() => decide(f, 'suggested')}>undo</button>}</span>}
+              {f.status !== 'suggested' && <span className="muted" style={{ fontSize: 11 }}>{f.status === 'accepted' ? (f.condition_id ? 'on the chart' : 'agreed') : 'dismissed'}{canDecide && <button type="button" className="link" style={{ fontSize: 11, marginLeft: 6 }} onClick={() => decide(f, 'suggested')}>undo</button>}</span>}
             </div>
           ))}
         </div>

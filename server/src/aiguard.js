@@ -43,6 +43,7 @@ export const HIGH_RISK = [
   ['POST', /^\/fees\/(increases|changes\/\d+\/(approve|cancel))$/, 'fee changes'],
   ['PUT', /^\/fees\/changes\/\d+$/, 'fee changes'],
   ['PUT', /^\/(fee-schedules|procedure-codes)\/\d+$/, 'fee changes'],
+  ['PATCH', /^\/ai-findings\/\d+$/, 'charting or dismissing an AI x-ray finding (a diagnosis)'],
   ['POST', /^\/provider-out$/, 'moving or cancelling a whole column of visits (provider out)'],
   ['POST', /^\/txfollow\/letters(\/\d+)?\/approve$/, 'sending a doctor’s letter to a patient'],
   ['POST', /^\/marketing\/costs(\/\d+\/void)?$/, 'marketing costs'],

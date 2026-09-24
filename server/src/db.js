@@ -4843,6 +4843,27 @@ CREATE TABLE IF NOT EXISTS txf_settings (
   updated_by INTEGER REFERENCES users(id),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+-- X-ray AI (XR1-XR2): every time an image was sent to the detection vendor (Pearl, Overjet, VideaHealth or the
+-- sandbox) and what came back: why (upload, by hand, the pre-appointment second look), whether it worked, how
+-- many findings, the vendor's reference. Reconciles images sent vs read, and lets the second look back off
+-- after a failure. No image data or patient details are kept here.
+CREATE TABLE IF NOT EXISTS xray_ai_reads (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER REFERENCES patients(id),
+  document_id INTEGER NOT NULL REFERENCES documents(id),
+  engine TEXT NOT NULL,
+  read_for TEXT NOT NULL,
+  ok INTEGER NOT NULL DEFAULT 0,
+  findings INTEGER NOT NULL DEFAULT 0,
+  vendor_ref TEXT,
+  error TEXT,
+  requested_by INTEGER REFERENCES users(id),
+  duration_ms INTEGER,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_xray_ai_reads_doc ON xray_ai_reads(document_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_xray_ai_reads_practice ON xray_ai_reads(practice_id, created_at);
 `;
 
 // Columns added after the first release. SQLite has no ADD COLUMN IF NOT EXISTS, so check first.
@@ -5407,6 +5428,17 @@ const COLUMNS = [
   ['appointments', 'moved_by', 'TEXT'],
   ['appointments', 'office_reason', 'TEXT'],
   ['appointments', 'office_note', 'TEXT'],
+  // X-ray AI (XR1-XR3): the vendor's own id for a finding, whether the engine that produced it is FDA-cleared,
+  // the dentist's call (why a finding was dismissed, whether the assistant asked on their behalf), and on the
+  // chart the finding that is the reason a condition was charted.
+  ['xray_findings', 'vendor_ref', 'TEXT'],
+  ['xray_findings', 'cleared', 'INTEGER NOT NULL DEFAULT 0'],
+  ['xray_findings', 'review_reason', 'TEXT'],
+  ['xray_findings', 'review_source', 'TEXT'],
+  ['xray_findings', 'approved_by', 'INTEGER REFERENCES users(id)'],
+  ['tooth_conditions', 'xray_finding_id', 'INTEGER REFERENCES xray_findings(id)'],
+  ['documents', 'ai_engine', 'TEXT'],
+  ['documents', 'ai_vendor_ref', 'TEXT'],
 ];
 
 // CHECK constraints widened after release: [table, constraint name on Postgres, old text, new text].

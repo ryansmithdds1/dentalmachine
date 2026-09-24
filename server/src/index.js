@@ -23,6 +23,7 @@ import { runRecallAgeRules } from './recallsync.js';
 import { runMissedCallCheck } from './phonecoach.js';
 import { runMarketingJobs } from './marketing.js';
 import { runFeeSchedules } from './feeimport.js';
+import { runSecondLook } from './xrayai.js';
 import { runScheduledReports } from './savedreports.js';
 import { runSurveys } from './surveys.js';
 import { runOrthoBilling } from './ortho.js';
@@ -262,6 +263,14 @@ if (process.env.FEE_CHANGES !== 'off') {
     .then((r) => r?.applied?.length && log.info(`Fee changes: ${r.applied.length} applied`)).catch(jobFailed('Fee schedule changes'));
   setInterval(run, 15 * 60 * 1000).unref();
   setTimeout(run, 25_000).unref();
+}
+// X-ray AI second look (XR2): today's patients' x-rays the AI hasn't read yet, before their visit. Hourly.
+if (process.env.XRAY_SECOND_LOOK !== 'off') {
+  const run = () => runExclusive('xray-second-look', 30 * 60 * 1000, () => runSecondLook(db))
+    .then((r) => r?.read && log.info(`X-ray second look: ${r.read} read${r.failed ? `, ${r.failed} failed` : ''}`))
+    .catch(jobFailed('X-ray AI second look'));
+  setInterval(run, 60 * 60 * 1000).unref();
+  setTimeout(run, 110_000).unref();
 }
 // Payment-plan late fees: an installment still unpaid after the plan's grace days gets its fee once.
 if (process.env.PLAN_LATE_FEES !== 'off') {
