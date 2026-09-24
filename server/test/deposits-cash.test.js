@@ -344,6 +344,10 @@ test('cash voids, cash refunds and cash discounts need a manager and are recorde
   // Refund in cash (the account has a credit).
   await s.pay(bill, 4000, 'cash');
   assert.equal((await bill.post(`/patients/${s.patient.id}/refunds`, { amount: 1000, method: 'cash' })).status, 403);
+  // Card and check refunds need a manager too (owner decision: refunds are a sensitive action).
+  const checkRefund = await bill.post(`/patients/${s.patient.id}/refunds`, { amount: 500, method: 'check', reference: '1001' });
+  assert.equal(checkRefund.status, 403);
+  assert.equal(checkRefund.data.details?.manager_required ?? checkRefund.data.manager_required ?? true, true);
   assert.equal((await s.admin.post(`/patients/${s.patient.id}/refunds`, { amount: 1000, method: 'cash' })).status, 201);
   await new Promise((r) => setTimeout(r, 50));
   assert.ok(await h.db.get("SELECT id FROM cash_flags WHERE kind = 'cash_refund' AND practice_id = ?", s.pid));

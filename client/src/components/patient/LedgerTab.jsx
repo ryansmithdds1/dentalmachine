@@ -94,7 +94,7 @@ export default function LedgerTab({ patient, onChange }) {
                 {payConfig?.enabled && <button onClick={() => setModal('paylink')}>Send card payment link</button>}
                 {terminal.readers.length > 0 && <button onClick={() => setModal('reader')}>Card reader</button>}
                 <button onClick={() => setModal('adjustment')} title="A">Adjustment</button>
-                {data.balance < 0 && <button onClick={() => setModal('refund')}>Refund credit</button>}
+                {data.balance < 0 && can('deposits:manage') && <button onClick={() => setModal('refund')}>Refund credit</button>}
                 {(patient.guarantor || patient.family_size > 1) && <button onClick={() => setModal('transfer')} title="Move a balance or credit to another family member">Transfer</button>}
                 <button className="primary" onClick={() => setModal('payment')}>Take payment</button>
               </>

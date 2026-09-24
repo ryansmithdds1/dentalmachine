@@ -20,7 +20,8 @@ export default function RefundQueue() {
   const [panel, setPanel] = useState(false);
   const rows = data || [];
   const cur = rows[Math.min(at, rows.length - 1)] || null;
-  const w = can('billing:write');
+  // Refunds need a manager (deposits:manage) or admin, like the server.
+  const w = can('billing:write') && can('deposits:manage');
   const move = (d) => setAt((i) => Math.max(0, Math.min(rows.length - 1, i + d)));
   useShortcuts([
     { combo: 'j', handler: () => move(1), label: 'Next account', section: 'Credits & refunds' },

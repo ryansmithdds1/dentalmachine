@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { requirePermission, HttpError } from '../auth.js';
+import { isManager } from '../deposits.js';
 import { pick, requireFields, requireOneOf, insert, findOr404, audit, toCents, practiceNow, publicPractice } from '../util.js';
 import { patientBalance, pendingInsurance, checkPostingDate, voidLedgerEntry } from '../services.js';
 import { planStatus } from './family.js';
@@ -164,7 +165,9 @@ export default function billingRoutes({ db, payments = { enabled: false }, confi
 
   // Refund of a credit balance. With `payment_id` of a card payment, the money goes back to that card
   // through the processor; otherwise it's recorded as paid out by cash or check.
+  // Money leaving the practice is a sensitive action (CLAUDE.md rule 8): a manager (deposits:manage) or admin.
   r.post('/patients/:id/refunds', requirePermission('billing:write'), async (req, res) => {
+    if (!isManager(req.user)) throw new HttpError(403, 'A refund needs a manager — ask one to do it', { manager_required: true });
     const patient = await patientOr404(req);
     const row = pick(req.body, ['amount', 'method', 'reference', 'description', 'payment_id']);
     requireFields(row, ['amount']);
