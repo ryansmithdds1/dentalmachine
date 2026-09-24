@@ -44,6 +44,15 @@ S6. **Customize what each appointment card shows (asked for):** an easy editor (
     notes, provider/assistant, time, custom labels/flags the office defines — with a live preview; separate layouts
     for short and long visits (what shows when space is tight), color by type/provider/status, and saved per
     practice with an optional personal override per user.
+S7. **Late is impossible to miss (asked for):** the current-time line (already there) made bolder with a time bubble
+    in every column and the view kept near it; patient flow steps on every card (check in → seated → ready → out,
+    already there) with the time of each; a practice setting for "late after N minutes" (default 5) and "very late
+    after M" (default 10): a scheduled/confirmed visit not checked in by then pulses/flashes (a clear red outline and
+    "Late 7 min" chip, respecting reduced-motion by using a strong static style instead), a "3 patients late" alert
+    at the top of the schedule with one-click actions (text "are you on your way?", call, mark no-show, move); also
+    running-behind warnings: a patient checked in but not seated after N minutes, or still in the chair past the
+    visit's end with the next patient waiting in that column ("Op 2 running 12 min behind"). Visible to everyone on
+    the schedule, optional sound for the front desk.
 S4. **More ideas:** short-call/ASAP list matched to a gap (length, provider, type); "next available" that respects
     blocks and patterns; buffer and sterilisation time per chair; colour by type/provider/status toggle; utilisation
     heatmap by chair and hour; unscheduled-treatment and due-recall patients suggested for each open gap; drag a
