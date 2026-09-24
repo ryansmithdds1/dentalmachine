@@ -13,6 +13,7 @@ import { toast, undoable } from '../../toast.js';
 import { guessCategory } from '../imaging/category.js';
 import '../imaging/documents.css';
 import ImageViewer from '../ImageViewer.jsx';
+import { is3dDoc, Viewer3D, zipFolder } from '../volume/index.jsx';
 import ImagingStudio, { MountBoard } from '../imaging/ImagingStudio.jsx';
 import { MOUNTS, slotLabels } from '../imaging/mounts.js';
 import { fetchBlob, useThumb } from '../imaging/thumbs.js';
@@ -73,8 +74,10 @@ export default function DocumentsTab({ patient }) {
     const added = [];
     try {
       for (const file of files) {
-        const category = typePick !== 'auto' ? typePick : await guessCategory(file, { lastPdf });
-        const q = new URLSearchParams({ category, filename: file.name || 'upload', ...(tooth ? { tooth } : {}) });
+        // CBCT zips and 3D scans: the server works out whether it's an x-ray series or a scan.
+        const threeD = /\.(zip|stl|ply|obj)$/i.test(file.name || '');
+        const category = typePick !== 'auto' ? typePick : threeD ? null : await guessCategory(file, { lastPdf });
+        const q = new URLSearchParams({ ...(category ? { category } : {}), filename: file.name || 'upload', ...(tooth ? { tooth } : {}) });
         const res = await fetch(`/api/patients/${patient.id}/documents?${q}`, {
           method: 'POST',
           // One key per file: a retried or doubled request files it once.
@@ -135,6 +138,8 @@ export default function DocumentsTab({ patient }) {
   const open = async (doc, list = null) => {
     setCompare(null);
     setEditing(false);
+    // CBCT and 3D scans open in their own viewer, which streams what it needs (no whole-file download).
+    if (is3dDoc(doc)) { setViewing({ doc, url: null, three: true }); return; }
     if (viewerable(doc.mime)) { setViewing({ doc, url: null, viewer: true, list: (list || viewables(shown)).map((d) => d.id) }); return; }
     setViewing({ doc, url: null });
     try {
@@ -209,8 +214,18 @@ export default function DocumentsTab({ patient }) {
             </label>
             <label>Tooth (optional)<input value={tooth} onChange={(e) => setTooth(e.target.value)} style={{ width: 90 }} placeholder="e.g. 19" /></label>
             <label>
-              Files (images, PDF, DICOM · max 25 MB)
-              <input ref={input} type="file" multiple accept="image/*,application/pdf,.dcm" disabled={uploading} onChange={(e) => upload([...e.target.files])} />
+              Files (images, PDF, DICOM, 3D scans STL/PLY/OBJ · max 25 MB; CBCT zip up to 1 GB)
+              <input ref={input} type="file" multiple accept="image/*,application/pdf,.dcm,.zip,.stl,.ply,.obj" disabled={uploading} onChange={(e) => upload([...e.target.files])} />
+            </label>
+            <label>
+              CBCT folder
+              <input type="file" webkitdirectory="" disabled={uploading} aria-label="Upload a CBCT folder" onChange={async (e) => {
+                const files = [...e.target.files];
+                if (!files.length) return;
+                const folder = (files[0].webkitRelativePath || 'cbct').split('/')[0] || 'cbct';
+                upload([new File([await zipFolder(files)], `${folder}.zip`, { type: 'application/zip' })]);
+                e.target.value = '';
+              }} />
             </label>
             {uploading ? <span className="muted">Uploading…</span> : <span className="muted docs-drop-note"><Upload size={14} aria-hidden /> or drop files anywhere here, or paste (Ctrl+V) · <kbd>U</kbd></span>}
           </div>
@@ -246,7 +261,8 @@ export default function DocumentsTab({ patient }) {
                 {compare && <ImageViewer key={compare.id} doc={compare} canEdit={canWrite} compact height="60vh" />}
               </div>
             )}
-            {!viewing.viewer && !viewing.url && <div className="empty">Loading…</div>}
+            {viewing.three && <Viewer3D documentId={viewing.doc.id} canEdit={canWrite} onClose={close} onSaved={reload} height="78vh" />}
+            {!viewing.viewer && !viewing.three && !viewing.url && <div className="empty">Loading…</div>}
             {viewing.url && previewable(viewing.doc.mime) && <img src={viewing.url} alt={viewing.doc.filename} className="doc-viewer" />}
             {viewing.url && viewing.doc.mime === 'application/pdf' && <iframe src={viewing.url} title={viewing.doc.filename} className="doc-viewer" style={{ height: '70vh', width: '100%', border: 0 }} />}
             {viewing.url && !viewerable(viewing.doc.mime) && viewing.doc.mime !== 'application/pdf' && <p>Preview not available for this file type — <a href={viewing.url} download={viewing.doc.filename}>download it</a> to open in your imaging software.</p>}

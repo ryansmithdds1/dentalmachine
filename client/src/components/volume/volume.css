@@ -1,0 +1,157 @@
+/* 3D viewer (CBCT and scans). Always dark, like the x-ray viewer's dark mode: images read best on black. */
+.vv {
+  --vv-bg: #05080d;
+  --vv-panel: #0e1520;
+  --vv-line: #1e293b;
+  --vv-text: #e2e8f0;
+  --vv-muted: #8b98ad;
+  --vv-accent: #2dd4bf;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 360px;
+  background: var(--vv-bg);
+  color: var(--vv-text);
+  border-radius: 12px;
+  overflow: hidden;
+  outline: none;
+  font-size: 13px;
+  user-select: none;
+}
+.vv:focus-visible { box-shadow: 0 0 0 2px var(--vv-accent); }
+.vv-center { align-items: center; justify-content: center; gap: 14px; }
+.vv-muted { color: var(--vv-muted); font-weight: 400; }
+
+.vv-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  padding: 8px 10px;
+  background: var(--vv-panel);
+  border-bottom: 1px solid var(--vv-line);
+}
+.vv-title { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; margin-right: 6px; }
+.vv-title strong { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 260px; }
+.vv-title .vv-muted { font-size: 12px; }
+.vv-group { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.vv-right { margin-left: auto; }
+.vv-wl { font-variant-numeric: tabular-nums; color: var(--vv-muted); font-size: 12px; margin-right: 4px; }
+
+.vv-icon, .vv-chip, .vv-btn, .vv-seg button, .vv-tabs button {
+  font: inherit;
+  color: var(--vv-text);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.vv-icon { display: inline-grid; place-items: center; width: 32px; height: 32px; }
+.vv-icon:hover, .vv-chip:hover, .vv-seg button:hover { background: #1a2433; }
+.vv-icon.on, .vv-chip.on, .vv-seg button.on, .vv-tabs button.on { background: rgba(45, 212, 191, 0.16); border-color: rgba(45, 212, 191, 0.55); color: #99f6e4; }
+.vv-chip { padding: 5px 10px; font-size: 12px; font-weight: 500; }
+.vv-btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; background: #134e4a; border-color: #0f766e; font-weight: 600; }
+.vv-btn:hover { background: #115e59; }
+.vv-btn:disabled { opacity: 0.6; cursor: default; }
+.vv-link { background: none; border: 0; color: #5eead4; cursor: pointer; font: inherit; text-decoration: underline; padding: 0 4px; }
+.vv-icon:focus-visible, .vv-chip:focus-visible, .vv-btn:focus-visible { outline: 2px solid var(--vv-accent); outline-offset: 1px; }
+
+.vv-warn, .vv-notice {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 12px; font-size: 12px;
+  background: rgba(245, 158, 11, 0.12); color: #fcd34d; border-bottom: 1px solid rgba(245, 158, 11, 0.25);
+}
+.vv-notice { background: rgba(45, 212, 191, 0.1); color: #99f6e4; border-color: rgba(45, 212, 191, 0.25); }
+
+/* Four views: axial | coronal / sagittal | 3D or panoramic. */
+.vv-grid {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 3px;
+  padding: 3px;
+  background: #000;
+}
+.vv-grid.maxed { grid-template-columns: 1fr; grid-template-rows: 1fr; }
+.vv-pane {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  background: #000;
+  border: 1px solid #111827;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.vv-pane.active { border-color: color-mix(in srgb, var(--pane, #2dd4bf) 60%, transparent); }
+.vv-pane.embedded { position: absolute; inset: 0; border: 0; }
+.vv-canvas { position: absolute; inset: 0; }
+.vv-canvas canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+.vv-max {
+  position: absolute; top: 6px; right: 6px; z-index: 2;
+  display: grid; place-items: center; width: 26px; height: 26px;
+  background: rgba(15, 23, 42, 0.7); color: var(--vv-text); border: 1px solid #1f2937; border-radius: 6px; cursor: pointer;
+  opacity: 0; transition: opacity 0.15s;
+}
+.vv-pane:hover .vv-max, .vv-fourth:hover .vv-max, .vv-max:focus-visible { opacity: 1; }
+
+.vv-fourth { display: flex; flex-direction: column; }
+.vv-tabs { position: absolute; top: 6px; left: 50%; transform: translateX(-50%); z-index: 3; display: flex; gap: 2px; padding: 2px; background: rgba(15, 23, 42, 0.8); border: 1px solid #1f2937; border-radius: 9px; }
+.vv-tabs button { display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; font-size: 12px; }
+.vv-3d { position: absolute; inset: 0; }
+.vv-3d-tools, .vv-pano-tools {
+  position: absolute; left: 8px; right: 8px; bottom: 8px; z-index: 2;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px;
+  padding: 6px 8px; font-size: 12px;
+  background: rgba(10, 15, 23, 0.78); border: 1px solid #1f2937; border-radius: 10px; backdrop-filter: blur(4px);
+}
+.vv-pano-tools { left: auto; right: 8px; bottom: 40px; }
+.vv-3d-tools label, .vv-pano-tools label, .vv-range { display: inline-flex; align-items: center; gap: 8px; color: var(--vv-muted); }
+.vv-3d-tools input[type='range'], .vv-pano-tools input[type='range'], .vv-range input { width: 120px; accent-color: #2dd4bf; }
+.vv-seg { display: inline-flex; gap: 2px; background: #0b1220; border-radius: 8px; padding: 2px; }
+.vv-seg button { padding: 3px 9px; font-size: 12px; }
+
+.vv-hint {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+  padding: 24px; text-align: center; color: var(--vv-muted); line-height: 1.45;
+}
+.vv-hint p { margin: 0; max-width: 340px; }
+.vv-hint strong { color: var(--vv-text); }
+
+.vv-measures {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px;
+  padding: 6px 12px; background: var(--vv-panel); border-top: 1px solid var(--vv-line); font-size: 12px; color: #fde68a;
+}
+.vv-measure { display: inline-flex; align-items: center; gap: 6px; padding: 2px 4px 2px 8px; background: rgba(250, 204, 21, 0.08); border: 1px solid rgba(250, 204, 21, 0.25); border-radius: 999px; font-variant-numeric: tabular-nums; }
+.vv-measure button { display: grid; place-items: center; width: 18px; height: 18px; border: 0; border-radius: 50%; background: transparent; color: var(--vv-muted); cursor: pointer; }
+.vv-measure button:hover { background: rgba(248, 113, 113, 0.2); color: #fca5a5; }
+
+.vv-loading { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.vv-spinner { width: 34px; height: 34px; border-radius: 50%; border: 3px solid #1e293b; border-top-color: var(--vv-accent); animation: vv-spin 0.9s linear infinite; }
+@keyframes vv-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .vv-spinner { animation-duration: 3s; } }
+.vv-error { display: flex; align-items: center; gap: 8px; color: #fdba74; max-width: 520px; text-align: center; }
+
+.vv-help { position: absolute; inset: 0; z-index: 10; display: grid; place-items: center; background: rgba(0, 0, 0, 0.55); }
+.vv-help > div { background: var(--vv-panel); border: 1px solid var(--vv-line); border-radius: 12px; padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; min-width: 320px; }
+.vv-help td { padding: 3px 12px 3px 0; color: var(--vv-muted); }
+.vv-help kbd { font: 600 11px ui-monospace, monospace; color: var(--vv-text); background: #1e293b; border-radius: 4px; padding: 2px 6px; }
+
+/* Scan viewer */
+.mv-stage { position: relative; flex: 1; min-height: 0; background: radial-gradient(ellipse at 50% 35%, #243044 0%, #111925 55%, #070b11 100%); }
+.mv-canvas { position: absolute; inset: 0; }
+.mv-canvas canvas { display: block; touch-action: none; }
+.mv-labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.mv-label {
+  position: absolute; left: 0; top: 0; padding: 2px 8px; border-radius: 6px;
+  background: rgba(15, 23, 42, 0.85); color: #facc15; font-weight: 600; font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums;
+}
+.mv-tip { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); padding: 5px 12px; border-radius: 999px; background: rgba(15, 23, 42, 0.85); color: #fde68a; font-size: 12px; pointer-events: none; }
+.mv-overlay { background: rgba(5, 8, 13, 0.55); }
+
+@media (max-width: 760px) {
+  .vv-grid { grid-template-columns: 1fr; grid-template-rows: repeat(4, minmax(220px, 1fr)); overflow-y: auto; }
+  .vv-title strong { max-width: 180px; }
+}

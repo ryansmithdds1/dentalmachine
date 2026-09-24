@@ -3,6 +3,7 @@ import { autoAnalyze } from '../xrayai.js';
 import { requirePermission, HttpError } from '../auth.js';
 import { findOr404, insert, audit, requireOneOf, validTooth, newToken, recorded } from '../util.js';
 import { sniffMime } from './imaging.js';
+import { sniffScanMime, inspectUpload } from '../volume.js';
 import { dicomToImage } from '../dicomimage.js';
 import { makeThumbnail, imageSize } from '../thumbnails.js';
 import { publish } from '../events.js';
@@ -60,7 +61,9 @@ export function cleanExposure(e) {
 const parseJson = (v) => (v ? JSON.parse(v) : null);
 
 const CATEGORIES = ['xray', 'photo', 'document', 'consent', 'insurance_card', 'referral', 'other'];
-const ALLOWED = /^(image\/(png|jpeg|gif|webp|bmp|tiff)|application\/pdf|application\/dicom|text\/plain)$/;
+const ALLOWED = /^(image\/(png|jpeg|gif|webp|bmp|tiff)|application\/pdf|application\/dicom|text\/plain|application\/zip|model\/(stl|ply|obj))$/;
+// A CBCT series arrives as one zip of DICOM slices (50–500 MB); everything else keeps the usual limit.
+const MAX_VOLUME_BYTES = 1024 * 1024 * 1024;
 // Tags: short labels to find documents by ("pre-op", "ortho records", "insurance"), stored as a JSON list.
 export function cleanTags(v) {
   const list = (Array.isArray(v) ? v : String(v || '').split(','))
@@ -70,6 +73,8 @@ export function cleanTags(v) {
 }
 
 export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+const rawSmall = express.raw({ type: () => true, limit: MAX_UPLOAD_BYTES });
+const rawVolume = express.raw({ type: () => true, limit: MAX_VOLUME_BYTES });
 
 // Patient documents & imaging. Files are uploaded as the raw request body.
 export default function documentRoutes({ db, storage, config = {} }) {
@@ -97,16 +102,20 @@ export default function documentRoutes({ db, storage, config = {} }) {
   r.post(
     '/patients/:id/documents',
     requirePermission('clinical:write'),
-    express.raw({ type: () => true, limit: MAX_UPLOAD_BYTES }),
+    (req, res, next) => (/\.zip$/i.test(String(req.query.filename || '')) ? rawVolume : rawSmall)(req, res, next),
     async (req, res) => {
       const patient = await findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient');
       if (!Buffer.isBuffer(req.body) || !req.body.length) throw new HttpError(400, 'Empty upload');
       // Go by the file's contents: browsers send DICOM (and often TIFF) as application/octet-stream,
       // and a declared type isn't proof of what the file is.
       const declared = String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
-      const mime = sniffMime(req.body, String(req.query.filename || '')) || (declared === 'text/plain' ? declared : null);
-      if (!mime || !ALLOWED.test(mime)) throw new HttpError(415, 'Only images, PDFs, DICOM and text files can be uploaded');
-      const category = String(req.query.category || 'document');
+      const mime = sniffMime(req.body, String(req.query.filename || '')) || sniffScanMime(req.body, String(req.query.filename || '')) || (declared === 'text/plain' ? declared : null);
+      if (!mime || !ALLOWED.test(mime)) throw new HttpError(415, 'Only images, PDFs, DICOM, CBCT (zip of DICOM), 3D scans (STL/PLY/OBJ) and text files can be uploaded');
+      // A zip must be a CBCT series or a set of scans (never arbitrary files); it's filed as an x-ray or photo.
+      const scan = mime === 'application/zip' || mime.startsWith('model/') ? inspectUpload(req.body, String(req.query.filename || '')) : null;
+      if (mime === 'application/zip' && !scan) throw new HttpError(415, 'That zip isn’t a CBCT series or a 3D scan');
+      if (mime === 'application/zip' && req.body.length > MAX_UPLOAD_BYTES && !/\.zip$/i.test(String(req.query.filename || ''))) throw new HttpError(413, 'Upload is too large');
+      const category = String(req.query.category || scan?.category || 'document');
       requireOneOf(category, CATEGORIES, 'category');
       const tooth = req.query.tooth ? String(req.query.tooth).toUpperCase() : null;
       if (!validTooth(tooth)) throw new HttpError(400, 'tooth must be 1-32 or A-T');
