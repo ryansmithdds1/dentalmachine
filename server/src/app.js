@@ -242,6 +242,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
     const ai = req.get('X-Acting-For') === 'assistant';
     setActor({
       source: ai ? 'ai' : 'human', userId: req.user.id, practiceId: req.user.practice_id, actor: ai ? `Assistant (for ${req.user.name})` : req.user.name,
+      locationId: req.location_id ?? null,
       // A reason typed for a change ("why?") travels with it into the audit log.
       reason: typeof req.body?.change_reason === 'string' ? req.body.change_reason.trim().slice(0, 500) || null : null,
     });

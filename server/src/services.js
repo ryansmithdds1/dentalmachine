@@ -62,9 +62,9 @@ export async function completeProcedure(db, user, procedure, { providerId, appoi
 
   await db.tx(async () => {
     await recorded(db, 'procedures', procedure.id, () => db.run(
-      `UPDATE procedures SET status = 'completed', completed_at = ?, provider_id = ?, appointment_id = COALESCE(?, appointment_id)
+      `UPDATE procedures SET status = 'completed', completed_at = ?, provider_id = ?, appointment_id = COALESCE(?, appointment_id), location_id = COALESCE(?, location_id)
        WHERE id = ?`,
-      now, provider, appointmentId ?? null, procedure.id,
+      now, provider, appointmentId ?? null, location ?? null, procedure.id,
     ));
     await insert(db, 'ledger_entries', {
       practice_id: procedure.practice_id,
@@ -252,7 +252,9 @@ export async function createClaim(db, { practiceId, policyId, procedureIds, user
     const claimId = await insert(db, 'claims', {
       practice_id: practiceId, patient_id: policy.patient_id, patient_insurance_id: policy.id,
       total_fee: est.total_fee, estimated_amount: est.total_insurance, deductible_applied: est.total_deductible, write_off_estimate: est.total_write_off,
-      primary_claim_id: primaryClaimId, ...extra,
+      primary_claim_id: primaryClaimId,
+      // The office where the work was done (claims are billed per office).
+      location_id: procs.find((p) => p.location_id)?.location_id ?? null, ...extra,
     });
     for (const item of est.items) {
       await insert(db, 'claim_items', { claim_id: claimId, procedure_id: item.procedure_id, fee: item.fee, estimated_amount: item.insurance, write_off: item.write_off });

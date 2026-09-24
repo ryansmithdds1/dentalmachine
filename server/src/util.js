@@ -39,7 +39,25 @@ export function toCents(value, name = 'amount') {
 const NAME_KEY = /(^|_)name$/;
 const cleanValue = (k, v) => (typeof v === 'string' && NAME_KEY.test(k) ? v.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim() : v);
 
+// Records that belong to an office. When the caller doesn't say which, it's the visit's office, else the
+// office the person is working in, else the patient's home office.
+const LOCATED = new Set(['procedures', 'claims', 'clinical_notes', 'messages', 'calls', 'documents', 'prescriptions', 'ledger_entries']);
+async function officeFor(db, row) {
+  if (row.appointment_id) {
+    const a = await db.get('SELECT location_id FROM appointments WHERE id = ?', row.appointment_id);
+    if (a?.location_id) return a.location_id;
+  }
+  const here = currentActor()?.locationId;
+  if (here) return here;
+  if (row.patient_id) return (await db.get('SELECT location_id FROM patients WHERE id = ?', row.patient_id))?.location_id ?? null;
+  return null;
+}
+
 export async function insert(db, table, row) {
+  if (LOCATED.has(table) && row.location_id == null && (row.appointment_id || row.patient_id || currentActor()?.locationId)) {
+    const office = await officeFor(db, row);
+    if (office) row = { ...row, location_id: office };
+  }
   const keys = Object.keys(row);
   const sql = `INSERT INTO ${table} (${keys.join(', ')}) VALUES (${keys.map(() => '?').join(', ')})`;
   const id = (await db.run(sql, ...keys.map((k) => cleanValue(k, row[k])))).id;

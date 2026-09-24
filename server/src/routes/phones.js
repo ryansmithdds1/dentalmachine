@@ -159,6 +159,7 @@ export default function phoneRoutes({ db, storage }) {
     const args = [req.user.practice_id, since];
     if (req.query.patient_id) { where.push('c.patient_id = ?'); args.push(Number(req.query.patient_id)); }
     if (req.query.direction) { where.push('c.direction = ?'); args.push(String(req.query.direction)); }
+    if (req.location_id) { where.push('(c.location_id = ? OR c.location_id IS NULL)'); args.push(req.location_id); }
     if (req.query.filter === 'missed') where.push("c.outcome IN ('missed','voicemail','after_hours','hung_up')");
     if (req.query.filter === 'follow_up') where.push('c.follow_up = 1 AND c.handled_at IS NULL');
     const rows = await db.all(

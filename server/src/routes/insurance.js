@@ -175,6 +175,11 @@ export default function insuranceRoutes({ db }) {
       where.push('ic.id = ?');
       params.push(Number(req.query.carrier_id));
     }
+    // Working in one office: its claims (and any not tied to an office).
+    if (req.location_id) {
+      where.push('(c.location_id = ? OR c.location_id IS NULL)');
+      params.push(req.location_id);
+    }
     // Worklist: how old each claim is (since it was sent, or created if not yet sent) and whether it needs
     // someone — rejected, denied, or no answer from the payer after 30 days. Those come first.
     // A logged call with a follow-up date quiets "no payment" until that date comes round.

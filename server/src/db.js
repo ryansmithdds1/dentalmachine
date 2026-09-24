@@ -3,6 +3,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash } from 'node:crypto';
+import { runMigrations } from './migrations.js';
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS practices (
@@ -1816,6 +1817,12 @@ CREATE TABLE IF NOT EXISTS issues (
   resolution TEXT
 );
 -- Every call to an outside service (see issues.js): no bodies, no query strings.
+-- Data migrations that have run (see migrations.js).
+CREATE TABLE IF NOT EXISTS schema_migrations (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  applied_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS integration_log (
   id INTEGER PRIMARY KEY,
   practice_id INTEGER,
@@ -2160,6 +2167,14 @@ const COLUMNS = [
   ['ortho_visits', 'deleted_at', 'TEXT'],
   ['ortho_visits', 'deleted_by', 'INTEGER REFERENCES users(id)'],
   ['webhook_endpoints', 'removed_at', 'TEXT'],
+  // The office each record belongs to (filled from the visit, the office being worked in, or the patient's home office).
+  ['procedures', 'location_id', 'INTEGER REFERENCES locations(id)'],
+  ['claims', 'location_id', 'INTEGER REFERENCES locations(id)'],
+  ['clinical_notes', 'location_id', 'INTEGER REFERENCES locations(id)'],
+  ['messages', 'location_id', 'INTEGER REFERENCES locations(id)'],
+  ['calls', 'location_id', 'INTEGER REFERENCES locations(id)'],
+  ['documents', 'location_id', 'INTEGER REFERENCES locations(id)'],
+  ['prescriptions', 'location_id', 'INTEGER REFERENCES locations(id)'],
   ['practices', 'onboarding_dismissed', 'INTEGER NOT NULL DEFAULT 0'],
   ['appointments', 'checked_in_via', 'TEXT'],
   ['appointments', 'ready_texted_at', 'TEXT'],
@@ -2310,9 +2325,10 @@ export function schemaInfo() {
 }
 
 export async function openDb(target = process.env.DATABASE_URL || process.env.DATABASE_PATH || './data/dentalmachine.db') {
-  if (target === ':memory:' && process.env.TEST_DATABASE_URL) return openPostgres(process.env.TEST_DATABASE_URL, { freshSchema: true });
-  if (/^postgres(ql)?:\/\//.test(target)) return openPostgres(target);
-  return openSqlite(target);
+  const db = target === ':memory:' && process.env.TEST_DATABASE_URL ? await openPostgres(process.env.TEST_DATABASE_URL, { freshSchema: true })
+    : /^postgres(ql)?:\/\//.test(target) ? await openPostgres(target) : openSqlite(target);
+  await runMigrations(db);
+  return db;
 }
 
 // ---- SQLite (node:sqlite) ----
