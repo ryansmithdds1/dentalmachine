@@ -19,6 +19,14 @@ into one field.
 | 10 | Reschedule | 3–4; no keyboard way | 3 (M, arrow, Enter); drag 1; pinned visit 2 | — | < 0.5 s | 3 | Blocked time asks inline (4) instead of a confirm() dialog |
 | 13 | Confirm appointments | 2 per row | 1 per row (C); "text all unconfirmed" 1 click | — | < 0.1 s | 1 | "N unconfirmed" pill opens the list; undo on confirm |
 | 19 | Cancel / no-show | 3, no rebook, no reason | 3 incl. reason + rebook (X, number, Enter); no-show 2 | — | < 0.5 s | 3 | Reason recorded and audited; no broken-appointment fee (no fee setting exists yet) |
+| 20 | Check eligibility | 3+ per patient | 1 key for the patient on screen; overnight batch shows only exceptions | — | < 5 s | 1 | Result applied to the policy automatically |
+| 21 | Build a treatment plan (3 procedures) | ~22 | 8 (N, "14 D2740" Enter per procedure, Ctrl+Enter); all unplanned work → new plan 1 | — | < 1 s | 10 | |
+| 22 | Present / accept a plan | 3 staff, 6 patient | 2 staff, 3 patient | — | < 1 s | 2 / 3 | |
+| 23 | Consent forms | 3 + DOB typing | 2 from the plan (in-office signing pass, no DOB) | — | < 1 s | 1–2 | From the command bar: 4 |
+| 25 | Claim attachments | ~7 per attachment | 2 | — | < 1 s | 2 | |
+| 28 | Staff task | ~9 | 3 ("task … @name"); done 1 key with undo | — | < 0.5 s | 3 | Assignee sees a badge |
+| 30 | Intake review | per-chart hunting | 1–2 per item on one list (/intake: J/K, A) | — | — | 2 | Browser test still to seed an item; server tests cover it |
+| 31 | Insurance card → policy | ~12 typed fields | ≤ 4 (S, photo, read, confirm) | — | < 5 s | 4 | A person confirms; carrier added inline if missing |
 
 ## Couldn't hit the budget
 
@@ -31,3 +39,4 @@ into one field.
   patient is active it's 2.
 - **#10, moving into blocked time: 4** — the extra Enter on "Move it there" is the deliberate replacement for the old
   confirm() dialog.
+- **#23, consent forms from the command bar: 4 actions** (Ctrl/⌘K, "consent", Enter, Enter). From the plan it's 2.
