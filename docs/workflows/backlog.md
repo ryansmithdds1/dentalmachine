@@ -509,6 +509,27 @@ BD4. **Daily, weekly, monthly trends:** labor %, production per labor hour, prod
      capacity meter; drill-down to the shifts and visits behind every number. Pay details visible only with
      timeclock:rates; staff never see each other's pay.
 
+## Team bonus module (asked for; off unless the owner turns it on)
+Builds on metrics (one definition per KPI), production/collections from the ledger, time clock (hours, payroll
+exports), reviews shout-outs, recurring checklists and the business view.
+BN1. **The common bonus plans, ready to switch on and configure** (each with plain-language rules and a worked example):
+     1) Team production/collections bonus: when monthly collections exceed a target (often labor cost ÷ target labor %),
+        a share of the excess is split by hours worked or by role weights;
+     2) Daily/weekly goal bonus: hit the day's production or collections goal → a set amount per person on shift;
+     3) Per-procedure spiffs: a set amount (or %) to the provider/assistant/scheduler for specific codes (e.g. sealants,
+        fluoride, whitening, perio maintenance, same-day crowns) — attributed from the visit;
+     4) Hygiene/associate % of production or collections above a base (per provider);
+     5) KPI scorecard bonus: points for hitting targets (reappointment %, case acceptance, collections %, unscheduled
+        treatment scheduled, new patients, reviews/shout-outs, checklist completion) → payout tiers;
+     6) Front desk bonuses: scheduling/confirming (schedule fill %, broken-appointment rate), collections at time of
+        service, treatment scheduled from the follow-up list.
+BN2. **Visible to the team:** a progress card on the dashboard and a slim bar on the schedule ("Team goal: $18,400 of
+     $22,000 this month — $3,600 to go · on pace"; "Today: 92% of goal"), each person's own qualified/not-yet status
+     and what they've earned so far; never shows other people's pay unless the owner chooses a team-visible plan.
+BN3. **Owner control and payroll:** plans are off by default, versioned, with effective dates, caps, eligibility
+     (hours minimum, active status), clawbacks for refunds/voids (computed from the ledger), an approval step at the end
+     of each period, audited; approved bonuses flow into the time-clock payroll export as a separate pay type.
+
 ## Then: remaining workflow batches
 9. Batch 4 (32–44): new patient setup, ERA/EOB posting, prescriptions, lab cases, huddle actions, recall lists,
    pre-auths, financing, adjustments, referrals, end-of-day, review requests (fix the count bug), clock in/out.
