@@ -10,6 +10,7 @@ import { ActivePatientProvider } from './activePatient.jsx';
 import CommandPalette from './components/CommandPalette.jsx';
 import IntranetCommands from './components/intranet/IntranetCommands.jsx';
 import DocumentCommands from './components/docs/DocumentCommands.jsx';
+import ChecklistCommands, { ChecklistBadge } from './components/checklists/ChecklistCommands.jsx';
 import QuickCommands, { TaskBadge } from './components/QuickCommands.jsx';
 import ChatPanel from './components/chat/ChatPanel.jsx';
 import ChatBadge from './components/chat/ChatBadge.jsx';
@@ -26,7 +27,7 @@ import { pendingCount } from './offline/index.js';
 import { ClockButton } from './components/TimeClock.jsx';
 import { useLiveEvents } from './live.js';
 import MfaSetup from './components/MfaSetup.jsx';
-import { Sun, CalendarDays, Users, MessageSquare, Inbox as InboxIcon, PhoneCall, Megaphone, Receipt, ListChecks, ChartColumn, Landmark, Settings as SettingsIcon, Search, PanelLeftClose, PanelLeftOpen, LogOut, Keyboard, Monitor, Moon, Sparkles, Phone, Building2, Star, HelpCircle, AlertTriangle, BookOpen, Clock, Banknote, Gauge, Repeat, ShieldCheck, FolderOpen, CalendarRange } from 'lucide-react';
+import { Sun, CalendarDays, Users, MessageSquare, Inbox as InboxIcon, PhoneCall, Megaphone, Receipt, ListChecks, ChartColumn, Landmark, Settings as SettingsIcon, Search, PanelLeftClose, PanelLeftOpen, LogOut, Keyboard, Monitor, Moon, Sparkles, Phone, Building2, Star, HelpCircle, AlertTriangle, BookOpen, Clock, Banknote, Gauge, Repeat, ShieldCheck, FolderOpen, CalendarRange, ClipboardCheck } from 'lucide-react';
 import { getThemePref, setThemePref, watchTheme } from './theme.js';
 
 // Pages load on demand so the first screen appears quickly.
@@ -87,6 +88,7 @@ const Metrics = lazy(() => import('./pages/Metrics.jsx'));
 const ChartAudit = lazy(() => import('./pages/ChartAudit.jsx'));
 const OfficeDocuments = lazy(() => import('./pages/OfficeDocuments.jsx'));
 const Capacity = lazy(() => import('./pages/Capacity.jsx'));
+const Checklists = lazy(() => import('./pages/Checklists.jsx'));
 const CheckinPage = lazy(() => import('./pages/public/CheckinPage.jsx'));
 const StatusPage = lazy(() => import('./pages/public/StatusPage.jsx'));
 const Help = lazy(() => import('./pages/Help.jsx'));
@@ -250,6 +252,7 @@ function StaffApp() {
     ['/reputation', Star, 'Reviews', can('patients:read')],
     ['/claims', Receipt, 'Billing', can('billing:read')],
     ['/office', ListChecks, 'To-do & labs', true],
+    ['/checklists', ClipboardCheck, 'Checklists', true],
     ['/timeclock', Clock, 'Time clock', true],
     ['/deposits', Banknote, 'Deposits & cash', can('billing:read')],
     ['/documents', FolderOpen, 'Documents', can('clinical:read') || can('officedocs:read')],
@@ -373,6 +376,7 @@ function Shell({ nav }) {
       <CommandPalette />
       <IntranetCommands />
       <DocumentCommands />
+      <ChecklistCommands />
       <QuickCommands />
       <KeyboardHelp />
       <Toasts />
@@ -399,6 +403,7 @@ function Shell({ nav }) {
               {to === '/messages' && <UnreadBadge />}
               {to === '/attention' && <Suspense fallback={null}><AttentionBadge /></Suspense>}
               {to === '/office' && <TaskBadge />}
+              {to === '/checklists' && <ChecklistBadge />}
             </NavLink>
           ))}
         </nav>
@@ -441,6 +446,7 @@ function Shell({ nav }) {
             <Route path="/attention" element={<Attention />} />
             <Route path="/messages" element={<Inbox />} />
             <Route path="/office" element={<Office />} />
+            <Route path="/checklists/*" element={<Checklists />} />
             <Route path="/timeclock" element={<TimeClockPage />} />
             <Route path="/deposits" element={<Deposits />} />
             <Route path="/claims" element={<Claims />} />

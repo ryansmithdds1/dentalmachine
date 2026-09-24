@@ -29,6 +29,7 @@ import { runChatJobs } from './chat.js';
 import { runDigests } from './digests.js';
 import { depositWatchAll } from './deposits.js';
 import { runCapacitySnapshots } from './capacity.js';
+import { runChecklistJobs } from './checklists.js';
 import { loggedFetch } from './issues.js';
 import { runChartAudits } from './chartaudit.js';
 import { createNoteComparer } from './ai/notecompare.js';
@@ -127,6 +128,13 @@ if (process.env.CAPACITY_SNAPSHOTS !== 'off') {
   const capacity = () => runExclusive('capacity-snapshots', 30 * 60 * 1000, () => runCapacitySnapshots(db)).catch(jobFailed('Capacity snapshots'));
   setInterval(capacity, 60 * 60 * 1000).unref();
   setTimeout(capacity, 100_000).unref();
+}
+// Checklists by position: today's items made, on-shift items assigned, critical items past their time flagged,
+// missed ones closed. Every 5 minutes; idempotent.
+if (process.env.CHECKLISTS !== 'off') {
+  const checklists = () => runExclusive('checklists', 4 * 60 * 1000, () => runChecklistJobs(db, messenger)).catch(jobFailed('Checklists'));
+  setInterval(checklists, 5 * 60 * 1000).unref();
+  setTimeout(checklists, 55_000).unref();
 }
 // Chart audit: each practice's completed visits checked once a day after 1am practice time.
 if (process.env.CHART_AUDIT !== 'off') {

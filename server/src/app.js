@@ -27,6 +27,7 @@ import opportunityRoutes from './routes/opportunities.js';
 import cadenceRoutes from './routes/cadence.js';
 import recallBookRoutes, { recallVoiceWebhooks } from './routes/recallbook.js';
 import chatRoutes from './routes/chat.js';
+import checklistRoutes from './routes/checklists.js';
 import chartAuditRoutes from './routes/chartaudit.js';
 import { docBridgeRoutes, docMediaRoutes } from './routes/docbridge.js';
 import longRecordingRoutes from './routes/longrecording.js';
@@ -359,6 +360,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(ediRoutes({ db, config, clearinghouse }));
   api.use(officeRoutes({ db }));
   api.use(chatRoutes({ db, storage, fetchImpl }));
+  api.use(checklistRoutes({ db, storage, messenger }));
   api.use(ppoRoutes({ db, config }));
   api.use(frontDeskRoutes({ db, messenger }));
   api.use(casePresentationRoutes({ db, messenger, config, erx, secret }));

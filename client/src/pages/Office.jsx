@@ -13,6 +13,7 @@ import { useShortcuts } from '../shortcuts.js';
 import { undoable } from '../toast.js';
 import { tasksChanged } from '../components/QuickCommands.jsx';
 import IntakeReview from '../components/IntakeReview.jsx';
+import MyChecklist from '../components/checklists/MyChecklist.jsx';
 import './office.css';
 
 // Team to-do list and lab case tracking, and the time clock.
@@ -67,6 +68,7 @@ function OfficeBoard() {
       <div className="page-header"><h1>To-do & lab cases</h1></div>
       {/* #30: forms, cards and insurance changes waiting for a person (shows nothing when there are none). */}
       <IntakeReview compact />
+      <MyChecklist compact />
       <div className="grid grid-2" style={{ alignItems: 'start' }}>
         <div className="card">
           <div className="page-header" style={{ marginBottom: 8 }}>

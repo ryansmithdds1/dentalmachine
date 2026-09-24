@@ -69,6 +69,7 @@ export const PERMISSION_CATALOG = {
   'timeclock:rates': 'See and set staff pay rates and labor cost',
   'officedocs:read': 'See office documents (contracts, licences, policies, invoices)',
   'officedocs:write': 'Add and file office documents',
+  'checklists:manage': 'Set up checklists by position, see the checklist dashboard and compliance log, resolve checklist flags',
   'chartaudit:manage': 'See everyone’s chart audit findings and tune the checks',
   'deposits:manage': 'Verify deposits and cash drawers, reopen deposits, approve cash voids, refunds and discounts',
   'intranet:manage': 'Edit the office intranet: links, office manual, announcements and onboarding',

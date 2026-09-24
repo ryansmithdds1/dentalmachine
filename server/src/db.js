@@ -3115,6 +3115,196 @@ CREATE TABLE IF NOT EXISTS capacity_snapshots (
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE (practice_id, snapshot_date, scope_key, kind)
 );
+-- Recurring checklists by position (RCL1–RCL3; checklists.js, routes/checklists.js, docs/workflows/specs/RCL-checklists.md).
+-- A position is who a checklist is for ("Sterilization", "Front desk"). Its people are everyone with its built-in role
+-- (role) or custom role (custom_role_id), plus people added by name (checklist_position_members). Archived, never deleted.
+CREATE TABLE IF NOT EXISTS checklist_positions (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  name TEXT NOT NULL,
+  role TEXT,
+  custom_role_id INTEGER REFERENCES custom_roles(id),
+  sort INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','archived')),
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (practice_id, name)
+);
+-- People added to a position by name; taken off with removed_at (the row stays).
+CREATE TABLE IF NOT EXISTS checklist_position_members (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  position_id INTEGER NOT NULL REFERENCES checklist_positions(id),
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  added_by INTEGER REFERENCES users(id),
+  removed_at TEXT,
+  removed_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (position_id, user_id)
+);
+-- A checklist the owner builds for a position. location_id NULL = every office (one set of items per office).
+-- starter_key marks one added from the starter list, so adding it twice brings back the same checklist.
+CREATE TABLE IF NOT EXISTS checklist_templates (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  position_id INTEGER NOT NULL REFERENCES checklist_positions(id),
+  location_id INTEGER REFERENCES locations(id),
+  name TEXT NOT NULL,
+  description TEXT,
+  starter_key TEXT,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','archived')),
+  archived_at TEXT,
+  archived_by INTEGER REFERENCES users(id),
+  created_by INTEGER REFERENCES users(id),
+  updated_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (practice_id, starter_key)
+);
+-- One line of a checklist and its schedule. cadence daily (weekdays '1,2,3,4,5', 0 = Sunday; NULL = the days
+-- the office is open), weekly (weekday), monthly / quarterly / annually (month_day 1–31, clamped to the month's
+-- end; -1 = the last day the office is open; month = the month for annually, the first month of the cycle for
+-- quarterly). due_time is practice-local 'HH:MM'. Numbers (min_value, max_value) are decimals kept as text so
+-- both databases keep them exactly. generated_through: the last date occurrences were made up to.
+CREATE TABLE IF NOT EXISTS checklist_items (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  template_id INTEGER NOT NULL REFERENCES checklist_templates(id),
+  title TEXT NOT NULL,
+  instructions TEXT,
+  sort INTEGER NOT NULL DEFAULT 0,
+  cadence TEXT NOT NULL CHECK (cadence IN ('daily','weekly','monthly','quarterly','annually')),
+  weekdays TEXT,
+  weekday INTEGER,
+  month_day INTEGER,
+  month INTEGER,
+  due_time TEXT NOT NULL DEFAULT '17:00',
+  assign_rule TEXT NOT NULL DEFAULT 'position' CHECK (assign_rule IN ('position','person','on_shift')),
+  assignee_id INTEGER REFERENCES users(id),
+  result_type TEXT NOT NULL DEFAULT 'none' CHECK (result_type IN ('none','number','pass_fail','text')),
+  min_value TEXT,
+  max_value TEXT,
+  unit TEXT,
+  require_photo INTEGER NOT NULL DEFAULT 0,
+  require_file INTEGER NOT NULL DEFAULT 0,
+  require_note INTEGER NOT NULL DEFAULT 0,
+  critical INTEGER NOT NULL DEFAULT 0,
+  sop_page_id INTEGER REFERENCES intranet_pages(id),
+  start_date TEXT NOT NULL,
+  generated_through TEXT,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','archived')),
+  archived_at TEXT,
+  archived_by INTEGER REFERENCES users(id),
+  created_by INTEGER REFERENCES users(id),
+  updated_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- Each time an item is due, once per office: made by the checklist job, one per item + date + office
+-- (location_key = the office id, 0 for none) whoever runs it and however often. open → done, or missed when its
+-- window closes (closes_on: the day before the next one is due). cancelled = a future one the schedule no longer
+-- has. critical is copied when made. completed_at is UTC; completed_local the practice's wall clock.
+-- outcome: ok, fail (a failed pass/fail result) or out_of_range (a number outside the allowed range).
+CREATE TABLE IF NOT EXISTS checklist_occurrences (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  item_id INTEGER NOT NULL REFERENCES checklist_items(id),
+  template_id INTEGER NOT NULL REFERENCES checklist_templates(id),
+  position_id INTEGER NOT NULL REFERENCES checklist_positions(id),
+  location_id INTEGER REFERENCES locations(id),
+  location_key INTEGER NOT NULL DEFAULT 0,
+  due_date TEXT NOT NULL,
+  due_at TEXT NOT NULL,
+  closes_on TEXT NOT NULL,
+  critical INTEGER NOT NULL DEFAULT 0,
+  assigned_to INTEGER REFERENCES users(id),
+  assigned_via TEXT,
+  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','done','missed','cancelled')),
+  result_number TEXT,
+  result_pass INTEGER,
+  result_text TEXT,
+  note TEXT,
+  outcome TEXT CHECK (outcome IN ('ok','fail','out_of_range')),
+  completed_at TEXT,
+  completed_local TEXT,
+  completed_by INTEGER REFERENCES users(id),
+  completed_source TEXT,
+  completed_late INTEGER NOT NULL DEFAULT 0,
+  late_reason TEXT,
+  missed_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (item_id, due_date, location_key)
+);
+-- Photos and files attached to an occurrence, stored (encrypted) like documents. The same file twice on one
+-- occurrence is one row (sha256). Taken off with removed_at and a reason; the file stays.
+CREATE TABLE IF NOT EXISTS checklist_evidence (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  occurrence_id INTEGER NOT NULL REFERENCES checklist_occurrences(id),
+  kind TEXT NOT NULL CHECK (kind IN ('photo','file')),
+  filename TEXT NOT NULL,
+  mime TEXT NOT NULL,
+  size INTEGER NOT NULL,
+  sha256 TEXT NOT NULL,
+  storage_key TEXT NOT NULL,
+  encrypted INTEGER NOT NULL DEFAULT 0,
+  uploaded_by INTEGER REFERENCES users(id),
+  source TEXT,
+  removed_at TEXT,
+  removed_by INTEGER REFERENCES users(id),
+  removed_reason TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (occurrence_id, sha256)
+);
+-- What happened to an occurrence, oldest first (done, undone, corrected with before/after, evidence, flags).
+-- Append-only: the compliance log's own history, next to the audit log.
+CREATE TABLE IF NOT EXISTS checklist_events (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  occurrence_id INTEGER NOT NULL REFERENCES checklist_occurrences(id),
+  kind TEXT NOT NULL,
+  details TEXT,
+  reason TEXT,
+  user_id INTEGER REFERENCES users(id),
+  source TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- A problem with an occurrence: a failed result, a number out of range, or a critical item not done by its due
+-- time. One per occurrence and kind. Also a Needs attention item (issue_id); stays open until someone with
+-- checklists:manage writes down what was done about it (corrective_action).
+CREATE TABLE IF NOT EXISTS checklist_flags (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  occurrence_id INTEGER NOT NULL REFERENCES checklist_occurrences(id),
+  item_id INTEGER NOT NULL REFERENCES checklist_items(id),
+  location_id INTEGER REFERENCES locations(id),
+  kind TEXT NOT NULL CHECK (kind IN ('fail','out_of_range','overdue')),
+  critical INTEGER NOT NULL DEFAULT 0,
+  title TEXT NOT NULL,
+  issue_id INTEGER REFERENCES issues(id),
+  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','resolved')),
+  notified_at TEXT,
+  notified_via TEXT,
+  raised_at TEXT NOT NULL DEFAULT (datetime('now')),
+  resolved_at TEXT,
+  resolved_by INTEGER REFERENCES users(id),
+  corrective_action TEXT,
+  UNIQUE (occurrence_id, kind)
+);
+-- Per practice: who hears about flags (alert_user_ids JSON; NULL = everyone with checklists:manage), texts for
+-- critical ones (alert_phones JSON), chat posts, and how long a tick can be undone before it needs a correction.
+CREATE TABLE IF NOT EXISTS checklist_settings (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL UNIQUE REFERENCES practices(id),
+  alert_user_ids TEXT,
+  alert_phones TEXT,
+  chat_alerts INTEGER NOT NULL DEFAULT 1,
+  sms_alerts INTEGER NOT NULL DEFAULT 0,
+  undo_minutes INTEGER NOT NULL DEFAULT 10,
+  positions_seeded INTEGER NOT NULL DEFAULT 0,
+  updated_by INTEGER REFERENCES users(id),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `;
 
 // Columns added after the first release. SQLite has no ADD COLUMN IF NOT EXISTS, so check first.
