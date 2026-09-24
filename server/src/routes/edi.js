@@ -55,7 +55,7 @@ export default function ediRoutes({ db, config, clearinghouse: ch }) {
     }
     return {
       claim, policy, primary,
-      attachments: await db.all("SELECT * FROM claim_attachments WHERE claim_id = ? AND status != 'rejected' ORDER BY id", claim.id),
+      attachments: await db.all("SELECT * FROM claim_attachments WHERE claim_id = ? AND status != 'rejected' AND removed_at IS NULL ORDER BY id", claim.id),
       patient: await db.get('SELECT * FROM patients WHERE id = ?', claim.patient_id),
       carrier: await db.get('SELECT * FROM insurance_carriers WHERE id = ?', policy.carrier_id),
       items: await db.all(
@@ -98,7 +98,7 @@ export default function ediRoutes({ db, config, clearinghouse: ch }) {
     const provs = await db.all(`SELECT pv.id, pv.name, pv.npi, pv.license_number, pv.type, COUNT(*) AS n FROM claim_items ci JOIN procedures pr ON pr.id = ci.procedure_id
       JOIN providers pv ON pv.id = pr.provider_id WHERE ci.claim_id = ? GROUP BY pv.id, pv.name, pv.npi, pv.license_number, pv.type`, b.claim.id);
     const treating = provs.sort((x, y) => ((y.type === 'dentist') - (x.type === 'dentist')) || (y.n - x.n))[0] || null;
-    const missing = (await db.all("SELECT tooth FROM tooth_conditions WHERE patient_id = ? AND condition = 'missing' AND resolved = 0", b.patient.id)).map((t) => t.tooth);
+    const missing = (await db.all("SELECT tooth FROM tooth_conditions WHERE patient_id = ? AND condition = 'missing' AND resolved = 0 AND voided_at IS NULL", b.patient.id)).map((t) => t.tooth);
     const plan = b.policy.plan_id ? await db.get('SELECT name FROM insurance_plans WHERE id = ?', b.policy.plan_id) : null;
     const descriptions = new Map((await db.all('SELECT pr.id, pr.description FROM procedures pr JOIN claim_items ci ON ci.procedure_id = pr.id WHERE ci.claim_id = ?', b.claim.id)).map((p) => [p.id, p.description]));
     await audit(db, req, 'claim.print_ada', 'claims', b.claim.id);

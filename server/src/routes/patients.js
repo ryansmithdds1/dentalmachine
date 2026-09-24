@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { requirePermission, HttpError, can } from '../auth.js';
-import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, practiceNow } from '../util.js';
+import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, practiceNow, recorded } from '../util.js';
 import { schemaInfo } from '../db.js';
 import { emitPatient } from '../webhooks.js';
 import { patientBalance, primaryPolicy } from '../services.js';
@@ -172,27 +172,31 @@ export default function patientRoutes({ db }) {
   });
 
   // Merge a duplicate chart into this one: everything that belonged to the duplicate (visits, charting,
-  // ledger, claims, documents, messages…) moves here, blank details are filled in, and the duplicate is removed.
+  // ledger, claims, documents, messages…) moves here, blank details are filled in, and the duplicate is archived
+  // (marked as merged into this one) rather than deleted.
   r.post('/patients/:id/merge', requirePermission('patients:write'), async (req, res) => {
     if (req.user.role !== 'admin') throw new HttpError(403, 'Only administrators can merge patients');
     const keep = await findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient');
     const from = await findOr404(db, 'patients', req.body?.from_id, req.user.practice_id, 'Patient');
     if (keep.id === from.id) throw new HttpError(400, 'Choose a different chart to merge');
+    if (from.merged_into_id || keep.merged_into_id) throw new HttpError(409, 'That chart was already merged into another one');
     const moved = {};
     await db.tx(async () => {
-      // Recalls are one per type: keep the sooner due date.
+      // Recalls are one per type: keep the sooner due date. The duplicate's own copy stays on its archived chart.
+      const leftBehind = [];
       for (const rc of await db.all('SELECT * FROM recalls WHERE patient_id = ?', from.id)) {
         const mine = await db.get('SELECT * FROM recalls WHERE patient_id = ? AND type = ?', keep.id, rc.type);
         if (mine) {
-          if (rc.due_date < mine.due_date) await db.run('UPDATE recalls SET due_date = ? WHERE id = ?', rc.due_date, mine.id);
-          await db.run('DELETE FROM recall_contacts WHERE recall_id = ?', rc.id);
-          await db.run('DELETE FROM recalls WHERE id = ?', rc.id);
+          if (rc.due_date < mine.due_date) await recorded(db, 'recalls', mine.id, () => db.run('UPDATE recalls SET due_date = ? WHERE id = ?', rc.due_date, mine.id));
+          await db.run("UPDATE recalls SET status = 'inactive' WHERE id = ?", rc.id);
+          leftBehind.push(rc.id);
         }
       }
       for (const [table, cols] of schemaInfo()) {
         for (const c of cols) {
           if (c.ref !== 'patients') continue;
-          const r0 = await db.run(`UPDATE ${table} SET ${c.name} = ? WHERE ${c.name} = ?`, keep.id, from.id);
+          const skip = table === 'recalls' && leftBehind.length ? ` AND id NOT IN (${leftBehind.map(() => '?').join(',')})` : '';
+          const r0 = await db.run(`UPDATE ${table} SET ${c.name} = ? WHERE ${c.name} = ?${skip}`, keep.id, from.id, ...(skip ? leftBehind : []));
           if (r0.changes) moved[`${table}.${c.name}`] = r0.changes;
         }
       }
@@ -205,7 +209,8 @@ export default function patientRoutes({ db }) {
       await db.run('UPDATE conversation_state SET thread = ? WHERE practice_id = ? AND thread = ?', `p${keep.id}`, req.user.practice_id, `p${from.id}`);
       // Old-system IDs from a data import follow the chart, so a re-import updates the kept one.
       await db.run("UPDATE external_ids SET local_id = ? WHERE practice_id = ? AND kind = 'patients' AND local_id = ?", keep.id, req.user.practice_id, from.id);
-      await db.run('DELETE FROM patients WHERE id = ?', from.id);
+      // The duplicate isn't deleted: it's archived and points at the kept chart, so its history can be traced.
+      await update(db, 'patients', from.id, req.user.practice_id, { status: 'archived', merged_into_id: keep.id, guarantor_id: null });
     });
     await audit(db, req, 'patient.merge', 'patients', keep.id, { merged: from.id, name: `${from.first_name} ${from.last_name}`, moved });
     res.json({ ok: true, moved });

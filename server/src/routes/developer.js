@@ -50,7 +50,7 @@ export default function developerRoutes({ db, fetchImpl }) {
     return { url, events: JSON.stringify(events), description: String(b.description || '').slice(0, 200) || null };
   };
   r.get('/webhooks', async (req, res) => {
-    const eps = await db.all('SELECT * FROM webhook_endpoints WHERE practice_id = ? ORDER BY id', req.user.practice_id);
+    const eps = await db.all('SELECT * FROM webhook_endpoints WHERE practice_id = ? AND removed_at IS NULL ORDER BY id', req.user.practice_id);
     const recent = await db.all(
       'SELECT id, endpoint_id, event, status, attempts, response_code, last_error, created_at, delivered_at FROM webhook_deliveries WHERE practice_id = ? ORDER BY id DESC LIMIT 50', req.user.practice_id,
     );
@@ -71,8 +71,10 @@ export default function developerRoutes({ db, fetchImpl }) {
   });
   r.delete('/webhooks/:wid', async (req, res) => {
     const e = await findOr404(db, 'webhook_endpoints', req.params.wid, req.user.practice_id, 'Webhook');
-    await db.run('DELETE FROM webhook_deliveries WHERE endpoint_id = ?', e.id);
-    await db.run('DELETE FROM webhook_endpoints WHERE id = ?', e.id);
+    // Switched off and hidden, not deleted: what was delivered to it stays in the integration history.
+    await db.run("UPDATE webhook_endpoints SET active = 0, removed_at = datetime('now') WHERE id = ?", e.id);
+    await db.run("UPDATE webhook_deliveries SET status = 'failed', last_error = 'Endpoint removed' WHERE endpoint_id = ? AND status = 'pending'", e.id);
+    await audit(db, req, 'webhook.remove', 'webhook_endpoints', e.id, { url: e.url.split('?')[0] });
     res.json({ ok: true });
   });
   // Sends a test event to one endpoint now and reports what came back.

@@ -42,4 +42,10 @@ test('time clock: clock in and out, own timesheet, manager fixes and payroll CSV
   assert.match(csv, /^\uFEFF?Employee,Regular hours,Overtime hours,Total hours,Open punches\r\nHy Gienist,7\.5,0,7\.5,0\r\n$/);
   const log = (await api.get('/audit-log?action=timeclock.edit')).data;
   assert.ok((log.rows || log).some((e) => e.action === 'timeclock.edit'));
+  // Removing a punch needs a reason; it leaves payroll but stays on record.
+  assert.equal((await api.del(`/timeclock/punches/${add.data.id}`)).status, 400);
+  assert.equal((await api.del(`/timeclock/punches/${add.data.id}`, { reason: 'Entered for the wrong person' })).status, 200);
+  assert.equal((await api.get('/timeclock?from=2031-03-01&to=2031-03-31')).data.summary.length, 0);
+  const row = await h.db.get('SELECT * FROM time_punches WHERE id = ?', add.data.id);
+  assert.equal(row.delete_reason, 'Entered for the wrong person');
 });

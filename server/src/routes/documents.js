@@ -238,6 +238,8 @@ export default function documentRoutes({ db, storage, config = {} }) {
   r.delete('/mounts/:mid', requirePermission('clinical:write'), async (req, res) => {
     const m = await findOr404(db, 'image_mounts', req.params.mid, req.user.practice_id, 'Mount');
     await db.run('DELETE FROM image_mounts WHERE id = ?', m.id);
+    // Only the layout goes; the images in it stay in the chart.
+    await audit(db, req, 'mount.delete', 'image_mounts', m.id, { template: m.template, taken_at: m.taken_at, slots: m.slots }, { patientId: m.patient_id });
     res.json({ ok: true });
   });
 

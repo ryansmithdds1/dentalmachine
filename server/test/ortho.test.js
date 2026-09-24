@@ -3,9 +3,11 @@ import assert from 'node:assert/strict';
 import { harness } from './helpers.js';
 import { runOrthoBilling } from '../src/ortho.js';
 import { addInterval } from '../src/memberships.js';
+import { localNow } from '../src/util.js';
 
 const h = harness({ config: { payments: 'sandbox' } });
-const today = () => new Date().toISOString().slice(0, 10);
+// The practice's own date (the default time zone), which is what billing goes by.
+const today = () => localNow().slice(0, 10);
 
 async function insured(api, patient, plan) {
   const carrier = (await api.post('/carriers', { name: 'Delta Dental', payer_id: '94276' })).data;

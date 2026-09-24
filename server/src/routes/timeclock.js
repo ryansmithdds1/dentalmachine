@@ -34,13 +34,13 @@ export function payrollSummary(punches) {
 export default function timeclockRoutes({ db }) {
   const r = Router();
   const manager = (req) => can(req.user, 'timeclock:manage');
-  const open = (userId) => db.get('SELECT * FROM time_punches WHERE user_id = ? AND clock_out IS NULL ORDER BY id DESC LIMIT 1', userId);
+  const open = (userId) => db.get('SELECT * FROM time_punches WHERE user_id = ? AND clock_out IS NULL AND deleted_at IS NULL ORDER BY id DESC LIMIT 1', userId);
 
   r.get('/timeclock/me', async (req, res) => {
     const now = (await practiceNow(db, req.user.practice_id)).slice(0, 16);
     const current = await open(req.user.id);
     const week = mondayOf(now.slice(0, 10));
-    const punches = await db.all('SELECT * FROM time_punches WHERE user_id = ? AND clock_in >= ? ORDER BY clock_in', req.user.id, `${week} 00:00`);
+    const punches = await db.all('SELECT * FROM time_punches WHERE user_id = ? AND clock_in >= ? AND deleted_at IS NULL ORDER BY clock_in', req.user.id, `${week} 00:00`);
     const minutes = punches.reduce((t, p) => t + Math.max(0, minutesBetween(p.clock_in, p.clock_out || now) - (p.break_minutes || 0)), 0);
     res.json({ clocked_in: current?.clock_in ?? null, week_hours: Math.round((minutes / 60) * 100) / 100, now });
   });
@@ -73,7 +73,7 @@ export default function timeclockRoutes({ db }) {
     const who = manager(req) ? (req.query.user_id ? Number(req.query.user_id) : null) : req.user.id;
     return db.all(
       `SELECT t.*, u.name AS user_name, e.name AS edited_by_name FROM time_punches t JOIN users u ON u.id = t.user_id LEFT JOIN users e ON e.id = t.edited_by
-       WHERE t.practice_id = ? AND t.clock_in >= ? AND t.clock_in <= ?${who ? ' AND t.user_id = ?' : ''} ORDER BY u.name, t.clock_in`,
+       WHERE t.practice_id = ? AND t.deleted_at IS NULL AND t.clock_in >= ? AND t.clock_in <= ?${who ? ' AND t.user_id = ?' : ''} ORDER BY u.name, t.clock_in`,
       req.user.practice_id, `${from} 00:00`, `${to} 23:59`, ...(who ? [who] : []),
     );
   };
@@ -113,6 +113,7 @@ export default function timeclockRoutes({ db }) {
   r.put('/timeclock/punches/:tid', async (req, res) => {
     if (!manager(req)) throw new HttpError(403, 'Missing permission: timeclock:manage');
     const p = await findOr404(db, 'time_punches', req.params.tid, req.user.practice_id, 'Punch');
+    if (p.deleted_at) throw new HttpError(409, 'This punch was removed');
     const row = cleanPunch(req.body || {}, p);
     if (!Object.keys(row).length) throw new HttpError(400, 'Nothing to change');
     await db.run(`UPDATE time_punches SET ${Object.keys(row).map((k) => `${k} = ?`).join(', ')}, edited_by = ?, edited_at = ? WHERE id = ?`, ...Object.values(row), req.user.id, new Date().toISOString(), p.id);
@@ -122,8 +123,12 @@ export default function timeclockRoutes({ db }) {
   r.delete('/timeclock/punches/:tid', async (req, res) => {
     if (!manager(req)) throw new HttpError(403, 'Missing permission: timeclock:manage');
     const p = await findOr404(db, 'time_punches', req.params.tid, req.user.practice_id, 'Punch');
-    await db.run('DELETE FROM time_punches WHERE id = ?', p.id);
-    await audit(db, req, 'timeclock.delete', 'time_punches', p.id, { user_id: p.user_id, clock_in: p.clock_in, clock_out: p.clock_out });
+    if (p.deleted_at) throw new HttpError(409, 'This punch was already removed');
+    const reason = String(req.body?.reason || '').trim().slice(0, 300);
+    if (!reason) throw new HttpError(400, 'Say why the punch is being removed');
+    // Payroll records are kept: the punch is marked removed (who, when, why) and drops out of hours and exports.
+    await db.run('UPDATE time_punches SET deleted_at = ?, deleted_by = ?, delete_reason = ? WHERE id = ?', new Date().toISOString(), req.user.id, reason, p.id);
+    await audit(db, req, 'timeclock.delete', 'time_punches', p.id, { user_id: p.user_id, clock_in: p.clock_in, clock_out: p.clock_out }, { reason });
     res.json({ ok: true });
   });
 

@@ -30,7 +30,7 @@ export default function clinicalRoutes({ db }) {
   r.get('/patients/:id/chart', requirePermission('clinical:read'), async (req, res) => {
     const patient = await patientOr404(req);
     await audit(db, req, 'chart.view', 'patients', patient.id);
-    const conditions = await db.all('SELECT * FROM tooth_conditions WHERE patient_id = ? AND practice_id = ? ORDER BY recorded_at DESC', patient.id, req.user.practice_id);
+    const conditions = await db.all('SELECT * FROM tooth_conditions WHERE patient_id = ? AND practice_id = ? AND voided_at IS NULL ORDER BY recorded_at DESC', patient.id, req.user.practice_id);
     const procedures = await db.all(
       `SELECT pr.*, pv.name AS provider_name, tp.name AS plan_name, tp.option_label AS plan_option FROM procedures pr LEFT JOIN providers pv ON pv.id = pr.provider_id
        LEFT JOIN treatment_plans tp ON tp.id = pr.treatment_plan_id

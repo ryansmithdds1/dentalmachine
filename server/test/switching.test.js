@@ -22,7 +22,7 @@ test('duplicate check finds same name + birthday and same phone, not family memb
   assert.equal(groups[0].length, 2);
 });
 
-test('merge moves history to the kept chart and removes the duplicate', async () => {
+test('merge moves history to the kept chart and archives the duplicate (pointing at the kept one)', async () => {
   const { api, patient, provider } = await h.practice();
   const dup = (await api.post('/patients', { first_name: patient.first_name, last_name: patient.last_name, email: 'dup@example.com', allergies: 'Penicillin' })).data;
   await api.post(`/patients/${dup.id}/procedures`, { code: 'D0150', provider_id: provider.id, complete: true });
@@ -33,7 +33,9 @@ test('merge moves history to the kept chart and removes the duplicate', async ()
   const res = await api.post(`/patients/${patient.id}/merge`, { from_id: dup.id });
   assert.equal(res.status, 200, JSON.stringify(res.data));
   assert.ok(res.data.moved['procedures.patient_id'] >= 1);
-  assert.equal((await api.get(`/patients/${dup.id}`)).status, 404);
+  const archived = await h.db.get('SELECT * FROM patients WHERE id = ?', dup.id);
+  assert.equal(archived.status, 'archived');
+  assert.equal(archived.merged_into_id, patient.id);
   const kept = (await api.get(`/patients/${patient.id}`)).data;
   assert.equal(kept.allergies, 'Penicillin');
   assert.ok(kept.email);

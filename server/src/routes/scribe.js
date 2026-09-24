@@ -54,7 +54,7 @@ export async function chartContext(db, pid, patientId, appointmentId) {
   const onVisit = visit ? await db.all("SELECT code, description, tooth, surfaces FROM procedures WHERE appointment_id = ? AND status != 'cancelled'", visit.id) : [];
   const planned = await db.all("SELECT code, description, tooth, surfaces FROM procedures WHERE patient_id = ? AND status = 'planned' ORDER BY id LIMIT 30", patientId);
   const history = await db.all("SELECT code, description, tooth, surfaces, completed_at FROM procedures WHERE patient_id = ? AND status = 'completed' ORDER BY completed_at DESC LIMIT 12", patientId);
-  const conditions = await db.all('SELECT tooth, condition, surfaces FROM tooth_conditions WHERE patient_id = ? AND resolved = 0 LIMIT 60', patientId);
+  const conditions = await db.all('SELECT tooth, condition, surfaces FROM tooth_conditions WHERE patient_id = ? AND resolved = 0 AND voided_at IS NULL LIMIT 60', patientId);
   const perio = await db.get('SELECT exam_date, readings FROM perio_exams WHERE patient_id = ? ORDER BY exam_date DESC LIMIT 1', patientId);
   let perioLine = null;
   if (perio) {

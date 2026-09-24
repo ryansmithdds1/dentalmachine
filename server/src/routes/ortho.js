@@ -12,7 +12,7 @@ export default function orthoRoutes({ db, payments }) {
   const r = Router();
   const patientOr404 = (req) => findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient');
   const caseView = async (c) => {
-    const visits = await db.all('SELECT v.*, u.name AS by_name FROM ortho_visits v LEFT JOIN users u ON u.id = v.created_by WHERE v.case_id = ? ORDER BY v.visit_date DESC, v.id DESC', c.id);
+    const visits = await db.all('SELECT v.*, u.name AS by_name FROM ortho_visits v LEFT JOIN users u ON u.id = v.created_by WHERE v.case_id = ? AND v.deleted_at IS NULL ORDER BY v.visit_date DESC, v.id DESC', c.id);
     const billed = (await db.get("SELECT COALESCE(SUM(amount), 0) AS n FROM ledger_entries WHERE ortho_case_id = ? AND type = 'charge'", c.id)).n;
     const today = (await practiceNow(db, c.practice_id)).slice(0, 10);
     const elapsed = Math.max(0, Math.round((Date.parse(`${today}T12:00:00Z`) - Date.parse(`${c.start_date}T12:00:00Z`)) / (30.44 * 86400_000)));
@@ -116,7 +116,9 @@ export default function orthoRoutes({ db, payments }) {
   });
   r.delete('/ortho/visits/:vid', requirePermission('clinical:write'), async (req, res) => {
     const v = await findOr404(db, 'ortho_visits', req.params.vid, req.user.practice_id, 'Visit');
-    await db.run('DELETE FROM ortho_visits WHERE id = ?', v.id);
+    if (v.deleted_at) throw new HttpError(409, 'This visit entry was already removed');
+    await db.run("UPDATE ortho_visits SET deleted_at = datetime('now'), deleted_by = ? WHERE id = ?", req.user.id, v.id);
+    await audit(db, req, 'ortho.visit_remove', 'ortho_visits', v.id, { case_id: v.case_id }, { reason: req.body?.reason || null });
     res.json({ ok: true });
   });
   return r;

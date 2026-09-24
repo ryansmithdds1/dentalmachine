@@ -9,7 +9,7 @@ export default function attachmentRoutes({ db, storage, sender }) {
   const r = Router();
   const list = (claimId) => db.all(
     `SELECT a.*, d.filename, d.mime, d.category AS document_category FROM claim_attachments a LEFT JOIN documents d ON d.id = a.document_id
-     WHERE a.claim_id = ? ORDER BY a.id`, claimId,
+     WHERE a.claim_id = ? AND a.removed_at IS NULL ORDER BY a.id`, claimId,
   );
 
   r.get('/claims/:cid/attachments', requirePermission('billing:read'), async (req, res) => {
@@ -41,8 +41,10 @@ export default function attachmentRoutes({ db, storage, sender }) {
 
   r.delete('/claim-attachments/:aid', requirePermission('billing:write'), async (req, res) => {
     const a = await findOr404(db, 'claim_attachments', req.params.aid, req.user.practice_id, 'Attachment');
+    if (a.removed_at) throw new HttpError(409, 'This attachment was already removed');
     if (!['pending', 'rejected'].includes(a.status)) throw new HttpError(409, 'This attachment was already sent; the claim refers to it');
-    await db.run('DELETE FROM claim_attachments WHERE id = ?', a.id);
+    await db.run("UPDATE claim_attachments SET removed_at = datetime('now'), removed_by = ? WHERE id = ?", req.user.id, a.id);
+    await audit(db, req, 'claim.attachment_remove', 'claims', a.claim_id, { attachment_id: a.id, report_type: a.report_type });
     res.json(await list(a.claim_id));
   });
 
@@ -58,7 +60,7 @@ export default function attachmentRoutes({ db, storage, sender }) {
        FROM claims cl JOIN patients p ON p.id = cl.patient_id JOIN patient_insurance pi ON pi.id = cl.patient_insurance_id
        JOIN insurance_carriers c ON c.id = pi.carrier_id JOIN practices pr ON pr.id = cl.practice_id WHERE cl.id = ?`, claim.id,
     );
-    const pending = await db.all("SELECT * FROM claim_attachments WHERE claim_id = ? AND status IN ('pending','rejected')", claim.id);
+    const pending = await db.all("SELECT * FROM claim_attachments WHERE claim_id = ? AND status IN ('pending','rejected') AND removed_at IS NULL", claim.id);
     const results = [];
     for (const a of pending) {
       try {

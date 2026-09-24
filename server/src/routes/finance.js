@@ -143,6 +143,7 @@ export default function financeRoutes({ db, config, secret, plaid, qbo }) {
   r.delete('/finance/rules/:id', requirePermission('finance:write'), async (req, res) => {
     const rule = await findOr404(db, 'finance_rules', req.params.id, req.user.practice_id, 'Rule');
     await db.run('DELETE FROM finance_rules WHERE id = ?', rule.id);
+    await audit(db, req, 'finance.rule_delete', 'finance_rules', rule.id, { rule });
     res.json({ ok: true });
   });
 

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { requirePermission, HttpError } from '../auth.js';
-import { insert, findOr404, audit, practiceNow } from '../util.js';
+import { insert, update, findOr404, audit, practiceNow } from '../util.js';
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 // Payments waiting to go to the bank: money in that isn't voided and isn't on a deposit yet.
@@ -24,7 +24,7 @@ export default function depositRoutes({ db }) {
   r.get('/deposits', requirePermission('billing:read'), async (req, res) => {
     res.json(await db.all(
       `SELECT d.*, u.name AS created_by_name, (SELECT COUNT(*) FROM ledger_entries l WHERE l.deposit_id = d.id) AS items
-       FROM deposits d LEFT JOIN users u ON u.id = d.created_by WHERE d.practice_id = ? ORDER BY d.deposit_date DESC, d.id DESC LIMIT 200`, req.user.practice_id,
+       FROM deposits d LEFT JOIN users u ON u.id = d.created_by WHERE d.practice_id = ? AND d.voided_at IS NULL ORDER BY d.deposit_date DESC, d.id DESC LIMIT 200`, req.user.practice_id,
     ));
   });
 
@@ -76,11 +76,16 @@ export default function depositRoutes({ db }) {
   r.delete('/deposits/:did', requirePermission('billing:write'), async (req, res) => {
     const d = await findOr404(db, 'deposits', req.params.did, req.user.practice_id, 'Deposit');
     if (d.status === 'reconciled') throw new HttpError(409, 'A reconciled deposit can’t be undone');
+    if (d.voided_at) throw new HttpError(409, 'This deposit was already undone');
+    const reason = String(req.body?.reason || '').trim().slice(0, 300);
+    if (!reason) throw new HttpError(400, 'Say why the deposit is being undone');
+    // The slip is kept (voided, with who and why); its payments go back to the not-deposited list.
+    const entries = (await db.all('SELECT id FROM ledger_entries WHERE deposit_id = ?', d.id)).map((e) => e.id);
     await db.tx(async () => {
       await db.run('UPDATE ledger_entries SET deposit_id = NULL WHERE deposit_id = ?', d.id);
-      await db.run('DELETE FROM deposits WHERE id = ?', d.id);
+      await update(db, 'deposits', d.id, req.user.practice_id, { voided_at: new Date().toISOString().slice(0, 19).replace('T', ' '), voided_by: req.user.id, void_reason: reason });
     });
-    await audit(db, req, 'deposit.delete', 'deposits', d.id);
+    await audit(db, req, 'deposit.void', 'deposits', d.id, { total: d.total, entries }, { reason });
     res.json({ ok: true });
   });
   return r;

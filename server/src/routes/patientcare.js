@@ -60,7 +60,8 @@ export default function patientCareRoutes({ db, messenger, config }) {
     res.json({ ok: true });
   });
   r.delete('/education/:slug', requirePermission('patients:write'), async (req, res) => {
-    await db.run('DELETE FROM education_articles WHERE practice_id = ? AND slug = ?', req.user.practice_id, String(req.params.slug));
+    const gone = await db.run('DELETE FROM education_articles WHERE practice_id = ? AND slug = ?', req.user.practice_id, String(req.params.slug));
+    if (gone.changes) await audit(db, req, 'education.delete', 'education_articles', null, { slug: String(req.params.slug) });
     res.json({ ok: true });
   });
   // Pages that match this patient's planned treatment.

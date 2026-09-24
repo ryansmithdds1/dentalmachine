@@ -104,7 +104,7 @@ function PunchForm({ init, users, onClose, onDone }) {
     else await api.post('/timeclock/punches', { ...body(), user_id: Number(f.user_id) });
     onDone();
   });
-  const remove = useSubmit(async () => { await api.del(`/timeclock/punches/${init.id}`); onDone(); });
+  const remove = useSubmit(async (reason) => { await api.del(`/timeclock/punches/${init.id}`, { reason }); onDone(); });
   return (
     <Modal title={init.id ? `Fix ${init.user_name}'s punch` : 'Add a missed shift'} onClose={onClose}>
       <ErrorBox error={save.error || remove.error} />
@@ -116,7 +116,7 @@ function PunchForm({ init, users, onClose, onDone }) {
         <label>Why (kept with the change)<input value={f.note || ''} onChange={(e) => setF({ ...f, note: e.target.value })} placeholder="e.g. forgot to clock out" /></label>
       </div>
       <div className="form-actions">
-        {init.id && <button className="danger" disabled={remove.busy} onClick={() => window.confirm('Delete this punch?') && remove.submit()}>Delete</button>}
+        {init.id && <button className="danger" disabled={remove.busy} onClick={() => { const why = window.prompt('Remove this punch from the timesheet? It stays on record as removed. Why?'); if (why?.trim()) remove.submit(why.trim()); }}>Delete</button>}
         <button className="primary" disabled={save.busy} onClick={save.submit}>Save</button>
       </div>
     </Modal>

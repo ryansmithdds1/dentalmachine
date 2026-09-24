@@ -121,7 +121,7 @@ function sandboxPlaid() {
         added.push({ external_id: `sbx-${hash(`${account}|${date}|${description}|${amount}`)}-${added.length}`, account_external_id: account, date, amount, description, merchant, provider_category: pc, pending: 0 });
       };
       // Money in: deposit slips a day later, insurance EFTs the payment date, card days two days later less ~2.9%.
-      for (const d of await db.all('SELECT id, deposit_date, total FROM deposits WHERE practice_id = ?', practiceId)) {
+      for (const d of await db.all('SELECT id, deposit_date, total FROM deposits WHERE practice_id = ? AND voided_at IS NULL', practiceId)) {
         add('sbx-checking', day(d.deposit_date, 1), d.total, `DEPOSIT ID NUMBER ${400000 + d.id}`, null, 'TRANSFER_IN_DEPOSIT');
       }
       for (const e of await db.all('SELECT id, payer_name, check_number, payment_date, total_paid FROM era_imports WHERE practice_id = ? AND total_paid > 0', practiceId)) {

@@ -47,7 +47,9 @@ export async function completeProcedure(db, user, procedure, { providerId, appoi
   if (procedure.status === 'cancelled') throw new HttpError(409, 'Cancelled procedures cannot be completed');
   const provider = providerId ?? procedure.provider_id;
   if (!provider) throw new HttpError(400, 'A provider is required to complete a procedure');
-  const today = (await practiceNow(db, procedure.practice_id)).slice(0, 10);
+  // The practice's local time: its date is the date of service on claims (an evening visit is still that day).
+  const now = await practiceNow(db, procedure.practice_id);
+  const today = now.slice(0, 10);
   // Production counts at the office of the visit, else where the procedure was entered.
   // A visit named by the caller must be this patient's, in this practice.
   if (appointmentId != null && !(await db.get('SELECT id FROM appointments WHERE id = ? AND practice_id = ? AND patient_id = ?', Number(appointmentId), procedure.practice_id, procedure.patient_id))) {
@@ -58,9 +60,9 @@ export async function completeProcedure(db, user, procedure, { providerId, appoi
 
   await db.tx(async () => {
     await recorded(db, 'procedures', procedure.id, () => db.run(
-      `UPDATE procedures SET status = 'completed', completed_at = datetime('now'), provider_id = ?, appointment_id = COALESCE(?, appointment_id)
+      `UPDATE procedures SET status = 'completed', completed_at = ?, provider_id = ?, appointment_id = COALESCE(?, appointment_id)
        WHERE id = ?`,
-      provider, appointmentId ?? null, procedure.id,
+      now, provider, appointmentId ?? null, procedure.id,
     ));
     await insert(db, 'ledger_entries', {
       practice_id: procedure.practice_id,
@@ -309,7 +311,7 @@ export async function voidLedgerEntry(db, entry, { userId, reason }) {
       const claim = await db.get("SELECT c.id FROM claim_items ci JOIN claims c ON c.id = ci.claim_id WHERE ci.procedure_id = ? AND c.status != 'void'", entry.procedure_id);
       if (claim) throw new HttpError(409, `The procedure is on claim #${claim.id} — void that claim first`);
       await recorded(db, 'procedures', entry.procedure_id, () => db.run("UPDATE procedures SET status = 'planned', completed_at = NULL WHERE id = ? AND status = 'completed'", entry.procedure_id));
-      await db.run('DELETE FROM tooth_conditions WHERE procedure_id = ?', entry.procedure_id);
+      await db.run("UPDATE tooth_conditions SET voided_at = datetime('now') WHERE procedure_id = ? AND voided_at IS NULL", entry.procedure_id);
       // The plan discount given for it goes too.
       const discounts = await db.all("SELECT * FROM ledger_entries WHERE procedure_id = ? AND adjustment_type = 'Treatment plan discount' AND voided_at IS NULL AND reverses_id IS NULL", entry.procedure_id);
       for (const d of discounts) await reverseEntry(db, d, { userId, reason: 'Procedure charge voided', date });

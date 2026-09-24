@@ -49,7 +49,7 @@ export default function closeRoutes({ db }) {
              AND reverses_id IS NULL AND deposit_id IS NULL AND COALESCE(method, 'check') IN ('cash','check') AND entry_date BETWEEN ? AND ?`, pid, start, end,
         ) },
       { key: 'unreconciled', label: 'Deposits not reconciled with the bank', link: '/claims?tab=deposits',
-        count: await count("SELECT COUNT(*) AS n FROM deposits WHERE practice_id = ? AND status != 'reconciled' AND deposit_date BETWEEN ? AND ?", pid, start, end) },
+        count: await count("SELECT COUNT(*) AS n FROM deposits WHERE practice_id = ? AND voided_at IS NULL AND status != 'reconciled' AND deposit_date BETWEEN ? AND ?", pid, start, end) },
     ];
     const lock = (await db.get('SELECT lock_date FROM practices WHERE id = ?', pid)).lock_date;
     return { type, period: value, start, end, totals, checks, lock_date: lock, closed: !!lock && lock >= end, today: now.slice(0, 10) };

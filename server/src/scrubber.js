@@ -24,7 +24,7 @@ export async function scrubClaim(db, claimId) {
     `SELECT ci.id AS item_id, pr.*, pc.requires_tooth, pc.requires_surface FROM claim_items ci JOIN procedures pr ON pr.id = ci.procedure_id
      LEFT JOIN procedure_codes pc ON pc.id = pr.code_id WHERE ci.claim_id = ? ORDER BY pr.id`, claim.id,
   );
-  const attachments = await db.all("SELECT report_type, narrative FROM claim_attachments WHERE claim_id = ? AND status != 'rejected'", claim.id);
+  const attachments = await db.all("SELECT report_type, narrative FROM claim_attachments WHERE claim_id = ? AND status != 'rejected' AND removed_at IS NULL", claim.id);
   const hasNarrative = attachments.some((a) => a.narrative || a.report_type === 'OZ') || !!claim.remarks;
   const today = (await practiceNow(db, claim.practice_id)).slice(0, 10);
   const out = [];

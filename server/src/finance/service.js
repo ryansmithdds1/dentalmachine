@@ -62,7 +62,7 @@ export const sealBankToken = (token, secret) => sealSecret(token, secret, 'bank'
 // which the processor pays out in one lump, less its fees.
 export async function expectedDeposits(db, pid, from, to) {
   const items = [];
-  for (const d of await db.all('SELECT id, deposit_date, total, reference FROM deposits WHERE practice_id = ? AND deposit_date BETWEEN ? AND ? AND total > 0', pid, from, to)) {
+  for (const d of await db.all('SELECT id, deposit_date, total, reference FROM deposits WHERE practice_id = ? AND voided_at IS NULL AND deposit_date BETWEEN ? AND ? AND total > 0', pid, from, to)) {
     items.push({ key: `deposit:${d.id}`, kind: 'deposit', date: d.deposit_date, amount: d.total, label: `Deposit slip${d.reference ? ` ${d.reference}` : ` #${d.id}`} (cash & checks)` });
   }
   for (const e of await db.all('SELECT id, payer_name, check_number, payment_date, total_paid FROM era_imports WHERE practice_id = ? AND payment_date BETWEEN ? AND ? AND total_paid > 0', pid, from, to)) {

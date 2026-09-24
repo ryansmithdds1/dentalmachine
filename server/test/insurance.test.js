@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { harness } from './helpers.js';
+import { localNow } from '../src/util.js';
 import { parseX12, sandbox835 } from '../src/x12.js';
 import { processInbound } from '../src/clearinghouse.js';
 import { allocate } from '../src/allocation.js';
@@ -70,7 +71,7 @@ test('benefits: frequency limits, waiting periods, downgrades, per-code coverage
 
   // Waiting period: major work covered only 12 months after the policy starts.
   await ctx.api.put(`/insurance-plans/${ctx.policy.plan_id}`, { wait_major_months: 12 });
-  await ctx.api.put(`/insurance/${ctx.policy.id}`, { effective_date: new Date().toISOString().slice(0, 10) });
+  await ctx.api.put(`/insurance/${ctx.policy.id}`, { effective_date: localNow().slice(0, 10) });
   est = await estimate(ctx, [crown.id]);
   assert.equal(est.items[0].insurance, 0);
   assert.match(est.items[0].notes.join(), /Waiting period/);

@@ -510,8 +510,10 @@ export default function scheduleRoutes({ db }) {
       for (const occ of later) {
         await recorded(db, 'appointments', occ.id, () => db.run("UPDATE appointments SET status = 'cancelled' WHERE id = ?", occ.id));
         await db.run("UPDATE recalls SET status = 'due', appointment_id = NULL WHERE appointment_id = ? AND status = 'scheduled'", occ.id);
-        // Their pre-loaded type procedures are only placeholders; drop them rather than leave "planned" work behind.
-        await db.run("DELETE FROM procedures WHERE appointment_id = ? AND status = 'planned' AND treatment_plan_id IS NULL", occ.id);
+        // Their pre-loaded type procedures are only placeholders; cancel them rather than leave "planned" work behind.
+        for (const pr of await db.all("SELECT id FROM procedures WHERE appointment_id = ? AND status = 'planned' AND treatment_plan_id IS NULL", occ.id)) {
+          await recorded(db, 'procedures', pr.id, () => db.run("UPDATE procedures SET status = 'cancelled' WHERE id = ?", pr.id));
+        }
       }
       changed(req, ...later.map((o) => o.start_time));
     }

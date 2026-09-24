@@ -41,7 +41,7 @@ export function harness({ config: extra = {}, messenger, fetchImpl } = {}) {
       } catch { /* not JSON */ }
       return { status: res.status, data, headers: res.headers };
     };
-    return { get: (p) => call('GET', p), post: (p, b) => call('POST', p, b ?? {}), put: (p, b) => call('PUT', p, b), patch: (p, b) => call('PATCH', p, b), del: (p) => call('DELETE', p) };
+    return { get: (p) => call('GET', p), post: (p, b) => call('POST', p, b ?? {}), put: (p, b) => call('PUT', p, b), patch: (p, b) => call('PATCH', p, b), del: (p, b) => call('DELETE', p, b) };
   };
 
   let n = 0;

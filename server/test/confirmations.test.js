@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { generateKeyPairSync, sign } from 'node:crypto';
 import { harness } from './helpers.js';
 import { runReminders } from '../src/messaging.js';
+import { localNow } from '../src/util.js';
 import { twilioSignature } from '../src/routes/sms.js';
 
 // SendGrid signs its event webhook with an ECDSA key; the office pastes the public half into the settings.
@@ -185,9 +186,12 @@ test('email reminders: HTML with a button and the calendar invite, one-click uns
 });
 
 test('missed visits get a same-day text; the unconfirmed call list and confirmation numbers', async () => {
-  const { api, provider, patient } = await h.practice({ timezone: 'UTC', reminder_steps: [{ hours: 48 }] });
+  // The missed visit has to be earlier the same day: just after midnight UTC, use a practice where it's already morning.
+  const timezone = new Date().getUTCHours() < 2 ? 'Asia/Tokyo' : 'UTC';
+  const day = localNow(timezone).slice(0, 10);
+  const { api, provider, patient } = await h.practice({ timezone, reminder_steps: [{ hours: 48 }] });
   await practiceOf(api);
-  const missed = (await api.post('/appointments', { patient_id: patient.id, provider_id: provider.id, start_time: `${today} 00:05`, end_time: `${today} 00:35`, override_blockout: true, notify: false })).data;
+  const missed = (await api.post('/appointments', { patient_id: patient.id, provider_id: provider.id, start_time: `${day} 00:05`, end_time: `${day} 00:35`, override_blockout: true, notify: false })).data;
   await api.patch(`/appointments/${missed.id}/status`, { status: 'no_show' });
   let n = h.sent.length;
   await run(new Date(Date.now() + 60_000));

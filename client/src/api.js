@@ -86,7 +86,7 @@ export const api = {
   post: (p, b = {}) => request('POST', p, b),
   put: (p, b) => request('PUT', p, b),
   patch: (p, b) => request('PATCH', p, b),
-  del: (p) => request('DELETE', p),
+  del: (p, b) => request('DELETE', p, b),
 };
 
 // What the assistant does on someone's behalf is recorded as the AI acting for them, not as them.

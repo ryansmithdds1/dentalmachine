@@ -92,7 +92,7 @@ export default function Deposits() {
 function Reconcile({ d, onClose, onDone }) {
   const [f, setF] = useState({ bank_amount: fromCents(d.total), bank_date: '' });
   const save = useSubmit(async () => { await api.post(`/deposits/${d.id}/reconcile`, { bank_amount: toCents(f.bank_amount), bank_date: f.bank_date || null }); onDone(); });
-  const undo = useSubmit(async () => { await api.del(`/deposits/${d.id}`); onDone(); });
+  const undo = useSubmit(async (reason) => { await api.del(`/deposits/${d.id}`, { reason }); onDone(); });
   return (
     <Modal title={`Reconcile deposit of ${money(d.total)}`} onClose={onClose}>
       <ErrorBox error={save.error || undo.error} />
@@ -102,7 +102,7 @@ function Reconcile({ d, onClose, onDone }) {
         <label>Date on the statement<input type="date" value={f.bank_date} onChange={(e) => setF({ ...f, bank_date: e.target.value })} /></label>
       </div>
       <div className="form-actions">
-        <button className="danger" disabled={undo.busy} onClick={() => window.confirm('Undo this deposit? Its payments go back to the not-deposited list.') && undo.submit()}>Undo deposit</button>
+        <button className="danger" disabled={undo.busy} onClick={() => { const why = window.prompt('Undo this deposit? Its payments go back to the not-deposited list. Why is it being undone?'); if (why?.trim()) undo.submit(why.trim()); }}>Undo deposit</button>
         <button className="primary" disabled={save.busy} onClick={save.submit}>Save</button>
       </div>
     </Modal>

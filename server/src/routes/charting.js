@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { requirePermission, HttpError } from '../auth.js';
-import { pick, requireFields, insert, update, findOr404, audit, practiceNow } from '../util.js';
+import { pick, requireFields, insert, update, findOr404, audit, practiceNow, localNow } from '../util.js';
 
 // Charting support: note templates, vitals, the lab directory and the procedure code list tools.
 
@@ -138,7 +138,10 @@ export default function chartingRoutes({ db }) {
     const provider = procedures[0]?.provider_id ? (await db.get('SELECT name FROM providers WHERE id = ?', procedures[0].provider_id))?.name : null;
     const vitals = await db.get('SELECT * FROM vitals WHERE patient_id = ? AND practice_id = ? ORDER BY recorded_at DESC, id DESC LIMIT 1', patient.id, req.user.practice_id);
     const date = (await practiceNow(db, req.user.practice_id)).slice(0, 10);
-    const ctx = { patient, procedures, provider, vitals: vitals && vitals.recorded_at.slice(0, 10) === date ? vitals : null, date };
+    // recorded_at is UTC: compare the practice-local day it was taken on (evening vitals are still "today").
+    const { timezone } = await db.get('SELECT timezone FROM practices WHERE id = ?', req.user.practice_id);
+    const takenOn = vitals && localNow(timezone, new Date(`${String(vitals.recorded_at).replace(' ', 'T').slice(0, 19)}Z`)).slice(0, 10);
+    const ctx = { patient, procedures, provider, vitals: takenOn === date ? vitals : null, date };
     // One template per procedure group, each written up for its own procedures.
     const parts = chosen.map((t) => {
       const mine = procedures.filter((p) => matchesCodes(t, [p.code]));

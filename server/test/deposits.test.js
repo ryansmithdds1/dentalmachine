@@ -31,7 +31,12 @@ test('deposit slips: undeposited checks and cash go on a deposit, which reconcil
   await pay(2500, 'check');
   waiting = (await api.get('/deposits/undeposited')).data;
   const d2 = (await api.post('/deposits', { entry_ids: waiting.map((e) => e.id) })).data;
-  await api.del(`/deposits/${d2.id}`);
+  assert.equal((await api.del(`/deposits/${d2.id}`)).status, 400, 'a reason is required');
+  assert.equal((await api.del(`/deposits/${d2.id}`, { reason: 'Wrong checks on the slip' })).status, 200);
+  // Kept as a voided slip, not deleted.
+  const kept = await h.db.get('SELECT * FROM deposits WHERE id = ?', d2.id);
+  assert.ok(kept.voided_at);
+  assert.equal(kept.void_reason, 'Wrong checks on the slip');
   assert.equal((await api.get('/deposits/undeposited')).data.length, 1);
   assert.equal((await api.get('/deposits')).data.length, 1);
 });

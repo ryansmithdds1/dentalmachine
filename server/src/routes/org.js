@@ -164,6 +164,7 @@ export default function orgRoutes({ db }) {
     const owners = await db.all("SELECT user_id FROM org_members WHERE organization_id = ? AND role = 'owner'", req.org.id);
     if (owners.length === 1 && owners[0].user_id === uid) throw new HttpError(400, 'A group needs at least one owner');
     await db.run('DELETE FROM org_members WHERE organization_id = ? AND user_id = ?', req.org.id, uid);
+    await audit(db, req, 'org.member_remove', 'organizations', req.org.id, { user_id: uid });
     res.json({ ok: true });
   });
 

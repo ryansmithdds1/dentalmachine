@@ -25,6 +25,7 @@ export default function queryBuilderRoutes({ db }) {
   r.delete('/query-builder/saved/:qid', requirePermission('reports:read'), async (req, res) => {
     const q = await findOr404(db, 'custom_queries', req.params.qid, req.user.practice_id, 'Saved report');
     await db.run('DELETE FROM custom_queries WHERE id = ?', q.id);
+    await audit(db, req, 'query.delete', 'custom_queries', q.id, { name: q.name });
     res.json({ ok: true });
   });
   return r;

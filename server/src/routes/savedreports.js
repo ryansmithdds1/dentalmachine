@@ -61,6 +61,7 @@ export default function savedReportRoutes({ db, messenger }) {
   r.delete('/saved-reports/:sid', requirePermission('reports:read'), async (req, res) => {
     const existing = await findOr404(db, 'saved_reports', req.params.sid, req.user.practice_id, 'Saved report');
     await db.run('DELETE FROM saved_reports WHERE id = ?', existing.id);
+    await audit(db, req, 'saved_report.delete', 'saved_reports', existing.id, { name: existing.name });
     res.json({ ok: true });
   });
   r.get('/saved-reports/:sid/preview', requirePermission('reports:read'), async (req, res) => {

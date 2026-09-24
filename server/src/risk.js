@@ -88,7 +88,7 @@ export function perioRisk(a) {
 export async function chartAnswers(db, patientId, today) {
   const three = new Date(Date.parse(today) - 3 * 365 * 86400_000).toISOString().slice(0, 10);
   const recent = (await db.get("SELECT COUNT(*) AS n FROM procedures WHERE patient_id = ? AND status = 'completed' AND (code LIKE 'D21%' OR code LIKE 'D23%' OR code LIKE 'D24%' OR code LIKE 'D27%') AND completed_at >= ?", patientId, three)).n;
-  const conditions = (await db.all('SELECT condition FROM tooth_conditions WHERE patient_id = ? AND resolved = 0', patientId)).map((c) => c.condition);
+  const conditions = (await db.all('SELECT condition FROM tooth_conditions WHERE patient_id = ? AND resolved = 0 AND voided_at IS NULL', patientId)).map((c) => c.condition);
   const ortho = await db.get("SELECT id FROM procedures WHERE patient_id = ? AND code LIKE 'D8%' AND status = 'completed' AND completed_at >= ? LIMIT 1", patientId, new Date(Date.parse(today) - 2 * 365 * 86400_000).toISOString().slice(0, 10));
   const caries = { cavities: conditions.includes('caries'), recent_restorations: recent > 0, appliances: !!ortho };
   const perio = {};

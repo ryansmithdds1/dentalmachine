@@ -267,7 +267,7 @@ export async function estimateCoverage(db, rawPolicy, procedures, { primary = nu
     }
     // Missing tooth clause: replacing a tooth that was already missing when coverage began isn't covered.
     if (covered && plan.missing_tooth_clause && REPLACES_TOOTH.test(p.code) && p.tooth) {
-      const missing = await db.get("SELECT recorded_at FROM tooth_conditions WHERE patient_id = ? AND tooth = ? AND condition = 'missing' ORDER BY recorded_at LIMIT 1", p.patient_id, String(p.tooth).toUpperCase());
+      const missing = await db.get("SELECT recorded_at FROM tooth_conditions WHERE patient_id = ? AND tooth = ? AND condition = 'missing' AND voided_at IS NULL ORDER BY recorded_at LIMIT 1", p.patient_id, String(p.tooth).toUpperCase());
       if (missing && (!policy.effective_date || String(missing.recorded_at).slice(0, 10) < policy.effective_date)) {
         covered = false;
         notes.push(policy.effective_date ? 'Missing tooth clause: the tooth was missing before coverage began' : 'Missing tooth clause: check when the tooth was lost');
