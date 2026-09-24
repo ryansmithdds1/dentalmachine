@@ -706,7 +706,9 @@ RT1. **Create in one step** from the chart/treatment plan ("refer #17 extraction
      reason, teeth/procedures (codes), urgency (routine / soon / **critical**), x-rays and notes attached, letter sent by
      fax/email/portal link, patient told what happens next (text with the specialist's contact).
 RT2. **Follow it to the end:** statuses with dates; nudges if not scheduled/seen by the expected time; **critical**
-     referrals re-alert the team on a schedule (e.g. every 3 days) until resolved, and show on the patient bar and huddle.
+     referrals re-alert the team on a schedule until resolved, and show on the patient bar and huddle. Owner's choices:
+     critical re-alerts weekly to both the dentist and the front desk; routine/soon referrals don't nudge by default,
+     but a past-due report lists everything open more than a month.
 RT3. **Closing the loop:** when the specialist's report or letter arrives (scanned, faxed or emailed in), it's matched to
      the open referral (patient + specialist, AI-assisted for scans with a person's confirm), filed on the chart, and the
      referral is marked complete; the dentist is notified to review it.
