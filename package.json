@@ -23,7 +23,9 @@
     "e2e:sweep": "node --test e2e/sweep/sweep.test.mjs",
     "e2e:chaos": "node --test --test-concurrency=2 e2e/chaos/*.test.mjs",
     "e2e:journeys": "node --test --test-concurrency=2 e2e/journeys/*.test.mjs",
-    "smoke": "node e2e/smoke/live.test.mjs"
+    "smoke": "node e2e/smoke/live.test.mjs",
+    "actions": "node e2e/actions/run.mjs",
+    "actions:report": "node e2e/actions/report.mjs"
   },
   "type": "module",
   "engines": {

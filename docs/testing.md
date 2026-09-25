@@ -15,6 +15,7 @@ which is read-only by construction.
 | Every-screen sweep | `e2e/sweep/sweep.test.mjs` | every push (CI `sweep`) and nightly (deeper) | broken screens in any role, theme or screen size |
 | Chaos (misbehaving browser) | `e2e/chaos/*.test.mjs` | nightly | stuck "Listening…", endless spinners, lost or doubled saves |
 | Role journeys | `e2e/journeys/*.test.mjs` | nightly | a whole role's day no longer working end to end |
+| Office-action robot | `e2e/actions/` (`npm run actions`) | on demand | how many clicks, keys, screens and dialogs each of ~180 office actions takes, scored in `docs/workflows/scorecard.md` (see `docs/workflows/scoring.md`); screenshots per step for the user manual |
 | Post-deploy smoke | `e2e/smoke/live.test.mjs` | after each deployment, every 3 hours, on demand | a live site that is down, can't sign in or shows broken pages |
 
 Browser tests need a build and Chromium: `npm run build` and `npx playwright install chromium` once.

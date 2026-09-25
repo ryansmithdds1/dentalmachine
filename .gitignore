@@ -6,3 +6,4 @@ dist/
 .env
 data/
 dump.rdb
+e2e/actions/out/
