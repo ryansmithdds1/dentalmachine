@@ -4,7 +4,7 @@ import { api, download } from '../../api.js';
 import { useApi, useLookup } from '../../hooks.js';
 import { useAuth } from '../../auth.jsx';
 import { money, fmtDate, practiceToday, toCents, fromCents } from '../../format.js';
-import { Badge, ErrorBox, Modal, useSubmit } from '../ui.jsx';
+import { Badge, ErrorBox, Modal, useSubmit, SidePanel } from '../ui.jsx';
 import AppointmentForm from '../AppointmentForm.jsx';
 import { CodePicker } from './ChartTab.jsx';
 import SendForms from '../FormsSend.jsx';
@@ -30,7 +30,7 @@ export default function TreatmentTab({ patient, onChange }) {
   const { data: loose, reload: reloadLoose } = useApi(`/patients/${patient.id}/procedures?status=planned`);
   const [creating, setCreating] = useState(false);
   const [err, setErr] = useState(null);
-  const [presenting, setPresenting] = useState(null);
+  const navigate = useNavigate();
   const [consent, setConsent] = useState(null);
   const [note, setNote] = useState(null);
   const [finSettings, setFinSettings] = useState(false);
@@ -75,10 +75,17 @@ export default function TreatmentTab({ patient, onChange }) {
       refresh();
     } catch (e) { setErr(e); }
   };
-  const quiet = !creating && !adding && !booking && !presenting && !consent && !finSettings;
+  const quiet = !creating && !adding && !booking && !consent && !finSettings;
+  // Present here: the plan opens on this screen with a one-time hand-off (spec 22), no dialog in between.
+  const presentHere = (plan) => act(async () => {
+    const r = await api.post(`/treatment-plans/${plan.id}/present`, { here: true });
+    navigate(`${new URL(r.url, window.location.origin).pathname}#here=${encodeURIComponent(r.handoff)}`);
+  });
+  const toPresent = (plans || []).find((p) => !p.signed_at && ['proposed', 'accepted'].includes(p.status));
   useShortcuts([
     { combo: 'f', handler: () => document.querySelector('.fin-card-main:not([disabled])')?.focus(), label: 'Ways to pay (financial options)', section: 'Treatment', enabled: quiet },
     { combo: 'n', handler: () => setCreating(true), label: 'New treatment plan (type “14 D2740”, Enter for each)', section: 'Treatment', enabled: canWrite && quiet },
+    { combo: 'p', handler: () => presentHere(toPresent), label: 'Present the newest unsigned plan here for the patient to sign', section: 'Treatment', enabled: canWrite && quiet && !!toPresent },
     { combo: 'a', handler: planAll, label: 'Put all unplanned work on a new plan', section: 'Treatment', enabled: canWrite && quiet && unplanned.length > 0 },
   ]);
 
@@ -101,7 +108,6 @@ export default function TreatmentTab({ patient, onChange }) {
           <FinOptionsSettings onSaved={() => { setFinSettings(false); refresh(); }} />
         </Modal>
       )}
-      {presenting && <PresentModal plan={presenting} patient={patient} onClose={() => { setPresenting(null); refresh(); }} />}
       {consent && (
         <SendForms patient={patient} title={`Consent for “${consent.name}”`} procedureIds={consent.procedures.filter((p) => p.status === 'planned').map((p) => p.id)} onClose={() => setConsent(null)} />
       )}
@@ -123,7 +129,19 @@ export default function TreatmentTab({ patient, onChange }) {
                 the same permission the server asks for (POST /preauths). */}
             {(can('clinical:write') || can('billing:write')) && plan.status !== 'completed' && (
               <div className="actions">
-                {can('clinical:write') && !plan.signed_at && <button className="small primary" onClick={() => setPresenting(plan)}>Present & e-sign…</button>}
+                {/* Present here: the plan opens on this screen for the patient in the chair (no dialog to choose
+                    first); Send asks them to review and sign at home (the birth date is asked there). */}
+                {can('clinical:write') && !plan.signed_at && (
+                  <>
+                    <button className="small primary" title={`Opens the plan on this screen for ${patient.first_name} to read and sign (no birth date on this signed-in device; “Back to the chart” brings you back)`}
+                      onClick={() => presentHere(plan)}>Present here for {patient.first_name} to sign</button>
+                    <button className="small" disabled={!patient.phone && !patient.email} title={!patient.phone && !patient.email ? 'No phone or email on file' : `Texts (or emails) ${patient.first_name} a link to review and sign at home`}
+                      onClick={() => act(async () => {
+                        const r = await api.post(`/treatment-plans/${plan.id}/present`, { send: 'auto' });
+                        setNote(<>Sent to {patient.first_name} by {r.message?.channel === 'sms' ? 'text' : 'email'} to review and sign. Link: <a href={r.url} target="_blank" rel="noreferrer">{r.url}</a></>);
+                      })}>Send to sign at home</button>
+                  </>
+                )}
                 {plan.estimate?.policy && can('billing:write') && plan.procedures.some((p) => p.status === 'planned') && (
                   <button className="small" title="Makes the pre-authorization and sends it to the payer" onClick={() => act(async () => {
                     // Workflow 38: made and sent in one step (the 837 file only when no clearinghouse is connected).
@@ -167,7 +185,7 @@ export default function TreatmentTab({ patient, onChange }) {
         </Modal>
       )}
       {booking && (
-        <Modal title={`Schedule — ${booking.plan.name}`} wide onClose={() => setBooking(null)}>
+        <SidePanel className="book-panel" title={`Schedule — ${booking.plan.name}`} onClose={() => setBooking(null)}>
           <AppointmentForm
             patient={patient}
             defaults={{
@@ -176,7 +194,7 @@ export default function TreatmentTab({ patient, onChange }) {
             }}
             onCancel={() => setBooking(null)} onSaved={() => { setBooking(null); refresh(); }}
           />
-        </Modal>
+        </SidePanel>
       )}
 
       {unplanned.length > 0 && (
@@ -678,45 +696,3 @@ function PlanBuilder({ patient, unplanned = [], onDone, onCancel }) {
   );
 }
 
-// Present: open it right here for the patient in the chair (no birth date on this signed-in device, and a way back
-// to the chart when they're done), or text/email it to review at home (the birth date is asked there).
-function PresentModal({ plan, patient, onClose }) {
-  const navigate = useNavigate();
-  const [result, setResult] = useState(null);
-  const [err, setErr] = useState(null);
-  const [busy, setBusy] = useState(false);
-  const go = async (send) => {
-    setErr(null);
-    setBusy(true);
-    try {
-      const r = await api.post(`/treatment-plans/${plan.id}/present`, send ? { send } : { here: true });
-      if (!send) {
-        navigate(`${new URL(r.url, window.location.origin).pathname}#here=${encodeURIComponent(r.handoff)}`);
-        return;
-      }
-      setResult(r);
-    } catch (e) {
-      setErr(e);
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <Modal title={`Present “${plan.name}”`} onClose={onClose}>
-      <ErrorBox error={err} />
-      {!result ? (
-        <>
-          <div className="inline" style={{ flexWrap: 'wrap' }}>
-            <button className="primary" disabled={busy} onClick={() => go(null)}>Open here for {patient.first_name} to sign</button>
-            <button disabled={busy || (!patient.phone && !patient.email)} onClick={() => go('auto')}>Text or email to {patient.first_name}</button>
-          </div>
-          <p className="muted" style={{ fontSize: 13 }}>They see each procedure in plain language with their estimated insurance and cost, then sign. On this device they won't be asked for their birth date; “Back to the chart” at the bottom brings you back.</p>
-        </>
-      ) : (
-        <div className="public-notice ok">
-          Sent by {result.message?.channel === 'sms' ? 'text' : 'email'}. Link: <a href={result.url} target="_blank" rel="noreferrer">{result.url}</a>
-        </div>
-      )}
-    </Modal>
-  );
-}

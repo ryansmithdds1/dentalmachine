@@ -153,7 +153,7 @@ export default function OptimizerPanel({ date, locationId = null, onClose, focus
   // The panel's own keys, ahead of the screen underneath (the schedule's D is "day view"; here it's "not today").
   useEffect(() => {
     const onKey = (e) => {
-      if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey || typingIn(e.target) || document.querySelector('.modal, .palette')) return;
+      if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey || typingIn(e.target) || document.querySelector('.modal, .palette, .side-panel')) return;
       const k = e.key;
       if (k === 'Escape') onClose?.();
       else if (k === 'j' || k === 'ArrowDown') setCursor((c) => Math.min(flat.length - 1, c + 1));

@@ -4,6 +4,7 @@ import { useApi, useLookup } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
 import { fmtUtcDateTime } from '../format.js';
 import { ErrorBox, Modal, useSubmit } from './ui.jsx';
+import { toast, undoable } from '../toast.js';
 
 const SCHEDULES = { '': 'Not emailed', daily: 'Every morning', weekly: 'Monday mornings', monthly: 'The 1st of each month' };
 
@@ -39,9 +40,12 @@ export default function SavedReports() {
               <td>
                 <div className="inline" style={{ gap: 6 }}>
                   <button className="small" onClick={() => run(async () => setPreview(await api.get(`/saved-reports/${s.id}/preview`)))}>View</button>
-                  <button className="small" disabled={!s.recipients.length} onClick={() => run(async () => { const r = await api.post(`/saved-reports/${s.id}/send`); window.alert(`Emailed to ${r.sent}`); reload(); })}>Send now</button>
+                  <button className="small" disabled={!s.recipients.length} onClick={() => run(async () => { const r = await api.post(`/saved-reports/${s.id}/send`); toast(`Emailed to ${r.sent}`); reload(); })}>Send now</button>
                   <button className="small" onClick={() => setEditing(s)}>Edit</button>
-                  <button className="small danger" onClick={() => window.confirm(`Delete “${s.name}”?`) && run(async () => { await api.del(`/saved-reports/${s.id}`); reload(); })}>Delete</button>
+                  {/* Deleted at once; Undo saves the same report (name, filters, schedule, recipients) again. */}
+                  <button className="small danger" onClick={() => undoable(`Deleted “${s.name}”`,
+                    async () => { await api.del(`/saved-reports/${s.id}`); reload(); },
+                    async () => { await api.post('/saved-reports', { name: s.name, report: s.report, params: s.params, schedule: s.schedule || null, recipients: s.recipients }); reload(); }).catch(setErr)}>Delete</button>
                 </div>
               </td>
             </tr>

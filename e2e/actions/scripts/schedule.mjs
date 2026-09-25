@@ -173,12 +173,12 @@ export default {
       await t.open('/schedule', '.cal-col-head');
       await t.step('Press Alt+B: the booking form opens on the patient’s next open time with their dentist', async () => {
         await t.key('Alt+b');
-        await t.see('.modal .book-suggest strong');
+        await t.see('.book-panel .book-suggest strong');
         await t.page.waitForFunction(() => document.activeElement?.textContent === 'Book appointment');
       });
       await t.step('Press Enter: booked', async () => {
         await t.key('Enter');
-        await t.see('.modal', { state: 'detached' });
+        await t.see('.book-panel', { state: 'detached' });
       });
       await until(t, async () => (await t.api.get(`/appointments?patient_id=${p.id}&from=${t.today}&to=${addDays(t.today, 400)}`)).length, 'the booking');
     },
@@ -193,20 +193,20 @@ export default {
       await t.open(`/schedule?date=${t.today}&view=day`, '.cal-col-head');
       await t.step('Press N: the booking form asks who', async () => {
         await t.key('n');
-        await t.see('.modal input[aria-label="Find a patient"]');
+        await t.see('.book-panel input[aria-label="Find a patient"]');
       });
       await t.step('Type the patient’s name and press Enter: the first open time today is suggested', async () => {
         await t.type(`${p.first_name} ${p.last_name}`);
-        await t.see(`.modal .picker-row.hl:has-text("${p.first_name}")`);
+        await t.see(`.book-panel .picker-row.hl:has-text("${p.first_name}")`);
         await t.key('Enter');
-        await t.see('.modal .book-suggest strong');
+        await t.see('.book-panel .book-suggest strong');
       });
-      const suggested = (await t.page.textContent('.modal .book-suggest')).replace(/\s+/g, ' ').trim();
+      const suggested = (await t.page.textContent('.book-panel .book-suggest')).replace(/\s+/g, ' ').trim();
       t.note(`Suggested: ${suggested}`);
       await t.step('Press Enter: booked', async () => {
         await t.page.waitForFunction(() => document.activeElement?.textContent === 'Book appointment');
         await t.key('Enter');
-        await t.see('.modal', { state: 'detached' });
+        await t.see('.book-panel', { state: 'detached' });
       });
       const [a] = await until(t, async () => { const l = await t.api.get(`/appointments?patient_id=${p.id}&from=${t.today}&to=${addDays(t.today, 400)}`); return l.length ? l : null; }, 'the booking');
       if (!a.start_time.startsWith(t.today)) t.flag('asks-known', `Booked from today’s schedule for an emergency, but the suggested time was ${a.start_time} — not today; the person has to pick a time by hand`);
@@ -253,14 +253,14 @@ export default {
         await t.key('x');
         await t.see('.broken-picker');
       });
-      await t.step('Press 2 ("schedule conflict"): cancelled, and a rebook form opens on the next opening', async () => {
+      await t.step('Press 2 ("schedule conflict"): cancelled, and the next opening shows on the schedule with Book it ready', async () => {
         await t.key('2');
-        await t.see('.modal .book-suggest strong');
+        await t.see('.rebook-bar button:has-text("Book it")');
+        await t.page.waitForFunction(() => document.activeElement?.textContent === 'Book it');
       });
       await t.step('Press Enter: rebooked', async () => {
-        await t.page.waitForFunction(() => document.activeElement?.textContent === 'Book appointment');
         await t.key('Enter');
-        await t.see('.modal', { state: 'detached' });
+        await t.see('.rebook-bar', { state: 'detached' });
       });
     },
   },
@@ -279,13 +279,9 @@ export default {
         await t.key('Shift+X');
         await t.see('.broken-picker');
       });
-      await t.step('Press 6 ("couldn’t reach them"): marked no-show; a rebook form opens', async () => {
+      await t.step('Press 6 ("couldn’t reach them"): marked no-show; the next opening shows on the schedule (nothing to close if not rebooking now)', async () => {
         await t.key('6');
-        await t.see('.modal');
-      });
-      await t.step('Press Esc: not rebooking now', async () => {
-        await t.key('Escape');
-        await t.see('.modal', { state: 'detached' });
+        await t.see('.rebook-bar');
       });
       await until(t, async () => (await t.api.get(`/appointments/${a.id}`)).status === 'no_show', 'the no-show');
     },
@@ -304,17 +300,13 @@ export default {
         await t.click(cardSel(a.id));
         await t.see('.drawer');
       });
-      await t.step('Click Edit: the full appointment form opens (12 fields)', async () => {
-        await t.click('.drawer button:has-text("Edit")');
-        await t.see('.modal');
-      });
-      await t.step('Pick the new visit type (its usual length follows) and click Save', async () => {
-        const type = t.page.locator('.modal select[aria-label="Appointment type"], .modal label:has-text("Appointment type") select').first();
+      await t.step('Pick the new visit type in the panel: saved at once, its usual length follows (Undo shows)', async () => {
+        const type = t.page.locator('.drawer select[aria-label="Visit type"]');
         const opts = await type.locator('option').allTextContents();
         await type.selectOption({ index: Math.max(1, opts.findIndex((o) => /crown/i.test(o))) });
-        await t.click('.modal button.primary');
-        await t.see('.modal', { state: 'detached' });
+        await t.see('.toast-undo');
       });
+      await until(t, async () => (await t.api.get(`/appointments/${a.id}`)).appointment_type_id, 'the new type');
     },
   },
 
@@ -375,14 +367,14 @@ export default {
       await t.open(`/schedule?date=${day}&view=day`, '.cal-col-head');
       await t.step('Click the "Block time" button (the ⊘ icon above the schedule)', async () => {
         await t.click('button[title*="Block"], button[aria-label*="Block"]');
-        await t.see('.modal');
+        await t.see('.block-panel');
       });
       await t.step('Click the "Staff meeting" chip (reason filled in; 12:00–1:00, whole office by default)', async () => {
-        await t.click('.modal button:has-text("Staff meeting")');
+        await t.click('.block-panel button:has-text("Staff meeting")');
       });
       await t.step('Click "Block time"', async () => {
-        await t.click('.modal button:has-text("Block time")');
-        await t.see('.modal', { state: 'detached' });
+        await t.click('.block-panel button:has-text("Block time")');
+        await t.see('.block-panel', { state: 'detached' });
       });
       t.note('Defaults: today’s date on screen, 12:00–1:00, every chair; changing the times is two more fields.');
     },

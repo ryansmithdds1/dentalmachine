@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../../api.js';
 import { useApi, useLookup } from '../../hooks.js';
 import { useAuth } from '../../auth.jsx';
 import { money, fmtDate, toCents, label, practiceToday } from '../../format.js';
-import { ErrorBox, Modal, useSubmit } from '../ui.jsx';
+import { ErrorBox, Modal, useSubmit, ConfirmButton } from '../ui.jsx';
+import { toast } from '../../toast.js';
 
 const STATUS_BADGE = { active: 'info', retention: 'ok', completed: 'ok', cancelled: 'danger' };
 
@@ -74,9 +75,10 @@ function OrthoCase({ c, appliances, onChange }) {
           {c.status === 'active' && <button className="small" onClick={() => update({ status: 'retention', debond_date: practiceToday() })}>Debond → retention</button>}
           {c.status === 'retention' && <button className="small" onClick={() => update({ status: 'completed' })}>Mark complete</button>}
           {c.payment_method_id && ['active', 'retention'].includes(c.status) && <button className="small" onClick={() => update({ autopay: !c.autopay })}>{c.autopay ? 'Turn autopay off' : 'Turn autopay on'}</button>}
-          {c.status === 'active' && <button className="small danger" onClick={() => window.confirm('Cancel this ortho case? Monthly billing stops; charges already posted stay on the ledger.') && update({ status: 'cancelled' })}>Cancel case</button>}
+          {c.status === 'active' && <ConfirmButton ask="Cancel this ortho case? Monthly billing stops; charges already posted stay on the ledger." yes="Cancel case" keep="Keep it" onConfirm={() => update({ status: 'cancelled' })}>Cancel case</ConfirmButton>}
         </div>
       )}
+      {visit && <VisitForm c={c} onClose={() => setVisit(false)} onDone={() => { setVisit(false); onChange(); }} />}
       <h4 style={{ marginBottom: 6 }}>Adjustment log</h4>
       {!c.visits.length ? <div className="muted">No visits logged yet.</div> : (
         <table className="compact-table">
@@ -87,39 +89,41 @@ function OrthoCase({ c, appliances, onChange }) {
                 <td>{fmtDate(v.visit_date)}</td><td>{v.upper_wire || '—'}</td><td>{v.lower_wire || '—'}</td><td>{v.elastics || '—'}</td><td>{v.aligner || '—'}</td>
                 <td>{v.notes}{v.by_name ? <div className="muted" style={{ fontSize: 12 }}>{v.by_name}</div> : null}</td>
                 <td>{v.next_weeks ? `${v.next_weeks} wk` : ''}</td>
-                <td>{w && <button className="small" aria-label="Delete visit" onClick={async () => { if (window.confirm('Delete this visit entry?')) { await api.del(`/ortho/visits/${v.id}`); onChange(); } }}>×</button>}</td>
+                <td>{w && <ConfirmButton className="small" aria-label="Delete visit" ask="Delete this visit entry?" yes="Delete" onConfirm={async () => { await api.del(`/ortho/visits/${v.id}`); onChange(); }}>×</ConfirmButton>}</td>
               </tr>
             ))}
           </tbody>
         </table>
       )}
-      {visit && <VisitForm c={c} onClose={() => setVisit(false)} onDone={() => { setVisit(false); onChange(); }} />}
     </div>
   );
 }
 
+// Log an adjustment, right under the case (no dialog): the last visit's wires and elastics are already there, the
+// cursor is in the upper wire (selected, so typing replaces it) — change what changed, Enter saves.
 function VisitForm({ c, onClose, onDone }) {
   const last = c.visits[0] || {};
   const aligners = c.appliance === 'aligners';
-  const [f, setF] = useState({ visit_date: practiceToday(), upper_wire: last.upper_wire || '', lower_wire: last.lower_wire || '', elastics: last.elastics || '', aligner: '', notes: '', next_weeks: aligners ? 8 : 6 });
+  const [f, setF] = useState({ visit_date: practiceToday(), upper_wire: last.upper_wire || '', lower_wire: last.lower_wire || '', elastics: last.elastics || '', aligner: '', notes: '', next_weeks: last.next_weeks || (aligners ? 8 : 6) });
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
-  const { submit, busy, error } = useSubmit(async () => { await api.post(`/ortho/${c.id}/visits`, f); onDone(); });
+  const { submit, busy, error } = useSubmit(async () => { await api.post(`/ortho/${c.id}/visits`, f); toast('Adjustment logged'); onDone(); });
+  const first = useRef(null);
+  useEffect(() => { requestAnimationFrame(() => { first.current?.focus(); first.current?.select(); }); }, []);
   return (
-    <Modal title="Log adjustment" onClose={onClose}>
-      <form onSubmit={(e) => { e.preventDefault(); submit(); }}>
-        <ErrorBox error={error} />
-        <div className="form-grid">
-          <label>Date<input type="date" value={f.visit_date} onChange={set('visit_date')} /></label>
-          <label>Next visit in (weeks)<input type="number" min="1" max="26" value={f.next_weeks} onChange={set('next_weeks')} /></label>
-          {!aligners && <label>Upper wire<input value={f.upper_wire} onChange={set('upper_wire')} placeholder=".016 NiTi" /></label>}
-          {!aligners && <label>Lower wire<input value={f.lower_wire} onChange={set('lower_wire')} placeholder=".016 NiTi" /></label>}
-          {aligners && <label>Aligner<input value={f.aligner} onChange={set('aligner')} placeholder={last.aligner ? `last: ${last.aligner}` : '6 of 22'} /></label>}
-          <label>Elastics<input value={f.elastics} onChange={set('elastics')} placeholder='Class II, 1/4" 6oz' /></label>
-        </div>
-        <label>Notes<textarea rows="3" value={f.notes} onChange={set('notes')} /></label>
-        <div className="form-actions"><button type="button" onClick={onClose}>Cancel</button><button className="primary" disabled={busy}>Save</button></div>
-      </form>
-    </Modal>
+    <form className="inline-editor ortho-visit" onSubmit={(e) => { e.preventDefault(); submit(); }} onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); onClose(); } }} aria-label="Log adjustment">
+      <h3>Log adjustment{last.visit_date ? <span className="muted" style={{ fontWeight: 400, fontSize: 13 }}> — from the {fmtDate(last.visit_date)} visit; change what changed</span> : null}</h3>
+      <ErrorBox error={error} />
+      <div className="form-grid">
+        {!aligners && <label>Upper wire<input ref={first} value={f.upper_wire} onChange={set('upper_wire')} placeholder=".016 NiTi" /></label>}
+        {!aligners && <label>Lower wire<input value={f.lower_wire} onChange={set('lower_wire')} placeholder=".016 NiTi" /></label>}
+        {aligners && <label>Aligner<input ref={first} value={f.aligner} onChange={set('aligner')} placeholder={last.aligner ? `last: ${last.aligner}` : '6 of 22'} /></label>}
+        <label>Elastics<input value={f.elastics} onChange={set('elastics')} placeholder='Class II, 1/4" 6oz' /></label>
+        <label>Date<input type="date" value={f.visit_date} onChange={set('visit_date')} /></label>
+        <label>Next visit in (weeks)<input type="number" min="1" max="26" value={f.next_weeks} onChange={set('next_weeks')} /></label>
+      </div>
+      <label>Notes<textarea rows="2" value={f.notes} onChange={set('notes')} /></label>
+      <div className="form-actions"><button type="button" onClick={onClose}>Cancel</button><button className="primary" disabled={busy}>Save</button></div>
+    </form>
   );
 }
 

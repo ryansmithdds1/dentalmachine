@@ -4,7 +4,7 @@ import { api } from '../api.js';
 import { useApi } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
 import { money, fmtDate, fmtTime, label, toCents, practiceToday } from '../format.js';
-import { Badge, ErrorBox, Modal, useSubmit } from '../components/ui.jsx';
+import { Badge, ErrorBox, useSubmit, SidePanel } from '../components/ui.jsx';
 import AppointmentForm from '../components/AppointmentForm.jsx';
 import { ReaderPay, useReaders } from '../components/CardReader.jsx';
 import NextVisitPicker from '../components/NextVisitPicker.jsx';
@@ -64,7 +64,7 @@ export default function Checkout() {
     if (!canBill) return undefined;
     const onKey = (e) => {
       if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || e.key.toLowerCase() !== 'b') return;
-      if (!e.target.matches?.('.checkout-steps input[type=number]') || document.querySelector('.modal, .palette')) return;
+      if (!e.target.matches?.('.checkout-steps input[type=number]') || document.querySelector('.modal, .palette, .side-panel')) return;
       e.preventDefault();
       billRef.current();
     };
@@ -93,7 +93,7 @@ export default function Checkout() {
     if (!canBook) return undefined;
     const onKey = (e) => {
       if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || e.key.toLowerCase() !== 'r') return;
-      if (!e.target.matches?.('.checkout-steps input[type=number]') || document.querySelector('.modal, .palette')) return;
+      if (!e.target.matches?.('.checkout-steps input[type=number]') || document.querySelector('.modal, .palette, .side-panel')) return;
       e.preventDefault();
       recallRef.current();
     };
@@ -219,9 +219,9 @@ export default function Checkout() {
       </div>
 
       {booking && (
-        <Modal title={`Book ${a.first_name}'s next visit`} wide onClose={() => setBooking(null)}>
+        <SidePanel className="book-panel" title={`Book ${a.first_name}'s next visit`} onClose={() => setBooking(null)}>
           <AppointmentForm patient={patient} defaults={booking} onCancel={() => setBooking(null)} onSaved={() => { setBooking(null); setNote('Next visit booked.'); reload(); }} />
-        </Modal>
+        </SidePanel>
       )}
     </>
   );

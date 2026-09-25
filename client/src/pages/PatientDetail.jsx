@@ -7,8 +7,8 @@ import { useMakeActive } from '../activePatient.jsx';
 import { PATIENT_MODULES } from '../nav/navConfig.js';
 import './patient.css';
 import { money, fullName, age, fmtDate, fmtDateTime, label, practiceToday } from '../format.js';
-import { Modal, Badge, ErrorBox, useSubmit, Menu } from '../components/ui.jsx';
-import { Pin, Pill, TriangleAlert, MoreHorizontal, GitMerge, FileArchive, ShieldCheck, CalendarPlus, Pencil, Star } from 'lucide-react';
+import { Modal, Badge, ErrorBox, useSubmit, Menu, SidePanel } from '../components/ui.jsx';
+import { Pin, Pill, TriangleAlert, MoreHorizontal, GitMerge, FileArchive, ShieldCheck, CalendarPlus, Pencil, Star, Mail } from 'lucide-react';
 import { requestReview } from '../reviewRequest.js';
 import PatientForm from '../components/PatientForm.jsx';
 import AppointmentForm from '../components/AppointmentForm.jsx';
@@ -33,6 +33,8 @@ import AttributionCard from '../components/marketing/AttributionCard.jsx';
 import MedicalHistory, { medStale, MEDICAL_CONDITIONS } from '../components/patient/MedicalHistory.jsx';
 import ConnectionChips from '../components/cards/Connection.jsx';
 import ContactCard from '../components/patient/ContactCard.jsx';
+import { NameInPlace, DobInPlace } from '../components/patient/IdentityInPlace.jsx';
+import SharedReferralForm from '../components/referrals/ReferralForm.jsx';
 
 export { MEDICAL_CONDITIONS };
 
@@ -104,9 +106,10 @@ export default function PatientDetail() {
             <PatientPhoto p={p} canEdit={can('patients:write')} onChange={reload} />
             <div>
               {inModule && <div className="pt-module" data-module={inModule.key}><ModIcon size={13} aria-hidden /> {inModule.label}</div>}
-              <h1>{fullName(p)} {p.status !== 'active' && <Badge value={p.status} />}</h1>
+              {/* Name and birth date are corrected right here (click, fix, Enter — with Undo). */}
+              <h1><NameInPlace p={p} canEdit={can('patients:write')}>{fullName(p)}</NameInPlace> {p.status !== 'active' && <Badge value={p.status} />}</h1>
               <div className="muted">
-                #{p.id} · {p.dob ? `${fmtDate(p.dob)} (${age(p.dob)} y)` : 'DOB not recorded'} {p.gender ? `· ${label(p.gender)}` : ''} {p.phone ? `· ${p.phone}` : ''}
+                #{p.id} · <DobInPlace p={p} canEdit={can('patients:write')}>{p.dob ? `${fmtDate(p.dob)} (${age(p.dob)} y)` : 'DOB not recorded'}</DobInPlace> {p.gender ? `· ${label(p.gender)}` : ''} {p.phone ? `· ${p.phone}` : ''}
               </div>
               <div className="inline" style={{ marginTop: 6, flexWrap: 'wrap' }}>
                 {p.office_alert && <button className="office-chip" onClick={() => setPopup(p.office_alert)}><Pin size={13} /> {p.office_alert}</button>}
@@ -137,6 +140,8 @@ export default function PatientDetail() {
             {can('schedule:write') && <button className="primary" onClick={() => setModal('appt')}><CalendarPlus size={16} /> Book appointment</button>}
             <Menu label={<MoreHorizontal size={18} />} title="More" items={[
               can('clinical:read') && can('billing:read') && { label: 'Export record', icon: <FileArchive size={16} />, title: "The patient's copy of their record (for a records request): summary PDF, all the data and their images and documents, in one ZIP", onClick: () => download(`/patients/${p.id}/record-export`, `health-record-${p.id}.zip`) },
+              can('clinical:read') && can('billing:read') && can('patients:write') && { label: 'Send the record to someone else…', icon: <FileArchive size={16} />, title: 'A court, the dental board, public health…: the record is downloaded and the disclosure recorded for the HIPAA accounting', onClick: () => navigate(`/compliance?tab=disclosures&new=1&export=1&patient=${p.id}`) },
+              can('patients:write') && { label: 'Write a letter', icon: <Mail size={16} />, title: 'A letter from a template, filled in from the chart', onClick: () => navigate(`/letters?patient=${p.id}`) },
               user?.role === 'admin' && { label: 'Access log', icon: <ShieldCheck size={16} />, title: "Who viewed or changed this patient's record", onClick: () => navigate(`/settings?tab=audit&patient_id=${p.id}`) },
               user?.role === 'admin' && { label: 'Merge a duplicate chart…', icon: <GitMerge size={16} />, title: "Move a duplicate chart's history into this one", onClick: () => setModal('merge') },
             ]} />
@@ -185,9 +190,9 @@ export default function PatientDetail() {
       )}
       {modal === 'merge' && <MergeDialog patient={p} onClose={() => setModal(null)} onDone={() => { setModal(null); reload(); }} />}
       {modal === 'appt' && (
-        <Modal title="Book appointment" onClose={() => setModal(null)}>
+        <SidePanel className="book-panel" title="Book appointment" onClose={() => setModal(null)}>
           <AppointmentForm patient={p} defaults={{ date: practiceToday(practice?.timezone) }} onCancel={() => setModal(null)} onSaved={() => { setModal(null); reload(); }} />
-        </Modal>
+        </SidePanel>
       )}
     </>
   );
@@ -368,68 +373,14 @@ function Referrals({ patient, onChange }) {
           )}
         </div>
       ))}
+      {/* One referral flow everywhere (the Referrals board's form): the usual specialist for this kind of work,
+          the reason from the planned treatment, Ctrl/⌘+Enter sends — in a side panel, not a dialog. */}
       {adding && (
-        <Modal title={adding === 'in' ? 'Who referred this patient?' : 'Refer to a specialist'} onClose={() => setAdding(null)}>
-          <ReferralForm patient={patient} direction={adding} onDone={done} />
-        </Modal>
+        <SidePanel className="rt-panel" title={adding === 'in' ? 'Who referred this patient?' : 'Refer to a specialist'} onClose={() => setAdding(null)}>
+          <SharedReferralForm patient={patient} direction={adding} onDone={done} onCancel={() => setAdding(null)} />
+        </SidePanel>
       )}
     </div>
-  );
-}
-
-function ReferralForm({ patient, direction, onDone }) {
-  const { data: contacts, reload } = useApi('/referral-contacts');
-  const providers = useLookup('/providers?active=true');
-  const [form, setForm] = useState({ contact_id: '', reason: '', teeth: '', urgency: 'routine', provider_id: patient.primary_provider_id || '', notes: '' });
-  const [newContact, setNewContact] = useState(null);
-  const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
-  const { submit, busy, error } = useSubmit(async () => {
-    let contactId = form.contact_id;
-    if (newContact) contactId = (await api.post('/referral-contacts', newContact)).id;
-    const r = await api.post(`/patients/${patient.id}/referrals`, {
-      direction, contact_id: Number(contactId), reason: form.reason || null, notes: form.notes || null,
-      ...(direction === 'out' ? { teeth: form.teeth || null, urgency: form.urgency, provider_id: form.provider_id ? Number(form.provider_id) : null } : {}),
-    });
-    if (direction === 'out') window.open(`/referrals/${r.id}/letter`, '_blank');
-    reload();
-    onDone();
-  });
-  return (
-    <form onSubmit={(e) => { e.preventDefault(); submit(); }}>
-      <ErrorBox error={error} />
-      <div className="form-grid">
-        {newContact ? (
-          <>
-            <label>Name<input required value={newContact.name} onChange={(e) => setNewContact({ ...newContact, name: e.target.value })} placeholder="Dr. Jane Smith" /></label>
-            <label>Practice<input value={newContact.practice_name} onChange={(e) => setNewContact({ ...newContact, practice_name: e.target.value })} /></label>
-            <label>Specialty<input list="specialties" value={newContact.specialty} onChange={(e) => setNewContact({ ...newContact, specialty: e.target.value })} /></label>
-            <label>Phone<input value={newContact.phone} onChange={(e) => setNewContact({ ...newContact, phone: e.target.value })} /></label>
-            <label>Fax<input value={newContact.fax} onChange={(e) => setNewContact({ ...newContact, fax: e.target.value })} /></label>
-            <label>Email<input type="email" value={newContact.email} onChange={(e) => setNewContact({ ...newContact, email: e.target.value })} /></label>
-            <datalist id="specialties">{['Endodontics', 'Oral surgery', 'Periodontics', 'Orthodontics', 'Pediatric dentistry', 'Prosthodontics', 'General dentist', 'Physician', 'Patient'].map((x) => <option key={x} value={x} />)}</datalist>
-          </>
-        ) : (
-          <label className="full">
-            {direction === 'in' ? 'Referred by' : 'Refer to'}
-            <select required value={form.contact_id} onChange={(e) => (e.target.value === 'new' ? setNewContact({ name: '', practice_name: '', specialty: '', phone: '', fax: '', email: '' }) : setForm({ ...form, contact_id: e.target.value }))}>
-              <option value="">Choose…</option>
-              {contacts?.filter((c) => c.active).map((c) => <option key={c.id} value={c.id}>{c.name}{c.practice_name ? ` — ${c.practice_name}` : ''}{c.specialty ? ` (${c.specialty})` : ''}</option>)}
-              <option value="new">+ Someone new…</option>
-            </select>
-          </label>
-        )}
-        <label className="full">{direction === 'in' ? 'Note' : 'Reason for referral'}<input value={form.reason} onChange={set('reason')} placeholder={direction === 'out' ? 'e.g. RCT #19, symptomatic irreversible pulpitis' : ''} /></label>
-        {direction === 'out' && (
-          <>
-            <label>Teeth<input value={form.teeth} onChange={set('teeth')} /></label>
-            <label>Urgency<select value={form.urgency} onChange={set('urgency')}><option value="routine">Routine</option><option value="soon">Soon</option><option value="urgent">Urgent</option></select></label>
-            <label>Referring provider<select value={form.provider_id} onChange={set('provider_id')}><option value="">—</option>{providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
-            <label className="full">Notes for the specialist<textarea rows={2} value={form.notes} onChange={set('notes')} /></label>
-          </>
-        )}
-      </div>
-      <div className="form-actions"><button className="primary" disabled={busy}>{direction === 'out' ? 'Save & print letter' : 'Save'}</button></div>
-    </form>
   );
 }
 

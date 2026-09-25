@@ -4,6 +4,7 @@ import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, to
 import { estimateCoverage, postClaimPayment, benefitYear, deductibleMet, reverseEntry, createClaim, checkPostingDate, primaryPolicy } from '../services.js';
 import { officeFee } from '../fees.js';
 import { savePolicy, validatePlan, syncPlan, PLAN_BENEFITS, DEFAULT_FREQUENCIES, planFor } from '../benefits.js';
+import { COMMON_CARRIERS } from './setup.js';
 
 const POLICY_FIELDS = [
   'carrier_id', 'priority', 'subscriber_name', 'subscriber_id', 'subscriber_dob', 'relationship', 'group_number',
@@ -57,6 +58,11 @@ export default function insuranceRoutes({ db }) {
   // ---- Carriers ----
   r.get('/carriers', requirePermission('billing:read'), async (req, res) => {
     res.json(await db.all('SELECT * FROM insurance_carriers WHERE practice_id = ? ORDER BY name', req.user.practice_id));
+  });
+
+  // The big dental payers' usual electronic payer IDs, so adding "Guardian" fills in 64246 (the person can change it).
+  r.get('/carriers/common', requirePermission('billing:read'), async (_req, res) => {
+    res.json(COMMON_CARRIERS.map(([name, payer_id]) => ({ name, payer_id })));
   });
 
   r.post('/carriers', requirePermission('billing:write'), async (req, res) => {

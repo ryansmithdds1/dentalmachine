@@ -62,6 +62,10 @@ export default function CloseBooks() {
                 <tr><td>Insurance payments</td><td className="num">{money(t.insurance_payments)}</td></tr>
                 <tr><td>Refunds</td><td className="num">{money(t.refunds)}</td></tr>
                 <tr><td>Adjustments</td><td className="num">{money(t.adjustments)}</td></tr>
+                {/* Not dental production: product sales and gift certificates on their own lines; their payments are in the payments above. */}
+                {t.retail_sales ? <tr><td>Retail sales{t.retail_sales_tax ? ` (incl. ${money(t.retail_sales_tax)} tax)` : ''}</td><td className="num">{money(t.retail_sales)}</td></tr> : null}
+                {t.gift_certificates_sold ? <tr><td>Gift certificates sold</td><td className="num">{money(t.gift_certificates_sold)}</td></tr> : null}
+                {t.gift_certificates_used ? <tr><td>Gift certificates used</td><td className="num">{money(t.gift_certificates_used)}</td></tr> : null}
                 <tr><td><strong>Net collections</strong></td><td className="num"><strong>{money(t.net_collections)}</strong></td></tr>
               </tbody>
             </table>

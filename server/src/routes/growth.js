@@ -50,7 +50,7 @@ export default function growthRoutes({ db, messenger, config, mailer = { enabled
     const adjustments = v.adjustments;
     const hygieneProduction = await one(
       `SELECT COALESCE(SUM(l.amount),0) AS n FROM ledger_entries l JOIN providers pv ON pv.id = l.provider_id
-       WHERE l.practice_id = ? AND l.type = 'charge' AND pv.type = 'hygienist' AND l.entry_date BETWEEN ? AND ?${byProv('l.provider_id')}`, ...range,
+       WHERE l.practice_id = ? AND l.type = 'charge' AND l.retail_sale_id IS NULL AND pv.type = 'hygienist' AND l.entry_date BETWEEN ? AND ?${byProv('l.provider_id')}`, ...range,
     );
     const kept = pt.broken_rate.kept;
     const broken = pt.broken_rate.broken;
@@ -64,20 +64,20 @@ export default function growthRoutes({ db, messenger, config, mailer = { enabled
     );
     const byProvider = await db.all(
       `SELECT pv.id, pv.name, pv.type, COALESCE(SUM(l.amount),0) AS production, COUNT(DISTINCT l.patient_id) AS patients
-       FROM providers pv LEFT JOIN ledger_entries l ON l.provider_id = pv.id AND l.type = 'charge' AND l.entry_date BETWEEN ? AND ?
+       FROM providers pv LEFT JOIN ledger_entries l ON l.provider_id = pv.id AND l.type = 'charge' AND l.retail_sale_id IS NULL AND l.entry_date BETWEEN ? AND ?
        WHERE pv.practice_id = ? AND pv.active = 1${byProv('pv.id')} GROUP BY pv.id ORDER BY production DESC`, from, to, pid,
     );
     const days = Math.max(1, (Date.parse(to) - Date.parse(from)) / 86400_000 + 1);
     const monthly = await db.all(
       `SELECT substr(entry_date, 1, 7) AS month,
-         SUM(CASE WHEN type = 'charge' THEN amount ELSE 0 END) AS production,
+         SUM(CASE WHEN type = 'charge' AND retail_sale_id IS NULL THEN amount ELSE 0 END) AS production,
          -SUM(CASE WHEN type IN ('payment','insurance_payment') THEN amount ELSE 0 END) AS collections
        FROM ledger_entries WHERE practice_id = ? AND entry_date >= ? GROUP BY month ORDER BY month`, pid, `${addDays(today, -365).slice(0, 7)}-01`,
     );
     if (prov) {
       // For one provider: their production each month, and the payments credited to their work.
       const start = `${addDays(today, -365).slice(0, 7)}-01`;
-      const prodRows = await db.all(`SELECT substr(entry_date, 1, 7) AS month, SUM(amount) AS n FROM ledger_entries WHERE practice_id = ? AND type = 'charge' AND entry_date >= ?${byProv()} GROUP BY month`, pid, start);
+      const prodRows = await db.all(`SELECT substr(entry_date, 1, 7) AS month, SUM(amount) AS n FROM ledger_entries WHERE practice_id = ? AND type = 'charge' AND retail_sale_id IS NULL AND entry_date >= ?${byProv()} GROUP BY month`, pid, start);
       const alloc = (await allocationsForRange(db, pid, start, today)).filter((a) => a.provider_id === prov && ['payment', 'insurance_payment'].includes(a.credit_type));
       const months = new Map(monthly.map((m) => [m.month, { month: m.month, production: 0, collections: 0 }]));
       for (const p of prodRows) (months.get(p.month) || months.set(p.month, { month: p.month, production: 0, collections: 0 }).get(p.month)).production = p.n;

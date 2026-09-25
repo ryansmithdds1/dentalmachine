@@ -151,3 +151,85 @@ export function Menu({ label, title, items, align = 'right' }) {
     </div>
   );
 }
+
+// Asks on the spot instead of a browser "Are you sure?" box or a dialog (CLAUDE.md principle 5): the first press
+// shows the question with the real button beside it (focused, so Enter does it); Esc or "Keep" puts it back.
+// Only for things that can't be undone — everything else saves at once with an undo toast.
+export function ConfirmButton({ children, ask, yes = 'Yes', onConfirm, className = 'small danger', disabled, title, keep = 'Keep', ...rest }) {
+  const [open, setOpen] = useState(false);
+  const yesRef = useRef(null);
+  useEffect(() => { if (open) yesRef.current?.focus({ preventScroll: true }); }, [open]);
+  if (!open) return <button type="button" className={className} disabled={disabled} title={title} onClick={() => setOpen(true)} {...rest}>{children}</button>;
+  return (
+    <span className="inline-confirm" role="group" aria-label={ask}
+      onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); e.nativeEvent.stopImmediatePropagation?.(); setOpen(false); } }}>
+      <span className="inline-confirm-ask">{ask}</span>
+      <button type="button" ref={yesRef} className={className} disabled={disabled} onClick={async () => { setOpen(false); await onConfirm(); }}>{yes}</button>
+      <button type="button" className="small" onClick={() => setOpen(false)}>{keep}</button>
+    </span>
+  );
+}
+
+// Asks for one short answer on the spot (a reason, a number) instead of a browser prompt box: the first press
+// opens a one-line box right there with the cursor in it; Enter saves, Esc puts the button back.
+export function AskButton({ children, label, placeholder, initial = '', required = false, submit = 'Save', onSubmit, className = 'small', disabled, title, danger, hint }) {
+  const [open, setOpen] = useState(false);
+  const [value, setValue] = useState(initial);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  if (!open) return <button type="button" className={className} disabled={disabled} title={title} onClick={() => { setValue(initial); setError(null); setOpen(true); }}>{children}</button>;
+  const go = async (e) => {
+    e.preventDefault();
+    if (required && !value.trim()) return;
+    setBusy(true);
+    setError(null);
+    try { await onSubmit(value.trim()); setOpen(false); } catch (x) { setError(x); } finally { setBusy(false); }
+  };
+  return (
+    <form className="inline-ask" onSubmit={go}
+      onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); e.nativeEvent.stopImmediatePropagation?.(); setOpen(false); } }}>
+      <label>{label}
+        <input autoFocus value={value} placeholder={placeholder} onChange={(e) => setValue(e.target.value)} aria-label={label} />
+      </label>
+      <button className={danger ? 'small danger' : 'small primary'} disabled={busy || (required && !value.trim())}>{submit}</button>
+      <button type="button" className="small" onClick={() => setOpen(false)}>Cancel</button>
+      {hint && <span className="muted inline-ask-hint">{hint}</span>}
+      {error && <span className="error inline-ask-error">{error.message || String(error)}</span>}
+    </form>
+  );
+}
+
+// A side panel instead of a dialog (CLAUDE.md principle 4): it slides in on the right, the page stays usable
+// behind it (no backdrop, nothing stacked), the cursor goes to its first box, Esc closes it and focus goes back.
+export function SidePanel({ title, onClose, children, className = '', wide }) {
+  const box = useRef(null);
+  const close = useRef(onClose);
+  close.current = onClose;
+  const [before] = useState(() => document.activeElement);
+  useEffect(() => {
+    if (!box.current?.contains(document.activeElement)) {
+      const inBody = FOCUSABLE.split(', ').map((x) => `.drawer-body ${x}`).join(', ');
+      (box.current?.querySelector(inBody) || box.current)?.focus({ preventScroll: true });
+    }
+    // Esc closes the panel (not whatever is behind it): listened for first, and stopped there.
+    const onKey = (e) => {
+      if (e.key !== 'Escape' || e.defaultPrevented) return;
+      e.stopImmediatePropagation();
+      close.current();
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => {
+      window.removeEventListener('keydown', onKey, true);
+      if (before && document.contains(before)) before.focus({ preventScroll: true });
+    };
+  }, [before]);
+  return (
+    <aside ref={box} tabIndex={-1} className={`drawer side-panel${wide ? ' wide' : ''} ${className}`} role="dialog" aria-label={title}>
+      <div className="drawer-head">
+        <h2 style={{ margin: 0 }}>{title}</h2>
+        <button className="small" onClick={onClose} aria-label="Close">✕</button>
+      </div>
+      <div className="drawer-body">{children}</div>
+    </aside>
+  );
+}

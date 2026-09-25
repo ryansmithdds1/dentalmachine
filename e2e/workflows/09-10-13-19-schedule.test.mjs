@@ -76,10 +76,10 @@ test('#9 book for the active patient from anywhere: Alt+B, then Enter books thei
   await page.waitForFunction((id) => sessionStorage.getItem('dm_active_patient') === String(id), p.id);
   const r = await measure(page, async () => {
     await page.keyboard.press('Alt+b');
-    await page.waitForSelector('.modal .book-suggest strong');
+    await page.waitForSelector('.book-panel .book-suggest strong');
     await page.waitForFunction(() => document.activeElement?.textContent === 'Book appointment');
     await page.keyboard.press('Enter');
-    await page.waitForSelector('.modal', { state: 'detached' });
+    await page.waitForSelector('.book-panel', { state: 'detached' });
   });
   console.log(withinBudget('book the active patient (Alt+B, Enter)', r, { actions: 3, ms: 6000 }));
   const [a] = await until(async () => { const l = await upcoming(p.id); return l.length ? l : null; }, 'the booking');
@@ -97,14 +97,14 @@ test('#9 N and a patient search: the form fills in the rest and Book has the foc
   await openDay(DAY);
   const r = await measure(page, async () => {
     await page.keyboard.press('n');
-    await page.waitForSelector('.modal input[aria-label="Find a patient"]');
+    await page.waitForSelector('.book-panel input[aria-label="Find a patient"]');
     await page.keyboard.type('Nadia Booktest');
-    await page.waitForSelector('.modal .picker-row.hl:has-text("Nadia")');
+    await page.waitForSelector('.book-panel .picker-row.hl:has-text("Nadia")');
     await page.keyboard.press('Enter');
-    await page.waitForSelector('.modal .book-suggest strong');
+    await page.waitForSelector('.book-panel .book-suggest strong');
     await page.waitForFunction(() => document.activeElement?.textContent === 'Book appointment');
     await page.keyboard.press('Enter');
-    await page.waitForSelector('.modal', { state: 'detached' });
+    await page.waitForSelector('.book-panel', { state: 'detached' });
   });
   console.log(withinBudget('book from N with a patient search', r, { actions: 4, ms: 8000 }));
   const [a] = await until(async () => { const l = await upcoming(p.id); return l.length ? l : null; }, 'the booking');
@@ -115,8 +115,8 @@ test('#9 N and a patient search: the form fills in the rest and Book has the foc
   // The new booking has no Status field (it's always "scheduled").
   await page.keyboard.press('Escape');
   await page.keyboard.press('n');
-  await page.waitForSelector('.modal');
-  assert.equal(await page.locator('.modal select option[value="no_show"]').count(), 0, 'no Status picker on a new booking');
+  await page.waitForSelector('.book-panel');
+  assert.equal(await page.locator('.book-panel select option[value="no_show"]').count(), 0, 'no Status picker on a new booking');
   await page.keyboard.press('Escape');
   assert.deepEqual(s.errors, []);
 });
@@ -138,10 +138,10 @@ test('#9 drag a time, one click for the active patient, Book: 3 actions; the dra
     await page.mouse.down();
     await page.mouse.move(x, y2, { steps: 6 });
     await page.mouse.up();
-    await page.click('.modal .book-active');
-    await page.waitForSelector('.modal .book-suggest strong');
-    await page.click('.modal button.primary:has-text("Book appointment")');
-    await page.waitForSelector('.modal', { state: 'detached' });
+    await page.click('.book-panel .book-active');
+    await page.waitForSelector('.book-panel .book-suggest strong');
+    await page.click('.book-panel button.primary:has-text("Book appointment")');
+    await page.waitForSelector('.book-panel', { state: 'detached' });
   });
   console.log(withinBudget('book from a drag', r, { actions: 3, ms: 6000 }));
   const [a] = await until(async () => { const l = await upcoming(p.id); return l.length ? l : null; }, 'the booking');
@@ -362,10 +362,10 @@ test('#19 cancel with a reason and rebook: X, a number, Enter (3 keys); no-show 
     await page.keyboard.press('x');
     await page.waitForSelector('.broken-picker');
     await page.keyboard.press('2');
-    await page.waitForSelector('.modal .book-suggest strong');
-    await page.waitForFunction(() => document.activeElement?.textContent === 'Book appointment');
+    // The next opening shows as a line on the schedule (no form on top of it), with Book it focused.
+    await page.waitForFunction(() => document.activeElement?.textContent === 'Book it' && document.activeElement.closest('.rebook-bar'));
     await page.keyboard.press('Enter');
-    await page.waitForSelector('.modal', { state: 'detached' });
+    await page.waitForSelector('.rebook-bar', { state: 'detached' });
   });
   console.log(withinBudget('cancel with a reason and rebook', r, { actions: 3, ms: 8000 }));
   const old = await s.get(`/appointments/${a.id}`);
@@ -378,7 +378,7 @@ test('#19 cancel with a reason and rebook: X, a number, Enter (3 keys); no-show 
   const hist = await s.get(`/appointments/${a.id}/history`);
   assert.ok(hist.some((h) => h.action === 'appointment.status' && JSON.parse(h.details).broken_reason === 'conflict'), 'the reason is in the history');
 
-  // No-show: Shift+X and the reason; Esc on the rebook form means "not now".
+  // No-show: Shift+X and the reason — done; the rebook line waits without blocking anything (Esc puts it away).
   const b = await bookAt(await newPatient('Nova'), DAY, '13:00', 30);
   await openDay(DAY);
   await page.waitForSelector(card(b.id));
@@ -387,10 +387,13 @@ test('#19 cancel with a reason and rebook: X, a number, Enter (3 keys); no-show 
     await page.keyboard.press('Shift+X');
     await page.waitForSelector('.broken-picker');
     await page.keyboard.press('6');
-    await page.waitForSelector('.modal');
+    await page.waitForSelector('.rebook-bar');
   });
   console.log(withinBudget('no-show with a reason', ns, { actions: 2, ms: 4000 }));
+  assert.equal(await page.locator('.modal, .side-panel').count(), 0, 'no form opens over the schedule');
+  await page.waitForFunction(() => document.activeElement?.closest('.rebook-bar'));
   await page.keyboard.press('Escape');
+  await page.waitForSelector('.rebook-bar', { state: 'detached' });
   const missed = await s.get(`/appointments/${b.id}`);
   assert.equal(missed.status, 'no_show');
   assert.equal(missed.broken_reason, 'no_contact');

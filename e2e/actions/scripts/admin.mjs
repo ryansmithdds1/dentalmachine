@@ -13,27 +13,29 @@ async function section(t, label, tab) {
     await t.page.waitForURL(new RegExp(`tab=${tab}`));
   });
 }
-// A resource list's "+ Add": fills the given fields [[label, text]] (click + type each) and saves.
+// A resource list's one-line add row (the cursor is already in its first box): types the given fields
+// [[label, text]] — Tab to the next box, skipping any that already hold the right value (a smart default) — and
+// presses Enter.
 async function addRecord(t, what, fields) {
-  await t.step(`Click "+ Add": the new ${what} form`, async () => {
-    await t.click('.settings-body button:has-text("Add")');
-    await t.see('.modal, .settings-body form');
-  });
-  await t.step(`Fill in ${fields.map(([l]) => l).join(', ')}`, async () => {
+  await t.step(`Type the new ${what}: ${fields.map(([l]) => l).join(', ')} (the cursor is already in the add line)`, async () => {
+    await t.see('.quick-add input');
+    let at = await t.page.evaluate(() => [...document.querySelectorAll('.quick-add input, .quick-add select')].indexOf(document.activeElement));
+    if (at < 0) { await t.click('.quick-add input'); at = 0; }
     for (const [label, text] of fields) {
-      const box = t.page.locator(`.modal label:has-text("${label}") input, .settings-body form label:has-text("${label}") input`).first();
-      // The first box has the cursor when the form opens: just type.
-      if (!(await box.evaluate((el) => el === document.activeElement))) {
-        await t.click(box);
-        await t.key(`${MOD}+a`);
-      }
+      const boxes = t.page.locator('.quick-add input, .quick-add select');
+      const want = await t.page.locator('.quick-add label').evaluateAll((ls, l) => ls.findIndex((x) => x.textContent.trim().toLowerCase().startsWith(l.toLowerCase())), label);
+      const box = boxes.nth(want);
+      if ((await box.inputValue()) === text) continue; // already right (a default or guessed from what was typed)
+      while (at < want) { await t.key('Tab'); at++; }
+      if (at !== want) { await t.click(box); at = want; }
       await t.type(text);
     }
   });
-  await t.step('Press Enter (or click Save)', async () => {
-    if (await t.page.evaluate(() => !!document.activeElement?.closest('.modal form, .settings-body form') && document.activeElement.tagName === 'INPUT')) await t.key('Enter');
-    else await t.click('.modal button.primary, .settings-body form button.primary');
-    await t.see('.modal', { state: 'detached' });
+  await t.step('Press Enter: added (Undo on the toast)', async () => {
+    const n = await t.page.locator('.settings-body tbody tr').count();
+    await t.key('Enter');
+    await t.page.waitForFunction((m) => document.querySelectorAll('.settings-body tbody tr').length > m, n);
+    await t.see('.toast:has-text("Added")');
   });
 }
 
@@ -42,6 +44,7 @@ export default {
     role: 'billing',
     async run(t) {
       await section(t, 'Insurance carriers', 'carriers');
+      // "Guardian…" fills in Guardian's usual payer ID (64246).
       await addRecord(t, 'carrier', [['Name', `Guardian Dental ${uniq()}`], ['Payer ID', '64246']]);
     },
   },
@@ -49,23 +52,9 @@ export default {
     role: 'admin',
     async run(t) {
       await section(t, 'Providers', 'providers');
-      await t.step('Click "+ Add": the new provider form (12 fields)', async () => {
-        await t.click('.settings-body button:has-text("Add")');
-        await t.see('.modal');
-      });
-      await t.step('Type the name ("…, DDS": the Type follows — Dentist); the cursor is already in Name', async () => {
-        if (!(await t.page.locator('.modal label:has-text("Name") input').first().evaluate((el) => el === document.activeElement))) await t.click('.modal label:has-text("Name") input');
-        await t.type(`Dr. Robin ${uniq()}, DDS`);
-        const type = t.page.locator('.modal label:has-text("Type") select');
-        if ((await type.inputValue()) !== 'dentist') {
-          t.flag('asks-known', 'Add provider doesn’t use the "DDS" typed in the name: the Type is picked by hand');
-          await type.selectOption('dentist');
-        }
-      });
-      await t.step('Press Enter: saved', async () => {
-        await t.key('Enter');
-        await t.see('.modal', { state: 'detached' });
-      });
+      // "…, DDS" in the name makes the Type Dentist; NPI, hours and the rest can follow (Edit, in place).
+      await addRecord(t, 'provider', [['Name', `Dr. Robin ${uniq()}, DDS`], ['Type', 'dentist']]);
+      if ((await t.page.locator('.settings-body tr', { hasText: 'Robin' }).last().textContent()).toLowerCase().includes('dentist') === false) t.flag('asks-known', 'Add provider doesn’t use the "DDS" typed in the name');
     },
   },
   A173: {
@@ -85,26 +74,17 @@ export default {
   A165: {
     role: 'admin',
     async run(t) {
-      await section(t, 'Fee schedule', 'codes');
-      await t.step('Click "+ Add": the new procedure code form', async () => {
-        await t.click('.settings-body button:has-text("Add")');
-        await t.see('.modal');
-      });
-      await t.step('Type the code, Tab, the description, Tab, the fee (the category follows the code: D9… = adjunctive)', async () => {
-        const fields = [['Code', `D9${String(Date.now()).slice(-3)}`], ['Description', 'Robot test procedure'], ['Fee', '95']];
-        for (const [i, [label, text]] of fields.entries()) {
-          const box = t.page.locator(`.modal label:has-text("${label}") input`).first();
-          if (!(await box.evaluate((el) => el === document.activeElement))) {
-            if (i) await t.key('Tab'); else await t.click(box);
-          }
-          await t.type(text);
-        }
-        const cat = t.page.locator('.modal label:has-text("Category") select');
-        if (!(await cat.inputValue())) { t.flag('asks-known', 'The category isn’t taken from the code (D9… is adjunctive)'); await cat.selectOption({ index: 1 }); }
-      });
-      await t.step('Press Enter: saved', async () => {
+      await section(t, 'Procedure codes & fees', 'codes');
+      // The category follows the code (D9… = adjunctive).
+      await t.step('Type the whole line in the add box — code, description, fee — and press Enter (the category follows the code)', async () => {
+        await t.see('.quick-add input');
+        const box = t.page.locator('.quick-add input').first();
+        if (!(await box.evaluate((el) => el === document.activeElement))) await t.click(box);
+        await t.type(`D9${String(Date.now()).slice(-3)} Robot test procedure 95`);
+        const n = await t.page.locator('.settings-body tbody tr').count();
         await t.key('Enter');
-        await t.see('.modal', { state: 'detached' });
+        await t.page.waitForFunction((m) => document.querySelectorAll('.settings-body tbody tr').length > m, n);
+        await t.see('.toast:has-text("Added")');
       });
     },
   },
@@ -113,36 +93,18 @@ export default {
     role: 'admin',
     async run(t) {
       await section(t, 'Users & roles', 'users');
-      await t.step('Click "+ Invite user"', async () => {
-        await t.click('button:has-text("Invite user")');
-        await t.see('.modal');
-      });
-      await t.step('Type their name, Tab, their email; pick the role (front desk to start with)', async () => {
-        if (!(await t.page.locator('.modal label:has-text("Name") input').first().evaluate((el) => el === document.activeElement))) await t.click('.modal label:has-text("Name") input');
+      await t.step('Type their name (the cursor is already in "Invite someone"), Tab, their email (they start as front desk)', async () => {
+        const name = t.page.locator('.quick-add label:has-text("Name") input');
+        if (!(await name.evaluate((el) => el === document.activeElement))) await t.click(name);
         await t.type('Riley Assistant');
         await t.key('Tab');
         await t.type(`riley.${uniq()}@example.com`);
-        const role = t.page.locator('.modal label:has-text("Role") select').first();
-        if (await role.count()) await role.selectOption({ index: 1 });
       });
-      if (await t.page.locator('.modal label:has-text("Temporary password") input').count()) {
-        t.flag('wording', '"+ Invite user" opens "New user" and asks the manager to make up a temporary password to pass on, instead of emailing an invitation link');
-        await t.step('Make up a temporary password and type it', async () => {
-          await t.click('.modal label:has-text("Temporary password") input');
-          await t.type('Temp-pass-2026!');
-        });
-      }
-      await t.step('Click "Send invitation": they get an email with a link to choose their own password', async () => {
-        await t.click('.modal button.primary');
-        await t.page.waitForFunction(() => !document.querySelector('.modal') || document.querySelector('.invite-sent'));
+      await t.step('Press Enter (Send invitation): they get an email with a link to choose their own password', async () => {
+        await t.key('Enter');
+        await t.page.waitForFunction(() => document.querySelector('.invite-sent') || [...document.querySelectorAll('.toast')].some((x) => /Invitation emailed/.test(x.textContent)));
       });
-      if (await t.page.locator('.invite-sent').count()) {
-        t.note('No email service in this office: the link is shown to pass on.');
-        await t.step('Press Enter (Done): the link to give them is on screen', async () => {
-          await t.key('Enter');
-          await t.see('.modal', { state: 'detached' });
-        });
-      }
+      if (await t.page.locator('.invite-sent').count()) t.note('No email service in this office: the link is shown on the page to pass on.');
     },
   },
 
@@ -155,15 +117,10 @@ export default {
     },
     async run(t, { name }) {
       await section(t, 'Users & roles', 'users');
-      const row = t.page.locator('.settings-body tr', { hasText: name }).first();
-      await t.step(`Click Edit on ${name}’s row`, async () => {
-        await t.click(row.locator('button:has-text("Edit")'));
-        await t.see('.modal');
-      });
-      await t.step('Change the role to Billing and click Save (audited; they are signed out everywhere)', async () => {
-        await t.page.locator('.modal select').first().selectOption('billing');
-        await t.click('.modal button.primary');
-        await t.see('.modal', { state: 'detached' });
+      await t.step(`Pick Billing in ${name}’s Role: saved at once (audited; they sign in again; Undo shows)`, async () => {
+        const role = t.page.locator(`.settings-body select[aria-label="Role for ${name}"]`);
+        await role.selectOption('billing');
+        await t.see('.toast:has-text("is now Billing")');
       });
     },
   },
@@ -181,11 +138,13 @@ export default {
     role: 'admin',
     async run(t) {
       await section(t, 'Audit log', 'audit');
-      await t.step('Type the patient # to see every change to their chart', async () => {
-        await t.click('.settings-body label:has-text("Patient") input, .settings-body input[placeholder*="Patient"]');
+      await t.step('Type the patient # (the cursor is already there): every change to their chart shows as you type', async () => {
+        const box = t.page.locator('.settings-body label:has-text("Patient") input').first();
+        if (!(await box.evaluate((el) => el === document.activeElement))) await t.click(box);
+        const before = await t.page.locator('.settings-body tbody tr').count();
         await t.type('3');
-        await t.key('Enter');
-        await t.wait(800);
+        await t.page.waitForFunction((n) => document.querySelectorAll('.settings-body tbody tr').length !== n || [...document.querySelectorAll('.settings-body tbody tr')].every((r) => /patient|#3/i.test(r.textContent)), before, { timeout: 5000 }).catch(() => {});
+        await t.wait(600);
       });
     },
   },
@@ -194,17 +153,14 @@ export default {
     role: 'dentist',
     async run(t) {
       await section(t, 'Note templates', 'templates');
-      await t.step('Click "+ Template"', async () => {
-        await t.click('.settings-body button:has-text("Template")');
-        await t.see('.modal, .settings-body form');
+      await t.step('Type the template (the cursor is already in it; the name comes from its first words unless you type one)', async () => {
+        await t.see('.inline-editor textarea');
+        if (!(await t.page.evaluate(() => !!document.activeElement?.closest('.inline-editor')))) await t.click('.inline-editor textarea');
+        await t.type(`Crown seat ${uniq()}: crown #__ seated with __ cement. Occlusion checked. Floss passes contacts.`);
       });
-      await t.step('Type the name and the template text; Save', async () => {
-        await t.click('.modal input, .settings-body form input');
-        await t.type(`Crown seat ${uniq()}`);
-        await t.click('.modal textarea, .settings-body form textarea');
-        await t.type('Crown #__ seated with __ cement. Occlusion checked. Floss passes contacts.');
-        await t.click('.modal button.primary, .settings-body form button.primary');
-        await t.see('.modal', { state: 'detached' });
+      await t.step('Press Ctrl/⌘+Enter: saved (it’s in the list)', async () => {
+        await t.key(`${MOD}+Enter`);
+        await t.see('.toast:has-text("Added")');
       });
     },
   },
@@ -214,11 +170,12 @@ export default {
     async run(t) {
       await section(t, 'My account', 'account');
       t.note('The robot fills the form but doesn’t submit it (the demo passwords are shared by every run).');
-      await t.step('Type the current password and the new one twice', async () => {
+      await t.step('Type the current password (the cursor is already there), Tab, the new one', async () => {
         const boxes = t.page.locator('.settings-body input[type="password"]');
         const n = await boxes.count();
+        if (!(await boxes.first().evaluate((el) => el === document.activeElement))) await t.click(boxes.first());
         for (let i = 0; i < n; i++) {
-          await t.click(boxes.nth(i));
+          if (i) await t.key('Tab');
           await t.type(i === 0 ? 'demo-password-123' : 'a-new-longer-password-1');
         }
       });

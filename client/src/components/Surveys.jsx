@@ -4,7 +4,7 @@ import { api } from '../api.js';
 import { useApi } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
 import { fmtUtcDateTime } from '../format.js';
-import { ErrorBox, Modal, useSubmit } from './ui.jsx';
+import { ErrorBox, Modal, useSubmit, AskButton } from './ui.jsx';
 
 const TYPE_LABEL = { nps: 'Recommend us (0–10)', rating: 'Stars (1–5)', yesno: 'Yes / no', text: 'Written answer' };
 
@@ -19,11 +19,14 @@ export default function Surveys() {
   if (loadError) return <ErrorBox error={loadError} />; // e.g. no permission: say so, not "Loading…" for ever (e2e sweep)
   if (!data) return <div className="card">Loading…</div>;
   const admin = user.role === 'admin';
-  const send = async (s) => {
-    const days = window.prompt('Send to patients seen in the last how many days? (Anyone asked in the last 90 days is skipped.)', '30');
-    if (!days) return;
+  // How far back to ask is typed beside the button (30 days to start with); Enter sends.
+  const send = async (s, days) => {
+    const n = Number(days);
+    if (!Number.isInteger(n) || n < 1 || n > 3650) throw new Error('Type a number of days, e.g. 30');
     setErr(null);
-    try { const r = await api.post(`/surveys/${s.id}/send`, { seen_within_days: Number(days) }); setNote(`Sent to ${r.sent}; ${r.skipped} couldn’t be reached.`); reload(); } catch (e) { setErr(e); }
+    const r = await api.post(`/surveys/${s.id}/send`, { seen_within_days: n });
+    setNote(`Sent to ${r.sent}; ${r.skipped} couldn’t be reached.`);
+    reload();
   };
   return (
     <div className="card">
@@ -48,7 +51,7 @@ export default function Surveys() {
               <td>
                 <div className="inline" style={{ gap: 6 }}>
                   <button className="small" onClick={() => setResults(s)}>Results</button>
-                  {can('patients:write') && s.active && <button className="small" onClick={() => send(s)}>Send…</button>}
+                  {can('patients:write') && s.active && <AskButton label="Patients seen in the last … days" initial="30" required submit="Send" hint="Anyone asked in the last 90 days is skipped." onSubmit={(days) => send(s, days)}>Send…</AskButton>}
                   {admin && <button className="small" onClick={() => setEditing(s)}>Edit</button>}
                 </div>
               </td>

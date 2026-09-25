@@ -97,3 +97,9 @@ marks every recall of theirs that was still due as contacted (`POST /patients/:i
 optional `recall_ids`; a note or a wrong number doesn't count as contact; audited with the recalls it covered). The
 unscheduled-treatment and broken-appointment lists log calls the same inline way. Tests: `e2e/workflows/RF-recall.test.mjs`
 (A051: 2 keys), `server/test/frontdesk-b1a.test.js`.
+
+
+## Phase 2, batch 2A: intervals by chips
+✎ on a recall opens the usual intervals (3 / 4 / 6 / 12 months) and the usual reasons (perio history, high caries
+risk, stable, alternates with the periodontist, the patient's request) as chips: ✎, the months, the reason — the
+reason saves it (**3 actions**, was 6). Another number or a typed reason still works (Save).

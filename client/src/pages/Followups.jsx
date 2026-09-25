@@ -6,10 +6,11 @@ import { useAuth } from '../auth.jsx';
 import { useShortcuts, useCommands } from '../shortcuts.js';
 import { undoable } from '../toast.js';
 import { money, fmtDate, fmtDateTime, label, shiftDate, practiceToday } from '../format.js';
-import { Badge, ErrorBox, Modal, useSubmit, MoreRows } from '../components/ui.jsx';
+import { Badge, ErrorBox, useSubmit, MoreRows, SidePanel } from '../components/ui.jsx';
 import AppointmentForm from '../components/AppointmentForm.jsx';
 import { brokenLabel } from '../components/calendar/BrokenPicker.jsx';
 import RecallBoard from '../components/RecallBoard.jsx';
+import MailingLabelsButton from '../components/MailingLabels.jsx';
 import './followups.css';
 
 const OUTCOMES = [['left_voicemail', 'Left voicemail'], ['texted', 'Texted'], ['emailed', 'Emailed'], ['spoke_scheduled', 'Spoke — scheduled'], ['spoke_will_call', 'Spoke — will call back'], ['declined', 'Declined'], ['wrong_number', 'Wrong number'], ['note', 'Note']];
@@ -308,6 +309,8 @@ function Recall() {
         <select value={win} onChange={(e) => setWin(Number(e.target.value))} style={{ width: 'auto' }} aria-label="Due within">
           <option value={0}>Overdue only</option><option value={30}>Due within 30 days</option><option value={60}>Due within 60 days</option><option value={90}>Due within 90 days</option>
         </select>
+        {/* A177: address labels for the chosen people (or everyone listed). */}
+        <MailingLabelsButton ids={(selected.length ? people.filter(picked) : people).map((g) => g.patient_id)} source="recall" label={selected.length ? 'Labels for selected' : 'Mailing labels'} />
         {w && (
           <div className="inline">
             <button onClick={() => setSelected(selected.length === allIds.length ? [] : allIds)}>{selected.length && selected.length === allIds.length ? 'Clear' : 'Select all'}</button>
@@ -365,9 +368,9 @@ function Recall() {
 // Books the patient straight from a list: their planned procedures can be attached in the form.
 function BookModal({ patient, date, defaults = {}, onDone }) {
   return (
-    <Modal title={`Book ${patient.first_name} ${patient.last_name}`} onClose={() => onDone(null)}>
+    <SidePanel className="book-panel" title={`Book ${patient.first_name} ${patient.last_name}`} onClose={() => onDone(null)}>
       <AppointmentForm patient={patient} defaults={{ date, ...defaults }} onCancel={() => onDone(null)} onSaved={onDone} />
-    </Modal>
+    </SidePanel>
   );
 }
 

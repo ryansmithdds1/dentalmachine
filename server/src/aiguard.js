@@ -58,6 +58,11 @@ export const HIGH_RISK = [
   ['POST', /^\/marketing\/costs(\/\d+\/void)?$/, 'marketing costs'],
   ['PUT', /^\/marketing\/patients\/\d+\/attribution$/, 'where a patient came from'],
   ['POST', /^\/verification\/(policies\/\d+\/phone|reads\/\d+\/confirm|reviews\/\d+\/apply)$/, 'insurance benefits for everyone on a plan'],
+  // Products and gift certificates (retail.js): money in, balances paid down, and their voids.
+  ['POST', /^\/patients\/\d+\/(retail-sales|gift-certificates\/redeem)$/, 'selling products and redeeming gift certificates'],
+  ['POST', /^\/(retail-sales\/\d+\/void|gift-certificates(\/\d+\/void|\/redemptions\/\d+\/void)?)$/, 'selling or voiding gift certificates and product sales'],
+  ['POST', /^\/retail\/products$/, 'product prices'],
+  ['PUT', /^\/retail\/(settings|products\/\d+)$/, 'product prices, sales tax and gift certificate rules'],
   ['DELETE', /./, 'removing records'],
 ];
 

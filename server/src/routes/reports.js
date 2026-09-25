@@ -4,6 +4,7 @@ import { practiceNow, utcRange, mapSeq, paged } from '../util.js';
 import { allocationsForRange } from '../allocation.js';
 import { agingReport } from '../aging.js';
 import { restricted } from '../officeaccess.js';
+import { isRetail, retailTotals } from '../ledgerkinds.js';
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -58,9 +59,9 @@ export default function reportRoutes({ db }) {
     if (can(req.user, 'reports:read') && !restricted(req.user)) {
       Object.assign(out, {
         period: { from, to },
-        production: (await db.get("SELECT COALESCE(SUM(amount),0) AS n FROM ledger_entries WHERE practice_id = ? AND type = 'charge' AND entry_date BETWEEN ? AND ?", pid, from, to)).n,
+        production: (await db.get("SELECT COALESCE(SUM(amount),0) AS n FROM ledger_entries WHERE practice_id = ? AND type = 'charge' AND retail_sale_id IS NULL AND entry_date BETWEEN ? AND ?", pid, from, to)).n,
         collections: -(await db.get("SELECT COALESCE(SUM(amount),0) AS n FROM ledger_entries WHERE practice_id = ? AND type IN ('payment','insurance_payment') AND entry_date BETWEEN ? AND ?", pid, from, to)).n,
-        adjustments: (await db.get("SELECT COALESCE(SUM(amount),0) AS n FROM ledger_entries WHERE practice_id = ? AND type = 'adjustment' AND entry_date BETWEEN ? AND ?", pid, from, to)).n,
+        adjustments: (await db.get("SELECT COALESCE(SUM(amount),0) AS n FROM ledger_entries WHERE practice_id = ? AND type = 'adjustment' AND retail_sale_id IS NULL AND gift_certificate_id IS NULL AND entry_date BETWEEN ? AND ?", pid, from, to)).n,
         accounts_receivable: (await db.get('SELECT COALESCE(SUM(amount),0) AS n FROM ledger_entries WHERE practice_id = ?', pid)).n,
         outstanding_claims: await db.get("SELECT COUNT(*) AS n, COALESCE(SUM(estimated_amount),0) AS amount FROM claims WHERE practice_id = ? AND status = 'submitted'", pid),
         new_patients: (await db.get('SELECT COUNT(*) AS n FROM patients WHERE practice_id = ? AND created_at >= ? AND created_at < ?', pid, ...(await utcRange(db, pid, from, to)))).n,
@@ -81,7 +82,7 @@ export default function reportRoutes({ db }) {
     const providers = await db.all('SELECT id, name FROM providers WHERE practice_id = ? AND user_id = ?', pid, req.user.id);
     const today = (await practiceNow(db, pid)).slice(0, 10);
     const sum = async (from) => (providers.length ? (await db.get(
-      `SELECT COALESCE(SUM(amount), 0) AS n FROM ledger_entries WHERE practice_id = ? AND type = 'charge' AND voided_at IS NULL AND reverses_id IS NULL
+      `SELECT COALESCE(SUM(amount), 0) AS n FROM ledger_entries WHERE practice_id = ? AND type = 'charge' AND retail_sale_id IS NULL AND voided_at IS NULL AND reverses_id IS NULL
          AND provider_id IN (${providers.map(() => '?').join(',')}) AND entry_date BETWEEN ? AND ?`, pid, ...providers.map((p) => p.id), from, today,
     )).n : 0);
     res.json({ providers, today: await sum(today), month: await sum(`${today.slice(0, 7)}-01`), year: await sum(`${today.slice(0, 4)}-01-01`) });
@@ -172,7 +173,7 @@ export default function reportRoutes({ db }) {
       from, to,
       by_provider: await db.all(
         `SELECT pv.id, pv.name, COUNT(*) AS procedures, SUM(l.amount) AS production FROM ledger_entries l
-         JOIN providers pv ON pv.id = l.provider_id WHERE l.practice_id = ? AND l.type = 'charge' AND l.entry_date BETWEEN ? AND ?${loc.sql}
+         JOIN providers pv ON pv.id = l.provider_id WHERE l.practice_id = ? AND l.type = 'charge' AND l.retail_sale_id IS NULL AND l.entry_date BETWEEN ? AND ?${loc.sql}
          GROUP BY pv.id ORDER BY production DESC`, pid, from, to, ...loc.args,
       ),
       by_category: await db.all(
@@ -182,7 +183,7 @@ export default function reportRoutes({ db }) {
       ),
       by_day: await db.all(
         `SELECT entry_date AS day,
-           SUM(CASE WHEN type = 'charge' THEN amount ELSE 0 END) AS production,
+           SUM(CASE WHEN type = 'charge' AND retail_sale_id IS NULL THEN amount ELSE 0 END) AS production,
            -SUM(CASE WHEN type IN ('payment','insurance_payment') THEN amount ELSE 0 END) AS collections
          FROM ledger_entries l WHERE practice_id = ? AND entry_date BETWEEN ? AND ?${loc.sql} GROUP BY entry_date ORDER BY entry_date`, pid, from, to, ...loc.args,
       ),
@@ -190,15 +191,15 @@ export default function reportRoutes({ db }) {
       top_procedures: await db.all(
         `SELECT pr.code, MIN(pr.description) AS description, SUM(CASE WHEN l.amount > 0 THEN 1 ELSE -1 END) AS count, SUM(l.amount) AS production
          FROM ledger_entries l JOIN procedures pr ON pr.id = l.procedure_id
-         WHERE l.practice_id = ? AND l.type = 'charge' AND l.entry_date BETWEEN ? AND ?${loc.sql}
+         WHERE l.practice_id = ? AND l.type = 'charge' AND l.retail_sale_id IS NULL AND l.entry_date BETWEEN ? AND ?${loc.sql}
          GROUP BY pr.code HAVING SUM(l.amount) > 0 ORDER BY SUM(l.amount) DESC LIMIT 10`, pid, from, to, ...loc.args,
       ),
       // Consolidated view across offices (insurance payments aren't tied to an office).
       by_location: multi && !restricted(req.user) ? await db.all(
         `SELECT l.location_id AS id, COALESCE(lo.name, 'No office') AS name,
-           SUM(CASE WHEN l.type = 'charge' THEN l.amount ELSE 0 END) AS production,
+           SUM(CASE WHEN l.type = 'charge' AND l.retail_sale_id IS NULL THEN l.amount ELSE 0 END) AS production,
            -SUM(CASE WHEN l.type = 'payment' THEN l.amount ELSE 0 END) AS patient_collections,
-           SUM(CASE WHEN l.type = 'adjustment' THEN l.amount ELSE 0 END) AS adjustments
+           SUM(CASE WHEN l.type = 'adjustment' AND l.retail_sale_id IS NULL AND l.gift_certificate_id IS NULL THEN l.amount ELSE 0 END) AS adjustments
          FROM ledger_entries l LEFT JOIN locations lo ON lo.id = l.location_id
          WHERE l.practice_id = ? AND l.entry_date BETWEEN ? AND ? GROUP BY l.location_id, lo.name ORDER BY 3 DESC`, pid, from, to,
       ) : null,
@@ -224,7 +225,7 @@ export default function reportRoutes({ db }) {
     const rows = new Map(providers.map((p) => [p.id, { ...p, production: 0, adjustments: 0, patient_collections: 0, insurance_collections: 0 }]));
     const unassigned = { id: null, name: 'Unapplied credit', production: 0, adjustments: 0, patient_collections: 0, insurance_collections: 0 };
     for (const r of await db.all(
-      `SELECT provider_id, SUM(amount) AS n FROM ledger_entries WHERE practice_id = ? AND type = 'charge' AND entry_date BETWEEN ? AND ?${atLocation(req).sql} GROUP BY provider_id`, pid, from, to, ...atLocation(req).args,
+      `SELECT provider_id, SUM(amount) AS n FROM ledger_entries WHERE practice_id = ? AND type = 'charge' AND retail_sale_id IS NULL AND entry_date BETWEEN ? AND ?${atLocation(req).sql} GROUP BY provider_id`, pid, from, to, ...atLocation(req).args,
     )) (rows.get(r.provider_id) || unassigned).production += r.n;
     for (const a of await allocationsForRange(db, pid, from, to)) {
       const row = (a.provider_id && rows.get(a.provider_id)) || unassigned;
@@ -246,7 +247,7 @@ export default function reportRoutes({ db }) {
       rows: await db.all(
         `SELECT COALESCE(adjustment_type, CASE WHEN claim_id IS NOT NULL THEN 'Insurance write-off' ELSE 'Other' END) AS type,
            COUNT(*) AS count, SUM(amount) AS amount FROM ledger_entries
-         WHERE practice_id = ? AND type = 'adjustment' AND entry_date BETWEEN ? AND ?${atLocation(req).sql} GROUP BY 1 ORDER BY SUM(amount)`, pid, from, to, ...atLocation(req).args,
+         WHERE practice_id = ? AND type = 'adjustment' AND retail_sale_id IS NULL AND gift_certificate_id IS NULL AND entry_date BETWEEN ? AND ?${atLocation(req).sql} GROUP BY 1 ORDER BY SUM(amount)`, pid, from, to, ...atLocation(req).args,
       ),
     });
   });
@@ -275,11 +276,14 @@ export default function reportRoutes({ db }) {
     res.json({
       date,
       totals: {
-        production: sum((e) => e.type === 'charge'),
+        // Dental production and adjustments leave out product sales and gift certificates (ledgerkinds.js); those
+        // have their own lines, and the payments for them are in the payments and the deposit as usual.
+        production: sum((e) => e.type === 'charge' && !isRetail(e)),
         patient_payments: -sum((e) => e.type === 'payment'),
         insurance_payments: -sum((e) => e.type === 'insurance_payment'),
-        adjustments: sum((e) => e.type === 'adjustment'),
+        adjustments: sum((e) => e.type === 'adjustment' && !isRetail(e)),
         refunds: sum((e) => e.type === 'refund'),
+        ...retailTotals(entries),
       },
       deposit: byMethod,
       appointments: Object.fromEntries(appts.map((a) => [a.status, a.n])),

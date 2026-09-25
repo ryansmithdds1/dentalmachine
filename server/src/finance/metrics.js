@@ -20,8 +20,8 @@ export async function financeOverview(db, pid, { months = 12, today }) {
   const to = today;
   const byMonth = (rows, key = 'n') => Object.fromEntries(rows.map((r) => [r.month, Number(r[key]) || 0]));
   const m7 = 'substr(entry_date, 1, 7)';
-  const production = byMonth(await db.all(`SELECT ${m7} AS month, SUM(amount) AS n FROM ledger_entries WHERE practice_id = ? AND type = 'charge' AND entry_date BETWEEN ? AND ? GROUP BY ${m7}`, pid, from, to));
-  const writeOffs = byMonth(await db.all(`SELECT ${m7} AS month, -SUM(amount) AS n FROM ledger_entries WHERE practice_id = ? AND type = 'adjustment' AND amount < 0 AND voided_at IS NULL AND reverses_id IS NULL AND entry_date BETWEEN ? AND ? GROUP BY ${m7}`, pid, from, to));
+  const production = byMonth(await db.all(`SELECT ${m7} AS month, SUM(amount) AS n FROM ledger_entries WHERE practice_id = ? AND type = 'charge' AND retail_sale_id IS NULL AND entry_date BETWEEN ? AND ? GROUP BY ${m7}`, pid, from, to));
+  const writeOffs = byMonth(await db.all(`SELECT ${m7} AS month, -SUM(amount) AS n FROM ledger_entries WHERE practice_id = ? AND type = 'adjustment' AND retail_sale_id IS NULL AND gift_certificate_id IS NULL AND amount < 0 AND voided_at IS NULL AND reverses_id IS NULL AND entry_date BETWEEN ? AND ? GROUP BY ${m7}`, pid, from, to));
   const collections = byMonth(await db.all(`SELECT ${m7} AS month, -SUM(amount) AS n FROM ledger_entries WHERE practice_id = ? AND type IN ('payment','insurance_payment','refund') AND voided_at IS NULL AND reverses_id IS NULL AND entry_date BETWEEN ? AND ? GROUP BY ${m7}`, pid, from, to));
   const visitRows = await db.all(
     `SELECT substr(start_time, 1, 7) AS month, substr(start_time, 1, 10) AS d, start_time, end_time FROM appointments

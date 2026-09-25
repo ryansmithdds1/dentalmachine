@@ -1439,3 +1439,35 @@ button.assist-fab.busy { animation: assist-busy 1.4s ease-in-out infinite; }
 .campaign-blanks { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; padding: 6px 10px; border-radius: 8px; font-size: 13px; background: color-mix(in srgb, var(--warn) 12%, var(--panel)); border: 1px solid color-mix(in srgb, var(--warn) 40%, var(--border)); }
 .campaign-confirm { align-items: center; gap: 10px; padding: 10px 12px; border-radius: 8px; background: color-mix(in srgb, var(--warn) 10%, var(--panel)); }
 .req { color: var(--danger); font-weight: 600; }
+
+/* Inline "are you sure" and one-line answers (ConfirmButton / AskButton in components/ui.jsx): no browser boxes. */
+.inline-confirm { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; background: var(--warn-soft); border: 1px solid var(--border); border-radius: 6px; padding: 3px 6px; }
+.inline-confirm-ask { font-size: 13px; }
+.inline-ask { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: flex-end; margin: 0; }
+.inline-ask label { display: flex; flex-direction: column; font-size: 12.5px; gap: 2px; margin: 0; }
+.inline-ask input { min-width: 220px; }
+.inline-ask-hint { font-size: 12px; flex-basis: 100%; }
+.inline-ask-error { flex-basis: 100%; margin: 0; }
+
+/* Settings lists: the one-line add row and in-place editing (no dialogs). */
+.quick-add { display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: flex-end; padding: 10px 16px 12px; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); background: var(--bg); }
+.quick-add label { display: flex; flex-direction: column; font-size: 12.5px; gap: 2px; margin: 0; min-width: 110px; }
+.quick-add label.grow { flex: 1 1 200px; }
+.quick-add label.checkbox { flex-direction: row; align-items: center; min-width: 0; padding-bottom: 6px; }
+.quick-add-title { font-weight: 600; font-size: 13px; flex-basis: 100%; }
+.quick-add-error { flex-basis: 100%; }
+.inline-editor { padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.inline-editor h3 { margin: 0 0 8px; }
+.inline-editor-row > td { background: var(--bg-soft, transparent); padding: 12px 16px; }
+.drawer.side-panel { width: 460px; }
+.drawer.side-panel.wide { width: 640px; }
+.rebook-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 8px 12px; margin: 0 0 8px; border: 1px solid var(--border); border-left: 4px solid var(--primary); border-radius: 8px; background: var(--panel); }
+.rebook-bar .rebook-actions { margin-left: auto; display: inline-flex; gap: 6px; }
+select.compact { width: auto; padding: 3px 6px; font-size: 13px; min-height: 0; }
+.viewer-ask { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); z-index: 5; display: flex; flex-wrap: wrap; gap: 6px; align-items: flex-end; background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; box-shadow: 0 6px 20px rgba(0,0,0,.25); max-width: 90%; }
+.viewer-ask label { display: flex; flex-direction: column; font-size: 12.5px; gap: 2px; margin: 0; }
+.name-in-place { all: unset; cursor: text; border-radius: 4px; }
+.name-in-place:hover, .name-in-place:focus-visible { background: var(--bg); outline: 1px dashed var(--border); }
+.identity-edit { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 4px 0; }
+.identity-edit input { width: auto; min-width: 140px; }
+.form-actions.sticky-save { position: sticky; bottom: 0; z-index: 5; background: var(--panel); border-top: 1px solid var(--border); padding: 10px 12px; margin: 0 -12px; box-shadow: 0 -6px 16px rgba(15, 23, 42, 0.08); align-items: center; }

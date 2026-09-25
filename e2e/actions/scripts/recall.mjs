@@ -25,14 +25,14 @@ export default {
       if (!(await row.count())) throw new Error('the overdue patient is not on the recall list');
       await t.step('Follow-up → Recall: overdue patients with their phone number. Call them; they want to book. Click "Book" on their row', async () => {
         await t.click(row.locator('button:has-text("Book")'));
-        await t.see('.modal');
+        await t.see('.book-panel');
       });
       await t.step('The booking form opens; press Enter / click Book appointment on the suggested time', async () => {
         await t.page.waitForTimeout(400);
         const focused = await t.page.evaluate(() => document.activeElement?.textContent || ''); // eslint-disable-line no-undef
         if (/Book appointment/.test(focused)) await t.key('Enter');
-        else await t.click('.modal button.primary:has-text("Book")');
-        await t.see('.modal', { state: 'detached' });
+        else await t.click('.book-panel button.primary:has-text("Book")');
+        await t.see('.book-panel', { state: 'detached' });
       });
     },
   },
@@ -100,14 +100,14 @@ export default {
       if (!(await row.count())) throw new Error('no broken appointments to work');
       await t.step('Follow-up → Broken appointments: click "Rebook" on the first row', async () => {
         await t.click(row.locator('button:has-text("Book")'));
-        await t.see('.modal');
+        await t.see('.book-panel');
       });
       await t.step('Book the suggested time', async () => {
         await t.page.waitForTimeout(400);
         const focused = await t.page.evaluate(() => document.activeElement?.textContent || ''); // eslint-disable-line no-undef
         if (/Book appointment/.test(focused)) await t.key('Enter');
-        else await t.click('.modal button.primary:has-text("Book")');
-        await t.see('.modal', { state: 'detached' });
+        else await t.click('.book-panel button.primary:has-text("Book")');
+        await t.see('.book-panel', { state: 'detached' });
       });
     },
   },

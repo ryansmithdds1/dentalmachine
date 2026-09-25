@@ -25,6 +25,8 @@ export function AnnouncementForm({ initial, onDone, onCancel }) {
     onDone?.(saved);
   });
   useShortcut('mod+s', () => submit(), { label: 'Post the announcement', section: 'Intranet', inInputs: true });
+  // Ctrl/⌘+Enter posts too (as everywhere else a form is finished from the keyboard).
+  useShortcut('mod+enter', () => f.title.trim() && submit(), { label: 'Post the announcement', section: 'Intranet', inInputs: true });
   return (
     <form className="intra-form" onSubmit={(e) => { e.preventDefault(); submit(); }}>
       <h2><Megaphone size={18} aria-hidden /> {initial ? 'Edit announcement' : 'New announcement'}</h2>
@@ -38,7 +40,7 @@ export function AnnouncementForm({ initial, onDone, onCancel }) {
       </div>
       <ScopePicker value={f} onChange={(v) => setF({ ...f, ...v })} locations={locations} />
       <div className="actions">
-        <button className="primary" disabled={busy || !f.title.trim()}>{initial ? 'Save' : 'Post'} <kbd>Ctrl/⌘ S</kbd></button>
+        <button className="primary" disabled={busy || !f.title.trim()}>{initial ? 'Save' : 'Post'} <kbd>Ctrl/⌘ Enter</kbd></button>
         {onCancel && <button type="button" onClick={onCancel}>Cancel</button>}
       </div>
     </form>

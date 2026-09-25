@@ -109,19 +109,19 @@ test('a new patient from first visit to paid claim and statement', async () => {
   const { today } = await api('/dashboard'); // the practice's date, whatever the machine's clock says
   await step('book', async () => {
     await page.goto(`${base}/schedule?book=${patientId}`);
-    const type = page.locator('.modal label:has-text("Appointment type") select');
+    const type = page.locator('.book-panel label:has-text("Appointment type") select');
     const cleaning = await type.locator('option').filter({ hasText: /cleaning/i }).first().getAttribute('value');
     await type.selectOption(cleaning);
-    const modal = page.locator('.modal');
+    const modal = page.locator('.book-panel');
     await modal.getByLabel('Date', { exact: true }).fill(today);
     await modal.getByLabel('Start time').fill('18:00');
-    const provider = page.locator('.modal label:has-text("Provider") select').first();
+    const provider = page.locator('.book-panel label:has-text("Provider") select').first();
     if (!(await provider.inputValue())) await provider.selectOption({ index: 1 });
-    await page.locator('.modal .form-actions button.primary').click();
+    await page.locator('.book-panel .form-actions button.primary').click();
     // Outside office hours or on a closed day, the form asks first.
-    const anyway = page.locator('.modal button:has-text("Book it anyway")');
-    await Promise.race([anyway.waitFor().then(() => anyway.click()), page.waitForSelector('.modal', { state: 'detached' })]).catch(() => {});
-    await page.waitForSelector('.modal', { state: 'detached' });
+    const anyway = page.locator('.book-panel button:has-text("Book it anyway")');
+    await Promise.race([anyway.waitFor().then(() => anyway.click()), page.waitForSelector('.book-panel', { state: 'detached' })]).catch(() => {});
+    await page.waitForSelector('.book-panel', { state: 'detached' });
   });
   const appt = (await api(`/appointments?date=${today}&patient_id=${patientId}`))[0];
   assert.ok(appt, 'appointment booked');

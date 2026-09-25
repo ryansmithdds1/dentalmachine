@@ -4,7 +4,7 @@ import { api, getToken } from '../../api.js';
 import { useApi } from '../../hooks.js';
 import { useLiveEvents } from '../../live.js';
 import { fmtDate } from '../../format.js';
-import { ErrorBox, Modal } from '../ui.jsx';
+import { ErrorBox, Modal, ConfirmButton } from '../ui.jsx';
 import ImageViewer from '../ImageViewer.jsx';
 import SensorTest from './SensorTest.jsx';
 import IntraoralCamera from './IntraoralCamera.jsx';
@@ -136,7 +136,6 @@ export default function ImagingStudio({ patient, docs, canEdit, initial, onClose
     } catch (e) { setError(e); }
   };
   const removeMount = async () => {
-    if (!confirm('Delete this mount? The images stay in the chart.')) return;
     await api.del(`/mounts/${current.id}`).catch(setError);
     setMountId(null);
     setSelected(null);
@@ -283,7 +282,7 @@ export default function ImagingStudio({ patient, docs, canEdit, initial, onClose
               <div className="lightbox-meta">
                 <span>{MOUNTS[current.template]?.label} · {fmtDate(current.taken_at)}</span>
                 <span>{filledCount} of {labels.length} images{retakes ? ` · ${retakes} retaken` : ''}</span>
-                {canEdit && !capture && <button type="button" className="studio-link" onClick={removeMount}>Delete mount</button>}
+                {canEdit && !capture && <ConfirmButton className="studio-link" ask="Delete this mount? The images stay in the chart." yes="Delete mount" onConfirm={removeMount}>Delete mount</ConfirmButton>}
               </div>
               <MountBoard mount={current} labels={labels} selected={selected} next={nextSlot} capturing={capturing} canEdit={canEdit} sensorReady={sensorReady}
                 adjustOf={adjustOf} docById={docById} onClick={(i) => { if (current.slots[i] != null) setCamera(false); clickSlot(i); }} onRetake={(i) => aim(i, true)} onClear={(i) => setSlot(i, null)} compact={!!selectedDoc || camera} />

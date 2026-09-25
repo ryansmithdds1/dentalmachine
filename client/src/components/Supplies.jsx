@@ -3,7 +3,7 @@ import { api, downloadCsv, dollars } from '../api.js';
 import { useApi } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
 import { money, fromCents, toCents, fmtUtcDateTime } from '../format.js';
-import { ErrorBox, Modal, useSubmit } from './ui.jsx';
+import { ErrorBox, Modal, useSubmit, AskButton } from './ui.jsx';
 import { useShortcuts } from '../shortcuts.js';
 import { toast, undoable } from '../toast.js';
 import '../pages/monthly.css';
@@ -28,18 +28,21 @@ export default function Supplies() {
   // The delivery came: what was ordered (or the usual order) goes on the shelf at once, with Undo.
   const receive = async (item) => {
     const qty = onOrder[item.id]?.qty || item.reorder_qty;
-    if (!qty) return move(item, 'received');
+    if (!qty) return;
     setErr(null);
     try {
       await undoable(`Received ${qty} ${item.unit} of ${item.name}`, () => api.post(`/inventory/${item.id}/receive`, {}), (r) => api.post(`/inventory/moves/${r.move_id}/undo`, {}).then(reload));
       reload();
     } catch { /* the toast shows it */ }
   };
-  const move = async (item, reason) => {
-    const q = window.prompt(`${reason === 'received' ? 'How many received' : 'How many used'} (${item.unit})?`, reason === 'received' ? String(item.reorder_qty || 1) : '1');
-    if (!q) return;
+  // How many is typed beside the button (no browser box); Enter records it (a wrong count is fixed with a count).
+  const move = async (item, reason, q) => {
+    const n = Number(q);
+    if (!(n > 0)) throw new Error('Type how many, e.g. 1');
     setErr(null);
-    try { await api.post(`/inventory/${item.id}/moves`, { reason, quantity: Number(q) }); reload(); } catch (e) { setErr(e); }
+    await api.post(`/inventory/${item.id}/moves`, { reason, quantity: n });
+    toast(`${reason === 'received' ? 'Received' : 'Used'} ${n} ${item.unit} of ${item.name}`);
+    reload();
   };
   return (
     <div className="card">
@@ -69,8 +72,10 @@ export default function Supplies() {
                 <td style={{ fontSize: 12 }}>{i.used_by.map((u) => `${u.code}${u.qty > 1 ? ` ×${u.qty}` : ''}`).join(', ') || '—'}</td>
                 <td>
                   <div className="inline" style={{ gap: 4 }}>
-                    {w && <button className="small" onClick={() => receive(i)} aria-label={`Receive ${i.name}`}>{onOrder[i.id] ? `Received ${onOrder[i.id].qty}` : 'Receive'}</button>}
-                    {w && <button className="small" onClick={() => move(i, 'used')}>Use</button>}
+                    {w && (onOrder[i.id]?.qty || i.reorder_qty
+                      ? <button className="small" onClick={() => receive(i)} aria-label={`Receive ${i.name}`}>{onOrder[i.id] ? `Received ${onOrder[i.id].qty}` : 'Receive'}</button>
+                      : <AskButton title={`Receive ${i.name}`} label={`How many received (${i.unit})?`} initial="1" required submit="Received" onSubmit={(q) => move(i, 'received', q)}>Receive</AskButton>)}
+                    {w && <AskButton label={`How many used (${i.unit})?`} initial="1" required submit="Used" onSubmit={(q) => move(i, 'used', q)}>Use</AskButton>}
                     <button className="small" onClick={() => setModal({ type: 'history', item: i })}>History</button>
                     {w && <button className="small" onClick={() => setModal({ type: 'item', item: i })}>Edit</button>}
                   </div>

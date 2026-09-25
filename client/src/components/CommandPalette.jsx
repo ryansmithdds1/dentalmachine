@@ -21,6 +21,11 @@ const PAGES = [
   ['Lab check-in', '/lab-checkin'], ['Checklists', '/checklists'], ['Documents', '/documents'], ['Intranet', '/intranet'], ['Capacity', '/capacity'],
   ['Business', '/business'], ['Marketing results', '/marketing'], ['Ask your data', '/ask'], ['Group', '/group'],
   // Report tabs people look for by name (they were Reports → a tab → a button).
+  // Batch 2B: compliance log, letters and labels, gift certificates and products.
+  ['Record a complaint or incident', '/compliance?new=1'], ['Complaint & incident log', '/compliance'], ['Log an exposure or sharps injury (OSHA)', '/compliance?tab=exposures&new=1'],
+  ['Record a HIPAA disclosure', '/compliance?tab=disclosures&new=1'], ['Accounting of disclosures (HIPAA)', '/compliance?tab=disclosures'], ['Write a letter', '/letters'],
+  ['Letter templates', '/settings?tab=letters'], ['Print mailing labels (recall list)', '/followups?tab=recall'], ['Sell a gift certificate', '/gift-certificates?new=1'],
+  ['Gift certificates (balances, outstanding)', '/gift-certificates'], ['Products for sale & sales tax', '/settings?tab=retail'],
   ['A/R aging (who owes what)', '/reports?tab=ops&view=aging'], ['Treatment plan acceptance', '/reports?tab=plans'], ['Hygiene report', '/reports?tab=hygiene'], ['Referrals report (where new patients come from)', '/reports?tab=referrals'],
 ];
 

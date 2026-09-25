@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { api, downloadCsv, dollars } from '../api.js';
 import { useApi } from '../hooks.js';
 import { money, fmtDate } from '../format.js';
-import { ErrorBox } from './ui.jsx';
+import { ErrorBox, AskButton } from './ui.jsx';
+import { toast, undoable } from '../toast.js';
 
 const fmt = (v, type) => (v == null ? '' : type === 'money' ? money(v) : type === 'date' && /^\d{4}-\d{2}-\d{2}$/.test(v) ? fmtDate(v) : type === 'number' && !Number.isInteger(v) ? Math.round(v * 100) / 100 : v);
 const START = { dataset: 'procedures', mode: 'list', columns: ['completed', 'code', 'description', 'provider', 'fee'], filters: [{ column: 'status', op: 'eq', value: 'completed' }], group_by: 'code', aggregates: [{ fn: 'count' }], sort: null };
@@ -24,10 +25,11 @@ export default function ReportBuilder() {
     setErr(null); setBusy(true);
     try { setResult(await api.post('/query-builder/run', body())); } catch (e) { setErr(e); } finally { setBusy(false); }
   };
-  const save = async () => {
-    const name = window.prompt('Name this report');
-    if (!name) return;
-    try { await api.post('/query-builder/saved', { name, spec: { ...body(), mode: spec.mode } }); reload(); } catch (e) { setErr(e); }
+  // The name is asked right beside Save (no browser box); Enter saves.
+  const save = async (name) => {
+    await api.post('/query-builder/saved', { name, spec: { ...body(), mode: spec.mode } });
+    reload();
+    toast(`Saved “${name}”`);
   };
   const load = (q) => { setSpec({ ...START, ...q.spec, mode: q.spec.group_by ? 'group' : 'list', columns: q.spec.columns || START.columns, filters: q.spec.filters || [], aggregates: q.spec.aggregates || [{ fn: 'count' }] }); setResult(null); };
   const setFilter = (i, patch) => set({ filters: spec.filters.map((f, j) => (j === i ? { ...f, ...patch } : f)) });
@@ -76,14 +78,16 @@ export default function ReportBuilder() {
           {cols.map(([k, c]) => <option key={k} value={k}>{c.label}</option>)}
         </select></label>
         {spec.sort && <label className="checkbox"><input type="checkbox" checked={spec.sort.dir === 'desc'} onChange={(e) => set({ sort: { ...spec.sort, dir: e.target.checked ? 'desc' : 'asc' } })} /> Largest / newest first</label>}
-        <div className="form-actions"><button onClick={save}>Save</button><button className="primary" disabled={busy} onClick={run}>{busy ? 'Running…' : 'Run'}</button></div>
+        <div className="form-actions"><AskButton className="" label="Name this report" required submit="Save" onSubmit={save}>Save…</AskButton><button className="primary" disabled={busy} onClick={run}>{busy ? 'Running…' : 'Run'}</button></div>
         {meta.saved.length > 0 && (
           <>
             <h3>Saved</h3>
             {meta.saved.map((q) => (
               <div key={q.id} className="inline" style={{ justifyContent: 'space-between' }}>
                 <button className="link" onClick={() => load(q)}>{q.name}</button>
-                <button className="small" aria-label={`Delete ${q.name}`} onClick={() => window.confirm(`Delete “${q.name}”?`) && api.del(`/query-builder/saved/${q.id}`).then(reload)}>✕</button>
+                <button className="small" aria-label={`Delete ${q.name}`} onClick={() => undoable(`Deleted “${q.name}”`,
+                  async () => { await api.del(`/query-builder/saved/${q.id}`); reload(); },
+                  async () => { await api.post('/query-builder/saved', { name: q.name, spec: q.spec }); reload(); }).catch(setErr)}>✕</button>
               </div>
             ))}
           </>

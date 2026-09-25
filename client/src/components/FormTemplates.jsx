@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { useApi, invalidateLookup } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
-import { Badge, ErrorBox, Modal, useSubmit } from './ui.jsx';
+import { Badge, ErrorBox, useSubmit } from './ui.jsx';
 import FormFields from './FormFields.jsx';
 
 const TYPES = [
@@ -18,6 +18,13 @@ export default function FormTemplates() {
   const admin = user?.role === 'admin';
   const { data: list, reload } = useApi('/form-templates?all=true');
   const [editing, setEditing] = useState(null);
+  const edit = (t) => setEditing({ ...t, procedure_codes: t.procedure_codes || '', auto_send: !!t.auto_send, active: !!t.active });
+  // "Change the wording" on the consent library above opens the same editor here (one place to edit the text).
+  useEffect(() => {
+    const onEdit = (e) => { const t = list?.find((x) => x.id === e.detail); if (t) edit(t); };
+    window.addEventListener('dm:edit-form-template', onEdit);
+    return () => window.removeEventListener('dm:edit-form-template', onEdit);
+  }, [list]);
   return (
     <div className="card" style={{ padding: 0 }}>
       <div className="inline" style={{ padding: '14px 16px', justifyContent: 'space-between' }}>
@@ -31,7 +38,7 @@ export default function FormTemplates() {
         {admin && <button className="primary" onClick={() => setEditing({ name: '', kind: 'consent', procedure_codes: '', auto_send: false, renew_months: 0, active: true, fields: [{ type: 'paragraph', text: '' }, { type: 'signature', label: 'Patient (or parent/guardian) signature', required: true }] })}>+ New form</button>}
       </div>
       {!list ? <div className="empty">Loading…</div> : (
-        <table>
+        <table className="form-template-list">
           <thead><tr><th>Form</th><th>Type</th><th>For procedures</th><th>Sent</th><th>Version</th><th /></tr></thead>
           <tbody>
             {list.map((t) => (
@@ -41,7 +48,7 @@ export default function FormTemplates() {
                 <td>{t.procedure_codes || <span className="muted">—</span>}</td>
                 <td>{t.auto_send ? `Automatically · ${RENEW.find(([m]) => m === t.renew_months)?.[1]?.toLowerCase() || `every ${t.renew_months} months`}` : <span className="muted">When sent</span>}</td>
                 <td>v{t.version}</td>
-                <td>{admin && <button className="small" onClick={() => setEditing({ ...t, procedure_codes: t.procedure_codes || '', auto_send: !!t.auto_send, active: !!t.active })}>Edit</button>}</td>
+                <td>{admin && <button className="small" onClick={() => edit(t)}>Edit</button>}</td>
               </tr>
             ))}
           </tbody>
@@ -55,6 +62,14 @@ export default function FormTemplates() {
 function Editor({ template, onClose, onSaved }) {
   const [t, setT] = useState(template);
   const [sample, setSample] = useState({});
+  const box = useRef(null);
+  // A new form starts in its name; an existing one at the end of its first paragraph (changing the wording is
+  // what people come to do).
+  useEffect(() => {
+    box.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    const para = template.id && box.current?.querySelector('.field-row textarea');
+    if (para) { para.focus({ preventScroll: true }); para.setSelectionRange(para.value.length, para.value.length); } else box.current?.querySelector('input')?.focus({ preventScroll: true });
+  }, [template]);
   const set = (patch) => setT({ ...t, ...patch });
   const setField = (i, patch) => set({ fields: t.fields.map((f, j) => (j === i ? { ...f, ...patch } : f)) });
   const move = (i, d) => { const f = [...t.fields]; [f[i], f[i + d]] = [f[i + d], f[i]]; set({ fields: f }); };
@@ -67,7 +82,10 @@ function Editor({ template, onClose, onSaved }) {
   const preview = t.fields.map((f, i) => ({ ...f, key: f.key || `f${i}`, options: typeof f.options === 'string' ? f.options.split(',').map((o) => o.trim()).filter(Boolean) : f.options || [] }))
     .map((f) => ({ ...f, label: fillSample(f.label), text: fillSample(f.text) }));
   return (
-    <Modal title={t.id ? `Edit “${template.name}”` : 'New form'} wide onClose={onClose}>
+    // In place under the list (no dialog): the fields beside a live preview; Ctrl/⌘+Enter saves, Esc closes.
+    <div ref={box} className="inline-editor form-template-editor" role="region" aria-label={t.id ? `Edit ${template.name}` : 'New form'}
+      onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); onClose(); } if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); submit(); } }}>
+      <h3>{t.id ? `Edit “${template.name}”` : 'New form'}</h3>
       <ErrorBox error={error} />
       <div className="form-grid">
         <label>Name<input value={t.name} onChange={(e) => set({ name: e.target.value })} /></label>
@@ -112,9 +130,9 @@ function Editor({ template, onClose, onSaved }) {
       </div>
       <div className="form-actions">
         <button type="button" onClick={onClose}>Cancel</button>
-        <button className="primary" disabled={busy} onClick={submit}>{busy ? 'Saving…' : 'Save form'}</button>
+        <button className="primary" disabled={busy} onClick={submit} title="Ctrl/⌘+Enter">{busy ? 'Saving…' : 'Save form'}</button>
       </div>
-    </Modal>
+    </div>
   );
 }
 

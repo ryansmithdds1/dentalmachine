@@ -184,12 +184,8 @@ export default {
     },
     async run(t, { p, plan }) {
       await t.open(`/patients/${p.id}?tab=treatment`, `.card[data-plan="${plan.id}"]`);
-      await t.step('Click "Present & e-sign" on the plan', async () => {
-        await t.click(t.page.locator(`.card[data-plan="${plan.id}"]`).locator('button:has-text("Present & e-sign")'));
-        await t.see(`.modal button:has-text("Open here for ${p.first_name} to sign")`);
-      });
-      await t.step('Press Enter: the plan opens on this screen for the patient (same tab, no birth date)', async () => {
-        await t.key('Enter');
+      await t.step(`Click "Present here for ${p.first_name} to sign" on the plan: it opens on this screen for the patient (same tab, no birth date)`, async () => {
+        await t.click(t.page.locator(`.card[data-plan="${plan.id}"]`).locator(`button:has-text("Present here for ${p.first_name} to sign")`));
         await t.page.waitForURL(/\/tp\//);
         await t.see(`h1:has-text("Your treatment plan, ${p.first_name}")`);
       });
@@ -204,7 +200,7 @@ export default {
         await t.click('button:has-text("Accept & sign")');
         await t.see('h1:has-text("Thank you")');
       });
-      t.note(`2 staff actions + ${prefilled ? 2 : 3} patient actions.`);
+      t.note(`1 staff action + ${prefilled ? 2 : 3} patient actions.`);
     },
   },
 

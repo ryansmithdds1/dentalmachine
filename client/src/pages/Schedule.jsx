@@ -10,9 +10,10 @@ import { useLookup } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
 import { useLiveEvents } from '../live.js';
 import { money, fmtTime, shiftDate, practiceToday, label } from '../format.js';
-import { Modal } from '../components/ui.jsx';
+import { SidePanel } from '../components/ui.jsx';
 import { ChevronLeft, ChevronRight, CalendarDays, Plus, Ban, SlidersHorizontal, Printer, Hourglass, Pin, X, ArrowUp, ArrowDown, EyeOff, BellOff } from 'lucide-react';
 import AppointmentForm from '../components/AppointmentForm.jsx';
+import RebookBar from '../components/calendar/RebookBar.jsx';
 import BlockoutForm from '../components/calendar/BlockoutForm.jsx';
 import AppointmentDrawer from '../components/calendar/AppointmentDrawer.jsx';
 import CalendarGrid, { toMin, STATUS_COLORS } from '../components/calendar/CalendarGrid.jsx';
@@ -229,6 +230,7 @@ export default function Schedule() {
   // ---- UI state ----
   const [selectedId, setSelectedId] = useState(null);
   const [modal, setModal] = useState(null);
+  const [rebookAsk, setRebookAsk] = useState(null);
   const [placing, setPlacing] = useState(null);
   // A move that landed on blocked time or outside hours, waiting for "move it there anyway" or "keep it".
   const [override, setOverride] = useState(null);
@@ -378,9 +380,10 @@ export default function Schedule() {
     if (!done) return;
     setBrokenAsk(null);
     toast(`${a.first_name} ${a.last_name} ${status === 'no_show' ? 'marked as a no-show' : 'cancelled'} · ${brokenLabel(reason)}${note ? ` (${note})` : ''}`);
+    // The next open time shows as a line on the schedule (Enter books it); nothing to dismiss if not now.
     if (rebook) {
-      setModal({
-        type: 'new', rebook: true,
+      setRebookAsk({
+        n: Date.now(),
         patient: { id: a.patient_id, first_name: a.first_name, last_name: a.last_name, preferred_name: a.preferred_name, dob: a.dob },
         defaults: {
           date: today, after: a.end_time, provider_id: a.provider_id, duration: toMin(a.end_time) - toMin(a.start_time),
@@ -526,7 +529,7 @@ export default function Schedule() {
     // Capture phase: while a visit is being carried, the arrows and letters belong to the move.
     const onKey = (e) => {
       if (e.ctrlKey || e.metaKey || e.altKey || ['Shift', 'Control', 'Alt', 'Meta', 'Tab'].includes(e.key)) return;
-      if (document.querySelector('.modal, .palette')) return;
+      if (document.querySelector('.modal, .palette, .side-panel')) return;
       // Handled here: the schedule's other keys and the focused card see defaultPrevented and stay out of it.
       e.preventDefault();
       const k = e.key;
@@ -871,7 +874,7 @@ export default function Schedule() {
           </select>
           {view !== 'agenda' && (
             <div className="view-options">
-              <button className={`icon-btn${optionsOpen ? ' active' : ''}`} onClick={() => setOptionsOpen(!optionsOpen)} aria-expanded={optionsOpen} title="View options"><SlidersHorizontal size={17} /></button>
+              <button className={`icon-btn${optionsOpen ? ' active' : ''}`} onClick={() => setOptionsOpen(!optionsOpen)} aria-expanded={optionsOpen} aria-label="View options" title="View options: colors, time steps, chairs, print"><SlidersHorizontal size={17} /></button>
               {optionsOpen && (
                 <div className="popover" role="dialog" aria-label="View options">
                   <div className="popover-row"><span>Zoom</span>
@@ -906,7 +909,7 @@ export default function Schedule() {
           <FillLauncher date={date} locationId={getLocationId()} />
           {biz.allowed && <BusinessToggle on={biz.on} onToggle={biz.toggle} />}
           <button onClick={() => setShowAsap(!showAsap)} className={`icon-btn wide${showAsap ? ' active' : ''}`} title="Waitlist and ASAP list"><Hourglass size={16} /> Waitlist</button>
-          {can('schedule:write') && <button className="icon-btn" onClick={() => setModal({ type: 'block', defaults: { date } })} title="Block time"><Ban size={16} /></button>}
+          {can('schedule:write') && <button className="icon-btn wide" onClick={() => setModal({ type: 'block', defaults: { date } })} title="Block time (a meeting, lunch, a chair out)"><Ban size={16} /> Block</button>}
           {can('schedule:write') && <button className="primary" onClick={() => setModal({ type: 'new', defaults: { date } })} title="New appointment (N)"><Plus size={16} strokeWidth={2.5} /> Appointment</button>}
         </div>
       </div>
@@ -941,6 +944,18 @@ export default function Schedule() {
           </div>
         );
       })()}
+      {rebookAsk && !modal && (
+        <RebookBar key={rebookAsk.n} ask={rebookAsk} onClose={() => setRebookAsk(null)}
+          onOther={() => { setModal({ type: 'new', rebook: true, patient: rebookAsk.patient, defaults: rebookAsk.defaults }); setRebookAsk(null); }}
+          onBooked={(a) => {
+            setRebookAsk(null);
+            cache.current.clear();
+            const d = a.start_time.slice(0, 10);
+            if (d < from || d > to) go({ date: d });
+            else reload({ silent: true });
+            setSelectedId(a.id);
+          }} />
+      )}
       {placing && !carry && (
         <div className="placing-banner">
           <span>Tap a new time for <strong>{placing.first_name} {placing.last_name}</strong>{view === 'agenda' ? ' — switch to Day or Week view' : ''}.</span>
@@ -1014,7 +1029,7 @@ export default function Schedule() {
         </div>
       )}
 
-      {selected && (
+      {selected && !modal && (
         <AppointmentDrawer
           onPin={() => { onPin(selected); setSelectedId(null); }}
           appt={selected} can={can} onClose={() => setSelectedId(null)}
@@ -1023,6 +1038,11 @@ export default function Schedule() {
           onStep={(kind) => runStep(selected, kind)} focusComplete={focusComplete}
           brokenAsk={brokenAsk} onBroken={(kind, choice) => breakVisit(selected, kind, choice)}
           onEdit={() => setModal({ type: 'edit', appt: selected })}
+          onQuickEdit={async (patch, what) => {
+            const was = selected;
+            const saved = await saveMove(was, patch, { undoable: false });
+            if (saved) toast(`${was.first_name} ${was.last_name}: ${what}`, { action: { label: 'Undo', run: () => saveMove(saved, { appointment_type_id: was.appointment_type_id ?? null, end_time: was.end_time }, { undoable: false, override: true }) } });
+          }}
           onCheckout={() => leaveTo(selected, `/checkout/${selected.id}`)}
           onPatient={(tab) => leaveTo(selected, `/patients/${selected.patient_id}${tab ? `?tab=${tab}` : ''}`)}
           onMove={() => {
@@ -1043,8 +1063,9 @@ export default function Schedule() {
         />
       )}
 
+      {/* Booking, editing and blocking time open in a side panel (the schedule stays in view, nothing stacked). */}
       {modal?.type === 'new' && (
-        <Modal title={modal.rebook ? `Rebook ${modal.patient.first_name} ${modal.patient.last_name}` : 'New appointment'} onClose={() => setModal(null)}>
+        <SidePanel className="book-panel" title={modal.rebook ? `Rebook ${modal.patient.first_name} ${modal.patient.last_name}` : 'New appointment'} onClose={() => setModal(null)}>
           <AppointmentForm defaults={modal.defaults} patient={modal.patient} onCancel={() => setModal(null)}
             onBlock={() => setModal({ type: 'block', defaults: modal.defaults })} key={modal.patient?.id || 'none'}
             onSaved={(a) => {
@@ -1055,17 +1076,17 @@ export default function Schedule() {
               else reload({ silent: true });
               setSelectedId(a.id);
             }} />
-        </Modal>
+        </SidePanel>
       )}
       {modal?.type === 'edit' && (
-        <Modal title="Edit appointment" onClose={() => setModal(null)}>
+        <SidePanel className="book-panel" title="Edit appointment" onClose={() => setModal(null)}>
           <AppointmentForm appointment={modal.appt} onCancel={() => setModal(null)} onSaved={() => { setModal(null); cache.current.clear(); reload({ silent: true }); }} />
-        </Modal>
+        </SidePanel>
       )}
       {modal?.type === 'block' && (
-        <Modal title={modal.blockout ? 'Blocked time' : 'Block time'} onClose={() => setModal(null)}>
+        <SidePanel className="block-panel" title={modal.blockout ? 'Blocked time' : 'Block time'} onClose={() => setModal(null)}>
           <BlockoutForm blockout={modal.blockout} defaults={modal.defaults} onDone={() => { setModal(null); cache.current.clear(); reload({ silent: true }); }} />
-        </Modal>
+        </SidePanel>
       )}
 
     </div>

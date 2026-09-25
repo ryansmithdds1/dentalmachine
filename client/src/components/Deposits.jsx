@@ -3,7 +3,7 @@ import { api } from '../api.js';
 import { useApi } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
 import { money, fmtDate, label, practiceToday, toCents, fromCents } from '../format.js';
-import { Badge, ErrorBox, Modal, useSubmit } from './ui.jsx';
+import { Badge, ErrorBox, Modal, useSubmit, AskButton } from './ui.jsx';
 
 // Billing → Deposits: build the bank deposit from undeposited payments, print the slip, reconcile with the bank.
 export default function Deposits() {
@@ -102,7 +102,7 @@ function Reconcile({ d, onClose, onDone }) {
         <label>Date on the statement<input type="date" value={f.bank_date} onChange={(e) => setF({ ...f, bank_date: e.target.value })} /></label>
       </div>
       <div className="form-actions">
-        <button className="danger" disabled={undo.busy} onClick={() => { const why = window.prompt('Undo this deposit? Its payments go back to the not-deposited list. Why is it being undone?'); if (why?.trim()) undo.submit(why.trim()); }}>Undo deposit</button>
+        <AskButton className="danger" danger disabled={undo.busy} label="Why is it being undone?" required submit="Undo deposit" hint="Its payments go back to the not-deposited list." onSubmit={(why) => undo.submit(why)}>Undo deposit…</AskButton>
         <button className="primary" disabled={save.busy} onClick={save.submit}>Save</button>
       </div>
     </Modal>

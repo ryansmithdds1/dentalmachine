@@ -9,6 +9,7 @@ import { ErrorBox } from './ui.jsx';
 import { useAuth } from '../auth.jsx';
 import { AI_COLOR, DISCLAIMER } from './xray/kinds.js';
 import { PRESETS, COLORMAPS, NEUTRAL, withDefaults, compact, renderProcessed, dist, pathLength, angleAt, openPreset, setOpenPreset } from './imaging/imageproc.js';
+import { toast } from '../toast.js';
 
 // Diagnostic x-ray / photo viewer. Pixels are enhanced on a copy (gamma, sharpen, auto-levels, false
 // colour, emboss) with presets for caries, endo and perio reads; the settings can be saved with the image
@@ -70,6 +71,9 @@ export default function ImageViewer({ doc, canEdit = false, height = '70vh', com
   const [openWith, setOpenWith] = useState(openPreset);
   const [dirty, setDirty] = useState(false);
   const [draft, setDraft] = useState(null);
+  // A note's text or a calibration length is typed in a box on the image (no browser prompt): { kind, p | px, value }.
+  const [ask, setAsk] = useState(null);
+  const [sensorScale, setSensorScale] = useState(null); // offer to keep a calibration for the sensor
   const [magnify, setMagnify] = useState(false);
   const [panel, setPanel] = useState(false);
   const [help, setHelp] = useState(false);
@@ -315,8 +319,7 @@ export default function ImageViewer({ doc, canEdit = false, height = '70vh', com
     }
     const p = toImage(e);
     if (tool === 'text') {
-      const text = window.prompt('Note');
-      if (text) addNote({ type: 'text', points: [p], text, color: MARK });
+      setAsk({ kind: 'text', p, value: '' });
       return;
     }
     if (tool === 'erase') {
@@ -371,17 +374,7 @@ export default function ImageViewer({ doc, canEdit = false, height = '70vh', com
     const px = dist(d.points[0], d.points[1]);
     if (px < 2) return;
     if (d.type === 'calibrate') {
-      const v = window.prompt('How long is that line, in millimetres? (e.g. a known implant or file length)');
-      if (v && Number(v) > 0) {
-        const scale = Number(v) / px;
-        setMm(scale);
-        setScaleSource('calibrated');
-        setDirty(true);
-        // One calibration can serve every later x-ray from the same sensor.
-        if (agentId && canEdit && window.confirm('Use this scale for every future x-ray from this sensor?')) {
-          api.put(`/imaging/agents/${agentId}/calibration`, { mm_per_px: scale }).catch(setError);
-        }
-      }
+      setAsk({ kind: 'mm', px, value: '' });
       return;
     }
     addNote(d);
@@ -552,6 +545,36 @@ export default function ImageViewer({ doc, canEdit = false, height = '70vh', com
       <div ref={wrap} className="viewer-canvas" style={{ height: canvasHeight }}>
         {!img && !error && <div className="viewer-loading"><span className="spinner" /> Loading image…</div>}
         <canvas ref={canvas} onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerLeave={leave} onDoubleClick={finishPath} style={{ cursor, width: '100%', height: '100%' }} />
+        {ask && (
+          <form className="viewer-ask" onSubmit={(e) => {
+            e.preventDefault();
+            const v = ask.value.trim();
+            if (ask.kind === 'text' && v) addNote({ type: 'text', points: [ask.p], text: v, color: MARK });
+            if (ask.kind === 'mm' && Number(v) > 0) {
+              const scale = Number(v) / ask.px;
+              setMm(scale);
+              setScaleSource('calibrated');
+              setDirty(true);
+              // One calibration can serve every later x-ray from the same sensor: offered, not asked.
+              if (agentId && canEdit) setSensorScale(scale);
+            }
+            setAsk(null);
+            root.current?.focus({ preventScroll: true });
+          }} onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setAsk(null); root.current?.focus({ preventScroll: true }); } }}>
+            <label>{ask.kind === 'text' ? 'Note' : 'How long is that line, in mm? (e.g. a known implant or file length)'}
+              <input autoFocus value={ask.value} inputMode={ask.kind === 'mm' ? 'decimal' : undefined} onChange={(e) => setAsk({ ...ask, value: e.target.value })} />
+            </label>
+            <button className="small primary">{ask.kind === 'text' ? 'Add note' : 'Set scale'}</button>
+            <button type="button" className="small" onClick={() => setAsk(null)}>Cancel</button>
+          </form>
+        )}
+        {sensorScale && !ask && (
+          <div className="viewer-ask" role="status">
+            <span>Use this scale for every future x-ray from this sensor?</span>
+            <button type="button" className="small primary" onClick={() => { api.put(`/imaging/agents/${agentId}/calibration`, { mm_per_px: sensorScale }).then(() => toast('Scale kept for this sensor')).catch(setError); setSensorScale(null); }}>Use for this sensor</button>
+            <button type="button" className="small" onClick={() => setSensorScale(null)}>Just this image</button>
+          </div>
+        )}
         {draft?.type === 'polyline' && <div className="viewer-hint">Click along the canal · double-click or Enter to finish · Esc to cancel</div>}
         {draft?.type === 'angle' && <div className="viewer-hint">{draft.points.length === 2 ? 'Click the vertex of the angle' : 'Click the end of the second line'}</div>}
         {help && (

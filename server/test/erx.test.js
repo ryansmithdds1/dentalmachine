@@ -34,7 +34,8 @@ test('e-prescribing: pharmacy, electronic send, and EPCS rules for controlled su
 
   // Controlled substance: needs DEA, the prescriber's own login, and a fresh 2FA code. The schedule
   // comes from the drug itself — leaving it blank (or picking a laxer one) doesn't skip the checks.
-  const hydro = { ...base, drug: 'Hydrocodone/acetaminophen', strength: '5/325', quantity: '12', schedule: 'IV' };
+  // (The PDMP rule for controlled substances is covered in pdmp.test.js; here the reason to skip it is given.)
+  const hydro = { ...base, drug: 'Hydrocodone/acetaminophen', strength: '5/325', quantity: '12', schedule: 'IV', pdmp_override_reason: 'Checked on the state website' };
   let r = await api.post(`/patients/${patient.id}/prescriptions`, { ...hydro, schedule: undefined });
   assert.equal(r.status, 400);
   assert.match(r.data.error, /DEA number/);

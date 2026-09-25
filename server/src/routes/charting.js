@@ -127,8 +127,10 @@ export default function chartingRoutes({ db, config = {}, transcriber = null }) 
   });
   r.delete('/note-templates/:tid', requirePermission('clinical:write'), async (req, res) => {
     const existing = await findOr404(db, 'note_templates', req.params.tid, req.user.practice_id, 'Template');
+    // A template is set-up, not a record: it is removed, with what it said kept in the audit row (the screen's
+    // Undo puts it back as a new template).
     await db.run('DELETE FROM note_templates WHERE id = ?', existing.id);
-    await audit(db, req, 'note_template.delete', 'note_templates', existing.id);
+    await audit(db, req, 'note_template.delete', 'note_templates', existing.id, { name: existing.name }, { before: pick(existing, TEMPLATE_FIELDS) });
     res.json({ ok: true });
   });
 

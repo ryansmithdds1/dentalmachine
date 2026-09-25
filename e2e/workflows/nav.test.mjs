@@ -58,13 +58,13 @@ test('NAV the same seven modules for everyone, with only the pages each person c
   }
   const a = people.admin.page;
   assert.deepEqual(await itemsOf(a, 'schedule'), ['/requests', '/capacity', '/lab-checkin']);
-  assert.deepEqual(await itemsOf(a, 'family'), ['/patients', '/followups', '/recall', '/referrals']);
-  assert.deepEqual(await itemsOf(a, 'account'), ['/claims', '/claims?tab=approve', '/deposits']);
+  assert.deepEqual(await itemsOf(a, 'family'), ['/patients', '/followups', '/recall', '/referrals', '/letters']);
+  assert.deepEqual(await itemsOf(a, 'account'), ['/claims', '/claims?tab=approve', '/deposits', '/gift-certificates']);
   assert.deepEqual(await itemsOf(a, 'treatment'), ['/recall?type=treatment']);
   assert.deepEqual(await itemsOf(a, 'chart'), ['tab:perio', '/chart-audit', '/xray-review']);
   assert.deepEqual(await itemsOf(a, 'images'), ['/documents']);
   assert.deepEqual(await itemsOf(a, 'manage'), ['/attention', '/messages', '/calls', '/phones', '/campaigns', '/reputation', '/reports', '/metrics', '/business',
-    '/marketing', '/finance', '/ask', '/group', '/office', '/checklists', '/timeclock', '/intranet']);
+    '/marketing', '/finance', '/ask', '/group', '/office', '/checklists', '/timeclock', '/intranet', '/compliance']);
   // Manage puts what a role uses most first.
   assert.deepEqual(await sectionsOf(a, 'manage'), ['Today', 'Messages & calls', 'Numbers', 'Office']);
   assert.deepEqual(await sectionsOf(people.billing.page, 'manage'), ['Numbers', 'Today', 'Messages & calls', 'Office']);
@@ -265,9 +265,9 @@ test('NAV keyboard: Tab between modules, Enter opens one, → or ↓ opens its d
   await page.keyboard.press('ArrowDown');
   await page.waitForFunction(() => document.activeElement?.dataset?.page === '/attention');
   await page.keyboard.press('ArrowUp'); // wraps to the last page
-  assert.equal(await page.evaluate(() => document.activeElement.dataset.page), '/intranet');
+  assert.equal(await page.evaluate(() => document.activeElement.dataset.page), '/compliance');
   await page.keyboard.press('Enter');
-  await page.waitForURL(/\/intranet/);
+  await page.waitForURL(/\/compliance/);
   await page.locator('#rail-fly-manage').waitFor({ state: 'hidden' });
   // "G then a letter": the old ones still jump, and A / C / I open the active patient's Account, Chart, Images.
   await page.goto(`${app.base}/`);

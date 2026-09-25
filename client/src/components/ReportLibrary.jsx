@@ -11,6 +11,7 @@ import { toast } from '../toast.js';
 import { ErrorBox, Modal, useSubmit } from './ui.jsx';
 import { ProviderSelect } from './ReportControls.jsx';
 import './reportlibrary.css';
+import MailingLabelsButton from './MailingLabels.jsx';
 
 // Reports → Report library: the ready-made reports office managers know by name (server/src/reportlibrary.js),
 // searchable, grouped by category, with favourites. Each opens with sensible filters, a sortable table with
@@ -207,6 +208,9 @@ function ReportView({ meta, today, fav, toggleFav, back }) {
           {meta.saved_key && <button onClick={() => setSaving(true)}><CalendarClock size={15} /> Save / schedule</button>}
           <button onClick={exportCsv} disabled={!data?.rows?.length} title="Download as a spreadsheet (CSV)"><Download size={15} /> CSV</button>
           <button onClick={() => window.print()} title="Print, or choose “Save as PDF” in the print dialog"><Printer size={15} /> Print</button>
+          {/* A177 / A171: labels or a letter for the patients in these results. */}
+          {data?.rows?.some((r) => r.patient_id) && <MailingLabelsButton ids={[...new Set(data.rows.map((r) => r.patient_id).filter(Boolean))]} source={`report:${meta.id}`} label="Labels" />}
+          {data?.rows?.some((r) => r.patient_id) && <Link to={`/letters?patients=${[...new Set(data.rows.map((r) => r.patient_id).filter(Boolean))].slice(0, 500).join(',')}`}><button type="button">Letter</button></Link>}
         </div>
       </div>
 

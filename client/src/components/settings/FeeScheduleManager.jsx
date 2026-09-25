@@ -245,7 +245,7 @@ function ImportPanel({ schedules, today, onRead }) {
     });
     await send({ file_base64: b64, mime: file.type || (/\.csv$/i.test(file.name) ? 'text/csv' : ''), file_name: file.name });
   };
-  if (!ppo.length) return <div><h2>Import a payer schedule</h2><p className="muted">Add an insurance fee schedule first (Settings → Fee schedules below), then bring in the payer’s file here.</p></div>;
+  if (!ppo.length) return <div><h2>Import a payer schedule</h2><p className="muted">Add an insurance fee schedule first (Settings → Insurance fee schedules), then bring in the payer’s file here.</p></div>;
   return (
     <div className="fsm-form">
       <h2><Upload size={18} aria-hidden="true" /> Import a payer schedule</h2>

@@ -125,7 +125,7 @@ export default function AppointmentForm({ appointment, defaults = {}, patient: i
     return () => { live = false; };
   }, [suggestKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const waiting = isNew && !!patient && loadedKey !== suggestKey;
-  // Start in the patient search (the dialog focuses its first button, the ✕, after this form mounts).
+  // Start in the patient search (the panel may focus something else first, after this form mounts).
   const formRef = useRef(null);
   useEffect(() => {
     if (!isNew || patient) return undefined;
@@ -223,7 +223,8 @@ export default function AppointmentForm({ appointment, defaults = {}, patient: i
       }
       const report = saved.series || saved.series_update;
       if (report?.skipped?.length) {
-        alert(`${saved.series ? `Booked ${report.created} visits.` : `Updated ${report.updated} later visits.`} These couldn't be booked:\n\n${report.skipped.map((s) => `• ${s.start_time.slice(0, 10)} ${fmtTime(s.start_time)} — ${s.reason}`).join('\n')}`);
+        // Said on screen (not a browser box): which repeats were skipped and why.
+        toast(`${saved.series ? `Booked ${report.created} visits.` : `Updated ${report.updated} later visits.`} Not booked: ${report.skipped.map((s) => `${fmtDate(s.start_time)} ${fmtTime(s.start_time)} (${s.reason})`).join('; ')}`, { tone: 'error', ms: 15000 });
       }
       onSaved(saved);
     } catch (e) {

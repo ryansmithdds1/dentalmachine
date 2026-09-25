@@ -82,7 +82,7 @@ async function money(db, pid, o) {
     // One provider: their charges; payments and write-offs credited to their work (the same allocation as
     // Collections by provider: insurance to the claim's procedures, the rest to the oldest charges first).
     const s = scope(o, { provider: 'l.provider_id = ?', location: 'l.location_id' });
-    const charges = (await db.get(`SELECT COALESCE(SUM(l.amount),0) AS n FROM ledger_entries l WHERE l.practice_id = ? AND l.type = 'charge' AND l.entry_date BETWEEN ? AND ? AND ${LIVE()}${s.sql}`, pid, from, to, ...s.args)).n;
+    const charges = (await db.get(`SELECT COALESCE(SUM(l.amount),0) AS n FROM ledger_entries l WHERE l.practice_id = ? AND l.type = 'charge' AND l.retail_sale_id IS NULL AND l.entry_date BETWEEN ? AND ? AND ${LIVE()}${s.sql}`, pid, from, to, ...s.args)).n;
     const alloc = (await allocationsForRange(db, pid, from, to)).filter((a) => a.provider_id === o.providerId);
     const received = alloc.filter((a) => ['payment', 'insurance_payment'].includes(a.credit_type)).reduce((x, a) => x + a.amount, 0);
     const adj = alloc.filter((a) => a.credit_type === 'adjustment');
@@ -102,7 +102,7 @@ async function money(db, pid, o) {
   }
   const s = scope(o, { location: 'l.location_id' });
   const t = await db.get(
-    `SELECT COALESCE(SUM(CASE WHEN l.type = 'charge' THEN l.amount ELSE 0 END),0) AS charges,
+    `SELECT COALESCE(SUM(CASE WHEN l.type = 'charge' AND l.retail_sale_id IS NULL THEN l.amount ELSE 0 END),0) AS charges,
        COALESCE(SUM(CASE WHEN l.type IN ('payment','insurance_payment') THEN -l.amount ELSE 0 END),0) AS received,
        COALESCE(SUM(CASE WHEN l.type = 'refund' THEN l.amount ELSE 0 END),0) AS refunds
      FROM ledger_entries l WHERE l.practice_id = ? AND l.entry_date BETWEEN ? AND ? AND ${LIVE()}${s.sql}`, pid, from, to, ...s.args,
@@ -110,7 +110,7 @@ async function money(db, pid, o) {
   const split = { insurance_write_offs: 0, discounts: 0, other_write_offs: 0 };
   const rows = await db.all(
     `SELECT l.adjustment_type, CASE WHEN l.claim_id IS NULL THEN 0 ELSE 1 END AS on_claim, -SUM(l.amount) AS n FROM ledger_entries l
-     WHERE l.practice_id = ? AND l.type = 'adjustment' AND l.amount < 0 AND ${LIVE()} AND l.entry_date BETWEEN ? AND ?${s.sql}
+     WHERE l.practice_id = ? AND l.type = 'adjustment' AND l.retail_sale_id IS NULL AND l.gift_certificate_id IS NULL AND l.amount < 0 AND ${LIVE()} AND l.entry_date BETWEEN ? AND ?${s.sql}
      GROUP BY l.adjustment_type, CASE WHEN l.claim_id IS NULL THEN 0 ELSE 1 END`, pid, from, to, ...s.args,
   );
   for (const r of rows) split[adjustmentKind({ adjustment_type: r.adjustment_type, claim_id: Number(r.on_claim) ? 1 : null })] += Number(r.n);

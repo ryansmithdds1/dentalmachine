@@ -140,10 +140,12 @@ function pngImage(buf) {
 
 // ---- Document ----
 export class PdfDoc {
-  constructor({ footer = '' } = {}) {
+  // pageNumbers: false for sheets printed edge to edge (mailing labels), where a footer would land on a label.
+  constructor({ footer = '', pageNumbers = true } = {}) {
     this.pages = [];
     this.images = [];
     this.footer = footer;
+    this.pageNumbers = pageNumbers;
     this.newPage();
   }
 
@@ -187,6 +189,13 @@ export class PdfDoc {
     });
   }
 
+  // Text at an exact spot (points from the page's bottom-left), cut to fit maxW: mailing labels and fixed boxes.
+  textAt(str, x, y, { size = 10, bold = false, maxW = null, color = [0.07, 0.09, 0.15] } = {}) {
+    let line = winAnsi(String(str ?? ''));
+    if (maxW) while (line.length > 1 && width(line, size, bold) > maxW) line = line.slice(0, -1);
+    this.ops.push(`BT ${color.join(' ')} rg /F${bold ? 2 : 1} ${size} Tf ${x.toFixed(2)} ${y.toFixed(2)} Td (${esc(line)}) Tj ET`);
+  }
+
   rule() {
     this.need(10);
     this.y -= 6;
@@ -223,7 +232,7 @@ export class PdfDoc {
     const kids = [];
     this.pages.forEach((ops, n) => {
       const foot = winAnsi(`${this.footer}${this.footer ? '  ·  ' : ''}Page ${n + 1} of ${this.pages.length}`);
-      const all = [...ops, `BT 0.45 0.48 0.55 rg /F1 8 Tf ${MARGIN} ${MARGIN - 18} Td (${esc(foot)}) Tj ET`].join('\n');
+      const all = [...ops, ...(this.pageNumbers ? [`BT 0.45 0.48 0.55 rg /F1 8 Tf ${MARGIN} ${MARGIN - 18} Td (${esc(foot)}) Tj ET`] : [])].join('\n');
       const content = add({ dict: `<< /Length ${Buffer.byteLength(all, 'latin1')} >>`, stream: Buffer.from(all, 'latin1') });
       kids.push(add(`<< /Type /Page /Parent ${pagesObj} 0 R /MediaBox [0 0 ${PAGE_W} ${PAGE_H}] /Resources << /Font << /F1 ${f1} 0 R /F2 ${f2} 0 R >> ${xobjects} >> /Contents ${content} 0 R >>`));
     });

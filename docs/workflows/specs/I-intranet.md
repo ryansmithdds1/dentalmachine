@@ -70,3 +70,8 @@ it; ticks already made on it are kept.
 - `server/test/intranet.test.js`: practice isolation, office/role visibility, URL validation, version history and
   restore, stale saves refused, archive not delete, acknowledgement report, permission checks, attachments
   (encrypted, scoped), templates, onboarding progress, and the Markdown renderer against XSS payloads.
+
+
+## Phase 2, batch 2A
+An announcement is posted with Ctrl/⌘+Enter (as well as Ctrl/⌘+S): A, the title, Ctrl/⌘+Enter — **3 actions**; the
+message is optional (Tab to it).

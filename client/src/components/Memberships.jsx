@@ -4,7 +4,8 @@ import { useApi, useLookup, invalidateLookup } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
 import { money, fmtDate, fullName } from '../format.js';
 import { CsvButton, PrintButton } from './ReportControls.jsx';
-import { Badge, ErrorBox, Modal, useSubmit } from './ui.jsx';
+import { Badge, ErrorBox, Modal, useSubmit, AskButton } from './ui.jsx';
+import { toast } from '../toast.js';
 
 const per = (p) => `${money(p.price)}/${p.interval === 'year' ? 'yr' : 'mo'}`;
 
@@ -127,7 +128,7 @@ export function MembershipCard({ patient, onChange }) {
               <button className="small" onClick={() => setModal('card')}>Card…</button>
               {m.status === 'past_due' && <button className="small" onClick={() => act(() => api.post(`/memberships/${m.id}/bill`))}>Try the card again</button>}
               {m.status === 'past_due' && <button className="small" onClick={() => act(() => api.post(`/memberships/${m.id}/settle`))}>Paid at the desk</button>}
-              <button className="small danger" onClick={() => { const reason = window.prompt(`Cancel ${patient.first_name}'s membership? Benefits continue until ${fmtDate(m.paid_through)}. Reason (optional):`); if (reason !== null) act(() => api.post(`/memberships/${m.id}/cancel`, { reason })); }}>Cancel membership</button>
+              <AskButton className="small danger" danger label="Why? (optional)" submit="Cancel membership" hint={`Benefits continue until ${fmtDate(m.paid_through)}.`} onSubmit={(reason) => act(() => api.post(`/memberships/${m.id}/cancel`, { reason }))}>Cancel membership…</AskButton>
             </div>
           )}
         </div>
@@ -158,7 +159,7 @@ function Enroll({ patient, onClose, onDone }) {
   const [card, setCard] = useState('');
   const { submit, busy, error } = useSubmit(async () => {
     const r = await api.post(`/patients/${patient.id}/memberships`, { plan_id: Number(planId), payment_method_id: card ? Number(card) : null });
-    if (r.billing?.some((b) => b.declined)) window.alert(`${fullName(patient)} is enrolled, but the card was declined: ${r.billing.find((b) => b.declined).reason}`);
+    if (r.billing?.some((b) => b.declined)) toast(`${fullName(patient)} is enrolled, but the card was declined: ${r.billing.find((b) => b.declined).reason}`, { tone: 'error', ms: 12000 });
     onDone();
   });
   const plan = plans.find((p) => p.id === Number(planId));

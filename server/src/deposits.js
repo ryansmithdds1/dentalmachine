@@ -350,7 +350,7 @@ export async function depositSeparation(db, slip, items, names) {
   const from = shift(slip.business_date, -30);
   const to = shift(slip.business_date, 30);
   const adjustments = await db.all(
-    `SELECT patient_id, created_by, amount FROM ledger_entries l WHERE l.practice_id = ? AND l.type = 'adjustment' AND l.amount < 0 AND ${LIVE}
+    `SELECT patient_id, created_by, amount FROM ledger_entries l WHERE l.practice_id = ? AND l.type = 'adjustment' AND l.retail_sale_id IS NULL AND l.gift_certificate_id IS NULL AND l.amount < 0 AND ${LIVE}
        AND l.transfer_id IS NULL AND l.entry_date BETWEEN ? AND ? AND l.patient_id IN (${patients.map(() => '?').join(',')})`, slip.practice_id, from, to, ...patients,
   );
   return separationFlags({ items, adjustments, preparedBy: slip.prepared_by, names });
@@ -513,7 +513,7 @@ export async function cashIntegrity(db, pid, { from, to, today }) {
   const adjustments = (await db.all(
     `SELECT l.created_by, COUNT(*) AS n, -SUM(l.amount) AS amount,
        -SUM(CASE WHEN LOWER(COALESCE(l.adjustment_type, '')) LIKE '%write%' THEN l.amount ELSE 0 END) AS write_offs
-     FROM ledger_entries l WHERE l.practice_id = ? AND l.type = 'adjustment' AND l.amount < 0 AND ${LIVE} AND l.transfer_id IS NULL AND l.entry_date BETWEEN ? AND ?
+     FROM ledger_entries l WHERE l.practice_id = ? AND l.type = 'adjustment' AND l.retail_sale_id IS NULL AND l.gift_certificate_id IS NULL AND l.amount < 0 AND ${LIVE} AND l.transfer_id IS NULL AND l.entry_date BETWEEN ? AND ?
      GROUP BY l.created_by`, pid, from, to,
   )).map((a) => ({ user_id: a.created_by, name: who(a.created_by), count: Number(a.n), amount: Number(a.amount), write_offs: Number(a.write_offs), discounts: Number(a.amount) - Number(a.write_offs) }))
     .sort((a, b) => b.amount - a.amount);

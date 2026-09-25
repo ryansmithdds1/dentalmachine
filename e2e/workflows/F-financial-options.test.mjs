@@ -34,12 +34,10 @@ test('F2/F3/F4 present the plan: teeth, phase cards, ways to pay side by side; t
   await s.api('PUT', `/treatment-plans/${plan.id}/phases/2`, { name: 'Replace the missing tooth', why: 'So you can chew on that side again.' });
   await openTreatment();
   const staff = await measure(page, async () => {
-    await page.locator(`.card[data-plan="${plan.id}"]`).locator('button:has-text("Present & e-sign")').click();
-    await page.waitForSelector('.modal button:has-text("Open here for Fina to sign")');
-    await page.keyboard.press('Enter');
+    await page.locator(`.card[data-plan="${plan.id}"]`).locator('button:has-text("Present here for Fina to sign")').click();
     await page.waitForSelector('h1:has-text("Your treatment plan, Fina")');
   });
-  console.log(withinBudget('F present (staff)', staff, { actions: 2 }));
+  console.log(withinBudget('F present (staff)', staff, { actions: 1 }));
   // Visual: the teeth, a card per phase in plain words, and the ways to pay.
   assert.equal(await page.locator('.tooth-map .tm-tooth.on').count(), 3);
   assert.equal(await page.locator('.cp-phase').count(), 2);

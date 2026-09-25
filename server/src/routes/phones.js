@@ -254,7 +254,7 @@ export default function phoneRoutes({ db, storage }) {
     const costs = new Map((await db.all('SELECT source, SUM(monthly_cost) AS cost FROM tracking_numbers WHERE practice_id = ? GROUP BY source', pid)).map((t) => [t.source, Number(t.cost) || 0]));
     const out = [];
     for (const r0 of rows.values()) {
-      const production = r0.new_patients.length ? Number((await db.get(`SELECT SUM(amount) AS n FROM ledger_entries WHERE type = 'charge' AND patient_id IN (${r0.new_patients.map(() => '?').join(',')})`, ...r0.new_patients))?.n) || 0 : 0;
+      const production = r0.new_patients.length ? Number((await db.get(`SELECT SUM(amount) AS n FROM ledger_entries WHERE type = 'charge' AND retail_sale_id IS NULL AND patient_id IN (${r0.new_patients.map(() => '?').join(',')})`, ...r0.new_patients))?.n) || 0 : 0;
       const spend = Math.round(((costs.get(r0.source) || 0) * days) / 30);
       out.push({ source: r0.source, calls: r0.calls, missed: r0.missed, new_callers: r0.new_callers.size, new_patients: r0.new_patients.length, production, spend, cost_per_new_patient: spend && r0.new_patients.length ? Math.round(spend / r0.new_patients.length) : null, return_on_spend: spend ? Math.round((production / spend) * 10) / 10 : null });
     }

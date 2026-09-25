@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from '../../api.js';
 import { fmtTime, fmtDateTime, fmtUtcDateTime, money, eligibilityBadge } from '../../format.js';
 import { useAuth } from '../../auth.jsx';
+import { useLookup } from '../../hooks.js';
 import { Badge } from '../ui.jsx';
 import { nextKind, NEXT_LABEL, READY_LABEL, STEP_KEYS, postsCharges } from './flow.js';
 import BrokenPicker, { brokenLabel } from './BrokenPicker.jsx';
@@ -32,7 +33,7 @@ export const JUMPS = [
 // Minutes between two practice-local 'YYYY-MM-DD HH:MM' times.
 const mins = (a, b) => (a && b ? Math.round((Date.parse(`${b.replace(' ', 'T')}Z`) - Date.parse(`${a.replace(' ', 'T')}Z`)) / 60000) : null);
 
-export default function AppointmentDrawer({ appt: a, can, onClose, onStatus, onStep, focusComplete = 0, brokenAsk = null, onBroken, onEdit, onPatient, onMove, onPin, onToggleAsap, onReminder, onCheckout, focusOpportunities = 0, onOpportunitiesChanged }) {
+export default function AppointmentDrawer({ appt: a, can, onClose, onStatus, onStep, focusComplete = 0, brokenAsk = null, onBroken, onEdit, onQuickEdit, onPatient, onMove, onPin, onToggleAsap, onReminder, onCheckout, focusOpportunities = 0, onOpportunitiesChanged }) {
   useEffect(() => {
     const onKey = (e) => e.key === 'Escape' && onClose();
     window.addEventListener('keydown', onKey);
@@ -77,6 +78,11 @@ export default function AppointmentDrawer({ appt: a, can, onClose, onStatus, onS
   // 1–6 while the panel is open — not while the cancel / no-show reasons are up (their numbers pick a reason).
   useShortcuts(jumps.map((j) => ({ combo: j.n, handler: () => onPatient(j.tab), label: `Open the patient’s ${j.label === 'X-rays' ? 'x-rays and documents' : j.label.toLowerCase()}`, section: 'Visit panel', enabled: !asking })));
   const elig = a.eligibility ? eligibilityBadge(a.eligibility) : null;
+  const types = useLookup(w ? '/appointment-types?active=true' : null);
+  const toMins = (t) => Number(t.slice(11, 13)) * 60 + Number(t.slice(14, 16));
+  const minsLong = toMins(a.end_time) - toMins(a.start_time);
+  const endAt = (len) => { const m = Math.min(toMins(a.start_time) + len, 23 * 60 + 59); return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`; };
+  const lengthFor = (t, providerId) => { try { return JSON.parse(t.provider_durations || '{}')[providerId] || t.duration; } catch { return t.duration; } };
   const owed = card?.balance != null ? card.balance : null;
   const plainClick = (e) => e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey;
 
@@ -171,6 +177,28 @@ export default function AppointmentDrawer({ appt: a, can, onClose, onStatus, onS
           </div>
         )}
         <dl className="kv" style={{ gridTemplateColumns: '110px 1fr' }}>
+          {/* Type and length change right here (the type's usual length follows), with Undo — no edit form. */}
+          {w && active && onQuickEdit ? (
+            <>
+              <dt>Type</dt>
+              <dd>
+                <select className="compact" aria-label="Visit type" value={a.appointment_type_id || ''} onChange={(e) => {
+                  const t = types.find((x) => String(x.id) === e.target.value);
+                  const len = t ? lengthFor(t, a.provider_id) : minsLong;
+                  onQuickEdit({ appointment_type_id: t ? t.id : null, end_time: `${a.start_time.slice(0, 10)} ${endAt(len)}` }, t ? `${t.name}, ${len} min` : 'no type');
+                }}>
+                  <option value="">— None —</option>
+                  {types.map((t) => <option key={t.id} value={t.id}>{t.name} ({lengthFor(t, a.provider_id)} min)</option>)}
+                </select>
+              </dd>
+              <dt>Length</dt>
+              <dd>
+                <select className="compact" aria-label="Length" value={minsLong} onChange={(e) => onQuickEdit({ end_time: `${a.start_time.slice(0, 10)} ${endAt(Number(e.target.value))}` }, `${e.target.value} min`)}>
+                  {[...new Set([10, 15, 20, 30, 40, 45, 50, 60, 75, 90, 120, 150, 180, minsLong])].sort((x, y) => x - y).map((m) => <option key={m} value={m}>{m} min</option>)}
+                </select>
+              </dd>
+            </>
+          ) : null}
           <dt>Provider</dt><dd>{a.provider_name}</dd>
           <dt>Chair</dt><dd>{a.operatory_name || '—'}</dd>
           <dt>Phone</dt><dd>{a.phone ? <a href={`tel:${a.phone}`}>{a.phone}</a> : '—'}</dd>

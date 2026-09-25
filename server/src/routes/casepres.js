@@ -7,6 +7,7 @@ import { practiceNow } from '../util.js';
 import { financingOptions } from '../financing.js';
 import { sendMessage, preferredChannel } from '../messaging.js';
 import { checkEpcs } from '../erx.js';
+import { pdmpForPrescription } from '../pdmp.js';
 import { allergyWarning, controlledSchedule, stricterSchedule } from '../drugs.js';
 import { PdfDoc, dataUrlImage } from '../pdf.js';
 import { mintHandoff, redeemHandoff, HANDOFF_MINUTES } from '../handoff.js';
@@ -236,7 +237,8 @@ export default function casePresentationRoutes({ db, messenger, config, erx, sec
   });
 
   // ---- E-prescribing ----
-  const RX_SELECT = 'SELECT rx.*, pv.name AS provider_name, pv.npi AS provider_npi, pv.license_number, pv.dea_number FROM prescriptions rx JOIN providers pv ON pv.id = rx.provider_id';
+  const RX_SELECT = `SELECT rx.*, pv.name AS provider_name, pv.npi AS provider_npi, pv.license_number, pv.dea_number, pc.summary AS pdmp_summary, pc.created_at AS pdmp_checked_at, pc.flagged AS pdmp_flagged
+    FROM prescriptions rx JOIN providers pv ON pv.id = rx.provider_id LEFT JOIN pdmp_checks pc ON pc.id = rx.pdmp_check_id`;
   const rxView = (rx) => rx && { ...rx, pharmacy: rx.pharmacy ? JSON.parse(rx.pharmacy) : null };
   r.get('/erx', (_req, res) => res.json({ mode: erx.mode, name: erx.name, electronic: erx.electronic, in_app: erx.inApp, epcs: erx.epcs, pharmacy_search: !!erx.searchPharmacies }));
   r.get('/pharmacies', requirePermission('clinical:read'), (req, res) => {
@@ -278,9 +280,15 @@ export default function casePresentationRoutes({ db, messenger, config, erx, sec
     if (row.schedule && !['II', 'III', 'IV', 'V'].includes(row.schedule)) throw new HttpError(400, 'schedule must be II, III, IV or V');
     // A known controlled substance is always treated as one, whatever the form said.
     row.schedule = stricterSchedule(row.schedule || null, controlledSchedule(`${row.drug} ${row.strength || ''}`));
+    let pdmp = null;
     if (row.schedule) {
       if (!provider.dea_number) throw new HttpError(400, `${provider.name} needs a DEA number (Settings → Providers) to prescribe controlled substances`);
       if (row.schedule === 'II' && row.refills > 0) throw new HttpError(400, 'Schedule II prescriptions cannot have refills');
+      // The PDMP was checked for this patient in the last day, or the prescriber says why not (pdmp.js). Before the
+      // two-factor signature, so a missing check never uses up a code.
+      pdmp = await pdmpForPrescription(db, req.user.practice_id, patient.id, req.body || {});
+      row.pdmp_check_id = pdmp.pdmp_check_id;
+      row.pdmp_override_reason = pdmp.pdmp_override_reason;
     }
     const send = !!req.body.send;
     let signature = null;
@@ -298,7 +306,7 @@ export default function casePresentationRoutes({ db, messenger, config, erx, sec
       status: send ? 'signed' : 'printed', pharmacy: pharmacy ? JSON.stringify(pharmacy) : null,
       signed_by: signature?.signed_by ?? (send ? req.user.id : null), signed_two_factor: signature?.two_factor ? 1 : 0,
     });
-    await audit(db, req, send ? 'prescription.sign' : 'prescription.create', 'prescriptions', id, { drug: row.drug, schedule: row.schedule || null, electronic: send, two_factor: !!signature, ...(allergy ? { allergy_override: allergy } : {}) });
+    await audit(db, req, send ? 'prescription.sign' : 'prescription.create', 'prescriptions', id, { drug: row.drug, schedule: row.schedule || null, electronic: send, two_factor: !!signature, ...(allergy ? { allergy_override: allergy } : {}), ...(pdmp ? { pdmp_check_id: pdmp.pdmp_check_id, pdmp_skipped: pdmp.pdmp_override_reason } : {}) });
     if (send) {
       try {
         const out = await erx.transmit({ ...row, id, pharmacy_ncpdp: pharmacy.ncpdp, patient, provider });

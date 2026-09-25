@@ -9,6 +9,7 @@ import { toast } from '../../toast.js';
 export const CONTACT_FIELDS = {
   phone: 'mobile', phone_home: 'home phone', phone_work: 'work phone', email: 'email', emergency_contact: 'emergency contact',
   preferred_contact: 'contact preference', language: 'language', address: 'address',
+  office_alert: 'office alert', primary_provider_id: 'usual dentist', primary_hygienist_id: 'usual hygienist',
 };
 
 // "5125550142", "512.555.0142", "+1 512 555 0142" → "(512) 555-0142". Anything else isn't a US phone number.
@@ -44,6 +45,7 @@ export function normalize(field, value) {
   if (field === 'phone' || field === 'phone_home' || field === 'phone_work') return formatPhone(value) || null;
   if (field === 'email') return cleanEmail(value) || null;
   if (field === 'address') return parseAddress(value);
+  if (field.endsWith('_id')) return value ? Number(value) : null;
   return String(value ?? '').trim() || null;
 }
 
@@ -52,7 +54,8 @@ const first = (p) => p.preferred_name || p.first_name;
 const names = (list) => (list.length <= 2 ? list.join(' and ') : `${list.slice(0, -1).join(', ')} and ${list.at(-1)}`);
 
 // Saves one change for a patient (who: { id, first_name, preferred_name, … the current values }), with an Undo toast.
-export async function saveContact(who, field, value) {
+// `shownAs` names the new value in the note when it's an id (a provider's name for primary_provider_id).
+export async function saveContact(who, field, value, shownAs = null) {
   const next = normalize(field, value);
   if (field === 'address') {
     const r = await api.put(`/patients/${who.id}/address`, next);
@@ -76,7 +79,7 @@ export async function saveContact(who, field, value) {
   if ((before || null) === (next || null)) return who;
   const saved = await api.put(`/patients/${who.id}`, { [field]: next });
   refresh();
-  toast(`${first(who)}’s ${CONTACT_FIELDS[field] || field.replace(/_/g, ' ')} ${next ? `is now ${next}` : 'was cleared'}`, {
+  toast(`${first(who)}’s ${CONTACT_FIELDS[field] || field.replace(/_/g, ' ')} ${next ? `is now ${shownAs || next}` : 'was cleared'}`, {
     undo: async () => {
       try { await api.put(`/patients/${who.id}`, { [field]: before }); toast('Undone'); } catch (e) { toast(`Couldn’t undo: ${e.message}`, { tone: 'error' }); }
       refresh();

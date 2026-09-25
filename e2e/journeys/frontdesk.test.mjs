@@ -1,5 +1,6 @@
 // Nightly journey — the front desk (Jordan, frontdesk@demo): a new patient with insurance, booked, confirmed,
 // checked in, pays; a later visit is moved and then cancelled. Driven through the screens, checked on the server.
+/* global document */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { journey, addDays } from './lib.mjs';
@@ -35,8 +36,8 @@ test('new patient with insurance', async () => {
 
 async function book(date, time) {
   const { page } = j;
-  await j.goto(`/schedule?book=${patientId}`, '.modal', { keep: true });
-  const modal = page.locator('.modal');
+  await j.goto(`/schedule?book=${patientId}`, '.book-panel', { keep: true });
+  const modal = page.locator('.book-panel');
   const type = modal.locator('label:has-text("Appointment type") select');
   const cleaning = await type.locator('option').filter({ hasText: /cleaning|exam/i }).first().getAttribute('value');
   if (cleaning) await type.selectOption(cleaning);
@@ -45,9 +46,9 @@ async function book(date, time) {
   const provider = modal.locator('label:has-text("Provider") select').first();
   if (!(await provider.inputValue())) await provider.selectOption({ index: 1 });
   await modal.locator('.form-actions button.primary').click();
-  const anyway = page.locator('.modal button:has-text("Book it anyway")');
-  await Promise.race([anyway.waitFor().then(() => anyway.click()), page.waitForSelector('.modal', { state: 'detached' })]).catch(() => {});
-  await page.waitForSelector('.modal', { state: 'detached' });
+  const anyway = page.locator('.book-panel button:has-text("Book it anyway")');
+  await Promise.race([anyway.waitFor().then(() => anyway.click()), page.waitForSelector('.book-panel', { state: 'detached' })]).catch(() => {});
+  await page.waitForSelector('.book-panel', { state: 'detached' });
 }
 
 test('book today and a visit later on', async () => {
@@ -123,9 +124,10 @@ test('reschedule the later visit, then handle its cancellation', async () => {
     await page.keyboard.press('x');
     await page.waitForSelector('.broken-picker');
     await page.keyboard.press('2');
-    await page.waitForSelector('.modal .book-suggest strong'); // offered a new time; they'll call back instead
+    await page.waitForSelector('.rebook-bar'); // offered a new time on the schedule; they'll call back instead
+    await page.waitForFunction(() => document.activeElement?.closest('.rebook-bar'));
     await page.keyboard.press('Escape');
-    await page.waitForSelector('.modal', { state: 'detached' });
+    await page.waitForSelector('.rebook-bar', { state: 'detached' });
   });
   const cancelled = await j.s.get(`/appointments/${later.id}`);
   assert.equal(cancelled.status, 'cancelled');

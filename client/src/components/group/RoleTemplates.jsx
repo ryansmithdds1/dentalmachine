@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { api } from '../../api.js';
 import { useApi } from '../../hooks.js';
 import { label } from '../../format.js';
-import { ErrorBox, Modal, useSubmit } from '../ui.jsx';
+import { ErrorBox, Modal, useSubmit, ConfirmButton } from '../ui.jsx';
 
 // Group role templates (owners): define "Front desk", "Billing", "Dentist" once and give it to people at several
 // practices at once. Each practice gets its own role linked to the template; every change is in that practice's log.
@@ -31,7 +31,7 @@ export default function RoleTemplates() {
           <div className="inline" style={{ gap: 6 }}>
             <button className="small primary" onClick={() => setApplying(t)}>Apply to people…</button>
             <button className="small" onClick={() => setEditing(t)}>Edit</button>
-            <button className="small" onClick={() => window.confirm(`Retire “${t.name}”? People keep the role it gave them.`) && retire.submit(t)}>Retire</button>
+            <ConfirmButton className="small" ask={`Retire “${t.name}”? People keep the role it gave them.`} yes="Retire" onConfirm={() => retire.submit(t)}>Retire</ConfirmButton>
           </div>
         </div>
       ))}
@@ -43,9 +43,9 @@ export default function RoleTemplates() {
 
 function Editor({ t, catalog, baseRoles, onClose, onDone }) {
   const [form, setForm] = useState({ name: t.name, base_role: t.base_role, permissions: t.permissions });
+  // Changing what a template allows changes it for everyone who has it: the Save button says so and asks once.
+  const affects = !!(t.id && t.people && JSON.stringify([...form.permissions].sort()) !== JSON.stringify([...t.permissions].sort()));
   const save = useSubmit(async () => {
-    if (t.id && JSON.stringify([...form.permissions].sort()) !== JSON.stringify([...t.permissions].sort()) && t.people
-      && !window.confirm(`This changes permissions for ${t.people} ${t.people === 1 ? 'person' : 'people'} across the group. Continue?`)) return;
     if (t.id) await api.put(`/org/role-templates/${t.id}`, form);
     else await api.post('/org/role-templates', form);
     onDone();
@@ -53,7 +53,7 @@ function Editor({ t, catalog, baseRoles, onClose, onDone }) {
   const toggle = (p) => setForm({ ...form, permissions: form.permissions.includes(p) ? form.permissions.filter((x) => x !== p) : [...form.permissions, p] });
   return (
     <Modal title={t.id ? `Edit ${t.name}` : 'New role template'} onClose={onClose}>
-      <form onSubmit={(e) => { e.preventDefault(); save.submit(); }}>
+      <form onSubmit={(e) => { e.preventDefault(); if (!affects) save.submit(); }}>
         <ErrorBox error={save.error} />
         <div className="form-grid">
           <label>Name<input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Front desk" autoFocus /></label>
@@ -62,7 +62,11 @@ function Editor({ t, catalog, baseRoles, onClose, onDone }) {
         <div style={{ marginTop: 10 }}>
           {Object.entries(catalog).map(([p, l]) => <label key={p} className="checkbox"><input type="checkbox" checked={form.permissions.includes(p)} onChange={() => toggle(p)} /> {l}</label>)}
         </div>
-        <div className="form-actions"><button type="button" onClick={onClose}>Cancel</button><button className="primary" disabled={!form.name.trim() || save.busy}>Save</button></div>
+        <div className="form-actions"><button type="button" onClick={onClose}>Cancel</button>
+          {affects
+            ? <ConfirmButton className="primary" disabled={!form.name.trim() || save.busy} ask={`This changes permissions for ${t.people} ${t.people === 1 ? 'person' : 'people'} across the group.`} yes="Save for everyone" onConfirm={save.submit}>Save</ConfirmButton>
+            : <button className="primary" disabled={!form.name.trim() || save.busy}>Save</button>}
+        </div>
       </form>
     </Modal>
   );
@@ -74,7 +78,6 @@ function Apply({ t, onClose, onDone }) {
   const [reason, setReason] = useState('');
   const [done, setDone] = useState(null);
   const apply = useSubmit(async () => {
-    if (!window.confirm(`Give ${ids.length} ${ids.length === 1 ? 'person' : 'people'} the “${t.name}” role? Their permissions change now and they sign in again.`)) return;
     setDone((await api.post(`/org/role-templates/${t.id}/apply`, { user_ids: ids, reason })).results);
   });
   const byPractice = (people || []).reduce((m, p) => ({ ...m, [p.practice]: [...(m[p.practice] || []), p] }), {});
@@ -101,7 +104,7 @@ function Apply({ t, onClose, onDone }) {
             </div>
           ))}
           <label>Why (kept with the change)<input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Standardising front desk access" /></label>
-          <div className="form-actions"><button onClick={onClose}>Cancel</button><button className="primary" disabled={!ids.length || apply.busy} onClick={apply.submit}>Apply to {ids.length || ''}</button></div>
+          <div className="form-actions"><button onClick={onClose}>Cancel</button><ConfirmButton className="primary" disabled={!ids.length || apply.busy} ask={`Give ${ids.length} ${ids.length === 1 ? 'person' : 'people'} the “${t.name}” role? Their permissions change now and they sign in again.`} yes={`Apply to ${ids.length}`} onConfirm={apply.submit}>Apply to {ids.length || ''}</ConfirmButton></div>
         </>
       )}
     </Modal>

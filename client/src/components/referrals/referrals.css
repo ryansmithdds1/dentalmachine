@@ -2,7 +2,7 @@
 .rt-form { display: flex; flex-direction: column; gap: 12px; }
 .rt-field { display: flex; flex-direction: column; gap: 5px; font-size: 13px; }
 .rt-field > span { color: var(--muted); }
-.rt-check { display: flex; gap: 8px; align-items: center; font-size: 13px; }
+.rt-check { display: flex; flex-direction: row; gap: 8px; align-items: center; font-size: 13px; text-align: left; }
 .rt-hint { font-size: 12px; color: var(--muted); }
 .rt-urgency button.active.rt-u-critical { background: var(--danger); color: #fff; }
 .rt-urgency button.active.rt-u-soon { background: var(--warn); color: #fff; }

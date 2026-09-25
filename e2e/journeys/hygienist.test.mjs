@@ -30,16 +30,16 @@ test('recall visit booked from the chart', async () => {
   await j.step('book', async () => {
     await j.goto(`/patients/${patient.id}?tab=overview`, 'h1');
     await page.keyboard.press('Alt+b'); // book the active patient's next visit
-    await page.waitForSelector('.modal .book-suggest strong');
-    const type = page.locator('.modal label:has-text("Appointment type") select');
+    await page.waitForSelector('.book-panel .book-suggest strong');
+    const type = page.locator('.book-panel label:has-text("Appointment type") select');
     if (await type.count()) {
       const recall = await type.locator('option').filter({ hasText: /recall|cleaning|prophy|hygiene/i }).first().getAttribute('value').catch(() => null);
       if (recall) await type.selectOption(recall);
     }
-    await page.locator('.modal .form-actions button.primary').click();
-    const anyway = page.locator('.modal button:has-text("Book it anyway")');
-    await Promise.race([anyway.waitFor().then(() => anyway.click()), page.waitForSelector('.modal', { state: 'detached' })]).catch(() => {});
-    await page.waitForSelector('.modal', { state: 'detached' });
+    await page.locator('.book-panel .form-actions button.primary').click();
+    const anyway = page.locator('.book-panel button:has-text("Book it anyway")');
+    await Promise.race([anyway.waitFor().then(() => anyway.click()), page.waitForSelector('.book-panel', { state: 'detached' })]).catch(() => {});
+    await page.waitForSelector('.book-panel', { state: 'detached' });
   });
   const booked = await j.until(async () => (await j.s.get(`/appointments?patient_id=${patient.id}&from=${j.today}&to=${addDays(j.today, 400)}`)).find((a) => a.status !== 'cancelled'), 'the booked visit');
   assert.ok(booked.start_time >= j.today, 'in the future');

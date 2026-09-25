@@ -1,0 +1,52 @@
+/* Compliance log (Compliance.jsx), letters (Letters.jsx), gift certificates and retail panels share these. Uses the
+   app's colour tokens so light and dark themes both work. */
+.cmp-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+.cmp-bar .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.cmp-form { display: grid; gap: 10px; }
+.cmp-form label.full { display: grid; gap: 4px; }
+.cmp-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.cmp-form .form-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
+.cmp-form .form-actions .hint { margin-right: auto; }
+.inline-label { display: inline-flex; align-items: center; gap: 6px; flex-direction: row; margin: 0; }
+.inline-label input[type='checkbox'] { width: auto; }
+.inline-label select, .inline-label input[type='datetime-local'] { width: auto; }
+.cmp-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 4px 3px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--primary-soft); font-size: 13px; }
+.cmp-chip button { min-height: 0; padding: 0 6px; font-size: 16px; line-height: 1; }
+.cmp-picker { min-width: 240px; }
+.cmp-table td { vertical-align: top; }
+.cmp-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.cmp-voided { opacity: 0.55; }
+.cmp-voided strong { text-decoration: line-through; }
+.cmp-report .grid { gap: 12px; }
+.cmp-more summary { cursor: pointer; color: var(--muted); font-size: 13px; margin-bottom: 8px; }
+.cmp-exposure-head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.cmp-steps { list-style: none; padding: 0; margin: 10px 0 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 4px 16px; }
+.cmp-steps li { font-size: 13px; }
+
+/* Letters */
+.ltr-layout { display: grid; grid-template-columns: minmax(220px, 280px) 1fr; gap: 16px; align-items: start; }
+@media (max-width: 800px) { .ltr-layout { grid-template-columns: 1fr; } }
+.ltr-list { display: grid; gap: 4px; }
+.ltr-list button { text-align: left; justify-content: flex-start; display: flex; gap: 8px; align-items: center; }
+.ltr-list button.active { border-color: var(--primary); }
+.ltr-paper { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 28px 32px; font-family: Georgia, 'Times New Roman', serif; font-size: 15px; line-height: 1.55; }
+.ltr-paper .ltr-head { font-family: inherit; font-weight: 700; font-size: 18px; }
+.ltr-paper textarea { width: 100%; min-height: 260px; font: inherit; border: 1px dashed var(--border); background: transparent; }
+.ltr-missing { background: var(--danger-soft, #fde8e8); color: var(--danger); border-radius: 4px; padding: 0 3px; }
+.ltr-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
+
+/* Gift certificates */
+.gc-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 600; letter-spacing: 0.04em; }
+.gc-summary { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 12px; }
+.gc-summary .card { margin: 0; flex: 1 1 180px; }
+
+/* PDMP prompt in the prescription form */
+.pdmp-box { border: 1px solid var(--warn, #b45309); border-radius: var(--radius); padding: 10px 12px; margin: 8px 0; display: grid; gap: 8px; }
+.pdmp-box.ok { border-color: var(--ok, #15803d); }
+.pdmp-box.flag { border-color: var(--danger); }
+.pdmp-box .pdmp-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+/* Mailing labels button (MailingLabels.jsx) */
+.labels-btn { display: inline-flex; align-items: center; gap: 8px; position: relative; }
+.labels-notes summary { cursor: pointer; font-size: 12px; color: var(--warn, #b45309); }
+.labels-notes ul { position: absolute; z-index: 20; right: 0; top: 100%; margin: 4px 0 0; padding: 8px 12px 8px 24px; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow, 0 4px 16px rgba(0,0,0,.12)); max-height: 260px; overflow: auto; font-size: 12px; min-width: 260px; }

@@ -141,7 +141,7 @@ export async function scheduleProduction(db, user, { from, days = 1, locationId 
   // The ledger decides what's done: live charges for these procedures (a voided charge and its reversal both drop out).
   const charges = new Map((await db.all(
     `SELECT le.procedure_id, SUM(le.amount) AS amount FROM ledger_entries le JOIN procedures x ON x.id = le.procedure_id JOIN appointments a ON a.id = x.appointment_id
-     WHERE ${where} AND le.practice_id = a.practice_id AND le.type = 'charge' AND le.voided_at IS NULL AND le.reverses_id IS NULL GROUP BY le.procedure_id`, ...args,
+     WHERE ${where} AND le.practice_id = a.practice_id AND le.type = 'charge' AND le.retail_sale_id IS NULL AND le.voided_at IS NULL AND le.reverses_id IS NULL GROUP BY le.procedure_id`, ...args,
   )).map((r) => [r.procedure_id, Number(r.amount) || 0]));
 
   // Goals and plans.

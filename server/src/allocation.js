@@ -13,6 +13,9 @@
 export const chargeVisitKey = (e) => (e.visit_appointment_id ? `a${e.visit_appointment_id}` : `d${e.entry_date}`);
 
 // entries: one patient's ledger rows; claimLines: [{ claim_id, procedure_id, paid_amount, adjusted_amount }].
+// A gift certificate being used pays a charge like a payment would, but it isn't a collection (the money was collected
+// when the certificate was sold) nor a write-off: it gets its own credit type, so neither total counts it.
+const creditType = (e) => (e.type === 'adjustment' && e.gift_certificate_id ? 'gift_certificate' : e.type);
 export function allocate(entries, claimLines = []) {
   const live = entries.filter((e) => !e.voided_at && !e.reverses_id).sort((a, b) => (a.entry_date < b.entry_date ? -1 : a.entry_date > b.entry_date ? 1 : a.id - b.id));
   const charges = live.filter((e) => e.amount > 0 && e.type !== 'refund').map((e) => ({ ...e, open: e.amount }));
@@ -24,7 +27,7 @@ export function allocate(entries, claimLines = []) {
     const part = Math.min(amount, charge.open);
     if (part <= 0) return 0;
     charge.open -= part;
-    allocations.push({ credit_id: credit.id, credit_type: credit.type, credit_date: credit.entry_date, charge_id: charge.id, procedure_id: charge.procedure_id ?? null, provider_id: charge.provider_id ?? null, amount: part });
+    allocations.push({ credit_id: credit.id, credit_type: creditType(credit), credit_date: credit.entry_date, charge_id: charge.id, procedure_id: charge.procedure_id ?? null, provider_id: charge.provider_id ?? null, amount: part });
     return part;
   };
   for (const credit of live.filter((e) => e.amount < 0)) {
@@ -53,7 +56,7 @@ export function allocate(entries, claimLines = []) {
       if (left <= 0) break;
       left -= apply(credit, c, left);
     }
-    if (left > 0) unapplied.push({ credit_id: credit.id, credit_type: credit.type, credit_date: credit.entry_date, amount: left });
+    if (left > 0) unapplied.push({ credit_id: credit.id, credit_type: creditType(credit), credit_date: credit.entry_date, amount: left });
   }
   // Refunds give back unapplied credit.
   let refunded = live.filter((e) => e.type === 'refund').reduce((s, e) => s + e.amount, 0);

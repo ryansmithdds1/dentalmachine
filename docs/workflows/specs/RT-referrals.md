@@ -108,3 +108,9 @@ back wording (placeholders `{first_name} {practice} {specialist} {specialist_pra
   `<Route path="/referrals" element={<Referrals />} />`, sidebar `['/referrals', Send, 'Referrals', can('patients:read')]`.
 - `PatientBar.jsx`: `<ReferralChip patientId={p.id} />`; `Dashboard.jsx`: `<ReferralHuddle date={date} />`;
   treatment plan / chart: `<ReferButton patient={p} procedureIds={[…planned ids]} />`.
+
+
+## Phase 2, batch 2A: one referral form
+"Refer out…" and "Referred by…" on the chart open the Referrals board's form (RT1) in a side panel — the specialist
+used last for that kind of work is chosen and the cursor waits in the reason, Ctrl/⌘+Enter sends — instead of a
+second, older form in a dialog that started on "Choose…" and "—".

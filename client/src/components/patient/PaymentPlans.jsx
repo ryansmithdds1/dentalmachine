@@ -3,7 +3,7 @@ import { api } from '../../api.js';
 import { useApi } from '../../hooks.js';
 import { useAuth } from '../../auth.jsx';
 import { money, fmtDate, toCents, label } from '../../format.js';
-import { ErrorBox, Modal, useSubmit } from '../ui.jsx';
+import { ErrorBox, Modal, useSubmit, ConfirmButton } from '../ui.jsx';
 
 export function PlanSummary({ plan }) {
   return (
@@ -171,7 +171,7 @@ function CardsOnFile({ patient, cards, mode, onChange }) {
       {cards?.map((c) => (
         <div key={c.id} className="card-row">
           <span>💳 {cardLabel(c)}</span>
-          {can('billing:write') && <button className="small link" onClick={() => confirm('Remove this card? Autopay using it will stop.') && api.del(`/payment-methods/${c.id}`).then(onChange)}>Remove</button>}
+          {can('billing:write') && <ConfirmButton className="small link" ask="Remove this card? Autopay using it will stop." yes="Remove card" onConfirm={() => api.del(`/payment-methods/${c.id}`).then(onChange)}>Remove</ConfirmButton>}
         </div>
       ))}
       <ErrorBox error={add.error} />

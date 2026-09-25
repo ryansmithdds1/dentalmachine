@@ -2592,7 +2592,7 @@
   "area": "admin",
   "band": "monthly",
   "perDay": 0.03,
-  "route": "Settings → Fee schedules",
+  "route": "Settings → Fee updates & history (a payer’s new schedule waits there for approval)",
   "workflow": [
    53
   ],
@@ -2748,7 +2748,7 @@
   "area": "admin",
   "band": "rare",
   "perDay": 0.02,
-  "route": "Settings → Fee schedule",
+  "route": "Settings → Procedure codes & fees",
   "workflow": null,
   "spec": null,
   "e2e": null,
@@ -2793,10 +2793,10 @@
   "area": "compliance",
   "band": "rare",
   "perDay": 0.02,
-  "route": "MISSING",
+  "route": "Manage → Compliance log (/compliance) — N; command bar “Record a complaint or incident”",
   "workflow": null,
   "spec": null,
-  "e2e": null,
+  "e2e": "e2e/workflows/B2B-new-actions.test.mjs",
   "target": 4
  },
  {
@@ -2808,10 +2808,10 @@
   "area": "compliance",
   "band": "rare",
   "perDay": 0.02,
-  "route": "MISSING",
+  "route": "Manage → Compliance log → Exposure log (/compliance?tab=exposures) — N",
   "workflow": null,
   "spec": null,
-  "e2e": null,
+  "e2e": "e2e/workflows/B2B-new-actions.test.mjs",
   "target": 4
  },
  {
@@ -2838,10 +2838,10 @@
   "area": "communication",
   "band": "rare",
   "perDay": 0.02,
-  "route": "MISSING",
+  "route": "Family → Letters (/letters) — 1–9 picks the letter, Enter prints (filed on the chart), M emails; command bar “Write a letter”",
   "workflow": null,
   "spec": null,
-  "e2e": null,
+  "e2e": "e2e/workflows/B2B-new-actions.test.mjs",
   "target": 4
  },
  {
@@ -2898,10 +2898,10 @@
   "area": "compliance",
   "band": "rare",
   "perDay": 0.01,
-  "route": "MISSING",
+  "route": "Manage → Compliance log → Disclosures (/compliance?tab=disclosures) — N; chart ⋯ → “Send the record to someone else…” records it automatically",
   "workflow": null,
   "spec": null,
-  "e2e": null,
+  "e2e": "e2e/workflows/B2B-new-actions.test.mjs",
   "target": 4
  },
  {
@@ -2913,10 +2913,10 @@
   "area": "payments",
   "band": "rare",
   "perDay": 0.01,
-  "route": "MISSING",
+  "route": "Account (ledger) → Sell a product — 1–9, Enter; command bar “Sell a product”",
   "workflow": null,
   "spec": null,
-  "e2e": null,
+  "e2e": "e2e/workflows/B2B-new-actions.test.mjs",
   "target": 4
  },
  {
@@ -2928,10 +2928,10 @@
   "area": "communication",
   "band": "rare",
   "perDay": 0.01,
-  "route": "MISSING",
+  "route": "“Mailing labels” on Follow-up → Recall, on report results and on a campaign's audience",
   "workflow": null,
   "spec": null,
-  "e2e": null,
+  "e2e": "e2e/workflows/B2B-new-actions.test.mjs",
   "target": 3
  },
  {
@@ -2943,10 +2943,10 @@
   "area": "clinical",
   "band": "rare",
   "perDay": 0.01,
-  "route": "MISSING",
+  "route": "Chart → Rx: a controlled drug → Check the PDMP (Enter) → Save & print",
   "workflow": null,
   "spec": null,
-  "e2e": null,
+  "e2e": "e2e/workflows/B2B-new-actions.test.mjs",
   "target": 3
  },
  {
@@ -3034,10 +3034,10 @@
   "area": "payments",
   "band": "rare",
   "perDay": 0.002,
-  "route": "MISSING",
+  "route": "Account → Gift certificates (/gift-certificates) — N sells; ledger → “Gift certificate” uses one",
   "workflow": null,
   "spec": null,
-  "e2e": null,
+  "e2e": "e2e/workflows/B2B-new-actions.test.mjs",
   "target": 4
  }
 ]

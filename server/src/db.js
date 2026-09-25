@@ -5465,6 +5465,201 @@ CREATE TABLE IF NOT EXISTS prediction_log (
   UNIQUE (practice_id, kind, subject_type, subject_id, shown_on, percent)
 );
 CREATE INDEX IF NOT EXISTS idx_prediction_log_shown ON prediction_log(practice_id, kind, shown_on);
+
+-- ---- Schema 2026-09, batch 2B: compliance logs, letters, retail, gift certificates, PDMP checks ----
+-- Patient complaints and office incidents (routes/compliance.js, README.md, “Compliance log”): what happened, when,
+-- who was involved, which patient (optional), how serious; the follow-up is a task (task_id) for its owner. Never
+-- deleted: open → resolved (with the resolution), or voided with a reason when it was entered by mistake.
+CREATE TABLE IF NOT EXISTS incidents (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  location_id INTEGER REFERENCES locations(id),
+  kind TEXT NOT NULL DEFAULT 'complaint' CHECK (kind IN ('complaint','incident')),
+  patient_id INTEGER REFERENCES patients(id),
+  occurred_at TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  details TEXT,
+  people TEXT,
+  severity TEXT NOT NULL DEFAULT 'low' CHECK (severity IN ('low','medium','high')),
+  reported_by INTEGER REFERENCES users(id),
+  follow_up_user_id INTEGER REFERENCES users(id),
+  follow_up_due TEXT,
+  task_id INTEGER REFERENCES tasks(id),
+  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','resolved','voided')),
+  resolution TEXT,
+  resolved_by INTEGER REFERENCES users(id),
+  resolved_at TEXT,
+  void_reason TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_incidents_practice ON incidents(practice_id, status, occurred_at);
+-- Staff blood/body-fluid exposures and sharps injuries (OSHA 29 CFR 1910.1030(f) and the sharps injury log,
+-- 1910.1030(h)(5)): confidential employee medical records, seen only with compliance:exposures. The source patient
+-- is optional and shown only to those people. followup is the post-exposure checklist ({ key: 'YYYY-MM-DD' | null }).
+CREATE TABLE IF NOT EXISTS exposure_incidents (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  location_id INTEGER REFERENCES locations(id),
+  employee_user_id INTEGER REFERENCES users(id),
+  employee_name TEXT NOT NULL,
+  occurred_at TEXT NOT NULL,
+  exposure_type TEXT NOT NULL DEFAULT 'sharps' CHECK (exposure_type IN ('sharps','splash','bite','other')),
+  device TEXT,
+  procedure_name TEXT,
+  body_part TEXT,
+  work_area TEXT,
+  description TEXT NOT NULL,
+  source_patient_id INTEGER REFERENCES patients(id),
+  source_unknown INTEGER NOT NULL DEFAULT 0,
+  immediate_actions TEXT,
+  followup TEXT NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','closed','voided')),
+  closed_at TEXT,
+  closed_by INTEGER REFERENCES users(id),
+  void_reason TEXT,
+  recorded_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_exposures_practice ON exposure_incidents(practice_id, occurred_at);
+-- HIPAA accounting of disclosures (45 CFR 164.528): each disclosure of a patient's PHI outside treatment, payment
+-- and operations — date, recipient (and address when known), what was disclosed and why. Kept at least six years;
+-- never deleted (voided with a reason when recorded in error). source: manual, or the screen that disclosed it
+-- (record_export) so it is recorded automatically.
+CREATE TABLE IF NOT EXISTS phi_disclosures (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  disclosed_on TEXT NOT NULL,
+  recipient TEXT NOT NULL,
+  recipient_address TEXT,
+  purpose TEXT NOT NULL,
+  purpose_detail TEXT,
+  description TEXT NOT NULL,
+  source TEXT NOT NULL DEFAULT 'manual',
+  recorded_by INTEGER REFERENCES users(id),
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','voided')),
+  void_reason TEXT,
+  voided_by INTEGER REFERENCES users(id),
+  voided_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_disclosures_patient ON phi_disclosures(practice_id, patient_id, disclosed_on);
+-- Letters from templates (routes/letters.js): the office's templates with merge fields ({first_name}, {balance}…),
+-- and every letter made from one — the exact text as printed or sent, filed on the chart as a PDF (document_id).
+-- Templates are configuration (switched off, not removed); letters are never edited or deleted.
+CREATE TABLE IF NOT EXISTS letter_templates (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  name TEXT NOT NULL,
+  subject TEXT,
+  body TEXT NOT NULL,
+  active INTEGER NOT NULL DEFAULT 1,
+  sort INTEGER NOT NULL DEFAULT 0,
+  updated_by INTEGER REFERENCES users(id),
+  updated_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (practice_id, name)
+);
+CREATE TABLE IF NOT EXISTS patient_letters (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  template_id INTEGER REFERENCES letter_templates(id),
+  subject TEXT,
+  body TEXT NOT NULL,
+  delivery TEXT NOT NULL DEFAULT 'print' CHECK (delivery IN ('print','email')),
+  document_id INTEGER REFERENCES documents(id),
+  message_id INTEGER REFERENCES messages(id),
+  batch_key TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_patient_letters_patient ON patient_letters(practice_id, patient_id);
+-- Retail (routes/retail.js): the office's products for sale (price in cents, taxable or not, optionally the stock
+-- item it takes from), and each sale — posted to the patient's ledger as a charge (plus a sales-tax line) that
+-- carries retail_sale_id. A sale is voided (reversing entries, stock put back), never edited or deleted.
+CREATE TABLE IF NOT EXISTS retail_products (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  name TEXT NOT NULL,
+  code TEXT,
+  price INTEGER NOT NULL,
+  taxable INTEGER NOT NULL DEFAULT 1,
+  inventory_item_id INTEGER REFERENCES inventory_items(id),
+  active INTEGER NOT NULL DEFAULT 1,
+  sort INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (practice_id, name)
+);
+CREATE TABLE IF NOT EXISTS retail_sales (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  location_id INTEGER REFERENCES locations(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  product_id INTEGER NOT NULL REFERENCES retail_products(id),
+  quantity INTEGER NOT NULL,
+  unit_price INTEGER NOT NULL,
+  subtotal INTEGER NOT NULL,
+  tax INTEGER NOT NULL DEFAULT 0,
+  tax_bp INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'posted' CHECK (status IN ('posted','voided')),
+  client_key TEXT,
+  created_by INTEGER REFERENCES users(id),
+  voided_at TEXT,
+  voided_by INTEGER REFERENCES users(id),
+  void_reason TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_retail_sales_key ON retail_sales(practice_id, client_key);
+-- Gift certificates: money taken in advance is owed to whoever holds the certificate (a liability), not income and
+-- not the buyer's credit. The sale posts on the buyer's account as their payment plus an equal "Gift certificate
+-- sold" debit adjustment (so the money reaches the day sheet and deposit, and the buyer's balance doesn't move);
+-- redeeming posts a "Gift certificate redeemed" credit adjustment on the patient's account. What a certificate
+-- still holds is always the SUM of its live adjustment lines (gift_certificate_id), never stored.
+CREATE TABLE IF NOT EXISTS gift_certificates (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  location_id INTEGER REFERENCES locations(id),
+  code TEXT NOT NULL,
+  amount INTEGER NOT NULL,
+  purchaser_patient_id INTEGER NOT NULL REFERENCES patients(id),
+  recipient_name TEXT,
+  note TEXT,
+  issued_on TEXT NOT NULL,
+  expires_on TEXT,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','voided')),
+  client_key TEXT,
+  created_by INTEGER REFERENCES users(id),
+  voided_at TEXT,
+  voided_by INTEGER REFERENCES users(id),
+  void_reason TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (practice_id, code)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_gift_certificates_key ON gift_certificates(practice_id, client_key);
+-- Prescription monitoring program checks before a controlled substance (pdmp.js adapter): who checked, when, for
+-- which patient, how (sandbox / vendor / the prescriber's own look at the state website) and a short summary —
+-- never the vendor's full report. A prescription points at the check (prescriptions.pdmp_check_id) or carries the
+-- reason it was skipped (pdmp_override_reason).
+CREATE TABLE IF NOT EXISTS pdmp_checks (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  provider_id INTEGER REFERENCES providers(id),
+  checked_by INTEGER REFERENCES users(id),
+  mode TEXT NOT NULL,
+  state TEXT,
+  status TEXT NOT NULL CHECK (status IN ('done','failed')),
+  summary TEXT,
+  prescriptions_count INTEGER,
+  prescribers_count INTEGER,
+  pharmacies_count INTEGER,
+  flagged INTEGER NOT NULL DEFAULT 0,
+  external_ref TEXT,
+  error TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_pdmp_checks_patient ON pdmp_checks(practice_id, patient_id, created_at);
 `;
 
 // Columns added after the first release. SQLite has no ADD COLUMN IF NOT EXISTS, so check first.
@@ -6067,6 +6262,15 @@ const COLUMNS = [
   // which in-place realism upgrade a finished older seed has had.
   ['demo_seed_state', 'plan_version', 'INTEGER'],
   ['demo_seed_state', 'upgraded', 'INTEGER NOT NULL DEFAULT 0'],
+  // Schema 2026-09, batch 2B. Ledger lines that belong to a product sale or a gift certificate (voided as a whole
+  // from there: routes/retail.js); a controlled-substance prescription's PDMP check, or why it was skipped; the
+  // practice's sales tax (basis points: 825 = 8.25%) and gift certificate expiry (months; NULL = never expires).
+  ['ledger_entries', 'retail_sale_id', 'INTEGER REFERENCES retail_sales(id)'],
+  ['ledger_entries', 'gift_certificate_id', 'INTEGER REFERENCES gift_certificates(id)'],
+  ['prescriptions', 'pdmp_check_id', 'INTEGER REFERENCES pdmp_checks(id)'],
+  ['prescriptions', 'pdmp_override_reason', 'TEXT'],
+  ['practices', 'sales_tax_bp', 'INTEGER NOT NULL DEFAULT 0'],
+  ['practices', 'gift_certificate_expiry_months', 'INTEGER'],
 ];
 
 // CHECK constraints widened after release: [table, constraint name on Postgres, old text, new text].

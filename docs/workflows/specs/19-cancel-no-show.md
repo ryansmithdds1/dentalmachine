@@ -16,7 +16,7 @@ With the visit focused on the schedule (or open in the drawer):
 | Step | Keys | Actions (measured) |
 |---|---|---|
 | Cancel, say why, rebook at the next open time | X, a number (1–7), Enter | **3** |
-| No-show, say why (Esc on the rebook form = not now) | Shift+X, a number | **2** (+1 to rebook) |
+| No-show, say why (the rebook line waits on the schedule; nothing to close) | Shift+X, a number | **2** (+1 Enter to rebook) |
 | From the drawer with the mouse | Cancel appointment / No-show, a reason, Book | 3 (+1 to open the drawer) |
 
 Reasons: Sick · Work, school or a conflict · No ride · Cost or insurance · Forgot · We had to move it (cancel
@@ -30,9 +30,11 @@ only) · Didn't hear from them (no-show only) · Other… (a few words, required
   no-show), written through `recorded()` (before/after in the change log) and in the `appointment.status` audit
   row (`broken_reason`, `broken_note`, and the audit `reason`). A series cancel ("this and later") gives the
   later visits the same reason. Putting a visit back on the schedule clears the reason (the log keeps it).
-- **Rebook in one step**: "Book their next visit now" (on by default, remembered per person) opens the booking
-  form for the same patient, visit type, provider and length, at the first opening after the broken time, with
-  Book focused. The Broken appointments list shows the reason and its button is "Rebook" with the same defaults.
+- **Rebook in one step**: "Book their next visit now" (on by default, remembered per person) puts a line on the
+  schedule (phase 2, batch 2A — it used to open the booking form over the schedule): "Rebook Nova? Next opening
+  Tue 10:00" for the same patient, visit type, provider and length, at the first opening after the broken time,
+  with **Book it** focused — Enter books it, "Other time…" opens the full booking panel, Esc or "Not now" puts it
+  away, and doing nothing leaves it (it blocks nothing). Tested by `e2e/workflows/09-10-13-19-schedule.test.mjs`. The Broken appointments list shows the reason and its button is "Rebook" with the same defaults.
 - **Fill offer unchanged**: a cancellation still texts the ASAP / waitlist patients automatically (`fill.js`).
 - **Broken-appointment fee: not added.** There is no existing fee setting or ledger flow for it, and the rules
   say not to invent money flows. If the practice later configures one, it should post through the ledger

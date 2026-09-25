@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { api } from '../../api.js';
 import { useLookup } from '../../hooks.js';
-import { ErrorBox, useSubmit } from '../ui.jsx';
+import { ErrorBox, useSubmit, ConfirmButton } from '../ui.jsx';
+import { undoable } from '../../toast.js';
 
 const PRESETS = ['Lunch', 'Staff meeting', 'Holiday', 'Continuing education', 'Emergencies only', 'Crown seats only'];
 const plus = (hhmm, mins) => {
@@ -34,9 +35,11 @@ export default function BlockoutForm({ blockout, defaults = {}, onDone }) {
     else await api.post('/blockouts', { ...body(), ...(form.repeat_weeks === 'range' ? { through_date: form.through } : { repeat_weeks: Number(form.repeat_weeks) }) });
     onDone();
   });
+  // One blocked time goes at once (Undo puts the same block back); a whole series asks first, on the page.
   const remove = useSubmit(async (scope) => {
-    await api.del(`/blockouts/${blockout.id}${scope === 'series' ? '?scope=series' : ''}`);
-    onDone();
+    if (scope === 'series') { await api.del(`/blockouts/${blockout.id}?scope=series`); onDone(); return; }
+    const again = body();
+    await undoable('Blocked time removed', async () => { await api.del(`/blockouts/${blockout.id}`); onDone(); }, async () => { await api.post('/blockouts', { ...again, repeat_weeks: 1 }); onDone(); });
   });
   const saveSeries = useSubmit(async () => {
     await api.put(`/blockouts/${blockout.id}`, { ...body(), scope: 'series' });
@@ -99,8 +102,8 @@ export default function BlockoutForm({ blockout, defaults = {}, onDone }) {
       </div>
       <p className="muted" style={{ fontSize: 12 }}>Leave provider and chair empty to block the whole office. Booking into blocked time asks for confirmation.</p>
       <div className="form-actions">
-        {blockout && <button type="button" className="danger" disabled={remove.busy} onClick={() => confirm('Remove this blocked time?') && remove.submit()}>Remove</button>}
-        {blockout?.series_key && <button type="button" className="danger" disabled={remove.busy} onClick={() => confirm('Remove every day in this series?') && remove.submit('series')}>Remove whole series</button>}
+        {blockout && <button type="button" className="danger" disabled={remove.busy} onClick={() => remove.submit()}>Remove</button>}
+        {blockout?.series_key && <ConfirmButton className="danger" disabled={remove.busy} ask="Remove every day in this series?" yes="Remove the series" onConfirm={() => remove.submit('series')}>Remove whole series</ConfirmButton>}
         {blockout?.series_key && <button type="button" disabled={saveSeries.busy} onClick={() => saveSeries.submit()} title="Apply the reason, provider, chair and reserved visit types to every day in the series">Save for whole series</button>}
         <button className="primary" disabled={save.busy || (form.kind === 'reserved' && !form.type_ids.length)}>{blockout ? 'Save' : 'Block time'}</button>
       </div>

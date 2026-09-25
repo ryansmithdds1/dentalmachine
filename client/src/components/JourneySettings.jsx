@@ -3,7 +3,7 @@ import { api } from '../api.js';
 import { useApi } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
 import { toast, undoable } from '../toast.js';
-import { ErrorBox, useSubmit } from './ui.jsx';
+import { ErrorBox, useSubmit, ConfirmButton } from './ui.jsx';
 import { fmtDate } from '../format.js';
 
 // Settings → Patient journeys (PX): the moments that make people feel cared for. Each journey switches on or off
@@ -310,9 +310,7 @@ function Broadcasts({ admin, mail }) {
     toast('Saved');
   });
   const send = useSubmit(async () => {
-    const { count } = await api.get(`/journeys/broadcasts/${draft.id}/audience`);
-    // Sending can't be taken back once it's in inboxes or the mail: the one place we ask first.
-    if (!window.confirm(`Send “${draft.title}” to ${count} patient${count === 1 ? '' : 's'}? It can’t be unsent.`)) return;
+    // Sending can't be taken back once it's in inboxes or the mail: the button asks once, on the page.
     await api.post(`/journeys/broadcasts/${draft.id}/send`);
     toast('Sending — it goes out over the next few minutes, inside your sending hours');
     setDraft(null);
@@ -354,7 +352,7 @@ function Broadcasts({ admin, mail }) {
           <div className="muted" style={{ fontSize: 12 }}>Fields: {'{first_name}'} {'{practice}'} {'{phone}'} {'{address}'}{audience != null ? ` · reaches ${audience} patient${audience === 1 ? '' : 's'} (save to update)` : ''}</div>
           <div className="inline" style={{ gap: 8, marginTop: 8 }}>
             <button type="button" disabled={saveDraft.busy} onClick={saveDraft.submit}>Save draft</button>
-            <button type="button" className="primary" disabled={send.busy} onClick={send.submit}>Send…</button>
+            <ConfirmButton className="primary" disabled={send.busy} ask={`Send “${draft.title}” to ${audience ?? 'the'} patient${audience === 1 ? '' : 's'}? It can’t be unsent.`} yes={`Send to ${audience ?? ''} now`.replace('  ', ' ')} onConfirm={send.submit}>Send…</ConfirmButton>
             <button type="button" className="link" onClick={() => setDraft(null)}>Close</button>
           </div>
         </div>

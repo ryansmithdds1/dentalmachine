@@ -83,6 +83,11 @@ export const PERMISSION_CATALOG = {
   'deposits:manage': 'Verify deposits and cash drawers, reopen deposits, approve cash voids, refunds and discounts',
   'intranet:manage': 'Edit the office intranet: links, office manual, announcements and onboarding',
   'finance:read': 'See bank activity, costs and profit', 'finance:write': 'Sort bank lines and match deposits',
+  // Compliance logs (routes/compliance.js): anyone can record a complaint or incident; the whole log, the HIPAA
+  // disclosure log and their reports are for managers. Staff exposure incidents are confidential employee medical
+  // records (OSHA), so recording and seeing them is its own permission.
+  'compliance:manage': 'See the whole complaint and incident log, the HIPAA disclosure log and their reports',
+  'compliance:exposures': 'Record and see staff exposure (sharps) incidents — confidential employee medical records',
 };
 
 // A person's permissions: their custom role's (or their built-in role's), plus or minus any set just for them.

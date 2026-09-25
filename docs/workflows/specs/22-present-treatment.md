@@ -1,6 +1,7 @@
 # 22 · Present treatment and get it accepted
 
-**Budget: 2 staff + 2 patient actions.** Measured: 2 staff (Present & e-sign → Enter on "Open here") and 2 patient
+**Budget: 1 staff + 2 patient actions.** Measured: 1 staff (**Present here for <name> to sign** on the plan, or P on
+the Treatment tab — no dialog in between) and 2 patient
 (tick "I have reviewed" → Accept & sign; their name is already on the signing line when the office hands the device
 over — they can correct it, and a link sent home still asks them to type it). Tested by `e2e/workflows/21-22-23-25-28.test.mjs`.
 
@@ -17,7 +18,9 @@ Staff 3 + patient 6: the plan opened in a new browser tab and even on the office
 their date of birth before seeing the plan.
 
 ## Target
-1. **Present & e-sign…** → the dialog's first button, **Open here for <name> to sign**, has focus → **Enter**.
+1. **Present here for <name> to sign** on the plan card (or **P** on the Treatment tab for the newest unsigned plan).
+   Phase 2 (batch 2A): the Present dialog is gone — there was nothing to choose in it; **Send to sign at home** is
+   its own button beside it and says on the tab how it was sent.
 2. The plan opens **in the same tab**, without the birth-date step, with the cursor in the name box.
 3. The patient's name is already on the signing line (from the hand-off: `POST /signing-passes/redeem` answers
    `signer_name` to the signed-in device only), so they tick the box and tap **Accept & sign**. "Please hand the device back" shows,
@@ -43,7 +46,7 @@ filed in the chart).
 - Plan already signed → 409 as before. Nothing about the plan changes when a pass is redeemed.
 
 ## Acceptance
-- e2e: 2 staff actions, no new tab, code gone from the URL; 2 patient actions (name prefilled); back link lands on the Treatment
+- e2e: 1 staff action, no new tab, code gone from the URL; 2 patient actions (name prefilled); back link lands on the Treatment
   tab showing "Signed by"; a second redeem of the same code is refused.
 - `server/test/efficiency3.test.js`: single use, other session/practice/anonymous refused, expired refused, pass
   bound to its plan, text/email links get no pass, audit rows with who handed over, front desk can't present (403).

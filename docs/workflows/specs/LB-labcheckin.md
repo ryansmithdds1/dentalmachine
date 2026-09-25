@@ -129,3 +129,8 @@ Enter `G` = 4 actions, no mouse).
 - "Late" includes a case **promised back on or after the visit day** (it can't be checked in time).
 - The slip QR carries the case number, not the lab's private link.
 - Problem photos are shared with the lab on the case link.
+
+
+## Phase 2, batch 2A
+The photo is optional when nothing is wrong: pick the case, **G** (Looks good) — **2 actions** (the robot measures
+this path; C takes a photo, and a problem asks for one).

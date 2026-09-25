@@ -4,7 +4,8 @@ import { api } from '../api.js';
 import { useApi } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
 import { money, fmtDate, fmtUtcDate } from '../format.js';
-import { ErrorBox } from '../components/ui.jsx';
+import { ErrorBox, ConfirmButton } from '../components/ui.jsx';
+import { toast } from '../toast.js';
 
 // The business side: what the practice really costs to run and earns (the schedule and ledger next to the
 // bank and QuickBooks), deposits matched to the bank, the bank's lines by category, and the connections.
@@ -331,12 +332,14 @@ function Bank({ categories }) {
   const { data, reload } = useApi(`/finance/bank/transactions?${qs}`);
   const [err, setErr] = useState(null);
   const label = Object.fromEntries(categories.map((c) => [c.key, c.label]));
-  const setCategory = async (t, category) => {
+  // Filed at once (just this line); a line on the page then offers to file every line from them the same way.
+  const [rememberAsk, setRememberAsk] = useState(null);
+  const setCategory = async (t, category, remember = false) => {
     setErr(null);
-    const who = t.merchant || t.description;
-    const remember = window.confirm(`File every line from “${who}” under ${label[category]} from now on?\n\nOK = all of them · Cancel = just this one`);
     try {
       await api.put(`/finance/bank/transactions/${t.id}`, { category, remember, pattern: t.merchant || undefined });
+      setRememberAsk(remember ? null : { t, category, who: t.merchant || t.description });
+      if (remember) toast(`Every line from “${t.merchant || t.description}” goes under ${label[category]} from now on`);
       reload();
     } catch (e) {
       setErr(e);
@@ -346,6 +349,13 @@ function Bank({ categories }) {
   return (
     <>
       <ErrorBox error={err} />
+      {rememberAsk && (
+        <div className="public-notice inline" style={{ marginBottom: 8, flexWrap: 'wrap' }} role="status">
+          <span>Filed under {label[rememberAsk.category]}.</span>
+          <button className="small primary" onClick={() => setCategory(rememberAsk.t, rememberAsk.category, true)}>File every line from “{rememberAsk.who}” this way</button>
+          <button className="small" onClick={() => setRememberAsk(null)}>Just this one</button>
+        </div>
+      )}
       <div className="inline" style={{ marginBottom: 8, alignItems: 'center', flexWrap: 'wrap' }}>
         <select value={filter.direction} onChange={(e) => setFilter({ ...filter, direction: e.target.value })}><option value="">In and out</option><option value="in">Money in</option><option value="out">Money out</option></select>
         <select value={filter.category} onChange={(e) => setFilter({ ...filter, category: e.target.value })}><option value="">All categories</option>{categories.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}</select>
@@ -457,7 +467,7 @@ function Connections({ status, reload, notice, message }) {
                 <div className="inline" style={{ marginTop: 8 }}>
                   <button className="small" disabled={busy} onClick={() => act(() => api.post('/finance/bank/sync'), () => 'Updated from the bank.')}>Update now</button>
                   {c.status === 'relink' && <button className="small primary" disabled={busy} onClick={() => connectBank(c.id)}>Sign in again</button>}
-                  <button className="small" disabled={busy} onClick={() => window.confirm('Disconnect this bank? Lines already in stay for your numbers.') && act(() => api.del(`/finance/bank/connections/${c.id}`))}>Disconnect</button>
+                  <ConfirmButton className="small" disabled={busy} ask="Disconnect this bank? Lines already in stay for your numbers." yes="Disconnect" onConfirm={() => act(() => api.del(`/finance/bank/connections/${c.id}`))}>Disconnect</ConfirmButton>
                 </div>
               )}
             </div>
@@ -496,7 +506,7 @@ function Connections({ status, reload, notice, message }) {
                 <button className="small" disabled={busy} onClick={() => act(() => api.post('/finance/quickbooks/sync'), (o) => `Updated: ${o.accounts} accounts.`)}>Update now</button>
                 {s.push_deposits && <button className="small" disabled={busy} onClick={() => act(() => api.post('/finance/quickbooks/push'), (o) => `${o.pushed} deposits sent.`)}>Send deposits now</button>}
                 {admin && q.status === 'reconnect' && <button className="small primary" onClick={async () => { window.location.href = (await api.get('/finance/quickbooks/connect')).url; }}>Sign in again</button>}
-                {admin && <button className="small" disabled={busy} onClick={() => window.confirm('Disconnect QuickBooks?') && act(() => api.del('/finance/quickbooks'))}>Disconnect</button>}
+                {admin && <ConfirmButton className="small" disabled={busy} ask="Disconnect QuickBooks? Nothing more is sent until it's connected again." yes="Disconnect" onConfirm={() => act(() => api.del('/finance/quickbooks'))}>Disconnect</ConfirmButton>}
               </div>
             </>
           ) : admin && status.quickbooks.enabled && (

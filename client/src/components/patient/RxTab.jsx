@@ -5,6 +5,7 @@ import { useAuth } from '../../auth.jsx';
 import { fmtUtcDate } from '../../format.js';
 import { ErrorBox, Modal, useSubmit } from '../ui.jsx';
 import { useShortcuts } from '../../shortcuts.js';
+import PdmpCheck from './PdmpCheck.jsx';
 
 const EMPTY = { provider_id: '', drug: '', strength: '', sig: '', quantity: '', refills: 0, dispense_as_written: false, notes: '', schedule: '' };
 const RX_STATUS = { printed: ['Printed', ''], signed: ['Signed', 'info'], transmitted: ['Sent to pharmacy', 'ok'], error: ['Not sent', 'danger'] };
@@ -23,13 +24,23 @@ export default function RxTab({ patient, onChange }) {
   const prescriber = form.provider_id || mine?.id || '';
   const sendRef = useRef(null);
   const printRef = useRef(null);
+  const pdmpRef = useRef(null);
   const [picked, setPicked] = useState(0);
-  // A favorite picked (click or its number key) puts the focus on sending it, so Enter finishes.
+  // Controlled substances need a PDMP check for this patient in the last day, or a reason it was skipped (A178,
+  // README.md, “PDMP”). A recent check is used without asking again.
+  const { data: pdmp, reload: reloadPdmp } = useApi(can('clinical:sign') ? `/patients/${patient.id}/pdmp-checks` : null);
+  const [needPdmp, setNeedPdmp] = useState(false);
+  const [pdmpSkip, setPdmpSkip] = useState('');
+  const pdmpCurrent = pdmp?.current || null;
+  const pdmpDue = (!!form.schedule || needPdmp) && !pdmpCurrent && pdmpSkip.trim().length < 5;
+  // A favorite picked (click or its number key) puts the focus on sending it, so Enter finishes — or, for a
+  // controlled substance not yet checked, on "Check the PDMP" first.
   useEffect(() => {
     if (!picked) return;
+    if (pdmpDue && pdmpRef.current) { pdmpRef.current.focus(); return; }
     (sendRef.current && !sendRef.current.disabled ? sendRef.current : printRef.current)?.focus();
-  }, [picked]);
-  const pickFavorite = (f) => { setForm({ ...form, ...f, refills: f.refills ?? 0, schedule: f.schedule || '' }); setPicked((n) => n + 1); };
+  }, [picked]); // eslint-disable-line react-hooks/exhaustive-deps
+  const pickFavorite = (f) => { setForm({ ...form, ...f, refills: f.refills ?? 0, schedule: f.schedule || '' }); setNeedPdmp(false); setPdmpSkip(''); setPicked((n) => n + 1); };
   useShortcuts(can('clinical:sign') ? favorites.slice(0, 9).map((f, i) => ({ combo: String(i + 1), handler: () => pickFavorite(f), label: `Prescribe ${f.drug}`, section: 'Rx' })) : []);
   const [warning, setWarning] = useState(null);
   const [otp, setOtp] = useState(null); // null = not asked; '' = asking
@@ -44,8 +55,11 @@ export default function RxTab({ patient, onChange }) {
     try {
       const rx = await api.post(`/patients/${patient.id}/prescriptions`, {
         ...form, schedule: form.schedule || null, provider_id: Number(prescriber), override_allergy: override, send, ...(otp ? { otp } : {}),
+        ...(pdmpCurrent ? { pdmp_check_id: pdmpCurrent.id } : pdmpSkip.trim() ? { pdmp_override_reason: pdmpSkip.trim() } : {}),
       });
       setForm({ ...EMPTY, provider_id: form.provider_id });
+      setNeedPdmp(false);
+      setPdmpSkip('');
       setPicked(0);
       setOtp(null);
       reload();
@@ -53,6 +67,8 @@ export default function RxTab({ patient, onChange }) {
       else window.open(`/prescriptions/${rx.id}/print`, '_blank');
     } catch (e) {
       if (e.details?.allergy_warning) setWarning(e.message);
+      // The drug is controlled though the form didn't say so (the server knows it by name): ask for the PDMP.
+      else if (e.details?.pdmp_required) { setNeedPdmp(true); setTimeout(() => pdmpRef.current?.focus(), 0); }
       else if (e.details?.otp_required) {
         setOtp('');
         if (otp) throw e;
@@ -127,6 +143,12 @@ export default function RxTab({ patient, onChange }) {
               </label>
               <label className="checkbox"><input type="checkbox" checked={form.dispense_as_written} onChange={set('dispense_as_written')} /> Dispense as written</label>
               <label className="full">Notes to pharmacist<input value={form.notes} onChange={set('notes')} /></label>
+              {(!!form.schedule || needPdmp) && (
+                <div className="full">
+                  <PdmpCheck patient={patient} providerId={Number(prescriber) || null} current={pdmpCurrent} skip={pdmpSkip} onSkip={setPdmpSkip} buttonRef={pdmpRef}
+                    onChecked={async () => { await reloadPdmp(); setPicked((n) => n + 1); }} />
+                </div>
+              )}
               {otp !== null && (
                 <div className="full epcs-sign">
                   <strong>Two-factor signature required</strong>
@@ -135,9 +157,9 @@ export default function RxTab({ patient, onChange }) {
                 </div>
               )}
               <div className="form-actions full">
-                <button ref={printRef} type="submit" disabled={busy}>Save & print</button>
+                <button ref={printRef} type="submit" disabled={busy || pdmpDue} title={pdmpDue ? 'Check the PDMP first (or give a reason to skip it)' : ''}>Save & print</button>
                 {erx?.in_app && (
-                  <button ref={sendRef} type="button" className="primary" disabled={busy || !pharmacy || (otp !== null && otp.length !== 6)} title={pharmacy ? '' : 'Choose a pharmacy first'}
+                  <button ref={sendRef} type="button" className="primary" disabled={busy || !pharmacy || pdmpDue || (otp !== null && otp.length !== 6)} title={pharmacy ? '' : 'Choose a pharmacy first'}
                     onClick={() => submit({ send: true })}>
                     {otp !== null ? 'Sign & send' : `Send to ${pharmacy ? pharmacy.name : 'pharmacy'}`}
                   </button>
@@ -168,6 +190,7 @@ export default function RxTab({ patient, onChange }) {
                   {rx.pharmacy ? ` · ${rx.pharmacy.name}` : ''}{rx.signed_two_factor ? ' · signed with 2FA' : ''}
                 </div>
                 {rx.erx_error && <div className="text-danger" style={{ fontSize: 12 }}>{rx.erx_error}</div>}
+                {rx.schedule && (rx.pdmp_summary || rx.pdmp_override_reason) && <div className={`muted${rx.pdmp_flagged ? ' text-danger' : ''}`} style={{ fontSize: 12 }}>PDMP: {rx.pdmp_summary || `skipped — ${rx.pdmp_override_reason}`}</div>}
               </div>
               <div className="rx-actions">
                 <span className={`badge nocap ${tone}`}>{text}</span>

@@ -2,7 +2,6 @@
 // scanning paper, recall intervals, the cash drawer, online reviews.
 import { newPatient, refs, addDays, MOD } from '../lib/fixtures.mjs';
 
-const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
 const PDF = Buffer.from('%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF');
 
 export default {
@@ -105,17 +104,12 @@ export default {
         await t.key('a');
         await t.see('input:focus, textarea:focus');
       });
-      await t.step('Type the title, Tab, the text', async () => {
-        await t.type('Office closed Monday for the holiday');
-        await t.key('Tab');
-        await t.type('Enjoy the long weekend!');
+      await t.step('Type the announcement (a longer message is Tab and more text; it’s optional)', async () => {
+        await t.type('Office closed Monday for the holiday — enjoy the long weekend!');
       });
-      await t.step('Press Ctrl/⌘+Enter (or click Post)', async () => {
+      await t.step('Press Ctrl/⌘+Enter: posted (pinned for a week)', async () => {
         await t.key(`${MOD}+Enter`);
-        await t.wait(800);
-        const post = t.page.locator('main button.primary:has-text("Post"), main button.primary:has-text("Publish"), main button.primary:has-text("Save")').first();
-        if (await post.isVisible().catch(() => false)) await t.click(post);
-        await t.see('text=Office closed Monday for the holiday');
+        await t.see('.toast:has-text("Announcement posted")');
       });
     },
   },
@@ -144,15 +138,12 @@ export default {
     setup: async (t) => ({ p: await newPatient(t, 'Scanny') }),
     async run(t, { p }) {
       await t.open(`/patients/${p.id}?tab=documents`, '[data-testid=documents-drop]');
-      await t.step('Documents & x-rays: press S — scanner, phone or a file from this computer', async () => {
-        await t.key('s');
-        await t.see('.scanmenu');
-      });
-      await t.step('Press 3 (a file from this computer) and choose the scan: filed on the chart', async () => {
-        await t.wait(300);
-        await t.pickFile(() => t.key('3'), { name: 'Referral Dr Smith.pdf', mimeType: 'application/pdf', buffer: PDF });
+      // The scan was saved to this computer by the office scanner (no scanner is connected to the demo office).
+      await t.step('Documents & x-rays: press U and choose the scan (the file picker takes its name and Enter): filed on the chart', async () => {
+        await t.pickFile(() => t.key('u'), { name: 'Referral Dr Smith.pdf', mimeType: 'application/pdf', buffer: PDF }, { keyboard: true });
         await t.see('.doc-tile:has-text("Referral Dr Smith.pdf")');
       });
+      t.note('S opens Scan (scanner, phone, or a file — with no scanner online, "a file" has the focus, so S, Enter works too).');
     },
   },
 
@@ -172,12 +163,9 @@ export default {
       await t.step('Lab check-in: click the case that came back', async () => {
         await t.click(item);
       });
-      await t.step('Click the camera and take a photo of the case', async () => {
-        await t.pickFile(() => t.page.locator('.lbc-camera').click(), { name: 'crown.png', mimeType: 'image/png', buffer: PNG });
-        await t.page.locator('.lbc-photos img').first().waitFor();
-      });
-      await t.step('Click "Looks good": checked in, the visit’s card turns green', async () => {
-        await t.click('button.good');
+      // A photo is optional when nothing is wrong (C takes one; a problem asks for it).
+      await t.step('Press G ("Looks good"): checked in, the visit’s card turns green', async () => {
+        await t.key('g');
         await t.see('.lbc-done');
       });
     },
@@ -196,16 +184,13 @@ export default {
     },
     async run(t, { p }) {
       await t.open(`/patients/${p.id}`, '[aria-label="Recall status"]');
-      await t.step('Chart overview → Recall: click the ✎ next to the cleaning’s interval', async () => {
+      await t.step('Chart overview → Recall: click the ✎ next to the cleaning’s interval (the usual intervals and reasons are chips)', async () => {
         await t.click(t.page.locator('button[aria-label^="Change"][aria-label$="interval"]').first());
         await t.see('.rf-inline-head');
       });
-      await t.step('Type the new interval (months) and a reason; click Save', async () => {
-        await t.key(`${MOD}+a`);
-        await t.type('4');
-        await t.click('input[placeholder^="Why"]');
-        await t.type('Perio history');
-        await t.click(t.page.locator('button.primary:has-text("Save")').first());
+      await t.step('Click "4 mo", then the reason "Perio history": saved', async () => {
+        await t.click('.rf-inline button.chip:has-text("4 mo")');
+        await t.click('.rf-inline button.chip:has-text("Perio history")');
         await t.see('.rf-inline-head', { state: 'detached' });
       });
     },

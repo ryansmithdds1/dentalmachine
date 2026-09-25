@@ -7,7 +7,7 @@ import { useAuth } from '../auth.jsx';
 import { useShortcuts, useCommands } from '../shortcuts.js';
 import { toast, undoable } from '../toast.js';
 import { fmtDate, fmtDateTime } from '../format.js';
-import { Modal, MoreRows } from './ui.jsx';
+import { MoreRows, SidePanel } from './ui.jsx';
 import AppointmentForm from './AppointmentForm.jsx';
 import './recallfreq.css';
 
@@ -130,13 +130,13 @@ export default function RecallBoard() {
         </div>
       </div>
       {bookFor && (
-        <Modal title={`Book ${bookFor.name}`} onClose={() => setBookFor(null)}>
+        <SidePanel className="book-panel" title={`Book ${bookFor.name}`} onClose={() => setBookFor(null)}>
           <AppointmentForm
             patient={{ id: bookFor.patient_id, first_name: bookFor.first_name, last_name: bookFor.last_name }}
             defaults={{ date: bookFor.due_date && bookFor.due_date > (data?.today || '') ? bookFor.due_date : data?.today }}
             onCancel={() => setBookFor(null)} onSaved={() => { setBookFor(null); reload(); }}
           />
-        </Modal>
+        </SidePanel>
       )}
     </div>
   );

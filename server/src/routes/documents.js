@@ -1,7 +1,7 @@
 import express, { Router } from 'express';
 import { autoAnalyze } from '../xrayai.js';
 import { requirePermission, requireAnyPermission, HttpError, can } from '../auth.js';
-import { findOr404, insert, audit, validTooth, newToken, recorded, isRealDate } from '../util.js';
+import { findOr404, insert, audit, validTooth, newToken, recorded, isRealDate, practiceNow } from '../util.js';
 import { dicomToImage } from '../dicomimage.js';
 import { makeThumbnail, imageSize } from '../thumbnails.js';
 import { publish } from '../events.js';
@@ -12,6 +12,7 @@ import { createVirusScanner } from '../virusscan.js';
 import { createOcr } from '../ocr.js';
 import docManageRoutes, { cleanFolder } from './docmanage.js';
 import { referralDocumentFiled } from '../referraltracker.js';
+import { recordDisclosure, DISCLOSURE_PURPOSES } from '../compliance.js';
 
 // Mount layouts (FMX etc.): how many images each holds; the client draws the slots.
 export const MOUNT_TEMPLATES = { fmx18: 18, fmx20: 20, fmx14: 14, bw4: 4, bw2: 2, vbw7: 7, pa1: 1, pa2: 2, pa4: 4, pano1: 1, photos8: 8 };
@@ -101,8 +102,19 @@ export default function documentRoutes({ db, storage, config = {} }) {
   // The patient's copy of their record (HIPAA right of access): summary PDF, the data, and their files.
   r.get('/patients/:id/record-export', requirePermission('clinical:read'), requirePermission('billing:read'), async (req, res) => {
     const patient = await findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient');
+    // Sent to someone other than the patient for a reason HIPAA makes the practice account for (a subpoena, a
+    // board, public health…): ?recipient=&purpose=&description= records the disclosure on the chart as it happens
+    // (README.md, “Compliance log”). Checked before the file is built, so a bad request discloses nothing.
+    const q = req.query;
+    const disclosed = q.recipient || q.purpose;
+    if (disclosed && !DISCLOSURE_PURPOSES[q.purpose]) throw new HttpError(400, 'Choose why the record is being disclosed');
+    if (disclosed && !can(req.user, 'patients:write')) throw new HttpError(403, 'Missing permission: patients:write');
     const out = await buildRecordExport(db, storage, req.user.practice_id, patient.id);
-    await audit(db, req, 'patient.record_export', 'patients', patient.id, { files: out.files });
+    const disclosureId = disclosed
+      ? await recordDisclosure(db, req, patient, { recipient: q.recipient, recipient_address: q.recipient_address, purpose: q.purpose, purpose_detail: q.purpose_detail, description: q.description || 'Copy of the health record (summary, chart data, images and documents)' },
+        { source: 'record_export', today: (await practiceNow(db, req.user.practice_id)).slice(0, 10) })
+      : null;
+    await audit(db, req, 'patient.record_export', 'patients', patient.id, { files: out.files, ...(disclosureId ? { disclosure_id: disclosureId, recipient: String(q.recipient).slice(0, 200) } : {}) });
     res.set({ 'Content-Type': 'application/zip', 'Content-Disposition': `attachment; filename="${out.filename}"` }).send(out.zip);
   });
 

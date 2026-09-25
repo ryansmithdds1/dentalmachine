@@ -108,23 +108,14 @@ export default {
     role: 'frontdesk',
     setup: async (t) => ({ p: await newPatient(t, 'Parent') }),
     async run(t, { p }) {
-      await t.open(`/patients/${p.id}?tab=family`, 'button:has-text("Add family member")');
-      await t.step('Family tab: click "+ Add family member" (address, phone and guarantor come from this patient)', async () => {
-        await t.click('button:has-text("Add family member")');
-        await t.see('.modal');
+      await t.open(`/patients/${p.id}?tab=family`, '.family-add input');
+      await t.step('Family tab: click the "Add to the family" line (address, phone and guarantor come from this patient)', async () => {
+        await t.click('.family-add input');
       });
-      await t.step('Type the first name, Tab, the birth date', async () => {
-        const first = t.page.locator('.modal input').first();
-        if (!(await first.evaluate((el) => el === document.activeElement))) await t.click(first);
-        await t.type('Kit');
-        await t.key('Tab');
-        const focusType = await t.page.evaluate(() => document.activeElement?.type);
-        if (focusType !== 'date') await t.key('Tab');
-        await t.type('06062016');
-      });
-      await t.step('Click Save / Add: the child is on the family', async () => {
-        await t.click('.modal button.primary');
-        await t.see('.modal', { state: 'detached' });
+      await t.step('Type "Kit 6/6/2016" — first name and birth date in one box (a child, with this family’s last name) — and press Enter', async () => {
+        await t.type('Kit 6/6/2016');
+        await t.key('Enter');
+        await t.see('.toast:has-text("added to the family")');
       });
     },
   },
@@ -134,51 +125,35 @@ export default {
     setup: async (t) => ({ p: await newPatient(t, 'Olive') }),
     async run(t, { p }) {
       await overview(t, p);
-      await t.step('No office-alert line on the chart: click Edit (the full patient form)', async () => {
-        await t.click('main button:has-text("Edit")');
-        await t.see('.modal');
+      await t.step('Contact card: click "Office alert" — it opens for typing in place', async () => {
+        await t.click('.contact-card button[aria-label^="Change office alert"]');
+        await t.see('.contact-card input[aria-label^="Office alert"]');
       });
-      await t.step('Scroll to "Pop-up office alert", click it and type the alert', async () => {
-        await t.click('.modal label:has-text("Pop-up office alert") input');
+      await t.step('Type the alert and press Enter: saved (Undo shows); it pops up for the next person who opens the chart', async () => {
         await t.type('Anxious — offer nitrous');
+        await t.key('Enter');
+        await t.see('.toast:has-text("office alert is now")');
       });
-      await t.step('Click Save', async () => {
-        await t.click('.modal button.primary');
-        await t.see('.modal', { state: 'detached' });
-      });
-      t.flag('layout', 'The office alert is only in the full Edit form (a dialog), not editable in place on the chart like phone and address');
     },
   },
 
   A098: {
     role: 'frontdesk',
-    setup: async (t) => ({ p: await newPatient(t, 'Provy') }),
-    async run(t, { p }) {
+    async setup(t) {
+      const { hygienist } = await refs(t);
+      return { p: await newPatient(t, 'Provy'), hygienist };
+    },
+    async run(t, { p, hygienist }) {
       await overview(t, p);
-      const line = t.page.locator('button[aria-label*="hygienist" i], button[aria-label*="provider" i], button[aria-label*="dentist" i]').first();
-      if (await line.count()) {
-        await t.step('Click the usual hygienist line on the chart', async () => { await t.click(line); });
-        await t.step('Pick the hygienist: saved', async () => {
-          const sel = t.page.locator('select:focus, main select').first();
-          await sel.selectOption({ index: 1 });
-          await t.wait(500);
-        });
-        t.note('Picked with the mouse from a list.');
-      } else {
-        t.flag('dead-end', 'The patient’s usual dentist/hygienist isn’t on the chart overview: Edit patient → All fields');
-        await t.step('Click Edit: the full patient form opens', async () => {
-          await t.click('main button:has-text("Edit")');
-          await t.see('.modal');
-        });
-        await t.step('Pick the usual hygienist in the form and Save', async () => {
-          const sel = t.page.locator('.modal label:has-text("hygienist") select').first();
-          if (!(await sel.count())) throw new Error('no hygienist field in Edit patient');
-          const opts = await sel.locator('option').allTextContents();
-          await sel.selectOption({ index: Math.max(1, opts.findIndex((o) => /RDH|hygien/i.test(o))) });
-          await t.click('.modal button.primary');
-          await t.see('.modal', { state: 'detached' });
-        });
-      }
+      await t.step('Contact card: click "Usual hygienist" — the list of hygienists opens in place', async () => {
+        await t.click('.contact-card button[aria-label^="Change usual hygienist"]');
+        await t.see('.contact-card select[aria-label^="Usual hygienist"]');
+      });
+      await t.step(`Pick ${hygienist.name}: saved at once (Undo shows)`, async () => {
+        const sel = t.page.locator('.contact-card select[aria-label^="Usual hygienist"]');
+        await sel.selectOption(String(hygienist.id));
+        await t.see('.toast:has-text("usual hygienist is now")');
+      });
     },
   },
 
@@ -211,18 +186,14 @@ export default {
     setup: async (t) => ({ p: await newPatient(t, 'Jon') }),
     async run(t, { p }) {
       await overview(t, p);
-      await t.step('Click Edit: the full patient form opens', async () => {
-        await t.click('main button:has-text("Edit")');
-        await t.see('.modal');
+      await t.step('Click the name on the chart header: first and last name open for correcting (the first name is selected)', async () => {
+        await t.click('h1 .name-in-place');
+        await t.page.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === 'First name');
       });
-      await t.step('Click the first name, select it and type the correct spelling', async () => {
-        await t.click('.modal input[name="first_name"], .modal label:has-text("First name") input');
-        await t.key(`${MOD}+a`);
+      await t.step('Type the correct spelling and press Enter: saved (Undo shows; the chart history keeps the old name)', async () => {
         await t.type('John');
-      });
-      await t.step('Click Save', async () => {
-        await t.click('.modal button.primary');
-        await t.see('.modal', { state: 'detached' });
+        await t.key('Enter');
+        await t.see('.toast:has-text("Name corrected to John")');
       });
     },
   },
@@ -252,24 +223,24 @@ export default {
     },
     async run(t, { p }) {
       await overview(t, p);
-      await t.step('Click "Refer out…" on the chart: "Refer to a specialist"', async () => {
+      await t.step('Click "Refer out…" on the chart: the referral panel opens beside it with the usual specialist chosen', async () => {
         await t.click('button:has-text("Refer out")');
-        await t.see('.modal');
+        await t.see('.side-panel .rt-form select option:nth-child(2)', { state: 'attached' });
+        await t.wait(400); // the suggestion (the specialist used last for this kind of work) arrives
       });
-      const to = t.page.locator('.modal label:has-text("Refer to") select');
-      const referring = t.page.locator('.modal label:has-text("Referring provider") select');
-      if (!(await to.inputValue())) t.flag('asks-known', 'Refer out (chart): the specialist starts on "Choose…" and the referring provider on "—" although the signed-in dentist and the office’s usual endodontist are known (the Referrals page fills them)');
-      await t.step('Pick the specialist and type the reason', async () => {
-        if (!(await to.inputValue())) await to.selectOption({ index: 1 });
-        await t.click('.modal label:has-text("Reason") input');
+      const to = t.page.locator('.side-panel .rt-form select').first();
+      if (!(await to.inputValue())) {
+        t.note('No referral out yet in this office, so no specialist is suggested: picked from the list.');
+        await t.step('Pick the specialist', async () => { await to.selectOption({ index: 1 }); });
+      }
+      await t.step('Type the reason (the cursor is already there)', async () => {
+        const reason = t.page.locator('.side-panel label:has-text("Reason") input');
+        if (!(await reason.evaluate((el) => el === document.activeElement))) await t.click(reason);
         await t.type('RCT #19, symptomatic irreversible pulpitis');
       });
-      if (!(await referring.inputValue())) {
-        await t.step('Pick yourself as the referring provider', async () => { await referring.selectOption({ index: 1 }); });
-      }
-      await t.step('Click "Save & print letter"', async () => {
-        await t.click('.modal button:has-text("Save & print letter")');
-        await t.see('.modal', { state: 'detached' });
+      await t.step('Press Ctrl/⌘+Enter: sent (the letter prints or emails; the patient gets the specialist’s number)', async () => {
+        await t.key(`${MOD}+Enter`);
+        await t.see('.toast:has-text("Referred to")');
       });
       for (const pg of t.ctx.pages()) if (pg !== t.page) await pg.close();
     },
@@ -280,16 +251,15 @@ export default {
     setup: async (t) => ({ p: await newPatient(t, 'Newbie') }),
     async run(t, { p }) {
       await overview(t, p);
-      await t.step('Click "Referred by…" on the chart: "Who referred this patient?"', async () => {
+      await t.step('Click "Referred by…" on the chart: "Who referred this patient?" opens beside it', async () => {
         await t.click('button:has-text("Referred by")');
-        await t.see('.modal');
+        await t.see('.side-panel .rt-form select');
       });
-      await t.step('Pick the source from the list and click Save', async () => {
-        const sel = t.page.locator('.modal select').first();
-        const opts = await sel.locator('option').allTextContents();
-        await sel.selectOption({ index: Math.max(1, opts.findIndex((o) => /google/i.test(o))) });
-        await t.click('.modal button.primary:has-text("Save")');
-        await t.see('.modal', { state: 'detached' });
+      await t.step('Pick the referring doctor from the list and click Save', async () => {
+        const sel = t.page.locator('.side-panel .rt-form select').first();
+        await sel.selectOption({ index: 1 });
+        await t.click('.side-panel button.primary:has-text("Save")');
+        await t.see('.side-panel', { state: 'detached' });
       });
     },
   },

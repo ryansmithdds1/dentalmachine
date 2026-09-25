@@ -3,7 +3,7 @@ import { api, getToken } from '../api.js';
 import { useApi } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
 import { fmtDateTime, fmtDate } from '../format.js';
-import { ErrorBox, PatientPicker } from './ui.jsx';
+import { ErrorBox, PatientPicker, ConfirmButton } from './ui.jsx';
 import { useLiveEvents } from '../live.js';
 
 function Preview({ id }) {
@@ -50,7 +50,7 @@ export default function UnfiledImages() {
               <button className="small" onClick={() => setPicked(picked.length === rows.length ? [] : rows.map((r) => r.id))}>{picked.length === rows.length ? 'Clear' : 'Select all'}</button>
               <div style={{ minWidth: 260 }}><PatientPicker value={patient} onChange={setPatient} /></div>
               <button className="primary" disabled={!picked.length || !patient} onClick={() => act({ patient_id: patient.id }, `Filed ${picked.length} image${picked.length === 1 ? '' : 's'} in ${patient.first_name} ${patient.last_name}'s chart.`)}>File in chart</button>
-              <button className="danger" disabled={!picked.length} onClick={() => window.confirm('Discard the selected images? They stay in storage for the record but leave this list.') && act({ discard: true }, 'Discarded.')}>Discard</button>
+              <ConfirmButton className="danger" disabled={!picked.length} ask="Discard the selected images? They stay in storage for the record but leave this list." yes="Discard" onConfirm={() => act({ discard: true }, 'Discarded.')}>Discard</ConfirmButton>
             </div>
           )}
           <div className="doc-grid">

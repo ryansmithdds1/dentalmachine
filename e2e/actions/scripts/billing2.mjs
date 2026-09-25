@@ -91,11 +91,16 @@ export default {
     setup: (t) => sentClaim(t, 'Voida', 'D0120'),
     async run(t, { claim }) {
       await t.open(`/claims/${claim.id}`, 'h1');
-      await t.step('On the claim, click "Void at payer…": a browser box asks for the payer’s claim number', async () => {
+      await t.step('On the claim, click "Void at payer…": a box for the payer’s claim number opens right there', async () => {
         await t.click('button:has-text("Void at payer")');
-        await t.wait(800);
+        await t.see('.inline-ask input');
       });
       if (t.dialogs.length) t.flag('asks-known', 'Void at payer asks for the payer’s claim number in a browser prompt box (the ERA/claim status may already have it)');
+      await t.step('Type the payer’s claim number from the EOB and press Enter: the void notice is made', async () => {
+        await t.type('PAYER-98765');
+        await t.key('Enter');
+        await t.see('.badge:has-text("Void notice")');
+      });
     },
   },
 
@@ -104,11 +109,16 @@ export default {
     setup: (t) => sentClaim(t, 'Fixie', 'D0120'),
     async run(t, { claim }) {
       await t.open(`/claims/${claim.id}`, 'h1');
-      await t.step('On the claim, click "Corrected claim…": a browser box asks for the payer’s claim number', async () => {
+      await t.step('On the claim, click "Corrected claim…": a box for the payer’s claim number opens right there', async () => {
         await t.click('button:has-text("Corrected claim")');
-        await t.wait(1000);
+        await t.see('.inline-ask input');
       });
       if (t.dialogs.length) t.flag('asks-known', 'Corrected claim asks for the payer’s original claim number in a browser prompt box');
+      await t.step('Type the payer’s claim number and press Enter: the corrected claim opens, ready to send', async () => {
+        await t.type('PAYER-12345');
+        await t.key('Enter');
+        await t.see('.badge:has-text("Corrected claim")');
+      });
     },
   },
 
@@ -212,19 +222,24 @@ export default {
 
   A147: { // collections
     role: 'admin',
+    // An office that sends accounts to collections has its agency set once (Collections settings).
+    async setup(t) {
+      await t.as('admin').put('/practice', { collection_agency: 'Summit Recovery Services' });
+      t.after(async () => { await t.as('admin').put('/practice', { collection_agency: '' }); });
+    },
     async run(t) {
       await t.open('/claims?tab=collections', 'h2:has-text("Past-due accounts")');
       const open = t.page.locator('main button:has-text("Open")').first();
       if (!(await open.count())) throw new Error('no past-due accounts in the demo office');
-      await t.step('Billing → Collections: click "Open" on the oldest past-due account', async () => {
+      await t.step('Billing → Collections: click "Open" on the oldest past-due account (it opens beside the list)', async () => {
         await t.click(open);
-        await t.wait(600);
+        await t.see('.side-panel h3:has-text("Agency")');
       });
       const send = t.page.locator('button:has-text("Send"):has-text("agency"), button:has-text("to collections"), button:has-text("Send to")').first();
       if (await send.count()) {
-        await t.step('Click "Send to the agency": a browser box asks "are you sure?"', async () => {
+        await t.step('Click "Send to agency": sent at once (Undo on the toast takes it back out)', async () => {
           await t.click(send);
-          await t.wait(800);
+          await t.see('.toast:has-text("sent to")');
         });
       } else t.note('No agency set up: the account can only be worked (letters, calls) here.');
     },

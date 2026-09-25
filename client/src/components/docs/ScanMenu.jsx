@@ -18,21 +18,25 @@ export default function ScanMenu({ patient, open, setOpen, onPhone, onUpload, on
   const [panel, setPanel] = useState(null); // null | 'desk'
   const box = useRef(null);
   const here = (scanners || []).find((s) => String(s.id) === String(readWs())) || (scanners || []).find((s) => s.online) || (scanners || [])[0];
+  // The choice this person used last has the focus (Enter repeats it); with no scanner online, "a file".
+  const [lastPick, rememberPick] = useRemembered('docs.scan.pick', '');
+  const focusPick = lastPick === 'desk' && !here?.online ? 'file' : lastPick || (here?.online ? 'desk' : 'file');
+  const pick = (k) => { if (k !== lastPick) rememberPick(k); };
   useEffect(() => {
     if (!open) { setPanel(null); return undefined; }
     const onKey = (e) => {
       if (e.key === 'Escape') { e.stopPropagation(); setOpen(false); }
       if (panel || /input|select|textarea/i.test(e.target.tagName)) return;
-      if (e.key === '1' && here) { e.preventDefault(); setPanel('desk'); }
-      if (e.key === '2') { e.preventDefault(); setOpen(false); onPhone(); }
-      if (e.key === '3') { e.preventDefault(); setOpen(false); onUpload(); }
+      if (e.key === '1' && here) { e.preventDefault(); pick('desk'); setPanel('desk'); }
+      if (e.key === '2') { e.preventDefault(); pick('phone'); setOpen(false); onPhone(); }
+      if (e.key === '3') { e.preventDefault(); pick('file'); setOpen(false); onUpload(); }
     };
     const onDown = (e) => { if (box.current && !box.current.contains(e.target) && !e.target.closest?.('.scan-trigger')) setOpen(false); };
     window.addEventListener('keydown', onKey, true);
     window.addEventListener('mousedown', onDown);
-    setTimeout(() => box.current?.querySelector('button:not([disabled])')?.focus(), 0);
+    setTimeout(() => (box.current?.querySelector(`button[data-pick="${focusPick}"]:not([disabled])`) || box.current?.querySelector('button:not([disabled])'))?.focus(), 0);
     return () => { window.removeEventListener('keydown', onKey, true); window.removeEventListener('mousedown', onDown); };
-  }, [open, panel, here]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [open, panel, here, focusPick]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!open) return null;
   return (
     <div className="scanmenu" ref={box} role="menu" aria-label="Scan or add a document">
@@ -40,17 +44,17 @@ export default function ScanMenu({ patient, open, setOpen, onPhone, onUpload, on
         <DeskScan patient={patient} scanners={scanners} initial={here} onClose={() => setOpen(false)} onScanned={onScanned} />
       ) : (
         <>
-          <button role="menuitem" className="scanmenu-item" disabled={!here || !here.online} onClick={() => setPanel('desk')}>
+          <button role="menuitem" data-pick="desk" className="scanmenu-item" disabled={!here || !here.online} onClick={() => { pick('desk'); setPanel('desk'); }}>
             <Printer size={20} aria-hidden />
             <span><strong>This computer’s scanner</strong><small>{here ? `${here.scanner} on ${here.name}${here.online ? '' : ' — offline'}` : 'No scanner set up in an imaging bridge (Settings → Imaging bridges)'}</small></span>
             <kbd>1</kbd>
           </button>
-          <button role="menuitem" className="scanmenu-item" onClick={() => { setOpen(false); onPhone(); }}>
+          <button role="menuitem" data-pick="phone" className="scanmenu-item" onClick={() => { pick('phone'); setOpen(false); onPhone(); }}>
             <Smartphone size={20} aria-hidden />
             <span><strong>Phone or tablet camera</strong><small>Scan a QR code, photograph the pages — straightened and sent as one PDF</small></span>
             <kbd>2</kbd>
           </button>
-          <button role="menuitem" className="scanmenu-item" onClick={() => { setOpen(false); onUpload(); }}>
+          <button role="menuitem" data-pick="file" className="scanmenu-item" onClick={() => { pick('file'); setOpen(false); onUpload(); }}>
             <Upload size={20} aria-hidden />
             <span><strong>A file on this computer</strong><small>PDF, pictures, Word/Excel, audio, video, x-rays… or drop it anywhere</small></span>
             <kbd>3</kbd>

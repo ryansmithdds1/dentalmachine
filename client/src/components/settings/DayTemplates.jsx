@@ -60,12 +60,14 @@ function Editor({ initial, providers, types, locations, onSaved, onCancel }) {
     return [...types.filter(fits), ...types.filter((ty) => !fits(ty))].filter((ty) => ty.active !== 0);
   }, [types, provider]);
   const blockSum = t.blocks.reduce((s, b) => s + (toCents(b.goal) || 0), 0);
+  const blockName = (b) => b.appointment_type_ids.map((id) => types.find((ty) => ty.id === id)?.name).filter(Boolean).slice(0, 2).join(' & ') || 'Open time';
   const { submit, busy, error } = useSubmit(async () => {
     const body = {
       provider_id: Number(t.provider_id), location_id: t.location_id ? Number(t.location_id) : null, name: t.name.trim() || `${firstName(provider?.name)} ${t.weekdays.map((d) => LONG_DAYS[d]).join(' & ') || 'day'}`,
       weekdays: t.weekdays, release_hours: Number(t.release_hours) || 0, day_goal: t.day_goal === '' ? null : toCents(t.day_goal),
       blocks: t.blocks.map((b) => ({
-        label: b.label.trim(), start_time: b.start_time, end_time: b.end_time, appointment_type_ids: b.appointment_type_ids,
+        // A block without a name is named for what it's kept for ("Crown prep"), or "Open time" for a goal only.
+        label: b.label.trim() || blockName(b), start_time: b.start_time, end_time: b.end_time, appointment_type_ids: b.appointment_type_ids,
         goal: b.goal === '' ? 0 : toCents(b.goal), release_hours: b.release_hours === '' ? null : Number(b.release_hours), color: b.color || null,
       })),
     };
@@ -114,7 +116,7 @@ function Editor({ initial, providers, types, locations, onSaved, onCancel }) {
         {t.blocks.map((b, i) => (
           <div key={b.key} className="dt-block" style={{ '--c': b.color || 'var(--primary)' }}>
             <div className="dt-block-row">
-              <input className="dt-label" aria-label="Block name" placeholder="e.g. Crowns" value={b.label} onChange={(e) => setBlock(i, { label: e.target.value })} required maxLength={60} autoFocus={!b.label && i === t.blocks.length - 1 && i > 0} />
+              <input className="dt-label" aria-label="Block name" placeholder={b.appointment_type_ids.length ? blockName(b) : 'e.g. Crowns (or pick what it’s kept for)'} value={b.label} onChange={(e) => setBlock(i, { label: e.target.value })} maxLength={60} autoFocus={!b.label && i === t.blocks.length - 1 && i > 0} />
               <input type="time" aria-label="Starts" step={600} value={b.start_time} onChange={(e) => setBlock(i, { start_time: e.target.value })} required />
               <span className="muted">to</span>
               <input type="time" aria-label="Ends" step={600} value={b.end_time} onChange={(e) => setBlock(i, { end_time: e.target.value })} required />

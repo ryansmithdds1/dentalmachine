@@ -3,6 +3,7 @@ import { requirePermission, HttpError } from '../auth.js';
 import { insert, audit, practiceNow, utcRange, recorded } from '../util.js';
 import { runReport } from '../reportlibrary.js';
 import { lastMonthOf } from '../monthlywork.js';
+import { SOLD, REDEEMED } from '../ledgerkinds.js';
 
 // End-of-day and month-end close: the period's totals, a checklist of loose ends, and closing the books
 // (moving the lock date up to the end of the period so nothing more can be posted into it).
@@ -25,11 +26,15 @@ export default function closeRoutes({ db }) {
     const sum = async (where) => (await db.get(`SELECT COALESCE(SUM(amount), 0) AS n FROM ledger_entries WHERE practice_id = ? AND entry_date BETWEEN ? AND ? AND ${where}`, pid, start, end)).n;
     const count = async (sql, ...args) => Number((await db.get(sql, ...args)).n);
     const totals = {
-      production: await sum("type = 'charge'"),
+      production: await sum("type = 'charge' AND retail_sale_id IS NULL"),
       patient_payments: -(await sum("type = 'payment'")),
       insurance_payments: -(await sum("type = 'insurance_payment'")),
-      adjustments: await sum("type = 'adjustment'"),
+      adjustments: await sum("type = 'adjustment' AND retail_sale_id IS NULL AND gift_certificate_id IS NULL"),
       refunds: await sum("type = 'refund'"),
+      // Not dentistry, shown on their own lines (ledgerkinds.js).
+      retail_sales: await sum('retail_sale_id IS NOT NULL'),
+      gift_certificates_sold: await sum(`gift_certificate_id IS NOT NULL AND adjustment_type = '${SOLD}'`),
+      gift_certificates_used: -(await sum(`gift_certificate_id IS NOT NULL AND adjustment_type = '${REDEEMED}'`)),
     };
     totals.net_collections = totals.patient_payments + totals.insurance_payments - totals.refunds;
     const checks = [

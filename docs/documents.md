@@ -16,6 +16,21 @@ Backlog D1–D5 ("Document management and scanning"). Patient documents stay in 
 | Belongs with | Link a document to a visit, claim or treatment plan of the same patient. |
 | Office documents | `/documents` page: contracts, licences (expiry → reminder task 60 days ahead), policies, invoices; the **Scan inbox** (scans no chart was named for) with "File to" the active patient; **To review**; **Search all documents**. |
 
+## Letters and mailing labels (server/src/letters.js, routes/letters.js)
+- **Letters** (Family → Letters, or "Write a letter" in the command bar for the active patient): templates with merge
+  fields — `{first_name}`, `{preferred_name}`, `{patient_address}`, `{provider}`, `{next_appointment}`, `{balance}`,
+  `{treatment_plan}`, `{treatment_total}` and more — filled from the chart. 1–9 picks the letter, **E** changes the
+  wording for this one letter, **Enter** prints, **M** emails (opt-outs respected). Every letter is kept word for word
+  (`patient_letters`) and its PDF filed in the patient's documents under **Letters**. A field the chart has nothing for
+  (no visit booked, no balance) or a "[blank]" left in the wording blocks printing and sending, as with campaigns.
+  Report results offer **Letter** (the same letter for everyone listed, one PDF, each filed on its own chart; anyone it
+  can't be filled for is left out and named). Templates: Settings → Letter templates (administrators; switched off
+  rather than removed).
+- **Mailing labels**: the **Mailing labels** button on Follow-up → Recall (the chosen patients, or everyone listed), on
+  report results and on a campaign's audience makes an Avery 5160 / 8160 sheet (30 per page) as a PDF. One label per
+  household; nobody with a "do not contact", "moved" or "deceased" hold, an archived chart, or an incomplete address —
+  they are listed with the reason, along with addresses worth a second look. Printing labels is audited.
+
 ## File types (server/src/filetypes.js)
 
 Decided from the file's bytes, never its name or the browser's type. Refused (415) whatever they're called:

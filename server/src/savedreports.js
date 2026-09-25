@@ -36,7 +36,7 @@ export const REPORTS = {
       const collections = -(await sum(['payment', 'insurance_payment']));
       const adjustments = await sum(['adjustment']);
       const byProvider = await db.all(
-        `SELECT pv.name, SUM(l.amount) AS n FROM ledger_entries l JOIN providers pv ON pv.id = l.provider_id WHERE l.practice_id = ? AND l.type = 'charge' AND l.entry_date BETWEEN ? AND ?${where.join('')}
+        `SELECT pv.name, SUM(l.amount) AS n FROM ledger_entries l JOIN providers pv ON pv.id = l.provider_id WHERE l.practice_id = ? AND l.type = 'charge' AND l.retail_sale_id IS NULL AND l.entry_date BETWEEN ? AND ?${where.join('')}
          GROUP BY pv.name ORDER BY SUM(l.amount) DESC`, pid, from, to, ...args,
       );
       return [

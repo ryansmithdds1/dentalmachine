@@ -66,6 +66,22 @@ Deposits and cash → **Cash integrity** shows, for any period:
 - separation-of-duties warnings.
 Opening the report is itself recorded. Everything above is also in the audit log with who, what, when and why.
 
+## 10. Gift certificates and product sales
+- **Products** (toothbrushes, whitening kits) are set up by an administrator in Settings → Products & gift
+  certificates, with the practice's sales tax rate. A sale posts a charge on the patient's account (and a separate
+  sales-tax line), takes the item out of Supplies stock, and is voided — charge, tax and stock together — never edited.
+- **Gift certificates** (Account → Gift certificates) are money paid in advance that belongs to whoever holds the
+  certificate. The buyer's payment is on their account (so it reaches the day sheet and the deposit like any payment)
+  with an equal "Gift certificate sold" line holding it — their balance doesn't move and it is not their credit, so it
+  can't be refunded as a credit. Using one posts a "Gift certificate redeemed" line on the patient's account, never
+  more than the certificate holds or than the account owes (a certificate is never cashed out).
+- What each certificate still holds is worked out from those lines; the **outstanding** total on the Gift
+  certificates page is what the practice owes holders (a liability for your accountant). Expired-but-unused amounts
+  are shown separately: check your state's unclaimed-property rules.
+- Voiding a certificate (sold by mistake or returned) needs a manager, only works while nothing has been used, and
+  reverses the payment — give the money back the way it was paid. A redemption on the wrong account is voided from
+  the ledger and the certificate gets the amount back. Every sale, use, look-up, print and void is in the audit log.
+
 ## Good habits that the software can't do for you
 - Rotate who counts and who verifies; make sure everyone who handles money takes real time off.
 - Take the deposit to the bank every day, in a sealed bag, and keep the stamped slip (photograph it here).

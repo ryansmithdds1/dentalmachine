@@ -4,7 +4,7 @@ import { api } from '../api.js';
 import { useApi } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
 import { money } from '../format.js';
-import { ErrorBox, useSubmit } from '../components/ui.jsx';
+import { ErrorBox, useSubmit, ConfirmButton } from '../components/ui.jsx';
 import BillingQueue, { QUEUE_ORDER } from '../components/group/BillingQueue.jsx';
 import PatientLookup from '../components/group/PatientLookup.jsx';
 import GroupReports from '../components/group/GroupReports.jsx';
@@ -75,7 +75,7 @@ function Start({ admin, onDone }) {
 
 function LeaveButton({ onDone }) {
   const leave = useSubmit(async () => { await api.post('/org/leave'); onDone(); });
-  return <button className="small danger" onClick={() => window.confirm('Take this practice out of the group?') && leave.submit()}>Leave the group</button>;
+  return <ConfirmButton ask="Take this practice out of the group?" yes="Leave the group" onConfirm={leave.submit}>Leave the group</ConfirmButton>;
 }
 
 const TABS = [['overview', 'Overview'], ['billing', 'Billing queue', (o) => o.billing], ['lookup', 'Patient lookup', (o) => o.billing], ['reports', 'Reports'], ['setup', 'Setup & roles', (o) => o.role === 'owner']];
@@ -196,7 +196,6 @@ function Push({ org }) {
   const [to, setTo] = useState([]);
   const [result, setResult] = useState(null);
   const push = useSubmit(async () => {
-    if (!window.confirm('Copy this setup to the chosen offices? Matching items there are replaced.')) return;
     setResult((await api.post('/org/push', { from_practice_id: Number(from), kinds, to_practice_ids: to })).results);
   });
   const others = org.practices.filter((p) => p.id !== Number(from));
@@ -217,7 +216,7 @@ function Push({ org }) {
         </div>
       </div>
       {result && <div className="public-notice ok" style={{ marginTop: 8 }}>Copied to {result.length} office{result.length === 1 ? '' : 's'}: {result.map((r) => `${org.practices.find((p) => p.id === r.practice_id)?.name} (${Object.entries(r.counts).map(([k, n]) => `${n} ${k.replace('_', ' ')}`).join(', ')})`).join('; ')}.</div>}
-      <div className="form-actions"><button className="primary" disabled={!kinds.length || push.busy || !others.length} onClick={push.submit}>Copy</button></div>
+      <div className="form-actions"><ConfirmButton className="primary" disabled={!kinds.length || push.busy || !others.length} ask="Copy this setup to the chosen offices? Matching items there are replaced." yes="Copy and replace" onConfirm={push.submit}>Copy</ConfirmButton></div>
     </div>
   );
 }
@@ -238,7 +237,7 @@ function Manage({ org, onChange, me }) {
         {org.practices.map((p) => (
           <div key={p.id} className="inline" style={{ justifyContent: 'space-between', padding: '4px 0' }}>
             <span>{p.name}{p.city ? <span className="muted"> · {p.city}</span> : null}</span>
-            <button className="small" onClick={() => window.confirm(`Remove ${p.name} from the group?`) && act.submit(() => api.del(`/org/practices/${p.id}`))}>Remove</button>
+            <ConfirmButton className="small" ask={`Remove ${p.name} from the group?`} yes="Remove" onConfirm={() => act.submit(() => api.del(`/org/practices/${p.id}`))}>Remove</ConfirmButton>
           </div>
         ))}
         <div style={{ marginTop: 10 }}>

@@ -5,7 +5,7 @@ import { useApi } from '../../hooks.js';
 import { useAuth } from '../../auth.jsx';
 import { money, fmtDateTime } from '../../format.js';
 import { toast } from '../../toast.js';
-import { ErrorBox } from '../ui.jsx';
+import { ErrorBox, AskButton } from '../ui.jsx';
 import { putPart, dropPart, partsFor, putSession, dropSession, openSessions } from './recordingQueue.js';
 import './longrecorder.css';
 
@@ -242,10 +242,12 @@ export default function LongRecorder({ patient, appointmentId = null, onSaved })
   };
 
   const retry = async (sid) => { try { await api.post(`/long-recordings/${sid}/retry`); reloadHistory(); } catch (e) { setError(e); } };
-  const discard = async (sid) => {
-    const reason = window.prompt('Why remove this recording? (e.g. patient withdrew consent)');
-    if (!reason) return;
-    try { await api.post(`/long-recordings/${sid}/discard`, { reason }); await dropSession(sid).catch(() => {}); reloadHistory(); refreshLeftover(); } catch (e) { setError(e); }
+  // The reason is typed beside the button (no browser box); Enter removes it.
+  const discard = async (sid, reason) => {
+    await api.post(`/long-recordings/${sid}/discard`, { reason });
+    await dropSession(sid).catch(() => {});
+    reloadHistory();
+    refreshLeftover();
   };
 
   if (!status?.enabled || !can('clinical:write')) return null;
@@ -338,7 +340,7 @@ export default function LongRecorder({ patient, appointmentId = null, onSaved })
               <span className={`badge ${h.status === 'failed' ? 'warn' : h.status === 'transcribed' ? 'ok' : ''}`}>{h.status}</span>
               {h.status === 'transcribed' && !h.note_id && <button className="small" onClick={() => openDraft(h.id)}><FileText size={13} /> Draft note</button>}
               {h.status === 'failed' && <button className="small" onClick={() => retry(h.id)}><RotateCw size={13} /> Retry</button>}
-              {!['purged', 'discarded', 'transcribing'].includes(h.status) && <button className="small link" onClick={() => discard(h.id)} title="Remove the audio and transcript now"><Trash2 size={13} /></button>}
+              {!['purged', 'discarded', 'transcribing'].includes(h.status) && <AskButton className="small link" title="Remove the audio and transcript now" label="Why remove it?" placeholder="e.g. patient withdrew consent" required danger submit="Remove recording" onSubmit={(reason) => discard(h.id, reason)}><Trash2 size={13} /></AskButton>}
             </div>
           ))}
           <div className="muted lr-small">Audio and transcripts are kept {status.retention_days} days, then removed; the signed note stays.</div>

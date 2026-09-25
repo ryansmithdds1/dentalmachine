@@ -2,7 +2,7 @@ import {
   AlertTriangle, CalendarDays, Inbox as InboxIcon, CalendarRange, PackageCheck, Users, PhoneCall, Repeat, Send, ShieldCheck,
   MessageSquare, Phone, Headset, Megaphone, Star, Receipt, Banknote, ChartColumn, Gauge, CircleDollarSign, Landmark, Sparkles,
   Building2, ListChecks, ClipboardCheck, Clock, FolderOpen, BookOpen, LayoutDashboard, TrendingUp, Wallet, ClipboardList,
-  Stethoscope, Images, CheckCheck, Ruler, ScanSearch, Contact,
+  Stethoscope, Images, CheckCheck, Ruler, ScanSearch, Contact, Gift, Mail, ShieldAlert,
 } from 'lucide-react';
 
 // The module bar, like Open Dental's: one click on a module goes straight to it, and the less used screens
@@ -34,6 +34,7 @@ export const MODULES = [
       { to: '/followups', label: 'Follow-up lists', icon: PhoneCall, can: read('schedule:read') },
       { to: '/recall', label: 'Recall autopilot', icon: Repeat, can: read('schedule:read') },
       { to: '/referrals', label: 'Referrals', icon: Send, can: read('patients:read') },
+      { to: '/letters', label: 'Letters', icon: Mail, can: read('patients:read') },
     ],
   },
   {
@@ -43,6 +44,7 @@ export const MODULES = [
       { to: '/claims', label: 'Billing & claims', icon: Receipt, can: read('billing:read') },
       { to: '/claims?tab=approve', label: 'Ready to approve', icon: CheckCheck, can: read('billing:read'), badge: 'claims' },
       { to: '/deposits', label: 'Deposits & cash', icon: Banknote, can: read('billing:read') },
+      { to: '/gift-certificates', label: 'Gift certificates', icon: Gift, can: read('billing:read') },
     ],
   },
   {
@@ -96,6 +98,7 @@ export const MODULES = [
         { to: '/checklists', label: 'Checklists', icon: ClipboardCheck, can: () => true, badge: 'checklists' },
         { to: '/timeclock', label: 'Time clock', icon: Clock, can: () => true },
         { to: '/intranet', label: 'Intranet', icon: BookOpen, can: () => true },
+        { to: '/compliance', label: 'Compliance log', icon: ShieldAlert, can: read('patients:read') },
       ] },
     ],
   },

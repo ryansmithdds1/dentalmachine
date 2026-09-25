@@ -57,3 +57,11 @@ and whatever they change keeps its value (the rest follows the next suggestion):
   date; validation (400), other practice (404), signed out (401).
 - `e2e/workflows/09-10-13-19-schedule.test.mjs` (#9): Alt+B + Enter = 2 and books the server's suggestion with
   the patient's own dentist and chair; N + search = 4; drag + chip + Book = 3 with the dragged time and length.
+
+## Phase 2, batch 2A: a side panel, not a dialog
+Booking (N, Alt+B, a dragged time, Book on the recall/broken/unscheduled lists, the plan's Schedule, checkout's
+next visit and the chart's Book) and Edit and Block time open in a **side panel** on the right (`SidePanel` in
+`components/ui.jsx`, class `book-panel` / `block-panel`): the schedule stays in view, nothing is stacked, the cursor
+starts in the first box and Esc closes it. The budgets are unchanged (the panel counts no dialog). A visit's **type
+and length** also change right in its panel (the type's usual length follows, Undo on the toast) — 1 action
+instead of Edit → the 12-field form (`e2e/workflows/2A-inline.test.mjs`).

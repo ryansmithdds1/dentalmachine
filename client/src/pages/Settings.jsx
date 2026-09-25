@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import ConnectionActivity from '../components/ConnectionActivity.jsx';
 import PhoneLineSettings from '../components/PhoneLineSettings.jsx';
 import EducationSettings from '../components/EducationSettings.jsx';
@@ -10,8 +10,10 @@ import { api, getToken, download } from '../api.js';
 import { useApi, useLookup, invalidateLookup } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
 import { money, fmtDate, fmtDateTime, fmtUtcDateTime, label, toCents, fromCents } from '../format.js';
-import { ErrorBox, Modal, useSubmit } from '../components/ui.jsx';
-import { toast } from '../toast.js';
+import { ErrorBox, Modal, useSubmit, ConfirmButton } from '../components/ui.jsx';
+import { toast, undoable } from '../toast.js';
+import { useShortcut } from '../shortcuts.js';
+
 import { CustomFieldsSettings, DuplicateCharts } from '../components/Switching.jsx';
 import ImportData from '../components/ImportData.jsx';
 import Backups from '../components/Backups.jsx';
@@ -31,6 +33,9 @@ import OpportunityRules from '../components/opportunities/OpportunityRules.jsx';
 import Digests from '../components/settings/Digests.jsx';
 import JourneySettings from '../components/JourneySettings.jsx';
 import ChartShortcuts from '../components/settings/ChartShortcuts.jsx';
+import RetailSettings from '../components/settings/RetailSettings.jsx';
+import LetterTemplates from '../components/settings/LetterTemplates.jsx';
+const isMacKey = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform) ? '⌘' : 'Ctrl';
 
 const ROLES = ['admin', 'dentist', 'hygienist', 'assistant', 'front_desk', 'billing'];
 const CATEGORIES = ['diagnostic', 'preventive', 'restorative', 'endodontics', 'periodontics', 'prosthodontics', 'oral_surgery', 'orthodontics', 'implants', 'adjunctive'];
@@ -48,38 +53,53 @@ const codeCategory = (code) => {
 const RESOURCES = {
   providers: {
     title: 'Providers', singular: 'provider', path: '/providers', columns: ['name', 'type', 'npi', 'color', 'working_hours'],
-    required: ['name', 'type'],
+    required: ['name', 'type'], quick: ['name', 'type', 'npi'],
     // "Dr. Robin Lee, DDS" is a dentist, "Sam Okafor, RDH" a hygienist — until the Type is picked by hand.
     guess: (f) => ({ type: /\b(RDH|RDHAP|hygienist)\b/i.test(f.name) ? 'hygienist' : /\b(MS|MSD|endodontist|orthodontist|periodontist|oral surgeon|OMS|prosthodontist)\b/i.test(f.name) ? 'specialist' : /\b(DDS|DMD|BDS|dentist)\b/i.test(f.name) ? 'dentist' : '' }),
     fields: [['name', 'Name', 'text'], ['type', 'Type', 'select', ['dentist', 'hygienist', 'specialist']], ['npi', 'NPI (10 digits)', 'text'], ['license_number', 'License #', 'text'], ['dea_number', 'DEA # (controlled substances)', 'text'], ['erx_user_id', 'e-Rx user ID (DoseSpot)', 'text'], ['color', 'Schedule color', 'color'], ['fee_schedule_id', 'Own fees (office fee schedule)', 'feeschedule'], ['video_room_url', 'Video room link (Doxy.me, Zoom…; blank = a new private room each visit)', 'text'], ['daily_goal', 'Daily production goal ($, blank = none)', 'money'], ['active', 'Active', 'checkbox'], ['working_hours', 'Working hours', 'hours']],
   },
   locations: {
-    title: 'Offices', singular: 'office', path: '/locations', columns: ['name', 'city', 'phone', 'office_hours'],
+    title: 'Offices', singular: 'office', path: '/locations', columns: ['name', 'city', 'phone', 'office_hours'], quick: ['name', 'phone', 'city'],
     intro: 'For practices with more than one office. Each chair belongs to an office; visits, production and front-desk payments are counted at their office, and staff can switch offices in the sidebar. Adding the first office puts your existing chairs and history there.',
     fields: [['name', 'Name', 'text'], ['phone', 'Phone', 'text'], ['address', 'Address', 'text'], ['city', 'City', 'text'], ['state', 'State', 'text'], ['zip', 'ZIP', 'text'], ['npi', 'Office NPI (if billed separately)', 'text'], ['fee_schedule_id', 'Fees (office fee schedule)', 'feeschedule'], ['sort', 'Display order', 'number'], ['active', 'Active', 'checkbox'],
       ['office_hours', 'Opening hours', 'hours', { note: 'Outside these hours the office is shaded on the calendar and online booking won’t offer times there.', same: 'Same as the practice’s office hours', alt: false }]],
   },
-  operatories: { title: 'Operatories', singular: 'operatory', path: '/operatories', columns: ['name', 'location_id', 'sort', 'is_hygiene'], required: ['name'], fields: [['name', 'Name', 'text'], ['location_id', 'Office', 'location'], ['sort', 'Display order', 'number'], ['default_provider_id', 'Usually works here', 'provider'], ['is_hygiene', 'Hygiene chair', 'checkbox'], ['active', 'Active', 'checkbox']] },
+  operatories: { title: 'Operatories', singular: 'operatory', path: '/operatories', columns: ['name', 'location_id', 'sort', 'is_hygiene'], required: ['name'], quick: ['name', 'is_hygiene'], fields: [['name', 'Name', 'text'], ['location_id', 'Office', 'location'], ['sort', 'Display order', 'number'], ['default_provider_id', 'Usually works here', 'provider'], ['is_hygiene', 'Hygiene chair', 'checkbox'], ['active', 'Active', 'checkbox']] },
   codes: {
-    title: 'Fee schedule', singular: 'procedure code', path: '/procedure-codes', columns: ['code', 'description', 'category', 'fee'],
-    required: ['code', 'description', 'category'],
+    title: 'Procedure codes & fees', singular: 'procedure code', path: '/procedure-codes', columns: ['code', 'description', 'category', 'fee'],
+    required: ['code', 'description', 'category'], quick: ['code', 'description', 'fee', 'category'],
+    // The whole line in the first box works too: "D9310 Consultation 95" = code, description and fee.
+    parseLine: (v) => {
+      const m = String(v || '').trim().match(/^([Dd]\d{4}\w?)\s+(.+?)(?:\s+\$?(\d+(?:\.\d{1,2})?))?$/);
+      return m ? { code: m[1].toUpperCase(), description: m[2], ...(m[3] ? { fee: m[3] } : {}) } : null;
+    },
     // The CDT code says its category (D2… restorative, D7… oral surgery) — until it's picked by hand.
     guess: (f) => ({ category: codeCategory(f.code) }),
     fields: [['code', 'Code', 'text'], ['description', 'Description', 'text'], ['fee', 'Fee ($)', 'money'], ['category', 'Category', 'select', CATEGORIES], ['area', 'Charted by (blank = automatic)', 'select', ['tooth', 'quadrant', 'arch', 'mouth']], ['time_units', 'Time units (10 min each)', 'number'], ['requires_tooth', 'Requires tooth', 'checkbox'], ['requires_surface', 'Requires surfaces', 'checkbox'], ['active', 'Active', 'checkbox']],
   },
   types: {
     title: 'Appointment types', singular: 'appointment type', path: '/appointment-types', columns: ['name', 'duration', 'color', 'procedure_codes', 'online_bookable'],
-    required: ['name', 'duration'],
+    required: ['name', 'duration'], quick: ['name', 'duration', 'provider_type'],
+    // Most visit types are half an hour: the length starts there (change it before Enter if not).
+    defaults: { duration: 30 },
     fields: [['name', 'Name', 'text'], ['name_es', 'Name in Spanish (online booking)', 'text'], ['duration', 'Length (minutes)', 'number'], ['color', 'Calendar color', 'color'], ['procedure_codes', 'Procedures added when booked (e.g. D0120, D1110)', 'codes'],
       ['provider_type', 'Usually booked with', 'select', ['dentist', 'hygienist', 'specialist']], ['online_bookable', 'Patients can book online', 'checkbox'], ['is_video', 'Always a video visit', 'checkbox'], ['deposit', 'Deposit to book online ($, needs Stripe)', 'money'], ['sort', 'Sort order', 'number'], ['active', 'Active', 'checkbox'],
       ['pattern', 'Time pattern', 'pattern'], ['provider_durations', 'Length for each provider (blank = the usual length)', 'durations']],
   },
   referrals: {
-    title: 'Referral contacts', singular: 'referral contact', path: '/referral-contacts', columns: ['name', 'practice_name', 'specialty', 'phone', 'referred_in', 'referred_out'], writePerm: 'patients:write', required: ['name'],
+    title: 'Referral contacts', singular: 'referral contact', path: '/referral-contacts', columns: ['name', 'practice_name', 'specialty', 'phone', 'referred_in', 'referred_out'], writePerm: 'patients:write', required: ['name'], quick: ['name', 'specialty', 'phone'],
     fields: [['name', 'Name', 'text'], ['practice_name', 'Practice', 'text'], ['specialty', 'Specialty', 'text'], ['phone', 'Phone', 'text'], ['fax', 'Fax', 'text'], ['email', 'Email', 'email'], ['address', 'Address', 'text'], ['npi', 'NPI', 'text'], ['notes', 'Notes', 'text'], ['active', 'Active', 'checkbox']],
   },
   carriers: {
     title: 'Insurance carriers', singular: 'insurance carrier', path: '/carriers', columns: ['name', 'payer_id', 'phone'], writePerm: 'billing:write', required: ['name'],
+    quick: ['name', 'payer_id', 'phone'],
+    // The usual electronic payer ID of the big dental payers ("Guardian" → 64246), until it's typed by hand.
+    common: '/carriers/common',
+    guess: (f, { common = [] } = {}) => {
+      const n = String(f.name || '').trim().toLowerCase();
+      const hit = n.length >= 3 && common.find((c) => c.payer_id && (n.startsWith(c.name.toLowerCase()) || c.name.toLowerCase().startsWith(n) || n.split(/\s+/)[0] === c.name.toLowerCase().split(/\s+/)[0]));
+      return { payer_id: hit ? hit.payer_id : '' };
+    },
     fields: [['name', 'Name', 'text'], ['payer_id', 'Payer ID', 'text'], ['phone', 'Phone', 'text'], ['address', 'Claims address', 'text'], ['timely_filing_days', 'Filing limit (days, blank = 365)', 'number'], ['active', 'Active', 'checkbox']],
   },
 };
@@ -118,6 +138,8 @@ const KEYWORDS = {
   developer: 'api keys webhooks developer integrations',
   audit: 'audit log access log who viewed hipaa',
   backups: 'backups restore download',
+  retail: 'products retail sell toothbrush whitening kit sales tax gift certificates gift cards expiry',
+  letters: 'letter templates merge fields print mail letters correspondence',
 };
 
 export default function Settings() {
@@ -127,8 +149,8 @@ export default function Settings() {
     ['You', [['account', 'My account', true]]],
     ['Practice', [['practice', 'Practice & security', admin], ['users', 'Users & roles', admin], ['locations', 'Offices', admin], ['providers', 'Providers', true], ['operatories', 'Operatories', true], ['types', 'Appointment types', true], ['daytemplates', 'Perfect day & late patients', can('schedule:read')], ['cards', 'Appointment cards', can('schedule:read')], ['bonus', 'Team bonus', admin || can('bonus:manage')], ['import', 'Import from another system', admin]]],
     ['Clinical', [['templates', 'Note templates', can('clinical:write')], ['forms', 'Forms & consents', can('patients:read')], ['labs', 'Labs', can('clinical:read')], ['education', 'Patient education', can('patients:read')], ['referrals', 'Referral contacts', can('patients:read')], ['opportunities', 'Opportunities', can('clinical:read')], ['chartshortcuts', 'Chart shortcuts & bundles', can('clinical:read')]]],
-    ['Billing', [['codes', 'Fee schedule', true], ['ppo', 'Fee schedules', can('billing:read')], ['fees', 'Fee updates & history', can('billing:read')], ['carriers', 'Insurance carriers', can('billing:read')], ['memberships', 'Membership plans', can('billing:read')]]],
-    ['Patients', [['messaging', 'Messages & reviews', admin], ['digests', 'Metric emails', admin], ['benchmarks', 'Benchmarks', admin], ['phone', 'Phone line', admin], ['checkin', 'Mobile check-in', admin], ['journeys', 'Patient journeys', can('patients:read')], ['booking', 'Online booking links', admin], ['custom', 'Custom patient fields', admin], ['duplicates', 'Duplicate charts', admin]]],
+    ['Billing', [['codes', 'Procedure codes & fees', true], ['ppo', 'Insurance fee schedules', can('billing:read')], ['fees', 'Fee updates & history', can('billing:read')], ['carriers', 'Insurance carriers', can('billing:read')], ['memberships', 'Membership plans', can('billing:read')], ['retail', 'Products & gift certificates', can('billing:read')]]],
+    ['Patients', [['messaging', 'Messages & reviews', admin], ['digests', 'Metric emails', admin], ['benchmarks', 'Benchmarks', admin], ['phone', 'Phone line', admin], ['checkin', 'Mobile check-in', admin], ['journeys', 'Patient journeys', can('patients:read')], ['booking', 'Online booking links', admin], ['custom', 'Custom patient fields', admin], ['duplicates', 'Duplicate charts', admin], ['letters', 'Letter templates', can('patients:read')]]],
     ['Connections', [['integrations', 'Integrations', admin], ['imaging', 'Imaging bridges', admin], ['assistant', 'Assistant', admin], ['developer', 'API & webhooks', admin], ['activity', 'Connection activity', admin]]],
     ['Compliance', [['audit', 'Audit log', admin], ['backups', 'Backups', admin]]],
   ].map(([g, items]) => [g, items.filter((t) => t[2])]).filter(([, items]) => items.length);
@@ -143,6 +165,9 @@ export default function Settings() {
   // After choosing a result, bring the matching field or heading into view.
   const reveal = (k) => {
     setTab(k);
+    // The section's first box takes the cursor (the add line, the current password…), even when the section was
+    // already open: clicking its name in the list would otherwise leave the cursor on the list.
+    setTimeout(() => document.querySelector('.settings-body [data-autofocus]')?.focus({ preventScroll: true }), 60);
     if (!words.length) return;
     setTimeout(() => {
       const el = [...document.querySelectorAll('.settings-body label, .settings-body h2, .settings-body h3')].find((x) => words.some((w) => x.textContent.toLowerCase().includes(w)));
@@ -174,6 +199,8 @@ export default function Settings() {
         </select>
         <div className="settings-body">
       {tab === 'account' && <Account />}
+      {tab === 'retail' && <RetailSettings />}
+      {tab === 'letters' && <LetterTemplates />}
       {tab === 'practice' && <Practice />}
       {tab === 'users' && <Users />}
       {RESOURCES[tab] && <ResourceTable key={tab} spec={RESOURCES[tab]} canWrite={RESOURCES[tab].writePerm ? can(RESOURCES[tab].writePerm) : admin} />}
@@ -232,7 +259,7 @@ function CodeImport() {
       </p>
       <ErrorBox error={error} />
       <input type="file" aria-label="CSV file" accept=".csv,text/csv" onChange={async (e) => { const f = e.target.files?.[0]; if (f) setCsv(await f.text()); }} />
-      <textarea rows={4} value={csv} onChange={(e) => setCsv(e.target.value)} placeholder={'D2740,Crown - porcelain/ceramic,restorative,1350.00,tooth,6'} style={{ marginTop: 8 }} />
+      <textarea rows={4} value={csv} onChange={(e) => setCsv(e.target.value)} aria-label="Codes and fees to import (CSV)" placeholder={'D2740,Crown - porcelain/ceramic,restorative,1350.00,tooth,6'} style={{ marginTop: 8 }} />
       <div className="form-actions"><button className="primary" disabled={busy || !csv.trim()} onClick={submit}>Import</button></div>
       {result && (
         <div className={result.errors.length ? 'public-notice' : 'public-notice ok'}>
@@ -247,58 +274,71 @@ function CodeImport() {
 function NoteTemplates() {
   const { data: list, reload } = useApi('/note-templates');
   const [editing, setEditing] = useState(null);
+  const [newKey, setNewKey] = useState(0);
   const [err, setErr] = useState(null);
   const done = () => { setEditing(null); reload(); invalidateLookup('/note-templates'); };
+  // Deleted at once; Undo puts the same template back.
+  const remove = (t) => undoable(`Deleted “${t.name}”`,
+    async () => { await api.del(`/note-templates/${t.id}`); done(); },
+    async () => { await api.post('/note-templates', { name: t.name, codes: t.codes || '', body: t.body, active: !!t.active }); done(); }).catch(setErr);
   return (
     <div className="card" style={{ padding: 0 }}>
-      <div className="inline" style={{ padding: '14px 16px', justifyContent: 'space-between' }}>
-        <div>
-          <h2 style={{ margin: 0 }}>Clinical note templates</h2>
-          <div className="muted" style={{ fontSize: 13 }}>Offered when the listed procedures are completed. <code>{'{patient}'}</code> <code>{'{procedures}'}</code> <code>{'{teeth}'}</code> <code>{'{bp}'}</code> <code>{'{allergies}'}</code> fill in; <code>[[Anesthetic: Lidocaine|Articaine]]</code> asks the writer to pick.</div>
-        </div>
-        <button className="primary" onClick={() => setEditing({ name: '', codes: '', body: '', active: 1 })}>+ Template</button>
+      <div style={{ padding: '14px 16px' }}>
+        <h2 style={{ margin: 0 }}>Clinical note templates</h2>
+        <div className="muted" style={{ fontSize: 13 }}>Offered when the listed procedures are completed. <code>{'{patient}'}</code> <code>{'{procedures}'}</code> <code>{'{teeth}'}</code> <code>{'{bp}'}</code> <code>{'{allergies}'}</code> fill in; <code>[[Anesthetic: Lidocaine|Articaine]]</code> asks the writer to pick.</div>
+      </div>
+      <div className="inline-editor">
+        <h3>New template</h3>
+        <TemplateForm key={newKey} tpl={{ name: '', codes: '', body: '', active: 1 }} onDone={(t) => { setNewKey((k) => k + 1); done(); toast(`Added “${t.name}”`); }} />
       </div>
       <ErrorBox error={err} />
       <table>
         <thead><tr><th>Name</th><th>Codes</th><th>Questions</th><th /></tr></thead>
         <tbody>
           {list?.map((t) => (
-            <tr key={t.id} style={{ opacity: t.active ? 1 : 0.5 }}>
-              <td>{t.name}</td><td>{t.codes || <span className="muted">any (pick manually)</span>}</td><td>{t.prompts.map((p) => p.label).join(', ') || '—'}</td>
-              <td className="row-actions">
-                <button className="small" onClick={() => setEditing(t)}>Edit</button>
-                <button className="small danger" onClick={async () => { if (!window.confirm(`Delete “${t.name}”?`)) return; try { await api.del(`/note-templates/${t.id}`); done(); } catch (e) { setErr(e); } }}>Delete</button>
-              </td>
-            </tr>
+            <Fragment key={t.id}>
+              <tr style={{ opacity: t.active ? 1 : 0.5 }}>
+                <td>{t.name}</td><td>{t.codes || <span className="muted">any (pick manually)</span>}</td><td>{t.prompts.map((p) => p.label).join(', ') || '—'}</td>
+                <td className="row-actions">
+                  <button className="small" aria-expanded={editing === t.id} onClick={() => setEditing(editing === t.id ? null : t.id)}>{editing === t.id ? 'Close' : 'Edit'}</button>
+                  <button className="small danger" onClick={() => remove(t)}>Delete</button>
+                </td>
+              </tr>
+              {editing === t.id && (
+                <tr className="inline-editor-row">
+                  <td colSpan={4} onKeyDown={(e) => { if (e.key === 'Escape') setEditing(null); }}><TemplateForm tpl={t} onDone={() => { done(); toast(`Saved “${t.name}”`); }} onCancel={() => setEditing(null)} /></td>
+                </tr>
+              )}
+            </Fragment>
           ))}
         </tbody>
       </table>
-      {editing && (
-        <Modal title={editing.id ? 'Edit template' : 'New template'} wide onClose={() => setEditing(null)}>
-          <TemplateForm tpl={editing} onDone={done} />
-        </Modal>
-      )}
     </div>
   );
 }
 
-function TemplateForm({ tpl, onDone }) {
+// A new template starts in the template text itself; its name can be left blank — it is taken from the first
+// words (blanks and fill-ins left out). Ctrl/⌘+Enter or Save; the codes it's offered for are optional.
+const nameFromBody = (body) => String(body || '').split('\n')[0].replace(/\[\[[^\]]*\]\]|\{[^}]*\}|_{2,}|#/g, ' ').replace(/[.,;:]+/g, ' ').replace(/\s+/g, ' ').trim().split(' ').slice(0, 5).join(' ').slice(0, 60);
+function TemplateForm({ tpl, onDone, onCancel }) {
   const [form, setForm] = useState({ name: tpl.name, codes: tpl.codes || '', body: tpl.body, active: !!tpl.active });
   const { submit, busy, error } = useSubmit(async () => {
-    if (tpl.id) await api.put(`/note-templates/${tpl.id}`, form);
-    else await api.post('/note-templates', form);
-    onDone();
+    const body = { ...form, name: form.name.trim() || nameFromBody(form.body) };
+    if (!body.name) throw new Error('Please type the template');
+    onDone(tpl.id ? await api.put(`/note-templates/${tpl.id}`, body) : await api.post('/note-templates', body));
   });
+  const nameBox = <label key="name">Name<input required={!!tpl.id} autoFocus={!!tpl.id} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder={tpl.id ? '' : nameFromBody(form.body) || 'Blank = the first words of the template'} /></label>;
   return (
-    <form onSubmit={(e) => { e.preventDefault(); submit(); }}>
+    <form onSubmit={(e) => { e.preventDefault(); submit(); }} onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); submit(); } }}>
       <ErrorBox error={error} />
       <div className="form-grid">
-        <label>Name<input required autoFocus={!tpl.id} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
+        {tpl.id && nameBox}
+        <label className="full">Template<textarea required autoFocus={!tpl.id} data-autofocus={tpl.id ? undefined : ''} rows={tpl.id ? 10 : 3} value={form.body} onChange={(e) => setForm({ ...form, body: e.target.value })} placeholder="Crown #__ seated with __ cement. Occlusion checked." /></label>
+        {!tpl.id && nameBox}
         <label>For codes (prefixes OK, e.g. D23 D27)<input value={form.codes} onChange={(e) => setForm({ ...form, codes: e.target.value })} /></label>
-        <label className="full">Template<textarea required rows={10} value={form.body} onChange={(e) => setForm({ ...form, body: e.target.value })} /></label>
         <label className="checkbox"><input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} /> Active</label>
       </div>
-      <div className="form-actions"><button className="primary" disabled={busy}>Save</button></div>
+      <div className="form-actions">{onCancel && <button type="button" onClick={onCancel}>Cancel</button>}<button className="primary" disabled={busy} title={`${isMacKey}+Enter`}>Save</button></div>
     </form>
   );
 }
@@ -433,8 +473,9 @@ function PasswordCard() {
       <ErrorBox error={signOutOthers.error} />
       {ok && <div className="badge ok" style={{ marginBottom: 10 }}>{ok}</div>}
       <form onSubmit={(e) => { e.preventDefault(); setOk(null); submit(); }} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <label>Current password<input type="password" required value={form.current_password} onChange={(e) => setForm({ ...form, current_password: e.target.value })} /></label>
-        <label>New password (min 10 characters)<input type="password" required minLength={10} value={form.new_password} onChange={(e) => setForm({ ...form, new_password: e.target.value })} /></label>
+        {/* The cursor starts here: people open My account to change the password more than anything else. */}
+        <label>Current password<input type="password" autoFocus data-autofocus="" autoComplete="current-password" required value={form.current_password} onChange={(e) => setForm({ ...form, current_password: e.target.value })} /></label>
+        <label>New password (min 10 characters)<input type="password" autoComplete="new-password" required minLength={10} value={form.new_password} onChange={(e) => setForm({ ...form, new_password: e.target.value })} /></label>
         <div className="inline" style={{ justifyContent: 'space-between' }}>
           <button className="primary" disabled={busy}>Update password</button>
           <button type="button" disabled={signOutOthers.busy} onClick={() => { setOk(null); signOutOthers.submit(); }} title="Lost a phone or signed in on a shared computer?">Sign out other devices</button>
@@ -580,42 +621,68 @@ function Users() {
   const { data: users, reload } = useApi('/users');
   const { data: roles, reload: reloadRoles } = useApi('/roles');
   const { data: perms } = useApi('/permissions');
-  const [modal, setModal] = useState(null);
+  const [editing, setEditing] = useState(null);
+  const [inviteKey, setInviteKey] = useState(0);
   const [roleEdit, setRoleEdit] = useState(null);
+  const [err, setErr] = useState(null);
   const roleName = (u) => roles?.find((r) => r.id === u.custom_role_id)?.name || label(u.role);
   const overrides = (u) => {
     const add = JSON.parse(u.permissions_add || '[]');
     const rem = JSON.parse(u.permissions_remove || '[]');
     return add.length || rem.length ? ` (${[...add.map((p) => `+${perms?.catalog[p] || p}`), ...rem.map((p) => `−${perms?.catalog[p] || p}`)].join(', ')})` : '';
   };
+  // The role changes right here (audited; they sign in again), with Undo to put the old one back.
+  const setRole = async (u, role) => {
+    setErr(null);
+    const was = u.role;
+    try {
+      await api.put(`/users/${u.id}`, { role });
+      reload();
+      toast(`${u.name} is now ${label(role)} — they sign in again`, {
+        undo: async () => {
+          try { await api.put(`/users/${u.id}`, { role: was }); reload(); toast(`${u.name} is back to ${label(was)}`); } catch (e) { toast(`Couldn’t undo: ${e.message}`, { tone: 'error' }); }
+        },
+      });
+    } catch (e) { setErr(e); }
+  };
   return (
     <>
     <div className="card" style={{ padding: 0 }}>
       <div className="page-header" style={{ padding: '14px 16px', marginBottom: 0 }}>
         <h2 style={{ margin: 0 }}>Users</h2>
-        <button className="primary" onClick={() => setModal({})}>+ Invite user</button>
       </div>
+      <InviteLine key={inviteKey} onDone={() => { setInviteKey((k) => k + 1); reload(); }} />
+      <ErrorBox error={err} />
       <table>
         <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>2FA</th><th>Last login</th><th /></tr></thead>
         <tbody>
           {users?.map((u) => (
-            <tr key={u.id}>
-              <td>{u.name}{u.id === me.id && <span className="muted"> (you)</span>}</td>
-              <td>{u.email}</td>
-              <td>{roleName(u)}<span className="muted" style={{ fontSize: 12 }}>{overrides(u)}</span></td>
-              <td><span className={`badge ${u.active ? 'ok' : 'danger'}`}>{u.active ? 'Active' : 'Disabled'}</span></td>
-              <td>{u.mfa_enabled ? <span className="badge ok">On</span> : <span className="muted">Off</span>}</td>
-              <td>{u.last_login_at ? fmtDateTime(u.last_login_at) : 'Never'}</td>
-              <td><button className="small" onClick={() => setModal({ user: u })}>Edit</button></td>
-            </tr>
+            <Fragment key={u.id}>
+              <tr>
+                <td>{u.name}{u.id === me.id && <span className="muted"> (you)</span>}</td>
+                <td>{u.email}</td>
+                <td>
+                  {u.id === me.id || u.custom_role_id
+                    ? roleName(u)
+                    : <select className="compact" aria-label={`Role for ${u.name}`} value={u.role} onChange={(e) => setRole(u, e.target.value)}>{ROLES.map((r) => <option key={r} value={r}>{label(r)}</option>)}</select>}
+                  <span className="muted" style={{ fontSize: 12 }}>{overrides(u)}</span>
+                </td>
+                <td><span className={`badge ${u.active ? 'ok' : 'danger'}`}>{u.active ? 'Active' : 'Disabled'}</span></td>
+                <td>{u.mfa_enabled ? <span className="badge ok">On</span> : <span className="muted">Off</span>}</td>
+                <td>{u.last_login_at ? fmtDateTime(u.last_login_at) : 'Never'}</td>
+                <td><button className="small" aria-expanded={editing === u.id} onClick={() => setEditing(editing === u.id ? null : u.id)}>{editing === u.id ? 'Close' : 'Edit'}</button></td>
+              </tr>
+              {editing === u.id && (
+                <tr className="inline-editor-row">
+                  <td colSpan={7} onKeyDown={(e) => { if (e.key === 'Escape') setEditing(null); }}>
+                    <UserForm user={u} roles={roles || []} perms={perms} onDone={() => { setEditing(null); reload(); toast(`Saved ${u.name}`); }} onCancel={() => setEditing(null)} />
+                  </td>
+                </tr>
+              )}
+            </Fragment>
           ))}
         </tbody>
       </table>
-      {modal && (
-        <Modal title={modal.user ? `Edit ${modal.user.name}` : 'Invite someone to the team'} onClose={() => { setModal(null); if (!modal.user) reload(); }}>
-          <UserForm user={modal.user} roles={roles || []} perms={perms} onDone={() => { setModal(null); reload(); }} />
-        </Modal>
-      )}
     </div>
     <div className="card" style={{ padding: 0 }}>
       <div className="page-header" style={{ padding: '14px 16px', marginBottom: 0 }}>
@@ -625,6 +692,7 @@ function Users() {
         </div>
         <button onClick={() => setRoleEdit({ name: '', permissions: [] })}>+ Role</button>
       </div>
+      {roleEdit && perms && <RoleForm role={roleEdit} catalog={perms.catalog} onDone={() => { setRoleEdit(null); reloadRoles(); reload(); }} onClose={() => setRoleEdit(null)} />}
       {perms && (
         <div style={{ overflowX: 'auto' }}>
           <table>
@@ -640,7 +708,6 @@ function Users() {
           </table>
         </div>
       )}
-      {roleEdit && <RoleForm role={roleEdit} catalog={perms.catalog} onDone={() => { setRoleEdit(null); reloadRoles(); reload(); }} onClose={() => setRoleEdit(null)} />}
     </div>
     </>
   );
@@ -651,9 +718,10 @@ function RoleForm({ role, catalog, onDone, onClose }) {
   const save = useSubmit(async () => { if (role.id) await api.put(`/roles/${role.id}`, r); else await api.post('/roles', r); onDone(); });
   const del = useSubmit(async () => { await api.del(`/roles/${role.id}`); onDone(); });
   return (
-    <Modal title={role.id ? `Edit ${role.name}` : 'New role'} onClose={onClose}>
+    <div className="inline-editor" onKeyDown={(e) => { if (e.key === 'Escape') onClose(); }}>
+      <h3>{role.id ? `Edit ${role.name}` : 'New role'}</h3>
       <ErrorBox error={save.error || del.error} />
-      <label>Name<input value={r.name} onChange={(e) => setR({ ...r, name: e.target.value })} /></label>
+      <label>Name<input autoFocus value={r.name} onChange={(e) => setR({ ...r, name: e.target.value })} /></label>
       <div style={{ marginTop: 10 }}>
         {Object.entries(catalog).map(([k, l]) => (
           <label key={k} className="checkbox" style={{ margin: '4px 0' }}>
@@ -667,11 +735,42 @@ function RoleForm({ role, catalog, onDone, onClose }) {
         <button type="button" onClick={onClose}>Cancel</button>
         <button className="primary" disabled={save.busy || !r.name} onClick={save.submit}>Save</button>
       </div>
-    </Modal>
+    </div>
   );
 }
 
-function UserForm({ user, roles = [], perms, onDone }) {
+// Invite someone: name, email and role on one line (front desk to start with); they get an email with a link to
+// choose their own password. When email isn't set up, the link to give them shows right here.
+function InviteLine({ onDone }) {
+  const [form, setForm] = useState({ name: '', email: '', role: 'front_desk' });
+  const [invited, setInvited] = useState(null);
+  const { submit, busy, error } = useSubmit(async () => {
+    const made = await api.post('/users', { ...form, invite: true });
+    if (made.invite_emailed) { toast(`Invitation emailed to ${made.email} — the link to choose a password works for ${made.invite_days} days`); onDone(); } else setInvited(made);
+  });
+  if (invited) {
+    return (
+      <div className="invite-sent quick-add">
+        <p style={{ margin: 0, flexBasis: '100%' }}><strong>{invited.name}</strong> can sign in once they choose a password. Email isn’t set up here, so give them this link (it works once, for {invited.invite_days} days):</p>
+        <input readOnly aria-label="Invitation link" value={invited.invite_link} onFocus={(e) => e.target.select()} style={{ flex: 1 }} />
+        <button type="button" onClick={() => navigator.clipboard?.writeText(invited.invite_link).then(() => toast('Link copied'))}>Copy</button>
+        <button className="primary" autoFocus onClick={onDone}>Done</button>
+      </div>
+    );
+  }
+  return (
+    <form className="quick-add" aria-label="Invite someone to the team" onSubmit={(e) => { e.preventDefault(); submit(); }}>
+      <span className="quick-add-title">Invite someone to the team <span className="muted" style={{ fontWeight: 400 }}>— they get an email with a link to choose their own password</span></span>
+      <label className="grow">Name<input required autoFocus data-autofocus="" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
+      <label className="grow">Email<input type="email" required value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></label>
+      <label>Role<select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>{ROLES.map((r) => <option key={r} value={r}>{label(r)}</option>)}</select></label>
+      <button className="primary" disabled={busy}>Send invitation</button>
+      {error && <div className="quick-add-error"><ErrorBox error={error} /></div>}
+    </form>
+  );
+}
+
+function UserForm({ user, roles = [], perms, onDone, onCancel }) {
   const [form, setForm] = useState({
     name: user?.name || '', email: user?.email || '', role: user?.role || 'front_desk', active: user ? !!user.active : true, password: '',
     custom_role_id: user?.custom_role_id || '', permissions_add: JSON.parse(user?.permissions_add || '[]'), permissions_remove: JSON.parse(user?.permissions_remove || '[]'),
@@ -757,20 +856,35 @@ function UserForm({ user, roles = [], perms, onDone }) {
           </table>
         </details>
       )}
-      <div className="form-actions"><button className="primary" disabled={busy}>{user ? 'Save' : 'Send invitation'}</button></div>
+      <div className="form-actions">{onCancel && <button type="button" onClick={onCancel}>Cancel</button>}<button className="primary" disabled={busy}>{user ? 'Save' : 'Send invitation'}</button></div>
     </form>
   );
 }
 
+// A settings list (providers, chairs, codes, carriers…): a one-line "add" row at the top with the cursor in it
+// (Enter adds, with an undo toast), and every row edits in place below itself — no dialogs (CLAUDE.md principle 4).
 function ResourceTable({ spec, canWrite }) {
   const { data: rows, reload } = useApi(spec.path);
   const locations = useLookup(spec.columns.includes('location_id') ? '/locations' : null);
+  const { data: common } = useApi(canWrite && spec.common ? spec.common : null);
   const [editing, setEditing] = useState(null);
-  const done = () => {
-    setEditing(null);
+  const [full, setFull] = useState(null); // the whole new-record form, started from what was typed on the add line
+  const [addKey, setAddKey] = useState(0);
+  const refresh = () => {
     invalidateLookup(`${spec.path}?active=true`);
     invalidateLookup(spec.path);
     reload();
+  };
+  const created = (row) => {
+    setFull(null);
+    setAddKey((k) => k + 1);
+    refresh();
+    const name = row?.name || row?.code || spec.singular;
+    toast(`Added “${name}”`, {
+      undo: row?.id ? async () => {
+        try { await api.put(`${spec.path}/${row.id}`, { active: false }); refresh(); toast(`“${name}” set inactive`); } catch (e) { toast(`Couldn’t undo: ${e.message}`, { tone: 'error' }); }
+      } : null,
+    });
   };
   const cell = (row, col) => {
     if (col === 'fee') return money(row.fee);
@@ -779,38 +893,115 @@ function ResourceTable({ spec, canWrite }) {
     if (col === 'duration') return `${row.duration} min`;
     if (col === 'procedure_codes') return (row.procedure_codes ? JSON.parse(row.procedure_codes) : []).join(', ') || '—';
     if (col === 'online_bookable') return row.online_bookable ? 'Online' : '—';
+    if (col === 'is_hygiene') return row.is_hygiene ? 'Hygiene' : '—';
     if (col === 'office_hours') return row.office_hours ? summarizeHours(JSON.parse(row.office_hours)) : 'Practice hours';
     if (col === 'location_id') return locations.find((l) => l.id === row.location_id)?.name || '—';
     if (col === 'working_hours') return row.working_hours ? (() => { const h = JSON.parse(row.working_hours); return `${summarizeHours(h)}${h.alt ? ' · alternating weeks' : ''}`; })() : 'Office hours';
     return row[col] ?? '—';
   };
+  const cols = spec.columns.length + 2;
   return (
     <div className="card" style={{ padding: 0 }}>
       <div className="page-header" style={{ padding: '14px 16px', marginBottom: 0 }}>
         <h2 style={{ margin: 0 }}>{spec.title}</h2>
-        {canWrite && <button className="primary" onClick={() => setEditing({})}>+ Add</button>}
       </div>
       {spec.intro && <p className="muted" style={{ fontSize: 13, margin: '0 16px 12px' }}>{spec.intro}</p>}
+      {canWrite && !full && <QuickAdd key={addKey} spec={spec} ctx={{ common: common || [] }} onDone={created} onMore={(values) => setFull(values)} />}
+      {canWrite && full && (
+        <div className="inline-editor" onKeyDown={(e) => { if (e.key === 'Escape') setFull(null); }}>
+          <h3>Add {spec.singular}</h3>
+          <ResourceForm spec={spec} row={{}} initial={full} ctx={{ common: common || [] }} onDone={created} onCancel={() => setFull(null)} />
+        </div>
+      )}
       <div className="table-wrap">
         <table>
           <thead><tr>{spec.columns.map((c) => <th key={c} className={c === 'fee' ? 'num' : ''}>{label(c)}</th>)}<th>Status</th><th /></tr></thead>
           <tbody>
             {rows?.map((r) => (
-              <tr key={r.id} style={{ opacity: r.active ? 1 : 0.5 }}>
-                {spec.columns.map((c) => <td key={c} className={c === 'fee' ? 'num' : ''}>{cell(r, c)}</td>)}
-                <td>{r.active ? 'Active' : 'Inactive'}</td>
-                <td>{canWrite && <button className="small" onClick={() => setEditing(r)}>Edit</button>}</td>
-              </tr>
+              <Fragment key={r.id}>
+                <tr style={{ opacity: r.active ? 1 : 0.5 }}>
+                  {spec.columns.map((c) => <td key={c} className={c === 'fee' ? 'num' : ''}>{cell(r, c)}</td>)}
+                  <td>{r.active ? 'Active' : 'Inactive'}</td>
+                  <td>{canWrite && <button className="small" aria-expanded={editing?.id === r.id} onClick={() => setEditing(editing?.id === r.id ? null : r)}>{editing?.id === r.id ? 'Close' : 'Edit'}</button>}</td>
+                </tr>
+                {editing?.id === r.id && (
+                  <tr className="inline-editor-row">
+                    <td colSpan={cols} onKeyDown={(e) => { if (e.key === 'Escape') setEditing(null); }}>
+                      <ResourceForm spec={spec} row={editing} onDone={() => { setEditing(null); refresh(); toast(`Saved “${r.name || r.code}”`); }} onCancel={() => setEditing(null)} />
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
             ))}
           </tbody>
         </table>
       </div>
-      {editing && (
-        <Modal title={`${editing.id ? 'Edit' : 'Add'} ${spec.singular || spec.title.toLowerCase()}`} onClose={() => setEditing(null)}>
-          <ResourceForm spec={spec} row={editing} onDone={done} />
-        </Modal>
-      )}
     </div>
+  );
+}
+
+// The one-line add: the few boxes a new record really needs (the rest start on sensible defaults and can be
+// changed with "More fields…" or Edit later). The cursor starts in the first box; Enter adds.
+function QuickAdd({ spec, ctx, onDone, onMore }) {
+  const fields = spec.fields.filter(([name]) => spec.quick.includes(name));
+  const [form0, setForm] = useState(() => Object.fromEntries(fields.map(([name, , type]) => [name, type === 'checkbox' ? false : spec.defaults?.[name] ?? ''])));
+  const [touched] = useState(() => new Set());
+  const required = new Set(spec.required || []);
+  const { submit, busy, error } = useSubmit(async () => {
+    let form = form0;
+    const first = fields[0][0];
+    const line = spec.parseLine && !String(form[fields[1]?.[0]] ?? '').trim() ? spec.parseLine(form[first]) : null;
+    if (line) {
+      form = { ...form, ...line };
+      if (spec.guess) for (const [k, g] of Object.entries(spec.guess(form, ctx))) if (!touched.has(k) && k in form && g) form[k] = g;
+      setForm(form);
+    }
+    const missing = spec.fields.filter(([name, , type]) => required.has(name) && type !== 'checkbox' && String(form[name] ?? '').trim() === '');
+    if (missing.length) throw new Error(`Please fill in ${missing.map(([, text]) => `“${text.replace(/\s*\(.*\)$/, '')}”`).join(', ')}`);
+    const body = { active: true };
+    for (const [name, , type] of fields) {
+      const v = form[name];
+      if (v === '' || v == null) continue;
+      body[name] = type === 'money' ? toCents(v) : type === 'number' ? Number(v) : v;
+    }
+    onDone(await api.post(spec.path, body));
+  });
+  const form = form0;
+  // What the guess needs (e.g. the usual payer IDs) may arrive after the person has typed: guess again then.
+  const ctxKey = ctx?.common?.length || 0;
+  useEffect(() => {
+    if (!spec.guess || !ctxKey) return;
+    setForm((f) => {
+      const next = { ...f };
+      for (const [k, g] of Object.entries(spec.guess(f, ctx))) if (!touched.has(k) && k in next && g && !next[k]) next[k] = g;
+      return next;
+    });
+  }, [ctxKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const set = (name, v) => {
+    touched.add(name);
+    const next = { ...form, [name]: v };
+    if (spec.guess) for (const [k, g] of Object.entries(spec.guess(next, ctx))) if (!touched.has(k) && k in next) next[k] = g || '';
+    setForm(next);
+  };
+  return (
+    <form className="quick-add" onSubmit={(e) => { e.preventDefault(); submit(); }} aria-label={`Add ${spec.singular}`}>
+      <span className="quick-add-title">Add {spec.singular}</span>
+      {fields.map(([name, text0, type, options], i) => {
+        const text = text0.replace(/\s*\(.*\)$/, '');
+        const star = required.has(name) ? <span className="req" aria-hidden title="Needed"> *</span> : null;
+        if (type === 'checkbox') return <label key={name} className="checkbox"><input type="checkbox" checked={!!form[name]} onChange={(e) => set(name, e.target.checked)} /> {text}</label>;
+        if (type === 'select') return <label key={name}><span>{text}{star}</span><select value={form[name]} onChange={(e) => set(name, e.target.value)}><option value="">—</option>{options.map((o) => <option key={o} value={o}>{label(o)}</option>)}</select></label>;
+        return (
+          <label key={name} className={i === 0 ? 'grow' : ''}><span>{text}{star}</span>
+            <input autoFocus={i === 0} data-autofocus={i === 0 ? '' : undefined} type={type === 'money' || type === 'number' ? 'number' : type === 'email' ? 'email' : 'text'} step={type === 'money' ? '0.01' : undefined}
+              value={form[name]} onChange={(e) => set(name, e.target.value)} />
+          </label>
+        );
+      })}
+      <button className="primary" disabled={busy}>Add</button>
+      <button type="button" className="link" onClick={() => onMore(form)}>More fields…</button>
+      {error && <div className="quick-add-error"><ErrorBox error={error} /></div>}
+    </form>
   );
 }
 
@@ -823,7 +1014,7 @@ function PatternBar({ pattern }) {
   );
 }
 
-function ResourceForm({ spec, row, onDone }) {
+function ResourceForm({ spec, row, onDone, onCancel, initial = null, ctx = {} }) {
   const providerList = useLookup('/providers?active=true');
   const locationList = useLookup(spec.fields.some((f) => f[2] === 'location') ? '/locations' : null);
   const officeSchedules = useLookup(spec.fields.some((f) => f[2] === 'feeschedule') ? '/fee-schedules' : null).filter((f) => f.kind === 'office');
@@ -837,7 +1028,7 @@ function ResourceForm({ spec, row, onDone }) {
     if (type === 'hours') return [name, row[name] ? JSON.parse(row[name]) : null];
     if (type === 'durations') return [name, row[name] ? JSON.parse(row[name]) : {}];
     return [name, row[name] ?? ''];
-  })));
+  }).map(([name, v]) => [name, initial && initial[name] !== undefined && initial[name] !== '' ? initial[name] : v])));
   const [touched] = useState(() => new Set());
   const required = new Set(spec.required || []);
   const { submit, busy, error } = useSubmit(async () => {
@@ -848,9 +1039,7 @@ function ResourceForm({ spec, row, onDone }) {
         : type === 'codes' ? String(form[name] || '').split(/[\s,]+/).filter(Boolean)
           : type === 'number' ? Number(form[name] || 0)
             : form[name]]));
-    if (row.id) await api.put(`${spec.path}/${row.id}`, body);
-    else await api.post(spec.path, body);
-    onDone();
+    onDone(row.id ? await api.put(`${spec.path}/${row.id}`, body) : await api.post(spec.path, body));
   });
   return (
     <form onSubmit={(e) => { e.preventDefault(); submit(); }}>
@@ -862,7 +1051,7 @@ function ResourceForm({ spec, row, onDone }) {
             touched.add(name);
             const next = { ...form, [name]: v };
             // New records only: fill what the person hasn't set from what they just typed.
-            if (!row.id && spec.guess) for (const [k, g] of Object.entries(spec.guess(next))) if (!touched.has(k) && g) next[k] = g;
+            if (!row.id && spec.guess) for (const [k, g] of Object.entries(spec.guess(next, ctx))) if (!touched.has(k) && g) next[k] = g;
             setForm(next);
           };
           if (type === 'checkbox') return <label key={name} className="checkbox"><input type="checkbox" checked={form[name]} onChange={(e) => set(e.target.checked)} /> {text}</label>;
@@ -900,10 +1089,10 @@ function ResourceForm({ spec, row, onDone }) {
           if (type === 'location') return locationList.length ? <label key={name}>{text}<select value={form[name] || ''} onChange={(e) => set(e.target.value ? Number(e.target.value) : null)}><option value="">—</option>{locationList.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</select></label> : null;
           if (type === 'provider') return <label key={name}>{text}<select value={form[name] || ''} onChange={(e) => set(e.target.value ? Number(e.target.value) : null)}><option value="">—</option>{providerList.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>;
           if (type === 'select') return <label key={name}>{text}<select required={required.has(name)} value={form[name]} onChange={(e) => set(e.target.value)}><option value="">—</option>{options.map((o) => <option key={o} value={o}>{label(o)}</option>)}</select></label>;
-          return <label key={name} className={type === 'codes' ? 'full' : ''}>{text}<input autoFocus={!row.id && name === spec.fields[0][0]} required={required.has(name)} type={type === 'money' || type === 'number' ? 'number' : type === 'codes' ? 'text' : type} step={type === 'money' ? '0.01' : undefined} value={form[name]} onChange={(e) => set(e.target.value)} /></label>;
+          return <label key={name} className={type === 'codes' ? 'full' : ''}>{text}<input autoFocus={name === spec.fields[0][0]} required={required.has(name)} type={type === 'money' || type === 'number' ? 'number' : type === 'codes' ? 'text' : type} step={type === 'money' ? '0.01' : undefined} value={form[name]} onChange={(e) => set(e.target.value)} /></label>;
         })}
       </div>
-      <div className="form-actions"><button className="primary" disabled={busy}>Save</button></div>
+      <div className="form-actions">{onCancel && <button type="button" onClick={onCancel}>Cancel</button>}<button className="primary" disabled={busy}>Save</button></div>
     </form>
   );
 }
@@ -919,17 +1108,24 @@ function AuditLog() {
   const { data: rows } = useApi(`/audit-log?${qs({ limit: 200 * pages })}`);
   const [err, setErr] = useState(null);
   const set = (k) => (e) => setFilters({ ...filters, [k]: e.target.value });
+  // A patient # typed is looked up as it's typed (a moment after the last digit); the other filters wait for Search.
+  useEffect(() => {
+    if (filters.patient_id === applied.patient_id || !/^\d*$/.test(filters.patient_id)) return undefined;
+    const t = setTimeout(() => { setPages(1); setApplied((a) => ({ ...a, patient_id: filters.patient_id })); }, 350);
+    return () => clearTimeout(t);
+  }, [filters.patient_id]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <div className="card" style={{ padding: 0 }}>
       <div style={{ padding: '14px 16px' }}>
         <h2 style={{ margin: 0 }}>Audit log</h2>
         <div className="muted">Every access to and change of patient information is recorded here (HIPAA §164.312(b)). Search it for access reviews; export for your compliance file.</div>
         <form className="inline" style={{ flexWrap: 'wrap', marginTop: 10, alignItems: 'flex-end' }} onSubmit={(e) => { e.preventDefault(); setPages(1); setApplied(filters); }}>
+          {/* "Who changed this patient's chart?" is the usual question: the cursor starts in Patient #. */}
+          <label>Patient #<input autoFocus data-autofocus="" value={filters.patient_id} onChange={set('patient_id')} inputMode="numeric" style={{ width: 90 }} /></label>
           <label>From<input type="date" value={filters.from} onChange={set('from')} /></label>
           <label>To<input type="date" value={filters.to} onChange={set('to')} /></label>
           <label>User<select value={filters.user_id} onChange={set('user_id')}><option value="">Anyone</option>{users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select></label>
           <label>Action starts with<input value={filters.action} onChange={set('action')} placeholder="e.g. patient.view, ledger." /></label>
-          <label>Patient #<input value={filters.patient_id} onChange={set('patient_id')} inputMode="numeric" style={{ width: 90 }} /></label>
           <label>Done by<select value={filters.source} onChange={set('source')}><option value="">Anyone or anything</option>{Object.entries(AUDIT_SOURCES).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></label>
           {offices.length > 1 && <label>Office<select value={filters.location_id} onChange={set('location_id')}><option value="">All</option>{offices.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</select></label>}
           <label className="checkbox"><input type="checkbox" checked={filters.changes === '1'} onChange={(e) => setFilters({ ...filters, changes: e.target.checked ? '1' : '' })} /> Only changes</label>
@@ -1025,7 +1221,7 @@ function OfficeHours({ value, onChange, note }) {
 
 async function exportData() {
   const res = await fetch('/api/export', { headers: { Authorization: `Bearer ${getToken()}` } });
-  if (!res.ok) return alert('Export failed');
+  if (!res.ok) return toast('The export didn’t work — try again, or see Settings → Connection activity', { tone: 'error' });
   const url = URL.createObjectURL(await res.blob());
   const a = document.createElement('a');
   a.href = url;
@@ -1387,9 +1583,20 @@ function Messaging() {
         </div>
       </div>
       <ErrorBox error={error} />
-      <div className="form-actions">{saved && <span className="badge ok">Saved</span>}<button className="primary" disabled={busy} onClick={submit}>Save</button></div>
+      {/* A change anywhere on this long page brings the Save bar up at the bottom of the screen (Ctrl/⌘+S). */}
+      <div className={`form-actions${form && !saved ? ' sticky-save' : ''}`}>
+        {form && !saved && <span className="muted">Unsaved changes</span>}
+        {saved && <span className="badge ok">Saved</span>}
+        <button className="primary" disabled={busy} onClick={submit} title={`${isMacKey}+S`}>Save</button>
+      </div>
+      <SaveKey enabled={!!form && !saved && !busy} onSave={submit} />
     </>
   );
+}
+
+function SaveKey({ enabled, onSave }) {
+  useShortcut('mod+s', () => { if (enabled) onSave(); }, { label: 'Save the message settings', section: 'Settings', inInputs: true, enabled });
+  return null;
 }
 
 // "Tue, Thu 7:00–15:00" style summary of weekly hours.
@@ -1527,7 +1734,7 @@ function ImagingBridges() {
                   <td>{a.last_seen_at ? fmtUtcDateTime(a.last_seen_at, practice?.timezone) : 'Never'}</td>
                   <td className="inline" style={{ gap: 6, justifyContent: 'flex-end' }}>
                     {a.sensor && <button className="small" disabled={!a.online} onClick={() => setTesting(a)} title={a.online ? 'Take one test exposure' : 'The bridge is offline'}>Test sensor</button>}
-                    {isAdmin && <button className="small danger" onClick={() => confirm(`Remove ${a.name}? Its bridge will stop working.`) && api.del(`/imaging/agents/${a.id}`).then(reload)}>Remove</button>}
+                    {isAdmin && <ConfirmButton ask={`Remove ${a.name}? Its bridge will stop working.`} yes="Remove" onConfirm={() => api.del(`/imaging/agents/${a.id}`).then(reload)}>Remove</ConfirmButton>}
                   </td>
                 </tr>
               ))}

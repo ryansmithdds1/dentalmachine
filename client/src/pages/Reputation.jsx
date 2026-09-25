@@ -5,7 +5,7 @@ import { api } from '../api.js';
 import { useApi } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
 import { fmtDate } from '../format.js';
-import { ErrorBox } from '../components/ui.jsx';
+import { ErrorBox, ConfirmButton } from '../components/ui.jsx';
 
 // Online reviews: the office's Google listing, answered from here — AI drafts replies that never confirm
 // someone is a patient (the HIPAA trap), and staff edit and post them.
@@ -55,7 +55,7 @@ export default function Reputation() {
           </div>
           {shown.map((r) => <Review key={r.id} review={r} canWrite={can('patients:write')} onChange={reload} />)}
           {!shown.length && <div className="card empty">Nothing here.</div>}
-          <div className="muted" style={{ fontSize: 12 }}>Connected to {data.connection.location_title}{data.connection.synced_at ? ` · checked ${fmtDate(data.connection.synced_at.slice(0, 10))}` : ''}.{user.role === 'admin' && <> <button className="link" onClick={() => window.confirm('Disconnect Google?') && run(() => api.del('/reputation/google'))}>Disconnect</button></>}</div>
+          <div className="muted" style={{ fontSize: 12 }}>Connected to {data.connection.location_title}{data.connection.synced_at ? ` · checked ${fmtDate(data.connection.synced_at.slice(0, 10))}` : ''}.{user.role === 'admin' && <> <ConfirmButton className="link" ask="Disconnect Google? New reviews stop coming in until it's connected again." yes="Disconnect" onConfirm={() => run(() => api.del('/reputation/google'))}>Disconnect</ConfirmButton></>}</div>
         </>
       )}
     </>

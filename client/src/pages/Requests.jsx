@@ -4,7 +4,7 @@ import { api } from '../api.js';
 import { useApi, useLookup } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
 import { fmtDateTime, fmtDate, label } from '../format.js';
-import { Badge, ErrorBox, Modal, useSubmit } from '../components/ui.jsx';
+import { Badge, ErrorBox, Modal, useSubmit, AskButton } from '../components/ui.jsx';
 import OnlineBookings from '../components/OnlineBookings.jsx';
 
 export default function Requests() {
@@ -19,16 +19,11 @@ export default function Requests() {
   const [err, setErr] = useState(null);
   const bookingUrl = practice?.slug ? `${window.location.origin}/book/${practice.slug}` : null;
 
-  const decline = async (b) => {
-    const reason = prompt('Optional note to the patient (e.g. "That day is fully booked."):', '');
-    if (reason === null) return;
+  // The note to the patient is typed beside Decline (optional); Enter declines.
+  const decline = async (b, reason) => {
     setErr(null);
-    try {
-      await api.post(`/booking-requests/${b.id}/decline`, { reason });
-      reload();
-    } catch (e) {
-      setErr(e);
-    }
+    await api.post(`/booking-requests/${b.id}/decline`, { reason });
+    reload();
   };
 
   return (
@@ -73,7 +68,7 @@ export default function Requests() {
                     {b.status === 'pending' && can('schedule:write') && (
                       <>
                         <button className="small primary" onClick={() => setAccepting(b)}>Accept…</button>{' '}
-                        <button className="small danger" onClick={() => decline(b)}>Decline</button>
+                        <AskButton className="small danger" danger label="Note to the patient (optional)" placeholder="That day is fully booked." submit="Decline" onSubmit={(reason) => decline(b, reason)}>Decline…</AskButton>
                       </>
                     )}
                   </td>

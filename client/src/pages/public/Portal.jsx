@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { money } from '../../format.js';
-import { ErrorBox } from '../../components/ui.jsx';
+import { ErrorBox, ConfirmButton } from '../../components/ui.jsx';
 import PublicLayout from './PublicLayout.jsx';
 import PortalAccount from './PortalAccount.jsx';
 import { fmtDateL, fmtTimeL, suggestLang, useLang, useT } from './i18n.js';
@@ -178,7 +178,7 @@ function Dashboard({ token, onSignOut }) {
               <div className="portal-actions">
                 {a.status === 'confirmed' ? <span className="badge ok nocap">{t('Confirmed')}</span> : a.status === 'scheduled' && <button className="small primary" onClick={() => act(() => call('POST', `/portal/appointments/${a.id}/confirm`, {}, token), 'Thanks — your visit is confirmed.')}>{t('Confirm')}</button>}
                 {a.can_cancel && <button className="small" onClick={() => setMoving(moving?.id === a.id ? null : a)}>{t('Move')}</button>}
-                {a.can_cancel && <button className="small" onClick={() => confirm(t('Cancel the {when} visit?', { when: when(lang, a.start_time) })) && act(() => call('POST', `/portal/appointments/${a.id}/cancel`, {}, token), "Cancelled. We'll reach out to find a new time.")}>{t('Cancel')}</button>}
+                {a.can_cancel && <ConfirmButton className="small" ask={t('Cancel the {when} visit?', { when: when(lang, a.start_time) })} yes={t('Yes, cancel it')} keep={t('Keep it')} onConfirm={() => act(() => call('POST', `/portal/appointments/${a.id}/cancel`, {}, token), "Cancelled. We'll reach out to find a new time.")}>{t('Cancel')}</ConfirmButton>}
               </div>
               {moving?.id === a.id && <Reschedule token={token} appt={a} onDone={() => { setMoving(null); act(async () => {}, 'Your visit was moved. We’ll send a new reminder.'); }} />}
             </div>
@@ -285,9 +285,8 @@ function Memberships({ token, household, onDone, onError }) {
   const load = useCallback(() => call('GET', '/portal/membership-plans', null, token).then(setData).catch(onError), [token, onError]);
   useEffect(() => { load(); }, [load]);
   if (!data?.plans.length) return null;
+  const joinAsk = (plan) => t('Join {plan} for {name} at {price}?', { plan: plan.name, name: household.find((h) => h.id === Number(who))?.first_name, price: `${money(plan.price)}/${plan.interval === 'year' ? t('year') : t('month')}` });
   const join = async (plan) => {
-    const name = household.find((h) => h.id === Number(who))?.first_name;
-    if (!confirm(t('Join {plan} for {name} at {price}?', { plan: plan.name, name, price: `${money(plan.price)}/${plan.interval === 'year' ? t('year') : t('month')}` }))) return;
     try {
       const r = await call('POST', '/portal/memberships', { plan_id: plan.id, patient_id: Number(who) }, token);
       onDone(r.requested ? 'Thanks — the office will call to set up your card and finish joining.' : 'Welcome to the plan! Your first payment was charged to your card on file.');
@@ -302,7 +301,7 @@ function Memberships({ token, household, onDone, onError }) {
       {data.plans.map((pl) => (
         <div key={pl.id} className="portal-appt">
           <div><strong>{pl.name}</strong> · {money(pl.price)}/{pl.interval === 'year' ? t('year') : t('month')}<div className="muted" style={{ fontSize: 12 }}>{pl.description || (pl.discount_pct ? t('{pct}% off other care', { pct: pl.discount_pct }) : '')}</div></div>
-          <button className="small primary" onClick={() => join(pl)}>{t('Join')}</button>
+          <ConfirmButton className="small primary" ask={joinAsk(pl)} yes={t('Join')} keep={t('Not now')} onConfirm={() => join(pl)}>{t('Join')}</ConfirmButton>
         </div>
       ))}
     </section>

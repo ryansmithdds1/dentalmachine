@@ -150,7 +150,7 @@ export function useSlashToSearch(ref) {
   useEffect(() => {
     const onKey = (e) => {
       if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey) return;
-      if (e.target.closest?.('input, textarea, select, [contenteditable]') || document.querySelector('.modal, .palette')) return;
+      if (e.target.closest?.('input, textarea, select, [contenteditable]') || document.querySelector('.modal, .palette, .side-panel')) return;
       if (!ref.current) return;
       e.preventDefault();
       e.stopImmediatePropagation();

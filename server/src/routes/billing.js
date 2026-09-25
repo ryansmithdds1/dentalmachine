@@ -12,6 +12,7 @@ import { payCodeFor, formatCode, guarantorIdOf } from '../billpay.js';
 import { receiptData, receiptPdf, sendReceipt } from '../receipts.js';
 import nextSlotRoutes from './nextslots.js';
 import { patientScope } from '../officeaccess.js';
+import { voidLinkedEntry } from '../retail.js';
 
 export const PAYMENT_METHODS = ['cash', 'check', 'credit_card', 'debit_card', 'ach', 'care_credit', 'financing', 'other'];
 
@@ -296,6 +297,9 @@ export default function billingRoutes({ db, payments = { enabled: false }, confi
     if (entry.amount > 0 && limit != null && entry.amount > limit && req.user.role !== 'admin') {
       throw new HttpError(403, `Voiding charges over $${(limit / 100).toFixed(2)} needs an administrator`, { approval_required: true });
     }
+    // A line from a product sale or a gift certificate voids the whole sale / certificate / redemption (retail.js).
+    const linked = await voidLinkedEntry(db, req, entry, req.body?.reason);
+    if (linked) return res.status(201).json({ ...linked, balance: await patientBalance(db, req.user.practice_id, entry.patient_id) });
     const id = await voidLedgerEntry(db, entry, { userId: req.user.id, reason: req.body?.reason });
     await audit(db, req, 'ledger.void', 'ledger_entries', entry.id, { reason: req.body?.reason, reversal_id: id, amount: entry.amount });
     res.status(201).json({ reversal_id: id, balance: await patientBalance(db, req.user.practice_id, entry.patient_id) });

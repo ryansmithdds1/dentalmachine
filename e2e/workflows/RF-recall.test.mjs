@@ -57,11 +57,11 @@ test('RF3: booking the hygiene visit takes the due bitewings and exam along (≤
   await page.waitForFunction((id) => sessionStorage.getItem('dm_active_patient') === String(id), pt.id);
   const r = await measure(page, async () => {
     await page.keyboard.press('Alt+b');
-    await page.waitForSelector('.modal .book-suggest strong');
-    await page.waitForSelector('.modal .rf-bundle input:checked');
-    await page.waitForFunction(() => document.querySelectorAll('.modal .rf-bundle input:checked').length >= 2);
-    await page.locator('.modal button.primary', { hasText: 'Book appointment' }).click();
-    await page.waitForSelector('.modal', { state: 'detached' });
+    await page.waitForSelector('.book-panel .book-suggest strong');
+    await page.waitForSelector('.book-panel .rf-bundle input:checked');
+    await page.waitForFunction(() => document.querySelectorAll('.book-panel .rf-bundle input:checked').length >= 2);
+    await page.locator('.book-panel button.primary', { hasText: 'Book appointment' }).click();
+    await page.waitForSelector('.book-panel', { state: 'detached' });
   });
   console.log(withinBudget('book a hygiene visit with due items bundled', r, { actions: 3, ms: 8000 }));
   let procs = [];

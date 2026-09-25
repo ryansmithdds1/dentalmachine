@@ -31,6 +31,7 @@ import { ClockButton } from './components/TimeClock.jsx';
 import MfaSetup from './components/MfaSetup.jsx';
 import { Sun, LogOut, Keyboard, Monitor, Moon } from 'lucide-react';
 import { getThemePref, setThemePref, watchTheme } from './theme.js';
+import { ConfirmButton } from './components/ui.jsx';
 
 // Pages load on demand so the first screen appears quickly.
 const Schedule = lazy(() => import('./pages/Schedule.jsx'));
@@ -109,6 +110,10 @@ const Referrals = lazy(() => import('./pages/Referrals.jsx'));
 const CheckinPage = lazy(() => import('./pages/public/CheckinPage.jsx'));
 const StatusPage = lazy(() => import('./pages/public/StatusPage.jsx'));
 const Help = lazy(() => import('./pages/Help.jsx'));
+// Batch 2B: compliance log, letters, gift certificates.
+const Compliance = lazy(() => import('./pages/Compliance.jsx'));
+const Letters = lazy(() => import('./pages/Letters.jsx'));
+const GiftCertificates = lazy(() => import('./pages/GiftCertificates.jsx'));
 
 // Patient-facing pages work without a staff login.
 export default function App() {
@@ -349,7 +354,10 @@ function UserMenu({ user, practice, logout }) {
           <LocationPicker user={user} />
           <ClockButton />
           <button className="menu-item" onClick={() => { setOpen(false); window.dispatchEvent(new Event('dm:shortcuts')); }}><Keyboard size={16} /> Keyboard shortcuts <kbd>?</kbd></button>
-          <button className="menu-item" onClick={() => (!pendingCount() || window.confirm(`${pendingCount()} change(s) made offline haven’t been sent yet. They stay locked on this computer and are sent the next time you sign in here. Sign out?`)) && logout()}><LogOut size={16} /> Sign out</button>
+          {/* Changes made offline that haven't gone yet: said on the spot, and Sign out asks once (on the menu). */}
+          {pendingCount()
+            ? <ConfirmButton className="menu-item" ask={`${pendingCount()} change(s) made offline haven’t been sent yet. They stay locked on this computer and are sent the next time you sign in here.`} yes="Sign out" keep="Stay signed in" onConfirm={logout}><LogOut size={16} /> Sign out</ConfirmButton>
+            : <button className="menu-item" onClick={logout}><LogOut size={16} /> Sign out</button>}
         </div>
       )}
     </div>
@@ -429,6 +437,9 @@ function Shell() {
             <Route path="/attention" element={<Attention />} />
             <Route path="/messages" element={<Inbox />} />
             <Route path="/office" element={<Office />} />
+            <Route path="/compliance" element={<Compliance />} />
+            <Route path="/letters" element={<Letters />} />
+            <Route path="/gift-certificates" element={<GiftCertificates />} />
             <Route path="/checklists/*" element={<Checklists />} />
             <Route path="/business" element={<Business />} />
             <Route path="/lab-checkin" element={<LabCheckin />} />

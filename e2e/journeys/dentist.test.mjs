@@ -56,8 +56,7 @@ test('build and present the treatment plan; the patient signs it here', async ()
   const plan = (await j.s.get(`/patients/${patient.id}/treatment-plans`)).find((p) => p.procedures.some((x) => x.code === 'D2740'));
   assert.ok(plan, 'the plan was made');
   await j.step('present and sign', async () => {
-    await page.locator(`.card[data-plan="${plan.id}"]`).locator('button:has-text("Present & e-sign")').click();
-    await page.locator('.modal button:has-text("Open here for")').click();
+    await page.locator(`.card[data-plan="${plan.id}"]`).locator('button:has-text("Present here for")').click();
     await page.waitForURL(/\/tp\//);
     await page.waitForSelector('h1:has-text("Your treatment plan")');
     await page.locator('input[autocomplete=name]').fill(`${patient.first_name} ${patient.last_name}`);

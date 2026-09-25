@@ -1,5 +1,6 @@
 // The rest: filling an opening from the ASAP list, a provider's day off, ortho adjustments, campaigns, the report
 // builder, insurance reconciliation, switching office.
+/* global document */
 import { newPatient, addDays, MOD } from '../lib/fixtures.mjs';
 
 const localNow = (tz) => {
@@ -67,28 +68,27 @@ export default {
 
   A101: { // ortho adjustment
     role: 'dentist',
+    // A patient in treatment: the last adjustment (six weeks ago) had .014 wires and Class II elastics.
     async setup(t) {
       const p = await newPatient(t, 'Brace');
-      await t.as('admin').post(`/patients/${p.id}/ortho`, { total_fee: 540000, months: 18, est_months: 18, appliance: 'brackets' });
+      const c = await t.as('admin').post(`/patients/${p.id}/ortho`, { total_fee: 540000, months: 18, est_months: 18, appliance: 'brackets' });
+      await t.as('admin').post(`/ortho/${c.id}/visits`, { visit_date: t.today, upper_wire: '.014 NiTi', lower_wire: '.014 NiTi', elastics: 'Class II 1/4" 6oz', next_weeks: 6 });
       return { p };
     },
     async run(t, { p }) {
       await t.open(`/patients/${p.id}?tab=ortho`, 'button:has-text("Log adjustment")');
-      await t.step('Ortho tab: click "+ Log adjustment" (today, next visit in the usual weeks)', async () => {
+      await t.step('Ortho tab: click "+ Log adjustment" — the last visit’s wires and elastics are filled in, the cursor in the upper wire', async () => {
         await t.click('button:has-text("Log adjustment")');
-        await t.see('label:has-text("Upper wire") input');
+        await t.page.waitForFunction(() => document.activeElement?.closest?.('label')?.textContent?.startsWith('Upper wire'));
       });
-      await t.step('Type the upper and lower wires and elastics', async () => {
-        await t.click('label:has-text("Upper wire") input');
+      await t.step('Type the new upper wire, Tab, the new lower wire (the elastics stay)', async () => {
         await t.type('.016 NiTi');
-        await t.click('label:has-text("Lower wire") input');
+        await t.key('Tab'); // Tab selects what's in the next box, so typing replaces it
         await t.type('.016 NiTi');
-        await t.click('label:has-text("Elastics") input');
-        await t.type('Class II 1/4" 6oz');
       });
-      await t.step('Click Save', async () => {
-        await t.click(t.page.locator('button.primary:has-text("Save")').last());
-        await t.see('label:has-text("Upper wire") input', { state: 'detached' });
+      await t.step('Press Enter: logged', async () => {
+        await t.key('Enter');
+        await t.see('.toast:has-text("Adjustment logged")');
       });
     },
   },

@@ -129,6 +129,11 @@ import surveyRoutes, { surveyPublicRoutes } from './routes/surveys.js';
 import attachmentRoutes from './routes/attachments.js';
 import apiV1Routes from './routes/apiv1.js';
 import developerRoutes from './routes/developer.js';
+import complianceRoutes from './routes/compliance.js';
+import letterRoutes from './routes/letters.js';
+import retailRoutes from './routes/retail.js';
+import pdmpRoutes from './routes/pdmp.js';
+import { createPdmp, pdmpConfig } from './pdmp.js';
 import assistantRoutes, { assistantConfig } from './routes/assistant.js';
 import { startWebhooks } from './webhooks.js';
 import { createAttachmentSender, attachmentConfig } from './attachments.js';
@@ -193,7 +198,7 @@ export function loadConfig(env = process.env) {
 // Plaid Link (connecting the practice's bank) runs from Plaid's own script and frame.
 export const CSP = "default-src 'self'; script-src 'self' https://cdn.plaid.com/link/v2/stable/link-initialize.js https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://production.plaid.com https://sandbox.plaid.com; frame-src 'self' blob: https://cdn.plaid.com https://challenges.cloudflare.com; media-src 'self' blob:; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'";
 
-export function createApp({ db, secret, config: overrides = {}, fetchImpl = globalThis.fetch, messenger, storage, clearinghouse, erx, payments, mailer, attachmentSender, plaid, qbo, xrayAi, transcriber, gbp }) {
+export function createApp({ db, secret, config: overrides = {}, fetchImpl = globalThis.fetch, messenger, storage, clearinghouse, erx, payments, mailer, attachmentSender, plaid, qbo, xrayAi, transcriber, gbp, pdmp }) {
   if (!secret) throw new Error('JWT secret is required');
   const config = { ...loadConfig(), ...overrides };
   // Every call to an outside service is logged (Settings → Connections activity), Claude's included.
@@ -202,6 +207,8 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   messenger ??= createMessenger({ fetchImpl });
   storage ??= createStorage({ dir: config.uploadDir, key: config.documentKey, previousKeys: config.documentKeysPrevious });
   erx ??= createErx(overrides.erx || erxConfig());
+  // Prescription monitoring program checks before controlled substances (pdmp.js): sandbox outside production.
+  pdmp ??= createPdmp({ config: { ...pdmpConfig(), ...(overrides.pdmp || {}) }, fetchImpl, db });
   payments ??= createPayments({ config, fetchImpl });
   plaid ??= createPlaid({ config, fetchImpl });
   qbo ??= createQuickBooks({ config, fetchImpl });
@@ -363,6 +370,11 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(membershipRoutes({ db, payments, messenger }));
   api.use(campaignRoutes({ db, messenger, config }));
   api.use(developerRoutes({ db, fetchImpl }));
+  // Batch 2B: compliance logs, letters & mailing labels, products and gift certificates, PDMP checks.
+  api.use(complianceRoutes({ db }));
+  api.use(letterRoutes({ db, storage, messenger }));
+  api.use(retailRoutes({ db }));
+  api.use(pdmpRoutes({ db, pdmp }));
   api.use(assistantRoutes({ db, config, secret, app: () => app }));
   api.use(financeRoutes({ db, config, secret, plaid, qbo }));
   api.use(scribeRoutes({ db, config }));

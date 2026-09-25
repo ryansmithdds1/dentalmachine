@@ -114,7 +114,7 @@ export default function FinDesk({ plan, patient, quote, onQuote, onChange, onBoo
               <input aria-label="Patient's name (optional)" placeholder={`${patient.first_name} ${patient.last_name} (optional)`} value={name} onChange={(e) => setName(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter' && picked) { e.preventDefault(); accept(); } }} />
               <button type="button" className="primary" disabled={busy || !picked} onClick={accept}>Accept for {patient.first_name}</button>
-              <span className="muted" style={{ fontSize: 12.5 }}>Or <em>Present & e-sign</em> so {patient.first_name} chooses and signs.</span>
+              <span className="muted" style={{ fontSize: 12.5 }}>Or <em>Present here</em> so {patient.first_name} chooses and signs.</span>
             </div>
           )}
         </>

@@ -435,7 +435,7 @@ const ENGINES = {
     const rows = codes.length ? await ctx.db.all(
       `SELECT l.id, l.amount, l.entry_date, COALESCE(pr.provider_id, l.provider_id) AS provider_id, pr.id AS procedure_id, pr.code, pr.appointment_id, a.operatory_id
        FROM ledger_entries l JOIN procedures pr ON pr.id = l.procedure_id LEFT JOIN appointments a ON a.id = pr.appointment_id
-       WHERE l.practice_id = ? AND l.type = 'charge' AND l.voided_at IS NULL AND l.reverses_id IS NULL AND l.entry_date >= ? AND l.entry_date <= ?
+       WHERE l.practice_id = ? AND l.type = 'charge' AND l.retail_sale_id IS NULL AND l.voided_at IS NULL AND l.reverses_id IS NULL AND l.entry_date >= ? AND l.entry_date <= ?
          AND pr.code IN (${codes.map(() => '?').join(',')})${loc} ORDER BY l.id`,
       ctx.pid, period.start, to, ...codes, ...(cfg.location_id ? [cfg.location_id] : []),
     ) : [];

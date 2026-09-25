@@ -16,6 +16,7 @@ import { useLastMethod, methodToPost } from './lastMethod.js';
 import { undoable, toast } from '../../toast.js';
 import './moneyflows.css';
 import { LedgerLegend, LedgerRow, VisitView } from './LedgerViews.jsx';
+import { SellProduct, RedeemGiftCertificate, useHasProducts } from './RetailPanels.jsx';
 
 const KINDS = { Charges: ['charge'], 'Patient payments': ['payment'], 'Insurance payments': ['insurance_payment'], Adjustments: ['adjustment'], Refunds: ['refund'] };
 const METHODS = ['credit_card', 'debit_card', 'cash', 'check', 'ach', 'care_credit', 'other'];
@@ -51,16 +52,18 @@ export default function LedgerTab({ patient, onChange }) {
   const [params, setParams] = useSearchParams();
   const [financeOpen, setFinanceOpen] = useState(false);
   useEffect(() => {
-    const open = params.get('pay') ? 'payment' : params.get('adjust') ? 'adjustment' : null;
+    // ?sell=1 / ?redeem=1: sell a product, use a gift certificate (A176, A184 — the command bar's actions too).
+    const open = params.get('pay') ? 'payment' : params.get('adjust') ? 'adjustment' : params.get('sell') ? 'sell' : params.get('redeem') ? 'redeem' : null;
     if (!open && !params.get('finance')) return;
     if (open) setModal(open);
     else setFinanceOpen(true);
     const next = new URLSearchParams(params);
-    ['pay', 'adjust', 'finance'].forEach((k) => next.delete(k));
+    ['pay', 'adjust', 'finance', 'sell', 'redeem'].forEach((k) => next.delete(k));
     setParams(next, { replace: true });
   }, [params, setParams]);
   useShortcut('a', () => setModal('adjustment'), { label: 'Adjustment or write-off', section: 'Ledger', enabled: can('billing:write') && !modal });
   const done = () => { setModal(null); reload(); setVersion((v) => v + 1); onChange?.(); };
+  const hasProducts = useHasProducts();
   if (!data) return <div className="empty">Loading…</div>;
   const providers = [...new Map(data.entries.filter((e) => e.provider_id).map((e) => [e.provider_id, e.provider_name])).entries()];
   const shown = data.entries.filter((e) => (!kind || KINDS[kind].includes(e.type)) && (!prov || String(e.provider_id) === prov) && !(hideVoided && (e.voided_at || e.reverses_id)));
@@ -96,6 +99,18 @@ export default function LedgerTab({ patient, onChange }) {
           <AdjustmentForm patient={patient} lockDate={data.lock_date} onDone={done} />
         </section>
       )}
+      {modal === 'sell' && (
+        <section className="inline-panel" aria-label="Sell a product">
+          <header><h3>Sell a product</h3><button className="small" onClick={() => setModal(null)}>Cancel</button></header>
+          <SellProduct patient={patient} onDone={done} onCancel={() => setModal(null)} />
+        </section>
+      )}
+      {modal === 'redeem' && (
+        <section className="inline-panel" aria-label="Use a gift certificate">
+          <header><h3>Use a gift certificate</h3><button className="small" onClick={() => setModal(null)}>Cancel</button></header>
+          <RedeemGiftCertificate patient={patient} balance={data.balance} onDone={done} onCancel={() => setModal(null)} />
+        </section>
+      )}
       {showWhy
         ? (data.balance !== 0 || data.entries.length > 0) && <BalanceWhy patient={patient} version={`${version}-${data.balance}-${data.entries.length}`} onClose={() => rememberWhy(false)} />
         : <div className="no-print" style={{ marginBottom: 12 }}><button className="small" onClick={() => rememberWhy(true)} title="W">Why this balance?</button></div>}
@@ -110,6 +125,8 @@ export default function LedgerTab({ patient, onChange }) {
                 {payConfig?.enabled && <button onClick={() => setModal('paylink')}>Send card payment link</button>}
                 {terminal.readers.length > 0 && <button onClick={() => setModal('reader')}>Card reader</button>}
                 <button onClick={() => setModal('adjustment')} title="A">Adjustment</button>
+                {hasProducts && <button onClick={() => setModal('sell')}>Sell a product</button>}
+                <button onClick={() => setModal('redeem')}>Gift certificate</button>
                 {data.balance < 0 && can('deposits:manage') && <button onClick={() => setModal('refund')}>Refund credit</button>}
                 {(patient.guarantor || patient.family_size > 1) && <button onClick={() => setModal('transfer')} title="Move a balance or credit to another family member">Transfer</button>}
                 <button className="primary" onClick={() => setModal('payment')}>Take payment</button>
@@ -268,7 +285,8 @@ function RefundForm({ patient, credit, entries, onDone }) {
 // Backdating is allowed only into the open period (after the practice's lock date), never the future.
 function DateField({ value, onChange, lockDate }) {
   const today = new Date().toLocaleDateString('en-CA');
-  return <label>Date<input type="date" value={value} max={today} min={lockDate ? new Date(Date.parse(`${lockDate}T12:00:00Z`) + 86400_000).toISOString().slice(0, 10) : undefined} onChange={(e) => onChange(e.target.value)} placeholder="Today" /></label>;
+  // Blank posts today: said on the label, since an empty date box only shows "mm/dd/yyyy".
+  return <label>Date {!value && <span className="muted" style={{ fontWeight: 400 }}>— today</span>}<input type="date" value={value} max={today} min={lockDate ? new Date(Date.parse(`${lockDate}T12:00:00Z`) + 86400_000).toISOString().slice(0, 10) : undefined} onChange={(e) => onChange(e.target.value)} placeholder="Today" /></label>;
 }
 
 function PaymentForm({ patient, balance, lockDate, onDone, onCancel }) {

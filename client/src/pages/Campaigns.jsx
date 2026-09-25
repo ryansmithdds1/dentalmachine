@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import Surveys from '../components/Surveys.jsx';
+import MailingLabelsButton from '../components/MailingLabels.jsx';
 import { api } from '../api.js';
 import { useApi } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
@@ -174,6 +175,8 @@ function Editor({ campaign, onClose, onDone }) {
                 {preview.list.map((r) => <div key={`${r.id}${r.channel}`}>{r.first_name} {r.last_name} <span className="muted">· {r.channel === 'sms' ? 'text' : 'email'}</span></div>)}
                 {preview.recipients > preview.list.length && <div className="muted">…and {preview.recipients - preview.list.length} more</div>}
               </div>
+              {/* A177: the same group on paper — address labels for everyone in it who can be mailed. */}
+              {preview.patients > 0 && <div style={{ marginTop: 10 }}><MailingLabelsButton segment={c.segment} params={c.params} source="campaign" className="small" label="Mailing labels for this group" /></div>}
             </>
           )}
         </div>

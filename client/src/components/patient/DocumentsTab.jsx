@@ -132,7 +132,7 @@ export default function DocumentsTab({ patient }) {
   useEffect(() => {
     if (!canAdd) return undefined;
     const onPaste = (e) => {
-      if (typingIn(e.target) || document.querySelector('.modal, .studio')) return;
+      if (typingIn(e.target) || document.querySelector('.modal, .studio, .side-panel')) return;
       const files = [...(e.clipboardData?.files || [])];
       if (!files.length) return;
       e.preventDefault();

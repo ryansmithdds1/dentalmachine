@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Camera, ArrowLeftRight, RotateCw, Trash2, Keyboard, Snowflake } from 'lucide-react';
 import { api, getToken } from '../../api.js';
-import { ErrorBox } from '../ui.jsx';
+import { ErrorBox, ConfirmButton } from '../ui.jsx';
 import { useThumb } from './thumbs.js';
 
 // Intraoral camera, live in the imaging studio. Nearly every intraoral camera (and the USB capture box of
@@ -120,7 +120,6 @@ export default function IntraoralCamera({ patient, photoMount, onCaptured }) {
     setFrozen(!frozen);
   };
   const remove = async (id) => {
-    if (!confirm('Delete this photo from the chart?')) return;
     try {
       await api.del(`/documents/${id}`);
       setShots((list) => list.filter((s) => s.id !== id));
@@ -170,7 +169,7 @@ function Shot({ id, tooth, onDelete }) {
     <div className="iocam-shot">
       {src ? <img className="arrive" src={src} alt={tooth ? `Tooth ${tooth}` : 'Intraoral photo'} /> : <span className="spot-loading" />}
       {tooth && <span className="spot-n">#{tooth}</span>}
-      <button type="button" aria-label="Delete photo" title="Delete" onClick={onDelete}><Trash2 size={13} /></button>
+      <ConfirmButton className="small" aria-label="Delete photo" title="Delete" ask="Delete this photo from the chart?" yes="Delete" onConfirm={onDelete}><Trash2 size={13} /></ConfirmButton>
     </div>
   );
 }

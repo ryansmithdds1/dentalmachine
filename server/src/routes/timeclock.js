@@ -899,7 +899,7 @@ export default function timeclockRoutes({ db }) {
       for (const o of out.offices) delete o.cost_cents;
     } else {
       // Production is the ledger's non-voided charges in the same dates (rule 4: the ledger is the source of truth).
-      const prod = await db.all("SELECT location_id, COALESCE(SUM(amount), 0) AS cents FROM ledger_entries WHERE practice_id = ? AND type = 'charge' AND voided_at IS NULL AND entry_date >= ? AND entry_date <= ? GROUP BY location_id", req.user.practice_id, from, to);
+      const prod = await db.all("SELECT location_id, COALESCE(SUM(amount), 0) AS cents FROM ledger_entries WHERE practice_id = ? AND type = 'charge' AND retail_sale_id IS NULL AND voided_at IS NULL AND entry_date >= ? AND entry_date <= ? GROUP BY location_id", req.user.practice_id, from, to);
       const production = prod.reduce((t, x) => t + Number(x.cents), 0);
       const labor = personRows.reduce((t, x) => t + (x.cost_cents || 0), 0);
       for (const o of out.offices) {

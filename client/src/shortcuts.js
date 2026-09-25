@@ -55,7 +55,7 @@ export function useShortcuts(list) {
       const s = live[i];
       const plain = !/mod|alt/.test(s.combo);
       if (plain && !s.inInputs && typingIn(e.target)) return;
-      if (plain && document.querySelector('.modal, .palette')) return;
+      if (plain && document.querySelector('.modal, .palette, .side-panel')) return;
       e.preventDefault();
       // The latest handler for this combo (it may close over new state) — the enabled one, when a screen gives
       // the same key to different jobs for different people (R: refund, or ask a manager to).

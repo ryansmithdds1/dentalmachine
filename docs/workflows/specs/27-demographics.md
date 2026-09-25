@@ -68,3 +68,12 @@ or email once a flagged number or address is replaced. Patients can also change 
 - `server/test/efficiency-w3.test.js`: the household at the old address moves (not members living elsewhere), one audit
   row per chart with before/after, undo, `household: false` / `members`, repeat is a no-op; validation 400s, other
   practice 404, billing 403, signed out 401; phone/email change keeps before/after and clears the bad-number flag.
+
+
+## Phase 2, batch 2A: more of the chart changes in place
+The Contact card also holds the **office alert** (click, type, Enter — **3 actions**; the person who typed it isn't
+shown the pop-up), the **usual dentist** and **usual hygienist** (click, pick — **1 action**, saved at once), all
+with Undo and before/after in the change log. The **name** and **birth date** on the chart header are corrected
+in place too (click, type, Enter — **3 actions**, Undo). A **family member** is added on one line on the Family tab
+("Kit 6/6/2016" — the guarantor's last name unless another is typed; child under 26, spouse otherwise; **3
+actions**). Tested by `e2e/workflows/2A-inline.test.mjs` and `server/test/inline2a.test.js`.

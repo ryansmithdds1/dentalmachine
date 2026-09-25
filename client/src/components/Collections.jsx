@@ -4,7 +4,8 @@ import { api } from '../api.js';
 import { useApi } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
 import { money, fmtDate, fmtUtcDateTime, label, toCents, fromCents } from '../format.js';
-import { ErrorBox, Modal, useSubmit, MoreRows } from './ui.jsx';
+import { ErrorBox, Modal, useSubmit, MoreRows, ConfirmButton, SidePanel } from './ui.jsx';
+import { toast } from '../toast.js';
 
 const STEP = { letter_30: '30-day letter', letter_60: '60-day letter', letter_90: 'Final notice', agency: 'Send to agency', written_off: 'Written off', cleared: 'Taken out of collections', finance_charge: 'Finance charge', late_fee: 'Late fee' };
 const AGE = { 0: 'Current', 30: '31–60 days', 60: '61–90 days', 90: '90+ days' };
@@ -71,10 +72,10 @@ function AccountModal({ id, canWrite, admin, agency, onClose, onChanged }) {
     setErr(null);
     try { await fn(); reload(); onChanged(); } catch (e) { setErr(e); }
   };
-  if (!data) return <Modal title="Account" onClose={onClose}><p>Loading…</p></Modal>;
+  if (!data) return <SidePanel title="Account" onClose={onClose}><p>Loading…</p></SidePanel>;
   const a = data.aging;
   return (
-    <Modal title={`${data.account.first_name} ${data.account.last_name}`} onClose={onClose}>
+    <SidePanel className="wide" title={`${data.account.first_name} ${data.account.last_name}`} onClose={onClose}>
       <ErrorBox error={err} />
       {a && (
         <table className="compact-table">
@@ -93,17 +94,22 @@ function AccountModal({ id, canWrite, admin, agency, onClose, onChanged }) {
             <div key={k} className="inline" style={{ justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
               <div><strong>{l.title}</strong><div className="muted" style={{ fontSize: 12 }}>{l.body}</div></div>
               <div className="inline" style={{ gap: 6, flexShrink: 0 }}>
-                <button className="small" disabled={!a?.overdue} onClick={() => run(async () => { const r = await api.post(`/collections/${id}/letter`, { stage: k }); window.alert(r.message ? `Sent by ${r.message.channel === 'sms' ? 'text' : 'email'}${r.message.status === 'sent' ? '' : ' (failed)'}` : 'Recorded — no email or text on file, so print it.'); })}>Send</button>
+                <button className="small" disabled={!a?.overdue} onClick={() => run(async () => { const r = await api.post(`/collections/${id}/letter`, { stage: k }); toast(r.message ? `Sent by ${r.message.channel === 'sms' ? 'text' : 'email'}${r.message.status === 'sent' ? '' : ' (failed)'}` : 'Recorded — no email or text on file, so print it.', { tone: r.message && r.message.status !== 'sent' ? 'error' : 'ok' }); })}>Send</button>
                 <button className="small" disabled={!a?.overdue} title="Print to mail it (recorded as sent)" onClick={() => { window.open(`/collections/${id}/letter?stage=${k}`, '_blank'); run(() => api.post(`/collections/${id}/letter`, { stage: k, send: false })); }}>Print</button>
               </div>
             </div>
           ))}
           <h3>Agency and write-off</h3>
           <div className="inline" style={{ gap: 8, flexWrap: 'wrap' }}>
-            <input value={agencyName} onChange={(e) => setAgencyName(e.target.value)} placeholder="Collection agency" style={{ width: 200 }} />
-            <button className="small" onClick={() => window.confirm(`Send ${data.account.first_name}'s account to ${agencyName || 'the agency'}?`) && run(() => api.post(`/collections/${id}/agency`, { agency: agencyName }))}>Send to agency</button>
-            {admin && <button className="small" onClick={() => window.confirm(`Send to ${agencyName || 'the agency'} and write the patient's balance off as bad debt?`) && run(() => api.post(`/collections/${id}/agency`, { agency: agencyName, write_off: true }))}>Send and write off</button>}
-            {admin && <button className="small danger" onClick={() => window.confirm("Write off the patient's balance as bad debt?") && run(() => api.post(`/collections/${id}/write-off`, {}))}>Write off bad debt</button>}
+            <input value={agencyName} onChange={(e) => setAgencyName(e.target.value)} placeholder="Collection agency" aria-label="Collection agency" style={{ width: 200 }} />
+            {/* Sending to the agency can be taken back ("Take out of collections"): done at once, with Undo.
+                Writing the balance off moves money on the ledger: that asks once, on the page. */}
+            <button className="small" disabled={!agencyName.trim()} title={agencyName.trim() ? '' : 'Type the agency first (or set it once in Collections settings)'} onClick={() => run(async () => {
+              await api.post(`/collections/${id}/agency`, { agency: agencyName });
+              toast(`${data.account.first_name}'s account sent to ${agencyName || 'the agency'}`, { undo: async () => { await api.post(`/collections/${id}/clear`, {}); toast('Taken out of collections'); reload(); onChanged(); } });
+            })}>Send to agency</button>
+            {admin && <ConfirmButton className="small" disabled={!agencyName.trim()} ask={`Send to ${agencyName || 'the agency'} and write the patient's balance off as bad debt?`} yes="Send and write off" onConfirm={() => run(() => api.post(`/collections/${id}/agency`, { agency: agencyName, write_off: true }))}>Send and write off</ConfirmButton>}
+            {admin && <ConfirmButton ask="Write off the patient's balance as bad debt?" yes="Write it off" onConfirm={() => run(() => api.post(`/collections/${id}/write-off`, {}))}>Write off bad debt</ConfirmButton>}
             {data.account.collection_status && <button className="small" onClick={() => run(() => api.post(`/collections/${id}/clear`, {}))}>Take out of collections</button>}
           </div>
         </>
@@ -115,7 +121,7 @@ function AccountModal({ id, canWrite, admin, agency, onClose, onChanged }) {
           {!data.history.length && <tr><td className="muted">Nothing yet.</td></tr>}
         </tbody>
       </table>
-    </Modal>
+    </SidePanel>
   );
 }
 

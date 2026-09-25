@@ -74,7 +74,7 @@ export default function KeyboardHelp() {
         else navigate(to);
         return;
       }
-      pendingG.current = e.key.toLowerCase() === 'g' && !document.querySelector('.modal') ? Date.now() : 0;
+      pendingG.current = e.key.toLowerCase() === 'g' && !document.querySelector('.modal, .side-panel') ? Date.now() : 0;
     };
     const onShow = () => setOpen(true);
     window.addEventListener('keydown', onKey);

@@ -3,7 +3,7 @@ import { api } from '../api.js';
 import { useApi } from '../hooks.js';
 import { fmtUtcDateTime } from '../format.js';
 import { useAuth } from '../auth.jsx';
-import { ErrorBox, Badge, useSubmit } from './ui.jsx';
+import { ErrorBox, Badge, useSubmit, ConfirmButton } from './ui.jsx';
 import FullConversion from './FullConversion.jsx';
 
 const KIND_INFO = {
@@ -122,7 +122,6 @@ export default function ImportData() {
   });
 
   const undo = useSubmit(async (b) => {
-    if (!window.confirm(`Remove the ${b.created_count} records this import created? Records it updated stay as they are.`)) return;
     await api.post(`/imports/${b.id}/undo`);
     reload();
   });
@@ -262,7 +261,7 @@ export default function ImportData() {
                   <td>{b.updated_count}</td>
                   <td>{b.error_count}</td>
                   <td><Badge value={b.status} /></td>
-                  <td>{b.status !== 'undone' && b.created_count > 0 && <button className="small danger" disabled={undo.busy} onClick={() => undo.submit(b)}>Undo</button>}</td>
+                  <td>{b.status !== 'undone' && b.created_count > 0 && <ConfirmButton className="small danger" disabled={undo.busy} ask={`Remove the ${b.created_count} records this import created? Records it updated stay as they are.`} yes="Remove them" onConfirm={() => undo.submit(b)}>Undo</ConfirmButton>}</td>
                 </tr>
               ))}
             </tbody>

@@ -19,14 +19,14 @@ export function ChStatus({ claim }) {
 }
 
 // Sends claims to the clearinghouse when connected, otherwise downloads an 837 file for the portal.
-// A claim the payer already has is only resent after the user confirms (resends cause duplicate denials).
+// A claim the payer already has is only resent when the person asks again: the error says why and carries
+// `resend()`, which the screen offers as a "Resend anyway" button beside it (resends cause duplicate denials).
 export async function sendClaims(ids, connection, resend = false) {
   try {
     return await sendOnce(ids, connection, resend);
   } catch (err) {
     if (resend || !err.details?.already_sent) throw err;
-    if (!window.confirm(`${err.message.replace(/ — .*/, '')}.\n\nResending can make the payer deny it as a duplicate. Resend anyway?`)) return null;
-    return sendOnce(ids, connection, true);
+    throw Object.assign(new Error(`${err.message.replace(/ — .*/, '')}. Resending can make the payer deny it as a duplicate.`), { details: err.details, resend: () => sendOnce(ids, connection, true) });
   }
 }
 

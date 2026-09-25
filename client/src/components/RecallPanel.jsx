@@ -105,18 +105,43 @@ function useSave(fn, onDone) {
   }];
 }
 
+// The usual intervals and reasons are one click each (A097): pick the months, then the reason — that saves.
+// Another number or reason can still be typed (Save).
+const MONTHS = [3, 4, 6, 12];
+const REASONS = ['Perio history', 'High caries risk', 'Stable — longer is fine', 'Alternates with periodontist', 'Patient’s request'];
 function IntervalForm({ item, onDone }) {
   const [months, setMonths] = useState(String(item.interval_months));
   const [reason, setReason] = useState('');
-  const [busy, save] = useSave(async () => {
-    const back = Number(months) === item.type_interval_months;
-    await api.put(`/recalls/${item.recall_id}/interval`, { interval_months: back ? null : Number(months), reason });
-    return `${item.short} every ${months} months`;
-  }, onDone);
+  const [busy, setBusy] = useState(false);
+  const saveWith = async (m, why) => {
+    if (!(Number(m) >= 1 && Number(m) <= 120)) { toast('Choose 1–120 months', { tone: 'error' }); return; }
+    if (String(why || '').trim().length < 3) { toast('Say why (e.g. perio history)', { tone: 'error' }); return; }
+    setBusy(true);
+    try {
+      const back = Number(m) === item.type_interval_months;
+      await api.put(`/recalls/${item.recall_id}/interval`, { interval_months: back ? null : Number(m), reason: why });
+      toast(`${item.short} every ${m} months`);
+      onDone();
+    } catch (e) {
+      toast(e.message, { tone: 'error' });
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
-    <Inline title={`${item.short}: this patient's interval`} onClose={onDone} onSubmit={save} busy={busy}>
-      <label>Every <input type="number" min="1" max="120" value={months} onChange={(e) => setMonths(e.target.value)} style={{ width: 70 }} autoFocus /> months <span className="muted">(standard {item.type_interval_months})</span></label>
-      <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Why (required) — e.g. stable perio, alternates with periodontist" aria-label="Reason" required minLength={3} />
+    <Inline title={`${item.short}: this patient's interval`} onClose={onDone} onSubmit={() => saveWith(months, reason)} busy={busy}>
+      <div className="chips" role="radiogroup" aria-label="Every">
+        {MONTHS.map((m) => (
+          <button type="button" key={m} role="radio" aria-checked={Number(months) === m} className={`chip${Number(months) === m ? ' active' : ''}`} onClick={() => setMonths(String(m))}>
+            {m} mo{m === item.type_interval_months ? ' (standard)' : ''}
+          </button>
+        ))}
+        <label className="inline" style={{ gap: 4 }}>other <input type="number" min="1" max="120" value={months} onChange={(e) => setMonths(e.target.value)} style={{ width: 64 }} aria-label="Every how many months" /></label>
+      </div>
+      <div className="chips" aria-label="Why">
+        {REASONS.map((r) => <button type="button" key={r} className="chip" disabled={busy} onClick={() => saveWith(months, r)} title="Saves with this reason">{r}</button>)}
+      </div>
+      <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Or type why — e.g. stable perio, alternates with periodontist" aria-label="Reason" minLength={3} />
     </Inline>
   );
 }

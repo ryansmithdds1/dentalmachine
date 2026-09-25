@@ -81,19 +81,18 @@ test('#21 all unplanned work onto a new plan: 1 action', async () => {
   assert.equal((await plansOf()).length, 2);
 });
 
-test('#22 present on this screen: 2 staff + 2 patient (their name is already on the signing line), no birth date, same tab, and back to the chart', async () => {
+test('#22 present on this screen: 1 staff + 2 patient (their name is already on the signing line), no birth date, same tab, and back to the chart', async () => {
   const { page } = s;
   await openTreatment();
   const plan = (await plansOf()).find((p) => p.procedures.some((x) => x.code === 'D3330'));
   const pages = page.context().pages().length;
   const staff = await measure(page, async () => {
-    await page.locator(`.card[data-plan="${plan.id}"]`).locator('button:has-text("Present & e-sign")').click();
-    await page.waitForSelector('.modal button:has-text("Open here for Tess to sign")');
-    await page.keyboard.press('Enter');
+    // No dialog in between: the plan's own button opens it here for the patient.
+    await page.locator(`.card[data-plan="${plan.id}"]`).locator('button:has-text("Present here for Tess to sign")').click();
     await page.waitForURL(/\/tp\//);
     await page.waitForSelector('h1:has-text("Your treatment plan, Tess")');
   });
-  console.log(withinBudget('#22 present (staff)', staff, { actions: 2 }));
+  console.log(withinBudget('#22 present (staff)', staff, { actions: 1 }));
   assert.equal(page.context().pages().length, pages, 'no new tab');
   assert.doesNotMatch(page.url(), /here=/, 'the one-time code is gone from the address bar');
 

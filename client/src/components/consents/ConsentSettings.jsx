@@ -123,6 +123,7 @@ function FormRow({ t, open, onToggle, act }) {
               ))}
             </div>
             <div className="form-actions">
+              <button type="button" className="link" style={{ marginRight: 'auto' }} onClick={() => window.dispatchEvent(new CustomEvent('dm:edit-form-template', { detail: t.id }))}>Change the wording…</button>
               {t.legal_review ? <button onClick={() => act(() => api.put(`/form-templates/${t.id}/consent-settings`, { legal_reviewed: true }), 'Marked as reviewed by your attorney')}><ShieldCheck size={14} /> Our attorney reviewed it</button> : null}
               <button className="primary" onClick={save}>Save</button>
             </div>

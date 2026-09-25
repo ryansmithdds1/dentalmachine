@@ -154,7 +154,7 @@ function FeesStep({ s, run, busy }) {
   const adj = (fee) => Math.round((fee * (100 + Number(pct || 0))) / 100 / 100) * 100;
   return (
     <>
-      <p className="muted" style={{ fontSize: 13 }}>You start with {s.steps.fees.codes} common procedure codes and typical fees. Keep them, move them all up or down, or set each fee in <Link to="/settings?tab=codes">Settings → Fee schedule</Link> (or import yours).</p>
+      <p className="muted" style={{ fontSize: 13 }}>You start with {s.steps.fees.codes} common procedure codes and typical fees. Keep them, move them all up or down, or set each fee in <Link to="/settings?tab=codes">Settings → Procedure codes &amp; fees</Link> (or import yours).</p>
       <div className="inline" style={{ gap: 8, alignItems: 'center' }}><span>Change every fee by</span><input type="number" value={pct} min="-50" max="200" onChange={(e) => setPct(e.target.value)} style={{ width: 80 }} aria-label="Percent change" /><span>%</span></div>
       <table className="compact-table" style={{ margin: '10px 0' }}>
         <thead><tr><th>Code</th><th>Procedure</th><th className="num">Now</th>{Number(pct) !== 0 && <th className="num">New</th>}</tr></thead>

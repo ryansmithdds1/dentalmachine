@@ -98,7 +98,7 @@ test('DN1: a doctor’s note on an empty slot in ≤ 2 actions (right-click, pic
   // "Book it" opens the booking form on that slot.
   await page.click('.dn-bubble:has-text("Fit an emergency here")');
   await page.click('.dn-popover button:has-text("Book it")');
-  await page.waitForSelector('.modal');
+  await page.waitForSelector('.book-panel');
   await page.keyboard.press('Escape');
   assert.deepEqual(s.errors, []);
 });
@@ -134,7 +134,7 @@ test('S8: cancel for our reason — “Whose reason? Ours”, then the office’
   await page.click('.broken-whose button:has-text("Ours")');
   await page.keyboard.press('1'); // Provider sick
   await page.waitForFunction(async (id) => !document.querySelector(`.cal [data-appt-id="${id}"]`), a.id);
-  if (await page.locator('.modal').count()) await page.keyboard.press('Escape');
+  if (await page.locator('.modal, .side-panel, .rebook-bar').count()) await page.keyboard.press('Escape');
   const conn = await s.get(`/patients/${p.id}/connection`);
   assert.equal(conn.strikes.count, 1);
   assert.equal(conn.strikes.list[0].reason, 'provider_sick');

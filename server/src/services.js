@@ -306,6 +306,8 @@ export async function reverseEntry(db, entry, { userId, reason, date }) {
     description: `Void: ${entry.description}`.slice(0, 300), method: entry.method, reference: entry.reference,
     procedure_id: entry.procedure_id, claim_id: entry.claim_id, provider_id: entry.provider_id, payment_plan_id: entry.payment_plan_id, location_id: entry.location_id,
     adjustment_type: entry.adjustment_type ?? null, entry_date: date, created_by: userId ?? null, reverses_id: entry.id,
+    // A reversal stays with its sale or gift certificate, so reports that leave those out of production leave both out.
+    retail_sale_id: entry.retail_sale_id ?? null, gift_certificate_id: entry.gift_certificate_id ?? null,
   });
 }
 
@@ -313,6 +315,8 @@ export async function reverseEntry(db, entry, { userId, reason, date }) {
 // planned, off production); insurance entries are undone by reopening their claim instead.
 export async function voidLedgerEntry(db, entry, { userId, reason }) {
   if (!String(reason || '').trim()) throw new HttpError(400, 'Give a reason for the void');
+  // A product sale's lines (charge, tax, stock) and a gift certificate's go together: retail.js voids them as one.
+  if (entry.retail_sale_id || entry.gift_certificate_id) throw new HttpError(409, entry.retail_sale_id ? 'This line is part of a product sale — void the sale' : 'This line belongs to a gift certificate — void it from Gift certificates');
   if (entry.voided_at) throw new HttpError(409, 'That entry was already voided');
   if (entry.reverses_id) throw new HttpError(409, "A reversal can't itself be voided");
   if (entry.claim_id) throw new HttpError(409, `This came from insurance claim #${entry.claim_id} — reopen the claim to undo it`);

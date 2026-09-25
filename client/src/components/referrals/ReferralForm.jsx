@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../api.js';
 import { useApi } from '../../hooks.js';
 import { useAuth } from '../../auth.jsx';
@@ -32,9 +32,12 @@ export default function ReferralForm({ patient, procedureIds = [], direction = '
   const [touched, setTouched] = useState({});
   const set = (k, v) => { setForm((f) => ({ ...f, [k]: v })); setTouched((t) => ({ ...t, [k]: true })); };
 
-  // Smart defaults, once they arrive (never over what the person already changed).
+  // Smart defaults, once they arrive (never over what the person already changed). With the specialist already
+  // chosen, the cursor goes to the reason (selected, so typing replaces the suggested one).
+  const reasonRef = useRef(null);
   useEffect(() => {
     if (!suggestion) return;
+    if (out && suggestion.contact && !touched.contact_id && !touched.reason) requestAnimationFrame(() => { reasonRef.current?.focus({ preventScroll: true }); reasonRef.current?.select(); });
     setForm((f) => ({
       ...f,
       contact_id: touched.contact_id || !out ? f.contact_id : String(suggestion.contact?.id || ''),
@@ -113,7 +116,7 @@ export default function ReferralForm({ patient, procedureIds = [], direction = '
           </div>
         </div>
       )}
-      <label className="rt-field">{out ? 'Reason' : 'Note'}<input value={form.reason} onChange={(e) => set('reason', e.target.value)} placeholder={out ? 'e.g. RCT #19, symptomatic irreversible pulpitis' : 'e.g. implant consult'} /></label>
+      <label className="rt-field">{out ? 'Reason' : 'Note'}<input ref={reasonRef} value={form.reason} onChange={(e) => set('reason', e.target.value)} placeholder={out ? 'e.g. RCT #19, symptomatic irreversible pulpitis' : 'e.g. implant consult'} /></label>
       {out && (
         <>
           <div className="rt-field">

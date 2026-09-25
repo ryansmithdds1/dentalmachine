@@ -33,6 +33,11 @@ export const PATIENT_COMMANDS = [
   { id: 'lab', label: 'New lab case', to: (id) => `/office?lab=new&patient=${id}`, perm: 'clinical:write' },
   { id: 'adjust', label: 'Adjustment or write-off', to: (id) => `/patients/${id}?tab=ledger&adjust=1`, perm: 'billing:write' },
   { id: 'finance', label: 'Send a financing application', to: (id) => `/patients/${id}?tab=ledger&finance=1`, perm: 'billing:write' },
+  // Batch 2B (A171, A176, A184, A175).
+  { id: 'letter', label: 'Write a letter', to: (id) => `/letters?patient=${id}`, perm: 'patients:write' },
+  { id: 'sell', label: 'Sell a product', to: (id) => `/patients/${id}?tab=ledger&sell=1`, perm: 'billing:write' },
+  { id: 'giftcert', label: 'Use a gift certificate', to: (id) => `/patients/${id}?tab=ledger&redeem=1`, perm: 'billing:write' },
+  { id: 'disclose', label: 'Record a disclosure (HIPAA)', to: (id) => `/compliance?tab=disclosures&new=1&patient=${id}`, perm: 'patients:write' },
 ];
 // Runs an action for a patient: goes to its screen, or does it right here.
 export const runPatientAction = (a, id, nav) => (a.run ? a.run(id) : nav(a.to(id)));

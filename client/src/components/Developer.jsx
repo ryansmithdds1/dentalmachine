@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { api } from '../api.js';
 import { useApi } from '../hooks.js';
 import { fmtDateTime } from '../format.js';
-import { Badge, ErrorBox, Modal, useSubmit } from './ui.jsx';
+import { Badge, ErrorBox, Modal, useSubmit, ConfirmButton } from './ui.jsx';
+import { toast } from '../toast.js';
 
 // Settings → API & webhooks.
 export default function Developer() {
@@ -10,6 +11,7 @@ export default function Developer() {
   const { data: hooks, reload: reloadHooks } = useApi('/webhooks');
   const [newKey, setNewKey] = useState(null);
   const [shown, setShown] = useState(null);
+  const [hookSecret, setHookSecret] = useState(null);
   const [newHook, setNewHook] = useState(null);
   const [err, setErr] = useState(null);
   const run = async (fn) => { setErr(null); try { await fn(); } catch (e) { setErr(e); } };
@@ -38,7 +40,7 @@ export default function Developer() {
                 <td>{k.name}</td><td><code>{k.prefix}…</code></td>
                 <td style={{ fontSize: 12 }}>{k.scopes.map((s) => keys.scopes[s]).join(', ')}</td>
                 <td>{k.revoked_at ? 'Revoked' : k.last_used_at ? fmtDateTime(k.last_used_at) : 'Never'}</td>
-                <td>{!k.revoked_at && <button className="small danger" onClick={() => window.confirm(`Revoke “${k.name}”? Anything using it stops working.`) && run(async () => { await api.del(`/api-keys/${k.id}`); reloadKeys(); })}>Revoke</button>}</td>
+                <td>{!k.revoked_at && <ConfirmButton ask={`Revoke “${k.name}”? Anything using it stops working.`} yes="Revoke" onConfirm={() => run(async () => { await api.del(`/api-keys/${k.id}`); reloadKeys(); })}>Revoke</ConfirmButton>}</td>
               </tr>
             ))}
             {!keys.keys.length && <tr><td colSpan={5} className="muted">No keys yet.</td></tr>}
@@ -67,6 +69,11 @@ claude mcp add --transport http dental-machine ${window.location.origin}/api/mcp
           </div>
           <button className="primary" onClick={() => setNewHook({ url: 'https://', events: ['appointment.created', 'appointment.cancelled'] })}>+ Endpoint</button>
         </div>
+        {hookSecret && (
+          <div className="public-notice ok" style={{ marginTop: 10 }}>
+            Endpoint added. Copy its signing secret now — it won’t be shown again:<div style={{ fontFamily: 'monospace', wordBreak: 'break-all', marginTop: 4 }}>{hookSecret}</div>
+          </div>
+        )}
         {hooks.endpoints.map((e) => (
           <div key={e.id} className="inline" style={{ justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--border)', flexWrap: 'wrap' }}>
             <div>
@@ -74,9 +81,9 @@ claude mcp add --transport http dental-machine ${window.location.origin}/api/mcp
               <div className="muted" style={{ fontSize: 12 }}>{e.events.join(', ')} · secret {e.secret_hint}{e.failures ? ` · ${e.failures} recent failures` : ''}</div>
             </div>
             <div className="inline" style={{ gap: 6 }}>
-              <button className="small" onClick={() => run(async () => { const r = await api.post(`/webhooks/${e.id}/test`); window.alert(r.status === 'delivered' ? `Delivered (HTTP ${r.response_code})` : `Failed: ${r.last_error}`); reloadHooks(); })}>Send test</button>
+              <button className="small" onClick={() => run(async () => { const r = await api.post(`/webhooks/${e.id}/test`); toast(r.status === 'delivered' ? `Test delivered (HTTP ${r.response_code})` : `Test failed: ${r.last_error}`, { tone: r.status === 'delivered' ? 'ok' : 'error' }); reloadHooks(); })}>Send test</button>
               <button className="small" onClick={() => run(async () => { await api.put(`/webhooks/${e.id}`, { active: !e.active }); reloadHooks(); })}>{e.active ? 'Pause' : 'Resume'}</button>
-              <button className="small danger" onClick={() => window.confirm('Delete this endpoint?') && run(async () => { await api.del(`/webhooks/${e.id}`); reloadHooks(); })}>Delete</button>
+              <ConfirmButton ask="Delete this endpoint? Its signing secret goes with it." yes="Delete" onConfirm={() => run(async () => { await api.del(`/webhooks/${e.id}`); reloadHooks(); })}>Delete</ConfirmButton>
             </div>
           </div>
         ))}
@@ -93,7 +100,7 @@ claude mcp add --transport http dental-machine ${window.location.origin}/api/mcp
       </div>
 
       {newKey && <KeyForm meta={keys} init={newKey} onClose={() => setNewKey(null)} onDone={(k) => { setNewKey(null); setShown(k.key); reloadKeys(); }} />}
-      {newHook && <HookForm events={hooks.events} init={newHook} onClose={() => setNewHook(null)} onDone={(h) => { setNewHook(null); setShown(null); window.alert(`Endpoint added. Its signing secret (shown once):\n\n${h.secret}`); reloadHooks(); }} />}
+      {newHook && <HookForm events={hooks.events} init={newHook} onClose={() => setNewHook(null)} onDone={(h) => { setNewHook(null); setShown(null); setHookSecret(h.secret); reloadHooks(); }} />}
     </>
   );
 }

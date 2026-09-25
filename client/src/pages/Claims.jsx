@@ -4,7 +4,7 @@ import { api, getToken } from '../api.js';
 import { useApi } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
 import { money, fmtDate, fmtDateTime, toCents } from '../format.js';
-import { Badge, ErrorBox, Modal, MoreRows } from '../components/ui.jsx';
+import { Badge, ErrorBox, Modal, MoreRows, ConfirmButton } from '../components/ui.jsx';
 import { PlanSummary } from '../components/patient/PaymentPlans.jsx';
 import { ChStatus, ClearinghousePanel, sendClaims, describeResponses } from '../components/ClaimEdi.jsx';
 import ClaimFollowup from '../components/billing/ClaimFollowup.jsx';
@@ -149,6 +149,7 @@ function ClaimList() {
       </div>
       <ClearinghousePanel onChange={reload} version={sent} />
       <ErrorBox error={err} />
+      {err?.resend && <div className="inline" style={{ marginBottom: 10 }}><button className="small danger" onClick={async () => { setErr(null); try { await err.resend(); setNotice('Resent.'); reload(); } catch (e) { setErr(e); } }}>Resend anyway</button></div>}
       {notice && <div className="public-notice ok" style={{ marginBottom: 12 }}>{notice}</div>}
       {can('billing:write') && picked.length > 0 && (
         <div className="card inline" style={{ justifyContent: 'space-between', flexWrap: 'wrap', marginBottom: 12 }}>
@@ -159,7 +160,7 @@ function ClaimList() {
               <button disabled={busy} onClick={() => each(picked.filter((c) => ['submitted', 'partially_paid'].includes(c.status)), (c) => api.post(`/claims/${c.id}/status-check`), (n) => `Checked status on ${n} claim${n === 1 ? '' : 's'}.`)}>Check status</button>
             )}
             {picked.some((c) => ['draft', 'denied'].includes(c.status)) && (
-              <button className="danger" disabled={busy} onClick={() => window.confirm('Void the selected unsent/denied claims? Their procedures can go on a new claim.') && each(picked.filter((c) => ['draft', 'denied'].includes(c.status)), (c) => api.post(`/claims/${c.id}/void`), (n) => `Voided ${n} claim${n === 1 ? '' : 's'}.`)}>Void</button>
+              <ConfirmButton className="danger" disabled={busy} ask="Void the selected unsent/denied claims? Their procedures can go on a new claim." yes="Void them" onConfirm={() => each(picked.filter((c) => ['draft', 'denied'].includes(c.status)), (c) => api.post(`/claims/${c.id}/void`), (n) => `Voided ${n} claim${n === 1 ? '' : 's'}.`)}>Void</ConfirmButton>
             )}
             {picked.some((c) => ['draft', 'denied'].includes(c.status)) && (
               <button className="primary" onClick={() => batch(picked.filter((c) => ['draft', 'denied'].includes(c.status)).map((c) => c.id))}>{ch?.batch ? 'Send to clearinghouse' : 'Download as 837'}</button>

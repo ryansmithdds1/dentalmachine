@@ -1,0 +1,5 @@
+/* Selling a product on the ledger or at checkout (RetailPanels.jsx). */
+.retail-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 210px), 1fr)); gap: 6px; }
+.retail-item { display: flex; align-items: center; gap: 8px; justify-content: flex-start; text-align: left; }
+.retail-item span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.retail-item.active { border-color: var(--primary); background: var(--primary-soft); }

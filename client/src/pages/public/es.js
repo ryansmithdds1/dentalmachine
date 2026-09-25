@@ -242,6 +242,8 @@ export default {
   'Confirmed': 'Confirmada',
   'Confirm': 'Confirmar',
   'Cancel the {when} visit?': '¿Cancelar la cita del {when}?',
+  'Keep it': 'Mantenerla',
+  'Not now': 'Ahora no',
   'Cancel': 'Cancelar',
   'Book a visit online': 'Haga una cita en línea',
   'or call {phone}.': 'o llame al {phone}.',

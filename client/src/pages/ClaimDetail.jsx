@@ -5,7 +5,7 @@ import { useApi } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
 import { money, fmtDate, fmtUtcDate, toCents, fromCents } from '../format.js';
 import { ChStatus, ClaimEdiCard, sendClaims } from '../components/ClaimEdi.jsx';
-import { Badge, ErrorBox, Modal, useSubmit } from '../components/ui.jsx';
+import { AskButton, Badge, ConfirmButton, ErrorBox, Modal, useSubmit } from '../components/ui.jsx';
 import { useShortcuts, isMac } from '../shortcuts.js';
 import { undoable, toast } from '../toast.js';
 import './claimdetail.css';
@@ -51,28 +51,31 @@ export default function ClaimDetail() {
           {w && ['submitted', 'partially_paid'].includes(c.status) && <button className="primary" onClick={() => setModal('pay')}>Enter EOB payment</button>}
           {w && c.status === 'submitted' && <button className="danger" onClick={() => setModal('deny')}>Denied</button>}
           {w && ['draft', 'denied'].includes(c.status) && <button onClick={() => setModal('edit')}>Edit claim</button>}
-          {w && ['draft', 'denied'].includes(c.status) && <button className="danger" onClick={() => confirm('Void this claim? Procedures become billable again.') && act(() => api.post(`/claims/${c.id}/void`))}>Void</button>}
+          {/* Voiding can't be taken back (the procedures go back to billable), so it asks once — on the page. */}
+          {w && ['draft', 'denied'].includes(c.status) && <ConfirmButton className="danger" ask="Void this claim? Its procedures become billable again." yes="Void claim" onConfirm={() => act(() => api.post(`/claims/${c.id}/void`))}>Void</ConfirmButton>}
           {w && ['submitted', 'denied'].includes(c.status) && (
             <>
-              <button title="Send a replacement claim (frequency 7) — the payer's claim number is needed" onClick={() => {
-                const ref = window.prompt("Corrected claim: a new claim replaces this one at the payer.\n\nPayer's claim number for the original:", c.payer_claim_number || '');
-                if (ref?.trim()) act(async () => { const n = await api.post(`/claims/${c.id}/correct`, { original_reference: ref }); navigate(`/claims/${n.id}`); });
-              }}>Corrected claim…</button>
-              <button className="danger" title="Tell the payer to cancel this claim (frequency 8)" onClick={() => {
-                const ref = window.prompt("Void at the payer: sends a cancellation for this claim.\n\nPayer's claim number for the original:", c.payer_claim_number || '');
-                if (ref?.trim()) act(async () => { const n = await api.post(`/claims/${c.id}/correct`, { kind: 'void', original_reference: ref }); navigate(`/claims/${n.id}`); });
-              }}>Void at payer…</button>
+              {/* The payer's number for the original, in a box right here (filled in when the ERA or claim status
+                  already gave it): Enter sends. */}
+              <AskButton className="" title="Send a replacement claim (frequency 7) — the payer's claim number is needed"
+                label="Payer’s claim # for the original" initial={c.payer_claim_number || ''} required submit="Make corrected claim"
+                hint="A new claim replaces this one at the payer (from the EOB or claim status)."
+                onSubmit={async (ref) => { const n = await api.post(`/claims/${c.id}/correct`, { original_reference: ref }); navigate(`/claims/${n.id}`); }}>Corrected claim…</AskButton>
+              <AskButton className="danger" danger title="Tell the payer to cancel this claim (frequency 8)"
+                label="Payer’s claim # to cancel" initial={c.payer_claim_number || ''} required submit="Send void to payer"
+                hint="Sends a cancellation for this claim to the payer."
+                onSubmit={async (ref) => { const n = await api.post(`/claims/${c.id}/correct`, { kind: 'void', original_reference: ref }); navigate(`/claims/${n.id}`); }}>Void at payer…</AskButton>
             </>
           )}
           {w && ['paid', 'partially_paid'].includes(c.status) && (
-            <button onClick={() => {
-              const reason = window.prompt('Reopen this claim? Its insurance payments and write-offs are reversed on the ledger and it goes back to waiting on the payer.\n\nReason:');
-              if (reason?.trim()) act(() => api.post(`/claims/${c.id}/reopen`, { reason }));
-            }}>Reopen claim</button>
+            <AskButton className="" label="Why reopen it?" required submit="Reopen claim"
+              hint="Its insurance payments and write-offs are reversed on the ledger and it goes back to waiting on the payer."
+              onSubmit={async (reason) => { await api.post(`/claims/${c.id}/reopen`, { reason }); reload(); }}>Reopen claim</AskButton>
           )}
         </div>
       </div>
       <ErrorBox error={err} />
+      {err?.resend && <div className="inline" style={{ marginBottom: 10 }}><button className="small danger" onClick={() => act(err.resend)}>Resend anyway</button></div>}
       {c.denial_reason && <div className="error">Denial reason: {c.denial_reason}</div>}
       {w && ['denied', 'partially_paid', 'paid'].includes(c.status) && <Appeal key={c.id} claim={c} onSent={() => setEdits((n) => n + 1)} />}
       {c.payer_claim_number && <div className="muted" style={{ marginBottom: 8 }}>Payer claim # {c.payer_claim_number}</div>}

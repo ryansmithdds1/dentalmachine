@@ -5,6 +5,7 @@ import { useApi, useLookup } from '../../hooks.js';
 import { useAuth } from '../../auth.jsx';
 import { money, fmtDate, fmtDateTime, age, label } from '../../format.js';
 import { ErrorBox, Modal, PatientPicker, useSubmit } from '../ui.jsx';
+import { toast } from '../../toast.js';
 
 // Household view: everyone the guarantor is responsible for, with balances, visits and recall.
 export default function FamilyTab({ patient, onChange }) {
@@ -48,9 +49,12 @@ export default function FamilyTab({ patient, onChange }) {
             <Link to={`/patients/${g.id}/statement?family=1`}><button>Family statement</button></Link>
             {can('schedule:write') && data.members.length > 1 && <button onClick={() => setModal('book')}>Book family visit</button>}
             {can('patients:write') && <button onClick={() => setModal('link')}>Link existing patient</button>}
-            {can('patients:write') && <button className="primary" onClick={() => setModal('new')}>+ Add family member</button>}
+            {can('patients:write') && <button className="primary" onClick={() => { setModal(null); setTimeout(() => document.querySelector('.family-add input')?.focus(), 0); }} title="Type the name and birth date on the add line">+ Add family member</button>}
           </div>
         </div>
+        {can('patients:write') && (modal === 'new'
+          ? <div className="inline-editor"><h3>Add family member</h3><NewMember guarantor={g} onDone={() => { setModal(null); reload(); onChange?.(); }} onCancel={() => setModal(null)} /></div>
+          : <FamilyAddLine guarantor={g} onDone={() => { reload(); onChange?.(); }} onMore={() => setModal('new')} />)}
         <div className="table-wrap">
           <table>
             <thead><tr><th>Name</th><th>Relationship</th><th>Age</th><th>Next visit</th><th>Recall due</th><th className="num">Balance</th><th /></tr></thead>
@@ -93,11 +97,6 @@ export default function FamilyTab({ patient, onChange }) {
       {modal === 'book' && (
         <Modal title={`Book the ${g.last_name} family`} wide onClose={() => setModal(null)}>
           <FamilyBooking members={data.members} onDone={(appts) => { setModal(null); reload(); onChange?.(); if (appts?.length) nav(`/schedule?date=${appts[0].start_time.slice(0, 10)}`); }} />
-        </Modal>
-      )}
-      {modal === 'new' && (
-        <Modal title="Add family member" onClose={() => setModal(null)}>
-          <NewMember guarantor={g} onDone={() => { setModal(null); reload(); }} />
         </Modal>
       )}
       {modal === 'second' && (
@@ -157,7 +156,55 @@ function SecondResponsible({ guarantor, onDone }) {
   );
 }
 
-function NewMember({ guarantor, onDone }) {
+// "Kit 6/6/2016" (or "Kit Parent 2016-06-06"): the first name — and a last name when it isn't the guarantor's —
+// and the birth date, in one box. Pure, so it's easy to check.
+export function parseFamilyLine(text, lastName) {
+  let rest = ` ${String(text || '')} `;
+  let dob = '';
+  const iso = /\s(\d{4})-(\d{1,2})-(\d{1,2})\s/.exec(rest);
+  const us = /\s(\d{1,2})[/.-](\d{1,2})[/.-](\d{4}|\d{2})\s/.exec(rest);
+  const m = iso ? [iso[0], iso[1], iso[2], iso[3]] : us ? [us[0], us[3].length === 2 ? `20${us[3]}` : us[3], us[1], us[2]] : null;
+  if (m) {
+    const [, y, mo, d] = m.map(String);
+    const dt = new Date(Date.UTC(Number(y), Number(mo) - 1, Number(d)));
+    if (dt.getUTCMonth() === Number(mo) - 1 && dt.getUTCDate() === Number(d)) dob = `${y}-${mo.padStart(2, '0')}-${d.padStart(2, '0')}`;
+    rest = rest.replace(m[0], ' ');
+  }
+  const words = rest.trim().split(/\s+/).filter(Boolean).map((w) => (w === w.toLowerCase() ? w[0].toUpperCase() + w.slice(1) : w));
+  if (!words.length) return null;
+  return { first_name: words[0], last_name: words.slice(1).join(' ') || lastName, dob };
+}
+
+function FamilyAddLine({ guarantor, onDone, onMore }) {
+  const [text, setText] = useState('');
+  const parsed = parseFamilyLine(text, guarantor.last_name);
+  const years = parsed?.dob ? age(parsed.dob) : null;
+  // Under 26 on the guarantor's family: a child to start with; an adult: their spouse. Changeable before Enter.
+  const [rel, setRel] = useState('');
+  const relationship = rel || (years != null && years >= 26 ? 'spouse' : 'child');
+  const { submit, busy, error } = useSubmit(async () => {
+    if (!parsed) throw new Error('Type their first name and birth date, e.g. Kit 6/6/2016');
+    const made = await api.post(`/patients/${guarantor.id}/family`, { ...parsed, dob: parsed.dob || null, relationship });
+    toast(`${parsed.first_name} ${parsed.last_name} added to the family`);
+    setText('');
+    setRel('');
+    onDone(made);
+  });
+  return (
+    <form className="quick-add family-add" onSubmit={(e) => { e.preventDefault(); submit(); }} aria-label="Add a family member">
+      <label className="grow">Add to the family — name and birth date
+        <input value={text} onChange={(e) => setText(e.target.value)} placeholder={`Kit 6/6/2016 (last name ${guarantor.last_name} unless you type one)`} />
+      </label>
+      <label>Relationship<select value={relationship} onChange={(e) => setRel(e.target.value)}>{['spouse', 'child', 'dependent', 'parent', 'other'].map((r) => <option key={r} value={r}>{label(r)}</option>)}</select></label>
+      <button className="primary" disabled={busy || !parsed}>Add</button>
+      <button type="button" className="link" onClick={onMore}>More fields…</button>
+      {parsed && <span className="muted quick-add-error">{parsed.first_name} {parsed.last_name}{parsed.dob ? ` · born ${fmtDate(parsed.dob)} (${years} y)` : ' · no birth date yet'} · address, phone and email from {guarantor.first_name}</span>}
+      {error && <div className="quick-add-error"><ErrorBox error={error} /></div>}
+    </form>
+  );
+}
+
+function NewMember({ guarantor, onDone, onCancel }) {
   const [form, setForm] = useState({ first_name: '', last_name: guarantor.last_name, dob: '', gender: '', relationship: 'child' });
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
   const { submit, busy, error } = useSubmit(async () => {
@@ -168,14 +215,14 @@ function NewMember({ guarantor, onDone }) {
     <form onSubmit={(e) => { e.preventDefault(); submit(); }}>
       <ErrorBox error={error} />
       <div className="form-grid">
-        <label>First name<input required value={form.first_name} onChange={set('first_name')} /></label>
+        <label>First name<input required autoFocus value={form.first_name} onChange={set('first_name')} /></label>
         <label>Last name<input value={form.last_name} onChange={set('last_name')} /></label>
         <label>Date of birth<input type="date" value={form.dob} onChange={set('dob')} /></label>
         <label>Gender<select value={form.gender} onChange={set('gender')}><option value="">—</option><option value="female">Female</option><option value="male">Male</option><option value="other">Other</option></select></label>
         <label>Relationship to {guarantor.first_name}<select value={form.relationship} onChange={set('relationship')}>{['spouse', 'child', 'dependent', 'parent', 'other'].map((r) => <option key={r} value={r}>{label(r)}</option>)}</select></label>
       </div>
       <p className="muted" style={{ fontSize: 12 }}>Address, phone and email are copied from the guarantor.</p>
-      <div className="form-actions"><button className="primary" disabled={busy}>Add to family</button></div>
+      <div className="form-actions">{onCancel && <button type="button" onClick={onCancel}>Cancel</button>}<button className="primary" disabled={busy}>Add to family</button></div>
     </form>
   );
 }
