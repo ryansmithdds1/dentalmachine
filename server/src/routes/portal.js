@@ -216,7 +216,7 @@ export function portalRoutes({ db, secret, config, payments, messenger, storage 
     const a = await ownAppt(req);
     const now = await practiceNow(db, req.portal.practice.id);
     if (a.start_time <= addHours(now, 24)) throw new HttpError(409, `Visits within 24 hours can't be cancelled online — please call ${req.portal.practice.phone || 'the office'}`);
-    await recorded(db, 'appointments', a.id, () => db.run("UPDATE appointments SET status = 'cancelled' WHERE id = ?", a.id));
+    await recorded(db, 'appointments', a.id, () => db.run("UPDATE appointments SET status = 'cancelled', cancelled_at = ? WHERE id = ?", now, a.id));
     await db.run("UPDATE procedures SET appointment_id = NULL WHERE appointment_id = ? AND status = 'planned'", a.id);
     const p = req.portal.household.find((h) => h.id === a.patient_id);
     await insert(db, 'tasks', {

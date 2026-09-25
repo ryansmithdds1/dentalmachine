@@ -26,8 +26,14 @@ export const pct = (p) => Math.round(p * 100);
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const round2 = (x) => Math.round(x * 100) / 100;
 
-// Typical rates for a dental office, used only until the office has its own history.
-export const PRIORS = { no_show: 0.08, denial: 0.05 };
+// Which version of the built-in model gave an answer (stored with each prediction staff saw, predict/log.js). Bump
+// it when the rules change what a percentage means. 2: late cancellations by the practice's window (latecancel.js)
+// and the claim-level "at least one line" combination.
+export const MODEL_VERSION = 'builtin-2';
+
+// Typical rates for a dental office, used only until the office has its own history. whole_claim: the share of
+// claim lines whose claim is turned down as a whole (not just that line).
+export const PRIORS = { no_show: 0.08, denial: 0.05, whole_claim: 0.03 };
 // How strongly each factor counts (overlapping factors are damped) and how many cases it takes to trust a group's
 // own rate over the wider one.
 export const NO_SHOW_WEIGHTS = { patient: 1, confirmed: 0.8, first_visit: 0.6, lead: 0.5, type: 0.5, weekday: 0.4, time: 0.4, owes: 0.4 };
@@ -97,16 +103,21 @@ export function predictNoShow(f) {
 export const RULE_SHIFT = { deny: 2.2, more_deny: 0.5, narrative: 0.8, warn: 0.3 };
 
 // f: see denial.js lineFeatures. Returns { probability, percent, confidence, reasons, factors, base_rate }.
+// How many claim lines at the wider rate each history is pulled toward (payer and code toward the office's; payer ×
+// code toward those two; with or without a narrative toward payer × code). Heavy enough that a handful of claims —
+// 4 denied of 4 — can't by themselves push a line past about 70%; a scrubber 'deny' hit (RULE_SHIFT) still can,
+// because that's evidence about this claim, not a small sample.
+export const K_DENIAL = { payer: 15, code: 15, payer_code: 15, narrative: 15 };
 export function predictDenial(f) {
   const L = f.labels || {};
   const base = smoothed(f.practice, PRIORS.denial, K.practice);
-  const payer = smoothed(f.payer_stats, base, 10);
-  const code = smoothed(f.code_stats, base, 10);
+  const payer = smoothed(f.payer_stats, base, K_DENIAL.payer);
+  const code = smoothed(f.code_stats, base, K_DENIAL.code);
   // Payer × code, with the payer's and the code's own rates as its starting point.
   const pcPrior = clamp(sigmoid(logit(payer) + logit(code) - logit(base)), 0.001, 0.999);
-  let hist = smoothed(f.payer_code_stats, pcPrior, 5);
+  let hist = smoothed(f.payer_code_stats, pcPrior, K_DENIAL.payer_code);
   const narr = f.narrative === false && f.payer_code_narr_stats?.n > 0;
-  if (narr) hist = smoothed(f.payer_code_narr_stats, hist, 3);
+  if (narr) hist = smoothed(f.payer_code_narr_stats, hist, K_DENIAL.narrative);
   const factors = [{ key: 'history', shift: round2(logit(hist) - logit(base)) }];
   const reasons = [];
   const pc = narr ? f.payer_code_narr_stats : f.payer_code_stats;
@@ -131,6 +142,48 @@ export function predictDenial(f) {
   if ((f.practice?.n || 0) < LITTLE_HISTORY.practice) reasons.push('not much claim history yet');
   else if (pcN < 3 && !rules.deny) reasons.push(`not enough history with ${L.payer || 'this payer'} for ${f.code} yet`);
   return { probability: round2(probability), percent: pct(probability), confidence, reasons: reasons.slice(0, 3), factors, base_rate: round2(base) };
+}
+
+// ---- A claim: the chance at least one of its lines is denied ----
+// Lines on one claim aren't independent: they share the payer, the patient and the claim itself (a payer that turns
+// down whole claims, a filing limit that applies to every line). Multiplying the lines' chances as if independent
+// would count that shared part once per line, so a 4-line claim would look far riskier than it is.
+//
+//   shared   the chance the whole claim is turned down (this payer's history of whole-claim denials, plus rule
+//            hits that are on every line, like a filing limit): counted once.
+//   p₁…pₙ    each line's own chance (the line model above, which already includes the shared part).
+//
+// Start from the riskiest line (its chance includes the shared part). Every other line adds only its own extra
+// risk, the part its chance has beyond the shared one: extraⱼ = 1 − (1 − pⱼ) / (1 − shared), never below 0. Then
+//   claim = 1 − (1 − p_riskiest) × Π (1 − extraⱼ)
+// One line: exactly that line. Nothing shared: the independent product 1 − Π(1 − pᵢ). Everything shared: the riskiest
+// line. It never falls below the riskiest line or above the independent product, rises with any line's chance, and
+// falls as more of the risk is shared.
+export function claimChance(probabilities, shared = 0) {
+  const ps = probabilities.map((p) => clamp(Number(p) || 0, 0, 0.999));
+  if (!ps.length) return null;
+  const q = clamp(Number(shared) || 0, 0, 0.999);
+  const top = ps.indexOf(Math.max(...ps));
+  let keep = 1 - ps[top];
+  ps.forEach((p, i) => {
+    if (i === top) return;
+    const extra = Math.max(0, 1 - (1 - p) / (1 - q));
+    keep *= 1 - extra;
+  });
+  return 1 - keep;
+}
+
+// The shared part for claimChance: the payer's (smoothed) rate of whole-claim denials, moved by the rule hits that
+// are on every line of the claim. f: { practice: {n,hits}, payer: {n,hits} } counted over lines; rules: deny hits.
+// Smoothed heavily (as if 25 more lines at the office's rate) and capped like the other group factors, so a payer
+// with a handful of claims can't make the shared part — and with it the claim — swing on a few outcomes.
+export const K_SHARED = 25;
+export function sharedDenial(f = {}, claimWideDeny = 0) {
+  const practice = smoothed(f.practice, PRIORS.whole_claim, K.practice);
+  const payer = smoothed(f.payer, practice, K_SHARED);
+  const history = clamp(logit(payer) - logit(practice), -MAX_SHIFT.group, MAX_SHIFT.group);
+  const shift = claimWideDeny > 0 ? RULE_SHIFT.deny + RULE_SHIFT.more_deny * (claimWideDeny - 1) : 0;
+  return clamp(sigmoid(logit(practice) + history + shift), 0.001, 0.97);
 }
 
 export const builtin = {

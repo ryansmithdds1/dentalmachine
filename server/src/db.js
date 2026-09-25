@@ -5440,6 +5440,31 @@ CREATE TABLE IF NOT EXISTS demo_seed_state (
   updated_at TEXT NOT NULL,
   finished_at TEXT
 );
+-- Predictions as staff saw them (predict/log.js, docs/predictions.md): written when a no-show or denial percentage
+-- is served to a person, so Reports → Prediction accuracy can compare what the team was told with what happened.
+-- Derived analytics, not a clinical record: never edited, and one row per subject, percentage and day (the unique
+-- key), however often the screen is opened. subject_type: appointment (no-show), procedure (a claim line), claim
+-- (a saved claim), claim_group (Ready to approve, before the claim exists; subject_id is its first procedure).
+CREATE TABLE IF NOT EXISTS prediction_log (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  location_id INTEGER REFERENCES locations(id),
+  kind TEXT NOT NULL,
+  subject_type TEXT NOT NULL,
+  subject_id INTEGER NOT NULL,
+  probability REAL NOT NULL,
+  percent INTEGER NOT NULL,
+  confidence TEXT,
+  driver TEXT,
+  model_version TEXT,
+  reasons TEXT,
+  screen TEXT,
+  shown_to INTEGER REFERENCES users(id),
+  shown_on TEXT NOT NULL,
+  shown_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (practice_id, kind, subject_type, subject_id, shown_on, percent)
+);
+CREATE INDEX IF NOT EXISTS idx_prediction_log_shown ON prediction_log(practice_id, kind, shown_on);
 `;
 
 // Columns added after the first release. SQLite has no ADD COLUMN IF NOT EXISTS, so check first.
@@ -6031,6 +6056,17 @@ const COLUMNS = [
   // Ledger by visit: a patient payment or adjustment staff applied to a visit points at one of that visit's
   // charges (ledgervisits.js). Only this link ever changes on the entry (POST /ledger/:id/link|unlink, audited).
   ['ledger_entries', 'applied_to_id', 'INTEGER REFERENCES ledger_entries(id)'],
+  // When a visit was cancelled, in the practice's own time like start_time (latecancel.js), so "cancelled within N
+  // hours of the visit" can be told from an early cancellation. Set by every path that cancels a visit, cleared
+  // when it's put back on the schedule; filled for older cancellations from the change log (migration 3).
+  ['appointments', 'cancelled_at', 'TEXT'],
+  // The practice's late-cancel window: a cancellation less than this many hours before the visit counts as late
+  // (no-show predictions, the optimizer's Double-confirm). Settings → Messages → Appointment reminders.
+  ['practices', 'late_cancel_hours', 'INTEGER NOT NULL DEFAULT 24'],
+  // The themed demo (themeddemo.js): which version of the plan the seed was built with (NULL = the first), and
+  // which in-place realism upgrade a finished older seed has had.
+  ['demo_seed_state', 'plan_version', 'INTEGER'],
+  ['demo_seed_state', 'upgraded', 'INTEGER NOT NULL DEFAULT 0'],
 ];
 
 // CHECK constraints widened after release: [table, constraint name on Postgres, old text, new text].

@@ -24,7 +24,7 @@ import { withActor } from './actor.js';
 import { DEMO_PASSWORD } from './demo.js';
 import * as D from './themeddata.js';
 import { SAMPLE_IMAGES } from './themedimages.js';
-import { SIZES, buildPlan, CODES, VISIT_KINDS, ppoFee, dn, ds, hhmm, rng, isWorkday } from './themedplan.js';
+import { SIZES, buildPlan, CODES, VISIT_KINDS, ppoFee, dn, ds, hhmm, rng, isWorkday, visitFacts, PLAN_VERSION } from './themedplan.js';
 
 export { THEMED_ADMIN_EMAIL } from './themeddata.js';
 export const THEMED_SIZES = SIZES;
@@ -75,16 +75,21 @@ async function readState(db) {
 }
 
 const plans = new Map();
+// The plan the seed started with: a seed from before plan version 2 (plan_version empty) finishes with version 1.
+const versionOf = (state) => Number(state.plan_version) || 1;
 function planFor(state) {
-  const k = `${state.size}|${state.anchor}`;
-  if (!plans.has(k)) { plans.clear(); plans.set(k, buildPlan(state.size, state.anchor)); }
+  const k = `${state.size}|${state.anchor}|${versionOf(state)}`;
+  if (!plans.has(k)) { plans.clear(); plans.set(k, buildPlan(state.size, state.anchor, versionOf(state))); }
   return plans.get(k);
 }
 
 // Status of the themed seed, for the CLI and tests.
 export async function themedStatus(db) {
   const s = await readState(db);
-  return s ? { phase: s.phase, cursor: s.cursor, size: s.size, anchor: s.anchor, practice_id: s.themed_practice_id, done: s.phase === 'done', started_at: s.started_at, finished_at: s.finished_at } : null;
+  return s ? {
+    phase: s.phase, cursor: s.cursor, size: s.size, anchor: s.anchor, practice_id: s.themed_practice_id, done: s.phase === 'done', started_at: s.started_at, finished_at: s.finished_at,
+    plan_version: versionOf(s), upgraded: Number(s.upgraded) || 0,
+  } : null;
 }
 
 let finished = false;
@@ -101,14 +106,19 @@ export async function runThemedDemoBatch(db, { seconds = 20, size, storage = nul
     const anchor = localNow(D.PRACTICE.timezone).slice(0, 10);
     // A themed practice made before the marker existed counts as done: never a second copy.
     const exists = await db.get('SELECT id, practice_id FROM users WHERE lower(email) = lower(?)', D.THEMED_ADMIN_EMAIL);
+    // A new seed is built with the current plan; one found already there (made before the marker) is version 1.
     await db.run(
-      `INSERT INTO demo_seed_state (key, size, anchor, phase, cursor, data, themed_practice_id, started_at, updated_at, finished_at)
-       VALUES (?, ?, ?, ?, 0, '{}', ?, ?, ?, ?) ON CONFLICT (key) DO NOTHING`,
-      KEY, sizeName, anchor, exists ? 'done' : 'setup', exists?.practice_id ?? null, nowIso(), nowIso(), exists ? nowIso() : null,
+      `INSERT INTO demo_seed_state (key, size, anchor, phase, cursor, data, themed_practice_id, started_at, updated_at, finished_at, plan_version, upgraded)
+       VALUES (?, ?, ?, ?, 0, '{}', ?, ?, ?, ?, ?, ?) ON CONFLICT (key) DO NOTHING`,
+      KEY, sizeName, anchor, exists ? 'done' : 'setup', exists?.practice_id ?? null, nowIso(), nowIso(), exists ? nowIso() : null, exists ? null : PLAN_VERSION, exists ? 0 : REALISM_UPGRADE,
     );
     state = await readState(db);
   }
-  if (state.phase === 'done') { finished = true; return { done: true, phase: 'done', steps: 0, ms: Date.now() - t0, practiceId: state.themed_practice_id }; }
+  if (state.phase === 'done') {
+    const upgraded = await upgradeRealism(db, state);
+    finished = true;
+    return { done: true, phase: 'done', steps: upgraded ? 1 : 0, ms: Date.now() - t0, practiceId: state.themed_practice_id, ...(upgraded ? { upgraded } : {}) };
+  }
   const leaseMs = Math.max(60, seconds * 3) * 1000;
   const until = () => new Date(Date.now() + leaseMs).toISOString();
   const took = await db.run(
@@ -132,8 +142,96 @@ export async function runThemedDemoBatch(db, { seconds = 20, size, storage = nul
     await db.run('UPDATE demo_seed_state SET lease_owner = NULL, lease_until = NULL WHERE key = ? AND lease_owner = ?', KEY, owner);
   }
   state = await readState(db);
-  if (state.phase === 'done') finished = true;
-  return { done: state.phase === 'done', phase: state.phase, cursor: state.cursor, steps, ms: Date.now() - t0, practiceId: state.themed_practice_id };
+  let upgraded = null;
+  if (state.phase === 'done') {
+    upgraded = await upgradeRealism(db, state);
+    finished = true;
+  }
+  return { done: state.phase === 'done', phase: state.phase, cursor: state.cursor, steps, ms: Date.now() - t0, practiceId: state.themed_practice_id, ...(upgraded ? { upgraded } : {}) };
+}
+
+// ---- Upgrading a finished older seed in place ----
+// A themed practice loaded with plan version 1 has missed visits that no factor explains, every kept visit confirmed
+// and no missed one — so "confirmed" alone told the answer and Reports → Prediction accuracy looked wrong. It is not
+// reseeded (that would mean deleting a practice); instead, the first batch run after an upgrade (at boot, like the
+// seed itself: index.js / api/index.js with DEMO_THEMED=on) makes its visits realistic, once:
+//   - about 11% of kept visits were never confirmed; about 40% of no-shows had confirmed;
+//   - every cancellation gets a time (cancelled_at): about 45% within a day of the visit (late), the rest days ahead;
+//     some of the late ones had confirmed first;
+//   - half of the missed visits (no-shows and late cancellations) were booked months ahead.
+// Only the themed practice's own visits before today, decided per visit (seeded by its id, so the same database always
+// gets the same answer), in one transaction together with the marker (demo_seed_state.upgraded), so it runs once even
+// with several servers. One audit entry says what it changed, as the seed's own steps do. Which visits were missed
+// can't change in place (their procedures, claims and payments follow from it); a fresh seed (plan version 2) also
+// makes misses follow the patient's record, the day and time, first visits and balances owed.
+export const REALISM_UPGRADE = 1;
+async function upgradeRealism(db, state) {
+  const pid = state.themed_practice_id;
+  if (versionOf(state) >= 2 || (Number(state.upgraded) || 0) >= REALISM_UPGRADE || !pid) return null;
+  // Only ever the themed demo practice: its administrator is the themed login.
+  const own = await db.get('SELECT id FROM users WHERE practice_id = ? AND lower(email) = lower(?)', pid, D.THEMED_ADMIN_EMAIL);
+  if (!own) return null;
+  const today = localNow(D.PRACTICE.timezone);
+  const counts = { unconfirmed_kept: 0, confirmed_no_shows: 0, cancel_times: 0, late_cancels: 0, confirmed_late_cancels: 0, booked_ahead: 0 };
+  let ran = false;
+  await withActor({ source: 'import', actor: ACTOR, practiceId: pid }, () => db.tx(async () => {
+    const took = await db.run('UPDATE demo_seed_state SET upgraded = ?, updated_at = ? WHERE key = ? AND upgraded < ?', REALISM_UPGRADE, nowIso(), KEY, REALISM_UPGRADE);
+    if (!took.changes) return;
+    ran = true;
+    const rows = await db.all(
+      "SELECT id, start_time, created_at, status, confirmed_at, cancelled_at FROM appointments WHERE practice_id = ? AND start_time < ? AND status IN ('completed','checked_in','in_chair','no_show','cancelled') ORDER BY id",
+      pid, today,
+    );
+    const minutes = (s) => Date.parse(`${String(s).slice(0, 16).replace(' ', 'T')}:00Z`) / 60000;
+    const stamp = (m) => new Date(m * 60000).toISOString().replace('T', ' ').slice(0, 19);
+    const unconfirm = [];
+    const confirm = [];
+    const cancelTimes = [];
+    const booked = [];
+    for (const a of rows) {
+      const r = rng(hash(`realism|${a.id}`));
+      const start = minutes(a.start_time);
+      const at9 = (daysBefore) => (Math.floor(start / 1440) - daysBefore) * 1440 + 540 + r.int(0, 540);
+      let missed = a.status === 'no_show';
+      if (['completed', 'checked_in', 'in_chair'].includes(a.status)) {
+        if (a.confirmed_at && r.chance(0.11)) unconfirm.push(a.id);
+      } else if (a.status === 'no_show') {
+        if (!a.confirmed_at && r.chance(0.4)) { confirm.push([a.id, stamp(at9(r.int(1, 3))), r.pick(['sms', 'sms', 'email', 'phone'])]); counts.confirmed_no_shows++; }
+      } else if (!a.cancelled_at) {
+        const late = r.chance(0.45);
+        const cancelledAt = start - (late ? r.int(1, 22) : r.int(2, 14) * 24 + r.int(0, 8)) * 60;
+        cancelTimes.push([a.id, stamp(cancelledAt).slice(0, 16)]);
+        if (late) {
+          missed = true;
+          counts.late_cancels++;
+          if (!a.confirmed_at && r.chance(0.3)) { confirm.push([a.id, stamp(Math.min(at9(r.int(1, 3)), cancelledAt - 30)), r.pick(['sms', 'email'])]); counts.confirmed_late_cancels++; }
+        }
+      }
+      if (missed && r.chance(0.5)) booked.push([a.id, stamp((Math.floor(start / 1440) - r.int(60, 170)) * 1440 + 600 + r.int(0, 400))]);
+    }
+    const inChunks = async (list, fn) => { for (let i = 0; i < list.length; i += 200) await fn(list.slice(i, i + 200)); };
+    const Q = (a) => a.map(() => '?').join(',');
+    await inChunks(unconfirm, (c) => db.run(`UPDATE appointments SET confirmed_at = NULL, confirmed_via = NULL WHERE practice_id = ? AND id IN (${Q(c)})`, pid, ...c));
+    await inChunks(confirm, (c) => db.run(
+      `UPDATE appointments SET confirmed_at = CASE id ${c.map(() => 'WHEN ? THEN ?').join(' ')} END, confirmed_via = CASE id ${c.map(() => 'WHEN ? THEN ?').join(' ')} END WHERE practice_id = ? AND id IN (${Q(c)})`,
+      ...c.flatMap(([id, t]) => [id, t]), ...c.flatMap(([id, , via]) => [id, via]), pid, ...c.map(([id]) => id),
+    ));
+    await inChunks(cancelTimes, (c) => db.run(
+      `UPDATE appointments SET cancelled_at = CASE id ${c.map(() => 'WHEN ? THEN ?').join(' ')} END WHERE practice_id = ? AND cancelled_at IS NULL AND id IN (${Q(c)})`,
+      ...c.flat(), pid, ...c.map(([id]) => id),
+    ));
+    await inChunks(booked, (c) => db.run(
+      `UPDATE appointments SET created_at = CASE id ${c.map(() => 'WHEN ? THEN ?').join(' ')} END WHERE practice_id = ? AND id IN (${Q(c)})`,
+      ...c.flat(), pid, ...c.map(([id]) => id),
+    ));
+    Object.assign(counts, { unconfirmed_kept: unconfirm.length, cancel_times: cancelTimes.length, booked_ahead: booked.length });
+    await db.run(
+      `INSERT INTO audit_log (practice_id, user_id, action, entity, entity_id, details, source, actor, reason)
+       VALUES (?, NULL, 'demo.seed', 'practices', ?, ?, 'import', ?, ?)`,
+      pid, pid, JSON.stringify({ phase: 'realism upgrade', version: REALISM_UPGRADE, rows: counts }), ACTOR, 'Themed demo practice (sample data): realistic confirmations and cancellation times',
+    );
+  }));
+  return ran ? counts : null;
 }
 
 // Runs it to the end (the CLI, tests).
@@ -471,19 +569,25 @@ async function writeHistory(db, plan, ctx, data, list, counts) {
   const visits = list.flatMap((p) => p.visits.map((v) => ({ p, v })));
   const apptRows = visits.map(({ p, v }) => {
     const r = rng(hash(`appt|${p.idx}|${v.idx}`));
-    let status = v.status;
+    // Plan version 2: booking, confirmation and cancellation times that look like a real office's (visitFacts).
+    // Version 1 (a seed started before it) keeps its original rows exactly, so a resumed seed stays consistent.
+    const f = plan.version >= 2 ? visitFacts(plan, p, v, r) : null;
+    let status = f ? f.status : v.status;
     if (status === 'future') status = v.day <= anchor + 2 ? (r.chance(0.65) ? 'confirmed' : 'scheduled') : r.chance(0.25) ? 'confirmed' : 'scheduled';
     const start = at(v.day, v.start, 0).slice(0, 16);
     const end = at(v.day, v.start + v.dur, 0).slice(0, 16);
     const done = status === 'completed';
     const here = ['completed', 'in_chair', 'checked_in'].includes(status);
     const recent = v.day >= anchor - 60;
-    const confirmed = status === 'confirmed' || (done && r.chance(0.8)) || here;
+    const confirmed = f ? !!f.confirmedAt : status === 'confirmed' || (done && r.chance(0.8)) || here;
     return {
       practice_id: ctx.pid, patient_id: pids[p.idx], provider_id: ctx.provOf[v.provider], operatory_id: ctx.ops[v.op], start_time: start, end_time: end, status,
-      reason: VISIT_KINDS[v.kind][0], notes: v.broken && r.chance(0.5) ? `Called to cancel: ${v.broken.toLowerCase()}` : null, created_at: at(Math.min(v.day - r.int(1, 60), anchor), 600 + r.int(0, 400)),
+      reason: VISIT_KINDS[v.kind][0], notes: v.broken && r.chance(0.5) ? `Called to cancel: ${v.broken.toLowerCase()}` : null,
+      created_at: f ? at(f.created[0], f.created[1]) : at(Math.min(v.day - r.int(1, 60), anchor), 600 + r.int(0, 400)),
       appointment_type_id: ctx.types[VISIT_KINDS[v.kind][0]], location_id: ctx.locOf[v.office], asap: status === 'scheduled' && v.day > anchor + 5 && r.chance(0.04) ? 1 : 0,
-      confirmed_at: confirmed ? at(Math.min(anchor, v.day - 2), 540) : null, confirmed_via: confirmed ? r.pick(['sms', 'sms', 'email', 'phone']) : null,
+      confirmed_at: f ? (f.confirmedAt ? at(f.confirmedAt[0], f.confirmedAt[1]) : null) : confirmed ? at(Math.min(anchor, v.day - 2), 540) : null,
+      confirmed_via: f ? f.via : confirmed ? r.pick(['sms', 'sms', 'email', 'phone']) : null,
+      cancelled_at: f?.cancelled ? at(f.cancelled[0], f.cancelled[1]).slice(0, 16) : null,
       reminder_sent_at: recent || v.day > anchor ? (v.day - 2 <= anchor ? at(v.day - 2, 540) : null) : null,
       arrived_at: here ? at(v.day, v.start - r.int(2, 12)) : null, seated_at: here && status !== 'checked_in' ? at(v.day, v.start + r.int(0, 6)) : null,
       dismissed_at: done ? at(v.day, v.start + v.dur - 2) : null, checked_out_at: done ? at(v.day, v.start + v.dur + 3) : null, checked_out_by: done ? U.pepper : null,

@@ -25,6 +25,8 @@ Rules that apply to all of them are in `/CLAUDE.md`.
 ## Scheduling
 - `appointments`: `status` scheduled → confirmed → checked_in → in_chair → completed, or cancelled / no_show
   (never deleted). Flow times: `arrived_at`, `seated_at`, `dismissed_at`. Confirmation: `confirmed_at`, `confirmed_via`.
+  Cancellation: `cancelled_at` (practice time, set by every path that cancels, cleared when put back), `broken_reason`;
+  a late cancellation is one inside the practice's `late_cancel_hours` window (`latecancel.js`).
 - Conflicts checked on the server by `validateAppt` (provider, chair, patient, blockouts, hours).
 - Online requests: `booking_requests` (pending → accepted/declined) until staff or instant booking makes an appointment.
 - Waitlist `waitlist`, cancellation offers `fill_offers` / `fill_offer_recipients`, reminders `appointment_reminders`.
@@ -97,10 +99,12 @@ into open times, requests, moving/cancelling a caller's own visit and messages �
 High-risk changes the assistant makes (money, claims, completing procedures, signing, prescriptions, merges,
 insurance, removals) are refused unless the person approved them on screen (`aiguard.js`); `requireHuman()`
 guards the same functions for AI that isn't a request. AI findings carry a short reason (`xray_findings.note`).
-Predictions (no-show risk per visit, denial risk per claim line — `server/src/predict/`, `docs/predictions.md`) are
-worked out when read, from the practice's own history, and are never stored on or acted on by themselves: they carry
-a probability, a confidence and plain-language reasons, and go through one adapter (built-in model by default; a
-vendor behind it falls back to the built-in model and raises a Needs attention item).
+Predictions (no-show risk per visit, denial risk per claim line and per claim — `server/src/predict/`,
+`docs/predictions.md`) are worked out when read, from the practice's own history, and are never stored on the records
+or acted on by themselves: they carry a probability, a confidence and plain-language reasons, and go through one adapter
+(built-in model by default; a vendor behind it falls back to the built-in model and raises a Needs attention item).
+What a person was shown is noted in `prediction_log` (derived analytics, one row per subject, percentage and day, never
+edited) so accuracy can be checked against what staff saw.
 
 ## Reconciliation, migrations, backups
 - Reports → Reconciliation compares card processor vs ledger, insurance checks vs postings, claims created →

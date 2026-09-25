@@ -116,6 +116,7 @@ export default function officeMoveRoutes({ db, messenger, config = {} }) {
     const runId = await insert(db, 'provider_out_runs', { practice_id: pid, provider_id: provider.id, out_date: b.date, reason, goodwill_note: goodwill, client_key: key, source, created_by: req.user.id });
     const results = [];
     const touched = new Set([b.date]);
+    const cancelNow = await practiceNow(db, pid); // when any of these were cancelled (latecancel.js)
     for (const act of actions) {
       const out = { appointment_id: Number(act.appointment_id), action: act.action };
       try {
@@ -137,7 +138,7 @@ export default function officeMoveRoutes({ db, messenger, config = {} }) {
           if (b.send_texts !== false) out.message = await tellPatient(db, messenger, { patient, a, body: (pt) => reassignText({ patient: pt, practice, visit: a, toName: to.name }), kind: 'office_move_notice', userId: req.user.id });
           await emitAppointment(db, a.id);
         } else if (act.action === 'reschedule') {
-          await recorded(db, 'appointments', a.id, () => db.run("UPDATE appointments SET status = 'cancelled', broken_reason = 'office', broken_note = ? WHERE id = ?", OFFICE_REASONS[reason], a.id));
+          await recorded(db, 'appointments', a.id, () => db.run("UPDATE appointments SET status = 'cancelled', cancelled_at = ?, broken_reason = 'office', broken_note = ? WHERE id = ?", cancelNow, OFFICE_REASONS[reason], a.id));
           await releaseAppointment(db, a.id);
           await recordOfficeMove(db, { practiceId: pid, appt: a, kind: 'cancel', reason, note: goodwill, runId, userId: req.user.id, source });
           await audit(db, req, 'appointment.status', 'appointments', a.id, { from: a.status, to: 'cancelled', broken_reason: 'office', office_reason: reason, provider_out_run: runId }, {

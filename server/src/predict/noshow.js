@@ -1,14 +1,17 @@
 // No-show / late-cancel risk for upcoming visits, from the practice's own history (see builtin.js for the model).
 //
-// What counts: a visit is "missed" when it was a no-show, or cancelled with a reason that isn't the office's own
-// (the reason picker's codes; the same rule the optimizer used before); "kept" when the patient came (checked in,
-// in the chair or completed). Other cancellations (the office's, or with no reason) don't count either way.
+// What counts: a visit is "missed" when it was a no-show or a late cancellation — cancelled less than the practice's
+// late-cancel window (practices.late_cancel_hours, default 24) before it, not by the office (latecancel.js); "kept"
+// when the patient came (checked in, in the chair or completed). Earlier cancellations and the office's own don't
+// count either way. Cancellations from before cancelled_at was kept (and not found in the change log) use the older
+// rule: any cancellation with a reason that isn't the office's.
 //
 // For a day (or a week) of visits it's a fixed set of queries — the office's rates (cached, predict/index.js), the
 // history of that day's patients and their balances — never one query per visit.
 import { practiceNow } from '../util.js';
 import { cachedStats, getPredictor, forScreen } from './index.js';
 import { predictNoShow } from './builtin.js';
+import { isLateCancel, lateCancelHours, DEFAULT_LATE_CANCEL_HOURS } from '../latecancel.js';
 
 const DAY = 86400_000;
 const HISTORY_YEARS = 5; // for "first visit" and a patient's record; the office's rates use the last two years
@@ -23,10 +26,10 @@ export const addDays = (date, n) => new Date(Date.parse(`${date}T12:00:00Z`) + n
 const IN = (a) => a.map(() => '?').join(',');
 const chunks = (a, n = 500) => Array.from({ length: Math.ceil(a.length / n) }, (_, i) => a.slice(i * n, i * n + n));
 
-export function outcomeOf(a) {
+export function outcomeOf(a, lateHours = DEFAULT_LATE_CANCEL_HOURS) {
   if (KEPT.includes(a.status)) return 'kept';
   if (a.status === 'no_show') return 'missed';
-  if (a.status === 'cancelled' && a.broken_reason && String(a.broken_reason).toLowerCase() !== 'office') return 'missed';
+  if (isLateCancel(a, lateHours)) return 'missed';
   return null;
 }
 export function leadBucket(days) {
@@ -45,7 +48,7 @@ const leadDays = (a) => (a.created_at ? Math.max(0, dayNum(a.start_time) - dayNu
 // The office's rates by group, from resolved visits (rows: all of the office's visits in the lookback, sorted by
 // patient then time; `owing`: patients who owe a balance now, or null to leave balance out; `from`/`to`: the
 // dates whose visits count toward the rates; `keptEarlier`: patients who came before the first of `rows`).
-export function buildNoShowStats(rows, { owing = null, from, to, types = {}, keptEarlier = null }) {
+export function buildNoShowStats(rows, { owing = null, from, to, types = {}, keptEarlier = null, lateHours = DEFAULT_LATE_CANCEL_HOURS }) {
   const blank = () => ({ n: 0, hits: 0 });
   const s = { practice: blank(), weekday: {}, time: {}, lead: {}, type: {}, confirmed: { yes: blank(), no: blank() }, first: blank(), owes: owing ? { yes: blank(), no: blank() } : null, types };
   const bump = (bag, key, missed) => { const b = (bag[key] ??= blank()); b.n++; if (missed) b.hits++; };
@@ -53,7 +56,7 @@ export function buildNoShowStats(rows, { owing = null, from, to, types = {}, kep
   let keptBefore = false;
   for (const a of rows) {
     if (a.patient_id !== pid) { pid = a.patient_id; keptBefore = !!keptEarlier?.has(pid); }
-    const o = outcomeOf(a);
+    const o = outcomeOf(a, lateHours);
     const d = ymd(a.start_time);
     if (o && d >= from && d < to) {
       const m = o === 'missed';
@@ -74,13 +77,13 @@ export function buildNoShowStats(rows, { owing = null, from, to, types = {}, kep
 
 // A patient's record before `date` (history: their resolved visits, any order), recency-weighted: a visit a year
 // before counts half as much as one this week.
-export function patientRecord(history, date) {
+export function patientRecord(history, date, lateHours = DEFAULT_LATE_CANCEL_HOURS) {
   const t = dayNum(date);
   const r = { missed_w: 0, kept_w: 0, no_shows_1y: 0, late_cancels_1y: 0, missed_2y: 0, kept_2y: 0, kept_ever: 0 };
   for (const a of history) {
     if (ymd(a.start_time) >= ymd(date)) continue;
     const age = t - dayNum(a.start_time);
-    const o = outcomeOf(a);
+    const o = outcomeOf(a, lateHours);
     if (!o) continue;
     const w = 0.5 ** (Math.max(0, age) / 365);
     if (o === 'kept') { r.kept_w += w; r.kept_ever++; if (age <= RATE_DAYS) r.kept_2y++; }
@@ -120,7 +123,7 @@ export function visitFeatures(visit, record, stats, { today, owes = null }) {
   };
 }
 
-const HIST_COLS = 'patient_id, start_time, created_at, status, broken_reason, confirmed_at, appointment_type_id';
+const HIST_COLS = 'id, patient_id, start_time, created_at, status, broken_reason, confirmed_at, cancelled_at, appointment_type_id';
 
 async function owingPatients(db, pid, ids = null) {
   const out = new Set();
@@ -131,8 +134,9 @@ async function owingPatients(db, pid, ids = null) {
 }
 
 // The office's rates as of today (cached a few minutes).
-export async function practiceNoShowStats(db, pid, today) {
-  return cachedStats(`no_show:${pid}`, today, async () => {
+export async function practiceNoShowStats(db, pid, today, lateHours = DEFAULT_LATE_CANCEL_HOURS) {
+  // Keyed by the late-cancel window too: changing it in Settings counts visits differently from the next read.
+  return cachedStats(`no_show:${pid}:${lateHours}`, today, async () => {
     const from = addDays(today, -RATE_DAYS);
     const rows = await db.all(
       `SELECT ${HIST_COLS} FROM appointments WHERE practice_id = ? AND start_time >= ? AND start_time < ? AND status IN ('completed','checked_in','in_chair','no_show','cancelled') ORDER BY patient_id, start_time`,
@@ -144,7 +148,7 @@ export async function practiceNoShowStats(db, pid, today) {
       pid, `${addDays(today, -365 * HISTORY_YEARS)} 00:00`, `${from} 00:00`,
     )).map((r) => r.patient_id));
     const types = Object.fromEntries((await db.all('SELECT id, name FROM appointment_types WHERE practice_id = ?', pid)).map((t) => [t.id, t.name]));
-    return buildNoShowStats(rows, { owing: await owingPatients(db, pid), from, to: today, types, keptEarlier });
+    return buildNoShowStats(rows, { owing: await owingPatients(db, pid), from, to: today, types, keptEarlier, lateHours });
   });
 }
 
@@ -156,7 +160,8 @@ export async function noShowRisks(db, pid, appts, { now = null } = {}) {
   const today = ymd(now);
   const todo = appts.filter((a) => ['scheduled', 'confirmed'].includes(a.status) && ymd(a.start_time) >= today);
   if (!todo.length) return out;
-  const stats = await practiceNoShowStats(db, pid, today);
+  const lateHours = await lateCancelHours(db, pid);
+  const stats = await practiceNoShowStats(db, pid, today, lateHours);
   const ids = [...new Set(todo.map((a) => a.patient_id))];
   const hist = new Map(ids.map((id) => [id, []]));
   for (const c of chunks(ids)) {
@@ -168,7 +173,7 @@ export async function noShowRisks(db, pid, appts, { now = null } = {}) {
     )) hist.get(r.patient_id).push(r);
   }
   const owing = await owingPatients(db, pid, ids);
-  const features = todo.map((a) => visitFeatures(a, patientRecord(hist.get(a.patient_id), today), stats, { today, owes: owing.has(a.patient_id) }));
+  const features = todo.map((a) => visitFeatures(a, patientRecord(hist.get(a.patient_id), today, lateHours), stats, { today, owes: owing.has(a.patient_id) }));
   const results = await getPredictor().predictMany('no_show', features, { practiceId: pid });
   todo.forEach((a, i) => out.set(a.id, results[i]));
   return out;
@@ -207,22 +212,23 @@ export function calibrate(pairs) {
 
 export async function noShowAccuracy(db, pid, { months = 6, today = null } = {}) {
   today ??= ymd(await practiceNow(db, pid));
+  const lateHours = await lateCancelHours(db, pid);
   const start = addDays(today, -Math.round(months * 30.44));
   const rows = await db.all(
     `SELECT ${HIST_COLS} FROM appointments WHERE practice_id = ? AND start_time >= ? AND start_time < ? AND status IN ('completed','checked_in','in_chair','no_show','cancelled') ORDER BY patient_id, start_time`,
     pid, `${addDays(start, -365 * HISTORY_YEARS)} 00:00`, `${today} 00:00`,
   );
   const types = Object.fromEntries((await db.all('SELECT id, name FROM appointment_types WHERE practice_id = ?', pid)).map((t) => [t.id, t.name]));
-  const stats = buildNoShowStats(rows, { from: addDays(start, -RATE_DAYS), to: start, types });
+  const stats = buildNoShowStats(rows, { from: addDays(start, -RATE_DAYS), to: start, types, lateHours });
   const pairs = [];
   let from = 0;
   for (let i = 0; i < rows.length; i++) {
     if (i && rows[i].patient_id !== rows[i - 1].patient_id) from = i;
     const a = rows[i];
-    const o = outcomeOf(a);
+    const o = outcomeOf(a, lateHours);
     if (!o || ymd(a.start_time) < start) continue;
     // As it looked on the day: confirmed or not, their record before this visit.
-    const f = visitFeatures({ ...a, status: 'scheduled' }, patientRecord(rows.slice(from, i), a.start_time), stats, { today: ymd(a.start_time) });
+    const f = visitFeatures({ ...a, status: 'scheduled' }, patientRecord(rows.slice(from, i), a.start_time, lateHours), stats, { today: ymd(a.start_time) });
     pairs.push({ p: predictNoShow(f).probability, y: o === 'missed' ? 1 : 0 });
   }
   return { kind: 'no_show', months, from: start, to: today, trained_on: stats.practice.n, ...calibrate(pairs) };

@@ -501,6 +501,9 @@ export class Importer {
       reason: blank(r.reason) ? null : String(r.reason).trim().slice(0, 200), notes: blank(r.notes) ? null : String(r.notes).trim(),
     };
     if (!row.provider_id) throw new Error('Add a provider in Settings first');
+    // An imported cancellation keeps cancelled_at empty: old systems' exports don't say when a visit was
+    // cancelled, and guessing would make it look late or early. Predictions then use the older rule for it
+    // (latecancel.js isLateCancel), and with no reason on file it counts neither way.
     const key = blank(r.external_id) ? `${String(r.patient).trim()}|${row.start_time}` : String(r.external_id).trim();
     const known = await this.externalId('appointments', key);
     const current = known && await db.get('SELECT id FROM appointments WHERE id = ? AND practice_id = ?', known.local_id, pid);

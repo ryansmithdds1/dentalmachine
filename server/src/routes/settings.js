@@ -14,6 +14,7 @@ import { ensureBaseline, snapshotVersion } from '../feeversions.js';
 import { cleanRoomUrl } from '../video.js';
 import { cleanPattern, parseDurations } from '../patterns.js';
 import { assertPublicUrl, localUrlsAllowed } from '../netguard.js';
+import { MAX_LATE_CANCEL_HOURS } from '../latecancel.js';
 
 const ROLES = ['admin', 'dentist', 'hygienist', 'assistant', 'front_desk', 'billing'];
 const CATEGORIES = ['diagnostic', 'preventive', 'restorative', 'endodontics', 'periodontics', 'prosthodontics', 'oral_surgery', 'orthodontics', 'implants', 'adjunctive'];
@@ -123,7 +124,7 @@ export default function settingsRoutes({ db, secret, config = {}, messenger = nu
   r.get('/message-templates/defaults', (_req, res) => res.json(DEFAULT_TEMPLATES));
   r.get('/message-templates/meta', (_req, res) => res.json(TEMPLATE_META));
   r.put('/practice', requireAdmin, async (req, res) => {
-    const row = pick(req.body, ['name', 'address', 'city', 'state', 'zip', 'phone', 'email', 'tax_id', 'npi', 'timezone', 'slug', 'online_booking', 'reminder_hours', 'require_mfa', 'office_hours', 'daily_goal', 'sms_number', 'review_url', 'review_requests', 'review_threshold', 'instant_booking', 'idle_timeout_minutes', 'message_templates', 'hygiene_goal', 'portal_enabled', 'lock_date', 'adjustment_approval_limit', 'reminder_steps', 'recall_steps', 'recall_auto', 'finance_charge_bps', 'finance_charge_min', 'late_fee', 'collection_agency', 'financing', 'auto_receipts', 'kpi_targets', 'send_from', 'send_until', 'booking_notices', 'no_show_texts', 'xray_ai_auto', 'auto_fill', 'fill_batch', 'voice_number', 'forward_to', 'ring_seconds', 'record_calls', 'missed_call_text', 'ai_receptionist', 'voicemail_greeting']);
+    const row = pick(req.body, ['name', 'address', 'city', 'state', 'zip', 'phone', 'email', 'tax_id', 'npi', 'timezone', 'slug', 'online_booking', 'reminder_hours', 'require_mfa', 'office_hours', 'daily_goal', 'sms_number', 'review_url', 'review_requests', 'review_threshold', 'instant_booking', 'idle_timeout_minutes', 'message_templates', 'hygiene_goal', 'portal_enabled', 'lock_date', 'adjustment_approval_limit', 'reminder_steps', 'recall_steps', 'recall_auto', 'finance_charge_bps', 'finance_charge_min', 'late_fee', 'collection_agency', 'financing', 'auto_receipts', 'kpi_targets', 'send_from', 'send_until', 'booking_notices', 'no_show_texts', 'xray_ai_auto', 'auto_fill', 'fill_batch', 'voice_number', 'forward_to', 'ring_seconds', 'record_calls', 'missed_call_text', 'ai_receptionist', 'voicemail_greeting', 'late_cancel_hours']);
     if (row.financing !== undefined) row.financing = cleanFinancing(row.financing);
     if (row.kpi_targets !== undefined) row.kpi_targets = cleanKpiTargets(row.kpi_targets);
     if (row.sms_number) {
@@ -200,6 +201,11 @@ export default function settingsRoutes({ db, secret, config = {}, messenger = nu
       if (row[k] === undefined) continue;
       if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(String(row[k]))) throw new HttpError(400, 'Sending hours are times like 08:00');
     }
+    // The late-cancel window (latecancel.js): a cancellation less than this many hours before the visit counts as late.
+    if (row.late_cancel_hours !== undefined) {
+      row.late_cancel_hours = Number(row.late_cancel_hours);
+      if (!Number.isInteger(row.late_cancel_hours) || row.late_cancel_hours < 1 || row.late_cancel_hours > MAX_LATE_CANCEL_HOURS) throw new HttpError(400, `A late cancellation is one made 1-${MAX_LATE_CANCEL_HOURS} hours before the visit`);
+    }
     if (row.reminder_hours != null) {
       row.reminder_hours = Number(row.reminder_hours);
       if (!Number.isInteger(row.reminder_hours) || row.reminder_hours < 0 || row.reminder_hours > 168) throw new HttpError(400, 'Reminder lead time must be 0-168 hours');
@@ -212,8 +218,13 @@ export default function settingsRoutes({ db, secret, config = {}, messenger = nu
       }
     }
     const keys = Object.keys(row);
+    const was = await db.get('SELECT * FROM practices WHERE id = ?', req.user.practice_id);
     if (keys.length) await db.run(`UPDATE practices SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, ...keys.map((k) => row[k]), req.user.practice_id);
-    await audit(db, req, 'practice.update', 'practices', req.user.practice_id);
+    // What changed, before → after (settings that change how visits are counted, like the late-cancel window, included).
+    const changedKeys = keys.filter((k) => String(was?.[k] ?? '') !== String(row[k] ?? ''));
+    await audit(db, req, 'practice.update', 'practices', req.user.practice_id, changedKeys.length ? { fields: changedKeys } : undefined, changedKeys.length ? {
+      before: Object.fromEntries(changedKeys.map((k) => [k, was?.[k] ?? null])), after: Object.fromEntries(changedKeys.map((k) => [k, row[k] ?? null])),
+    } : {});
     res.json({ ...(await db.get('SELECT * FROM practices WHERE id = ?', req.user.practice_id)), sso_client_secret: undefined });
   });
 

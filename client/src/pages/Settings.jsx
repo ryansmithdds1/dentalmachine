@@ -1189,6 +1189,7 @@ function Messaging() {
       review_url: form.review_url || null, review_requests: form.review_requests, review_threshold: Number(form.review_threshold), message_templates: form.templates,
       reminder_steps: form.reminder_steps.map((s) => ({ ...s, hours: Number(s.hours) })), recall_auto: form.recall_auto, recall_steps: form.recall_steps.map((s) => ({ ...s, days: Number(s.days) })),
       send_from: form.send_from, send_until: form.send_until, booking_notices: form.booking_notices, no_show_texts: form.no_show_texts, auto_fill: form.auto_fill, fill_batch: Number(form.fill_batch) || 5,
+      late_cancel_hours: Number(form.late_cancel_hours) || 24,
     });
     setSaved(true);
     refresh();
@@ -1199,6 +1200,7 @@ function Messaging() {
     reminder_steps: practice.reminder_steps ? JSON.parse(practice.reminder_steps) : (practice.reminder_hours > 0 ? [{ hours: practice.reminder_hours, channel: 'auto', confirmed: false }] : []),
     recall_auto: !!practice.recall_auto,
     send_from: practice.send_from || '08:00', send_until: practice.send_until || '20:00', booking_notices: practice.booking_notices !== 0, no_show_texts: practice.no_show_texts !== 0, auto_fill: practice.auto_fill !== 0, fill_batch: practice.fill_batch || 5,
+    late_cancel_hours: practice.late_cancel_hours || 24,
     recall_steps: practice.recall_steps ? JSON.parse(practice.recall_steps) : [{ days: -14, channel: 'auto' }, { days: 0, channel: 'auto' }, { days: 30, channel: 'auto' }, { days: 90, channel: 'auto' }],
   };
   const setStep = (list, i, patch) => change({ [list]: cur[list].map((s, j) => (j === i ? { ...s, ...patch } : s)) });
@@ -1239,6 +1241,12 @@ function Messaging() {
         <h3 style={{ marginTop: 18 }}>Also</h3>
         <label className="checkbox"><input type="checkbox" checked={cur.booking_notices} onChange={(e) => change({ booking_notices: e.target.checked })} /> Tell patients when the office books or moves a visit (a text or email with the time and the confirm link; untick “Let the patient know” when booking to skip one)</label>
         <label className="checkbox"><input type="checkbox" checked={cur.no_show_texts} onChange={(e) => change({ no_show_texts: e.target.checked })} /> Send a “we missed you” message the same day when a visit is marked as a no-show</label>
+        <div className="inline" style={{ marginTop: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+          <label htmlFor="late-cancel-hours">A cancellation less than</label>
+          <input id="late-cancel-hours" type="number" min={1} max={168} value={cur.late_cancel_hours} onChange={(e) => change({ late_cancel_hours: e.target.value })} style={{ width: 64 }} />
+          <span>hours before the visit counts as a late cancellation</span>
+          <span className="muted" style={{ fontSize: 12 }}>(counted with no-shows in the no-show risk and Double-confirm)</span>
+        </div>
         <label className="checkbox"><input type="checkbox" checked={cur.auto_fill} onChange={(e) => change({ auto_fill: e.target.checked })} /> Fill cancellations automatically: text the opening to
           <input type="number" min={1} max={20} value={cur.fill_batch} onChange={(e) => change({ fill_batch: e.target.value })} style={{ width: 56, margin: '0 6px' }} />
           ASAP and waitlist patients; the first to reply YES is booked</label>

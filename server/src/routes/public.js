@@ -9,6 +9,7 @@ import { emitAppointment } from '../webhooks.js';
 import { sendAppointmentReminder, visitsIcs, mapsUrl, recordOptOut } from '../messaging.js';
 import { openSlots, releaseAppointment } from './schedule.js';
 import { openSlotLater } from '../fill.js';
+import { lateCancelHours } from '../latecancel.js';
 import { publish } from '../events.js';
 import { officeHours } from '../hours.js';
 import { parseDurations } from '../patterns.js';
@@ -320,7 +321,8 @@ export default function publicRoutes({ db, storage, payments, messenger, config,
       const when = friendlyDateTime(v.start_time);
       const note = String(req.body?.note || '').trim().slice(0, 300);
       if (action === 'cancel') {
-        await recorded(db, 'appointments', v.id, () => db.run("UPDATE appointments SET status = 'cancelled' WHERE id = ?", v.id));
+        await recorded(db, 'appointments', v.id, () => db.run("UPDATE appointments SET status = 'cancelled', cancelled_at = ? WHERE id = ?", now, v.id));
+        const lateHours = await lateCancelHours(db, practiceId);
         await releaseAppointment(db, v.id);
         openSlotLater(db, v.id);
         // The front desk hears about it, with who might fill the opening.
@@ -330,7 +332,7 @@ export default function publicRoutes({ db, storage, payments, messenger, config,
         const p = await db.get('SELECT first_name, last_name FROM patients WHERE id = ?', v.patient_id);
         await insert(db, 'tasks', {
           practice_id: practiceId, patient_id: v.patient_id, priority: hoursLeft < 48 ? 'high' : 'normal', due_date: now.slice(0, 10),
-          title: `${p.first_name} ${p.last_name} cancelled ${when} with ${v.provider_name} from their reminder${hoursLeft < 24 ? ' (less than 24 hours’ notice)' : ''}.${asap ? ` ${asap} on the ASAP list / waitlist could take the opening.` : ''} Call to rebook.${note ? ` They wrote: "${note}"` : ''}`,
+          title: `${p.first_name} ${p.last_name} cancelled ${when} with ${v.provider_name} from their reminder${hoursLeft < lateHours ? ` (a late cancellation: less than ${lateHours} hours’ notice)` : ''}.${asap ? ` ${asap} on the ASAP list / waitlist could take the opening.` : ''} Call to rebook.${note ? ` They wrote: "${note}"` : ''}`,
         });
       } else {
         const p = await db.get('SELECT first_name, last_name FROM patients WHERE id = ?', v.patient_id);

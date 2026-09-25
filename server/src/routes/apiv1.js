@@ -2,6 +2,7 @@ import express, { Router } from 'express';
 import { setActor } from '../actor.js';
 import { HttpError, rateLimit } from '../auth.js';
 import { insert, hashToken, normalizeDateTime, audit, practiceNow, recorded, isRealDate, validEmail } from '../util.js';
+import { cancelledNow } from '../latecancel.js';
 import { apiPatient, apiAppointment, apiPayment, emitEvent } from '../webhooks.js';
 import { validateAppt, openSlots } from './schedule.js';
 import { findDuplicates } from './patients.js';
@@ -167,7 +168,8 @@ export default function apiV1Routes({ db }) {
     if (!['scheduled', 'confirmed'].includes(a.status)) throw new HttpError(409, `Appointment is ${a.status}`);
     if (status === 'confirmed') await recorded(db, 'appointments', a.id, () => db.run("UPDATE appointments SET status = 'confirmed', confirmed_at = COALESCE(confirmed_at, datetime('now')), confirmed_via = 'api' WHERE id = ?", a.id));
     else {
-      await recorded(db, 'appointments', a.id, () => db.run("UPDATE appointments SET status = 'cancelled' WHERE id = ?", a.id));
+      const now = await cancelledNow(db, a.practice_id);
+      await recorded(db, 'appointments', a.id, () => db.run("UPDATE appointments SET status = 'cancelled', cancelled_at = ? WHERE id = ?", now, a.id));
       await db.run("UPDATE procedures SET appointment_id = NULL WHERE appointment_id = ? AND status = 'planned'", a.id);
     }
     const after = await db.get('SELECT * FROM appointments WHERE id = ?', a.id);

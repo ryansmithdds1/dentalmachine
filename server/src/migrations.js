@@ -41,6 +41,48 @@ export const MIGRATIONS = [
       await db.run("DELETE FROM fee_schedule_versions WHERE source = 'baseline'");
     },
   },
+  {
+    id: 3,
+    name: 'When visits were cancelled: cancelled_at filled from the change log for cancellations made before it was kept',
+    // Fills only empty values, for visits that are cancelled now, from the change log entry that set the status to
+    // cancelled (the latest one, when it was cancelled, put back and cancelled again). The log's time is UTC; it is
+    // turned into the practice's own time, like start_time (latecancel.js). Visits the log has nothing for keep an
+    // empty cancelled_at, and the predictions use the older rule for them. Running it again finds nothing to fill.
+    async up(db) {
+      const { localNow } = await import('./util.js');
+      const zones = new Map((await db.all('SELECT id, timezone FROM practices')).map((p) => [Number(p.id), p.timezone || 'America/New_York']));
+      const when = new Map();
+      // One pass over the log (no json_extract: the changes are read here). Entries are in time order.
+      for (const l of await db.all(
+        "SELECT entity_id, practice_id, created_at, changes FROM audit_log WHERE entity = 'appointments' AND entity_id IS NOT NULL AND changes LIKE ? ORDER BY id",
+        '%"status":[%"cancelled"]%',
+      )) {
+        let to = null;
+        try { to = JSON.parse(l.changes)?.status?.[1]; } catch { continue; }
+        if (to !== 'cancelled') continue;
+        const t = Date.parse(`${String(l.created_at).slice(0, 19).replace(' ', 'T')}Z`);
+        if (!Number.isFinite(t)) continue;
+        when.set(Number(l.entity_id), { t, practiceId: Number(l.practice_id) });
+      }
+      if (!when.size) return;
+      const open = await db.all("SELECT id, practice_id FROM appointments WHERE status = 'cancelled' AND cancelled_at IS NULL");
+      const fill = [];
+      for (const a of open) {
+        const w = when.get(Number(a.id));
+        // The entry must be the same practice's (the log is shared; ids are not).
+        if (w && (!w.practiceId || w.practiceId === Number(a.practice_id))) fill.push([Number(a.id), localNow(zones.get(Number(a.practice_id)), new Date(w.t))]);
+      }
+      for (let i = 0; i < fill.length; i += 200) {
+        const part = fill.slice(i, i + 200);
+        await db.run(
+          `UPDATE appointments SET cancelled_at = CASE id ${part.map(() => 'WHEN ? THEN ?').join(' ')} END WHERE cancelled_at IS NULL AND id IN (${part.map(() => '?').join(',')})`,
+          ...part.flat(), ...part.map(([id]) => id),
+        );
+      }
+    },
+    // Nothing to undo that matters: it only filled blanks, and the column stays (additive schema).
+    down: null,
+  },
 ];
 
 export async function runMigrations(db, list = MIGRATIONS) {

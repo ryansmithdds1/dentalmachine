@@ -1,4 +1,5 @@
 import { insert, practiceNow, recorded } from './util.js';
+import { cancelledNow } from './latecancel.js';
 import { withActor } from './actor.js';
 import { aiClient, structured } from './ai.js';
 import { sendMessage } from './messaging.js';
@@ -252,7 +253,8 @@ async function receptionAct(db, call, practice, name, input) {
     const a = (await mine()).find((v) => v.id === Number(input.appointment_id));
     if (!a) return { error: 'That visit isn’t one of the caller’s upcoming visits.' };
     if (input.action === 'cancel') {
-      await recorded(db, 'appointments', a.id, () => db.run("UPDATE appointments SET status = 'cancelled' WHERE id = ?", a.id));
+      const now = await cancelledNow(db, pid);
+      await recorded(db, 'appointments', a.id, () => db.run("UPDATE appointments SET status = 'cancelled', cancelled_at = ? WHERE id = ?", now, a.id));
       await db.run("UPDATE procedures SET appointment_id = NULL WHERE appointment_id = ? AND status = 'planned'", a.id);
       await db.run('UPDATE calls SET outcome = ? WHERE id = ?', 'cancelled', call.id);
       publish(pid, { type: 'schedule', dates: [a.start_time.slice(0, 10)], source: 'phone' });

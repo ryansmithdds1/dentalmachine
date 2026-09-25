@@ -1,4 +1,5 @@
-// Denial risk per claim line (and per claim: its riskiest line), from this practice's own claim outcomes plus the
+// Denial risk per claim line, and per claim (the chance at least one line is denied, counting what the lines share —
+// the payer, the claim — once: claimChance in builtin.js), from this practice's own claim outcomes plus the
 // scrubber's rule checks (see builtin.js for the model; scrubber.js for the rules, whose messages stay as they are).
 //
 // What counts as a denied line: its claim was denied (now or at some point — a denial later won on appeal still
@@ -7,7 +8,7 @@
 // having paid it all). Claims still waiting on the payer don't count either way.
 import { practiceNow } from '../util.js';
 import { cachedStats, getPredictor, forScreen } from './index.js';
-import { predictDenial } from './builtin.js';
+import { predictDenial, claimChance, sharedDenial, pct } from './builtin.js';
 import { addDays, calibrate } from './noshow.js';
 import { scrubWork } from '../scrubber.js';
 
@@ -16,17 +17,22 @@ const HISTORY_ROWS = `SELECT pi.carrier_id AS carrier_id, pr.code AS code, c.cre
     CASE WHEN (c.remarks IS NOT NULL AND c.remarks != '') OR EXISTS (SELECT 1 FROM claim_attachments ca WHERE ca.claim_id = c.id AND ca.removed_at IS NULL
       AND ca.status != 'rejected' AND (ca.narrative IS NOT NULL OR ca.report_type = 'OZ')) THEN 1 ELSE 0 END AS narrative,
     CASE WHEN c.status = 'denied' OR EXISTS (SELECT 1 FROM claim_events e WHERE e.claim_id = c.id AND e.status = 'denied')
-      OR (ci.paid_amount = 0 AND ci.estimated_amount > 0) THEN 1 ELSE 0 END AS denied
+      OR (ci.paid_amount = 0 AND ci.estimated_amount > 0) THEN 1 ELSE 0 END AS denied,
+    CASE WHEN c.status = 'denied' OR EXISTS (SELECT 1 FROM claim_events e WHERE e.claim_id = c.id AND e.status = 'denied') THEN 1 ELSE 0 END AS whole
   FROM claim_items ci JOIN claims c ON c.id = ci.claim_id JOIN procedures pr ON pr.id = ci.procedure_id JOIN patient_insurance pi ON pi.id = c.patient_insurance_id
   WHERE c.practice_id = ? AND c.status IN ('paid','partially_paid','denied') AND c.primary_claim_id IS NULL AND c.created_at >= ? AND c.created_at < ?`;
 
-// rows: { carrier_id, code, narrative, n, denied } (grouped) → rates by payer × code (× narrative), code, payer, all.
+// rows: { carrier_id, code, narrative, n, denied, whole } (grouped) → rates by payer × code (× narrative), code,
+// payer, all; and `whole`: how often a line's whole claim was turned down (by payer, and overall).
 export function buildDenialStats(rows) {
-  const s = { practice: { n: 0, hits: 0 }, payer: {}, code: {}, pc: {}, pcn: {} };
+  const s = { practice: { n: 0, hits: 0 }, payer: {}, code: {}, pc: {}, pcn: {}, whole: { practice: { n: 0, hits: 0 }, payer: {} } };
   const bump = (bag, key, n, d) => { const b = (bag[key] ??= { n: 0, hits: 0 }); b.n += n; b.hits += d; };
   for (const r of rows) {
     const n = Number(r.n ?? 1) || 0;
     const d = Number(r.denied) || 0;
+    const w = Number(r.whole) || 0;
+    s.whole.practice.n += n; s.whole.practice.hits += w;
+    bump(s.whole.payer, r.carrier_id, n, w);
     s.practice.n += n; s.practice.hits += d;
     bump(s.payer, r.carrier_id, n, d);
     bump(s.code, r.code, n, d);
@@ -38,7 +44,7 @@ export function buildDenialStats(rows) {
 
 export async function practiceDenialStats(db, pid, today) {
   return cachedStats(`denial:${pid}`, today, async () => buildDenialStats(await db.all(
-    `SELECT carrier_id, code, narrative, COUNT(*) AS n, SUM(denied) AS denied FROM (${HISTORY_ROWS}) t GROUP BY carrier_id, code, narrative`,
+    `SELECT carrier_id, code, narrative, COUNT(*) AS n, SUM(denied) AS denied, SUM(whole) AS whole FROM (${HISTORY_ROWS}) t GROUP BY carrier_id, code, narrative`,
     pid, `${addDays(today, -LOOKBACK_DAYS)} 00:00:00`, `${addDays(today, 1)} 00:00:00`,
   )));
 }
@@ -58,8 +64,28 @@ export function lineFeatures(stats, { carrierId, carrierName, code, narrative, r
   };
 }
 
-// items: procedures ({ id, code, tooth }); risks: the scrubber's list for them. Returns { claim, lines }: claim is the
-// riskiest line's answer (with its procedure), lines one per item.
+// A 'deny' rule hit that is on every line of a claim (the same message: a filing limit, a lapsed policy) is about
+// the claim, not a line: it belongs to the shared part, counted once.
+export function claimWideDenyRules(items, risks) {
+  if (items.length < 2) return 0;
+  const byMessage = new Map();
+  for (const r of risks) if (r.level === 'deny') (byMessage.get(r.message) || byMessage.set(r.message, new Set()).get(r.message)).add(r.procedure_id);
+  return [...byMessage.values()].filter((ids) => items.every((i) => ids.has(i.id))).length;
+}
+
+// The claim as a whole, from its lines' answers: the chance at least one line is denied (claimChance), with the
+// riskiest line named. Its reasons are the riskiest line's.
+export function claimLevel(lines, shared) {
+  const top = lines.reduce((a, b) => (b.probability > a.probability ? b : a), lines[0]);
+  const p = Math.round(claimChance(lines.map((l) => l.probability), shared) * 100) / 100;
+  return {
+    ...top, probability: p, percent: pct(p), line_count: lines.length, shared_percent: pct(shared),
+    riskiest: { procedure_id: top.procedure_id, code: top.code, tooth: top.tooth, probability: top.probability, percent: top.percent },
+  };
+}
+
+// items: procedures ({ id, code, tooth }); risks: the scrubber's list for them. Returns { claim, lines }: lines one per
+// item; claim the chance something on it is denied (claimLevel), carrying the riskiest line's code and reasons.
 export async function denialFor(db, pid, { carrierId, carrierName, items, risks = [], hasNarrative = null, today = null }) {
   if (!items.length) return null;
   today ??= (await practiceNow(db, pid)).slice(0, 10);
@@ -67,8 +93,8 @@ export async function denialFor(db, pid, { carrierId, carrierName, items, risks 
   const features = items.map((i) => lineFeatures(stats, { carrierId, carrierName, code: i.code, narrative: hasNarrative, risks: risks.filter((r) => r.procedure_id === i.id) }));
   const results = await getPredictor().predictMany('denial', features, { practiceId: pid });
   const lines = items.map((i, k) => ({ procedure_id: i.id, code: i.code, tooth: i.tooth ?? null, ...forScreen(results[k]) }));
-  const top = lines.reduce((a, b) => (b.probability > a.probability ? b : a), lines[0]);
-  return { claim: { ...top }, lines };
+  const shared = sharedDenial({ practice: stats.whole?.practice, payer: stats.whole?.payer?.[carrierId] }, claimWideDenyRules(items, risks));
+  return { claim: claimLevel(lines, shared), lines };
 }
 
 export const narrativeOf = (attachments, remarks) => attachments.some((a) => a.narrative || a.report_type === 'OZ') || !!remarks;

@@ -9,7 +9,7 @@ import { Badge, ErrorBox, Modal, useSubmit } from '../components/ui.jsx';
 import { useShortcuts, isMac } from '../shortcuts.js';
 import { undoable, toast } from '../toast.js';
 import './claimdetail.css';
-import { DenialChip } from '../components/predict/RiskChip.jsx';
+import { ClaimDenial } from '../components/predict/RiskChip.jsx';
 
 export default function ClaimDetail() {
   const { id } = useParams();
@@ -194,7 +194,7 @@ function ClaimChecks({ id, status, version }) {
     <div className="public-notice" style={{ marginBottom: 12 }}>
       {denial?.claim && (
         <div className="claim-denial" style={{ marginBottom: 6 }}>
-          <DenialChip denial={denial.claim} withReasons />
+          <ClaimDenial denial={denial} />
           {denial.lines.length > 1 && (
             <ul className="risk-lines">
               {denial.lines.map((l) => <li key={l.procedure_id}>{l.code}{l.tooth ? ` #${l.tooth}` : ''}: {l.percent}%{l.reasons?.length ? ` — ${l.reasons.join(', ')}` : ''}</li>)}

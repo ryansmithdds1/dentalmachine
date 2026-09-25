@@ -9,6 +9,7 @@ import { templatesFor, renderTemplate, patientLang, fixedText } from '../templat
 import { raiseIssue, resolveIssue } from '../issues.js';
 import { loadDay, generate, verifyPlacements, solve, goalGaps, track, settleOffers, captured, at } from '../optimizer.js';
 import { explainPlan, explainMode } from '../ai/optimizerExplain.js';
+import { logShown } from '../predict/log.js';
 
 // Today's schedule optimizer (OPT1–OPT4; the engine is optimizer.js, the spec docs/workflows/specs/OPT-optimizer.md).
 //   GET  /optimizer/today?date&location_id&explain=1  each provider's goal gap, every opportunity priced, and the plan
@@ -170,6 +171,10 @@ export default function optimizerRoutes({ db, config = {}, messenger, app }) {
       ai, ai_error: aiError,
     };
     res.json(money ? body : hideMoney(body));
+    // The no-show percentages in the Double-confirm suggestions (predict/log.js), after the response.
+    logShown(db, req, body.protect.filter((o) => day.noShow?.[o.appointment_id]).map((o) => ({
+      kind: 'no_show', subject_type: 'appointment', subject_id: o.appointment_id, location_id: locationId ?? null, prediction: day.noShow[o.appointment_id],
+    })), 'optimizer');
   });
 
   // What a person without billing access sees: the moves and the time, never the $.

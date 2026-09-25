@@ -8,7 +8,7 @@ import { ErrorBox } from '../ui.jsx';
 import { useShortcuts } from '../../shortcuts.js';
 import { toast } from '../../toast.js';
 import { describeResponses } from '../ClaimEdi.jsx';
-import { DenialChip } from '../predict/RiskChip.jsx';
+import { DenialChip, ClaimDenial } from '../predict/RiskChip.jsx';
 import '../../pages/monthly.css';
 
 // Billing → Ready to approve (workflow 24, docs/workflows/specs/24-claims.md). Claims for finished work are prepared
@@ -171,7 +171,7 @@ function GroupRows({ g, current, w, busy, skipping, onPick, onApprove, onChanged
         <td>{g.carrier_name}{g.priority !== 'primary' && <span className="muted"> ({g.priority})</span>}</td>
         <td>{codes}</td>
         <td>{fmtDate(g.first_service)}</td>
-        <td>{g.status === 'ready' ? <span className="badge ok">Ready</span> : <span className="badge warn">Needs a fix</span>}{g.denial?.claim && <> <DenialChip denial={g.denial.claim} /></>}</td>
+        <td>{g.status === 'ready' ? <span className="badge ok">Ready</span> : <span className="badge warn">Needs a fix</span>}{g.denial?.claim && <> <DenialChip denial={g.denial.claim} claim /></>}</td>
         <td className="num">{money(g.total_fee)}</td>
         <td className="num">{money(g.est_insurance)}</td>
         <td className="no-print" style={{ whiteSpace: 'nowrap' }}>
@@ -353,7 +353,7 @@ function DenialLines({ denial }) {
   const lines = denial.lines.filter((l) => l.reasons?.length);
   return (
     <div className="denial-lines" style={{ fontSize: 13 }}>
-      <DenialChip denial={denial.claim} withReasons />
+      <ClaimDenial denial={denial} />
       {denial.lines.length > 1 && lines.length > 0 && (
         <ul className="risk-lines">
           {lines.map((l) => <li key={l.procedure_id}>{l.code}{l.tooth ? ` #${l.tooth}` : ''}: {l.percent}% — {l.reasons.join(', ')}</li>)}

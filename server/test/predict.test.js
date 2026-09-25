@@ -6,7 +6,8 @@ import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { harness } from './helpers.js';
 import { practiceNow } from '../src/util.js';
-import { predictNoShow, predictDenial, smoothed, PRIORS } from '../src/predict/builtin.js';
+import { predictNoShow, predictDenial, smoothed, PRIORS, claimChance, sharedDenial } from '../src/predict/builtin.js';
+import { claimWideDenyRules, claimLevel } from '../src/predict/denial.js';
 import { createPredictor, registerPredictor, getPredictor, clearPredictCache, ISSUE_KEY } from '../src/predict/index.js';
 import { noShowRisks, addDays, calibrate } from '../src/predict/noshow.js';
 import { deidentify, JEV_FIELDS, createJev } from '../src/predict/jev.js';
@@ -78,6 +79,68 @@ test('denial model: payer × code history orders it; a "deny" rule hit pushes it
   assert.ok(Math.abs(thin.probability - PRIORS.denial) < 0.03);
   assert.ok(thin.reasons.some((x) => /not much claim history yet/.test(x)));
   assert.equal(smoothed(stats(0, 0), 0.2, 10), 0.2);
+});
+
+test('claim level: the chance at least one line is denied, with what the lines share counted once', () => {
+  const close = (a, b, msg) => assert.ok(Math.abs(a - b) < 1e-9, `${msg}: ${a} vs ${b}`);
+  close(claimChance([0.3], 0.1), 0.3, 'one line: that line');
+  close(claimChance([0.3], 0.6), 0.3, 'one line, even when the shared part is higher');
+  close(claimChance([0.3, 0.2], 0), 1 - 0.7 * 0.8, 'nothing shared: the independent product');
+  close(claimChance([0.3, 0.2, 0.1], 0.5), 0.3, 'everything shared: the riskiest line');
+  // 32% and 15% with 5% shared: the second line adds 1 − 0.85/0.95 ≈ 10.5%, not 15%.
+  close(claimChance([0.32, 0.15], 0.05), 1 - 0.68 * (0.85 / 0.95), 'shared part once');
+  assert.equal(claimChance([], 0.1), null);
+  // Bounds and monotonicity on many random claims.
+  let seed = 7;
+  const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  for (let k = 0; k < 2000; k++) {
+    const n = 1 + Math.floor(rand() * 5);
+    const ps = Array.from({ length: n }, () => Math.round(rand() * 90) / 100);
+    const q = Math.round(rand() * 40) / 100;
+    const c = claimChance(ps, q);
+    const indep = 1 - ps.reduce((x, p) => x * (1 - p), 1);
+    assert.ok(c >= Math.max(...ps) - 1e-12 && c <= indep + 1e-12, `${JSON.stringify(ps)} q=${q}: ${c} within [${Math.max(...ps)}, ${indep}]`);
+    const i = Math.floor(rand() * n);
+    const up = ps.map((p, j) => (j === i ? Math.min(0.95, p + 0.05) : p));
+    assert.ok(claimChance(up, q) >= c - 1e-12, `raising a line never lowers the claim: ${JSON.stringify(ps)} → ${JSON.stringify(up)}`);
+    assert.ok(claimChance([...ps, rand() * 0.5], q) >= c - 1e-12, 'adding a line never lowers it');
+    assert.ok(claimChance(ps, Math.min(0.9, q + 0.1)) <= c + 1e-12, 'more shared, never higher');
+  }
+  // The shared part: a payer that turns down whole claims more often shares more; a rule on every line adds to it.
+  const quiet = sharedDenial({ practice: stats(3000, 60), payer: stats(500, 5) });
+  const harsh = sharedDenial({ practice: stats(3000, 60), payer: stats(500, 80) });
+  assert.ok(harsh > quiet * 3, `${harsh} vs ${quiet}`);
+  assert.ok(sharedDenial({ practice: stats(3000, 60), payer: stats(500, 5) }, 1) > quiet * 5, 'a filing limit on every line is about the claim (the same push a line gets from it)');
+  assert.ok(Math.abs(sharedDenial({}) - PRIORS.whole_claim) < 0.005, 'no history: the typical rate');
+  // A payer with only four claims, all turned down whole, can't push a clean two-line claim near certain.
+  const few = { practice: stats(3000, 150), payer_stats: stats(8, 8), labels: { payer: 'Acme' }, narrative: true, payer_code_stats: stats(4, 4), payer_code_narr_stats: stats(4, 4) };
+  const l1 = predictDenial({ ...few, code: 'D2391', code_stats: stats(400, 12) });
+  const l2 = predictDenial({ ...few, code: 'D1110', code_stats: stats(900, 9) });
+  const smallPayer = sharedDenial({ practice: stats(3000, 60), payer: stats(8, 8) });
+  assert.ok(smallPayer < 0.2, `shared part from 4 claims: ${smallPayer}`);
+  const two = claimChance([l1.probability, l2.probability], smallPayer);
+  assert.ok(two < 0.85, `4 of 4 whole-claim denials, 2 clean lines: ${two}`);
+  // Rule hits on every line are claim-wide; on one line they are that line's.
+  const items = [{ id: 1 }, { id: 2 }];
+  const filing = 'Service date 2025-01-01 is past this payer’s 90-day filing limit';
+  assert.equal(claimWideDenyRules(items, [{ level: 'deny', procedure_id: 1, message: filing }, { level: 'deny', procedure_id: 2, message: filing }]), 1);
+  assert.equal(claimWideDenyRules(items, [{ level: 'deny', procedure_id: 1, message: 'Tooth number is missing' }]), 0);
+  assert.equal(claimWideDenyRules([{ id: 1 }], [{ level: 'deny', procedure_id: 1, message: filing }]), 0, 'one line: nothing to share');
+  // The claim's own answer names its riskiest line.
+  const lvl = claimLevel([{ procedure_id: 1, code: 'D2950', tooth: '3', probability: 0.32, percent: 32, reasons: ['x'] }, { procedure_id: 2, code: 'D2391', tooth: '19', probability: 0.15, percent: 15, reasons: [] }], 0.05);
+  assert.deepEqual([lvl.percent, lvl.line_count, lvl.riskiest.code, lvl.riskiest.percent, lvl.code, lvl.reasons[0]], [39, 2, 'D2950', 32, 'D2950', 'x']);
+});
+
+test('denial model: a small sample (4 of 4) can’t by itself push a line past ~70%; a hard rule hit still can', () => {
+  const small = { code: 'D2950', practice: stats(3000, 150), payer_stats: stats(4, 4), code_stats: stats(40, 4), payer_code_stats: stats(4, 4), labels: { payer: 'Acme' } };
+  for (const narrative of [null, false]) {
+    const f = { ...small, narrative, payer_code_narr_stats: narrative === false ? stats(4, 4) : null };
+    const plain = predictDenial(f);
+    assert.ok(plain.probability < 0.7, `4 of 4, no rule hit (narrative ${narrative}): ${plain.probability}`);
+    assert.ok(plain.probability > 0.2, `still well above the office’s usual 5%: ${plain.probability}`);
+    const ruled = predictDenial({ ...f, rules: { deny: 1, narrative: 0, warn: 0 }, labels: { payer: 'Acme', first_rule: 'Frequency: 1 per 5 years — used' } });
+    assert.ok(ruled.probability >= 0.85, `with a deny rule hit: ${ruled.probability}`);
+  }
 });
 
 test('calibration: bins compare what was said with what happened', () => {
@@ -222,7 +285,11 @@ test('treatment plan: denial percentage per planned procedure, from this payer�
   const by = Object.fromEntries(res.data.lines.map((l) => [l.code, l]));
   assert.ok(by.D2950.probability > by.D2391.probability * 3, `${by.D2950.probability} vs ${by.D2391.probability}`);
   assert.match(by.D2950.reasons.join(' '), /Delta Dental has denied 5 of 8 D2950/);
-  assert.equal(res.data.claim.code, 'D2950', 'the claim-level answer is the riskiest line');
+  // The claim as a whole: at least as likely as its riskiest line, no more than the lines as if independent.
+  const c = res.data.claim;
+  assert.equal(c.riskiest.code, 'D2950');
+  assert.equal(c.line_count, 2);
+  assert.ok(c.probability >= by.D2950.probability && c.probability <= 1 - (1 - by.D2950.probability) * (1 - by.D2391.probability) + 0.01, JSON.stringify(c));
   assert.equal(res.data.carrier_name, 'Delta Dental');
   // Validation: ids must be real, and belong to this practice.
   assert.equal((await p.api.get(`/predict/denial?patient_id=${p.target.id}&procedure_ids=abc`)).status, 400);

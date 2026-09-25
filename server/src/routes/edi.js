@@ -1,6 +1,7 @@
 import express, { Router } from 'express';
 import { scrubClaim } from '../scrubber.js';
 import { claimDenial } from '../predict/denial.js';
+import { logShown, denialEntries } from '../predict/log.js';
 import { requirePermission, HttpError } from '../auth.js';
 import { findOr404, audit, insert, update, practiceNow, mapSeq, recorded } from '../util.js';
 import { build837D, build276, parse271, parse277, sandbox277, x12Type } from '../x12.js';
@@ -115,7 +116,10 @@ export default function ediRoutes({ db, config, clearinghouse: ch }) {
     // Warnings don't block sending: payers commonly deny these codes without attachments.
     const risks = await scrubClaim(db, bundle.claim.id);
     // With the rule checks, the chance it's denied (predict/denial.js): the rules' messages stay as they are.
-    res.json({ problems: claimProblems(bundle, practice), warnings: attachmentHints(bundle.items, bundle.attachments), risks, denial: await claimDenial(db, bundle.claim.id, risks) });
+    const denial = await claimDenial(db, bundle.claim.id, risks);
+    res.json({ problems: claimProblems(bundle, practice), warnings: attachmentHints(bundle.items, bundle.attachments), risks, denial });
+    // Shown on the claim screen only while it's still to send (ClaimDetail's checks).
+    if (['draft', 'denied'].includes(bundle.claim.status)) logShown(db, req, denialEntries(denial, { claimId: bundle.claim.id, locationId: bundle.claim.location_id ?? null }), 'claim');
   });
 
   // Builds a validated 837D batch for the given claims (the request's claim_ids, resend and force).

@@ -107,9 +107,15 @@ export async function seedDemo(db) {
       const pastOffset = -Math.floor(3 + rand() * 75);
       const pastDay = dayOffset(pastOffset);
       const eobDay = dayOffset(Math.min(0, pastOffset + 10 + Math.floor(rand() * 10)));
+      // Most kept visits were confirmed a couple of days ahead; a few never were (realistic, so "confirmed" isn't a
+      // giveaway for the no-show predictions). Decided by the patient's number, not the random stream, so the rest of
+      // the demo stays exactly as it was.
+      const confirmedAhead = i % 9 !== 4;
       const pastAppt = await insert(db, 'appointments', {
         practice_id: practiceId, patient_id: id, provider_id: hyg, operatory_id: ops[2],
         start_time: `${pastDay} 09:00`, end_time: `${pastDay} 10:00`, status: 'completed', reason: 'Recall exam & cleaning',
+        created_at: `${dayOffset(pastOffset - 150 - (i % 40))} 11:00:00`,
+        ...(confirmedAhead ? { confirmed_at: `${dayOffset(pastOffset - 2)} 10:15:00`, confirmed_via: i % 3 ? 'text' : 'email' } : {}),
       });
       for (const c of ['D0120', 'D1110', 'D0274']) {
         const pid = await addProc(id, c, { provider_id: c === 'D0120' ? drChen : hyg, appointment_id: pastAppt });
@@ -255,6 +261,9 @@ export async function seedDemo(db) {
         await insert(db, 'appointments', {
           practice_id: practiceId, patient_id: pid, provider_id: j % 4 === 0 ? drChen : hyg, operatory_id: ops[j % 4 === 0 ? 0 : 2],
           start_time: `${when} 14:00`, end_time: `${when} 15:00`, status: j % 4 === 0 ? 'no_show' : 'cancelled', reason: j % 4 === 0 ? 'Crown prep' : 'Recall exam & cleaning',
+          // One no-show had confirmed; cancellations carry why and when (one the evening before: a late cancel).
+          ...(j === 32 ? { confirmed_at: `${dayOffset(-(j - 28) * 3 - 2)} 09:30:00`, confirmed_via: 'text' } : {}),
+          ...(j % 4 === 0 ? { broken_reason: 'no_contact' } : { broken_reason: j === 30 ? 'sick' : 'conflict', cancelled_at: j === 30 ? `${dayOffset(-(j - 28) * 3 - 1)} 19:40` : `${dayOffset(-(j - 28) * 3 - 6)} 10:05` }),
         });
       }
       if (!(await db.get("SELECT 1 FROM procedures WHERE patient_id = ? AND status = 'planned'", pid))) {

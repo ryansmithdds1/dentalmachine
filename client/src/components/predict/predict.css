@@ -13,3 +13,5 @@
 .accuracy-bar { position: relative; height: 8px; min-width: 80px; background: var(--subtle); border-radius: 4px; overflow: hidden; }
 .accuracy-bar i { position: absolute; top: 0; bottom: 0; left: 0; background: var(--info); opacity: 0.35; }
 .accuracy-bar b { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--text); }
+/* "Compare: What staff saw | Backtest" — a labelled choice set apart from the kind tabs by a divider. */
+.accuracy-source { display: inline-flex; align-items: center; gap: 6px; padding-left: 12px; margin-left: 4px; border-left: 1px solid var(--border); font-size: 13px; }

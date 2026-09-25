@@ -8,6 +8,7 @@ import { createClaim } from '../services.js';
 import { REPORT_TYPES } from '../attachments.js';
 import { attachmentDeps, filePerioChart, sendPendingAttachments } from './attachments.js';
 import { parseKey, prepEnabled, prepareGroups, countGroups, skippedGroups } from '../claimprep.js';
+import { logShown, denialEntries } from '../predict/log.js';
 
 // Billing → Ready to approve (docs/workflows/specs/24-claims.md). The list is prepared on its own (claimprep.js);
 // every claim here is made and sent only when a person approves it:
@@ -182,6 +183,8 @@ export default function claimPrepRoutes({ db, ch, claimProblems, send }) {
     const { groups, more } = await prepareGroups(db, opts(req));
     const ready = groups.filter((g) => g.status === 'ready');
     res.json({ enabled, clearinghouse, groups, more, ready_count: ready.length, ready_total: ready.reduce((t, g) => t + g.total_fee, 0) });
+    // The denial percentages the person was shown (predict/log.js), after the response.
+    logShown(db, req, groups.flatMap((g) => denialEntries(g.denial, { group: true, locationId: g.location_id ?? null })), 'ready_to_approve');
   });
 
   r.get('/claim-queue/count', requirePermission('billing:read'), async (req, res) => {

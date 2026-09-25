@@ -16,6 +16,8 @@ import { checkDayBlocks } from '../production.js';
 import { recordOfficeMove, officeReasonFrom } from '../cards.js';
 import { linkNoteBookings } from './doctornotes.js';
 import { withNoShowRisk } from '../predict/noshow.js';
+import { cancelledNow } from '../latecancel.js';
+import { logShown, noShowEntries } from '../predict/log.js';
 
 export const STATUSES = ['scheduled', 'confirmed', 'checked_in', 'in_chair', 'completed', 'cancelled', 'no_show'];
 export const INACTIVE = "('cancelled','no_show')";
@@ -450,6 +452,7 @@ export default function scheduleRoutes({ db }) {
     row.procedures = await db.all('SELECT * FROM procedures WHERE appointment_id = ? ORDER BY id', row.id);
     if (row.series_id) row.series = await seriesInfo(row);
     res.json(row);
+    logShown(db, req, noShowEntries([row]), 'visit_panel');
   });
 
   // Appointment types can pre-load their procedures (e.g. exam + prophy + BWX) so scheduled production is known.
@@ -586,6 +589,9 @@ export default function scheduleRoutes({ db }) {
       row.video_url = req.body.video ? existing.video_url || videoRoomFor(await findOr404(db, 'providers', row.provider_id, req.user.practice_id, 'Provider')) : null;
     }
     const inactive = ['cancelled', 'no_show'];
+    // Cancelled from the edit form: when (latecancel.js); put back on the schedule: cleared.
+    if (row.status === 'cancelled' && existing.status !== 'cancelled') row.cancelled_at = await cancelledNow(db, req.user.practice_id);
+    else if (row.status !== 'cancelled' && existing.cancelled_at) row.cancelled_at = null;
     // A moved appointment needs a fresh reminder and confirmation.
     if (row.start_time !== existing.start_time) {
       Object.assign(row, { reminder_sent_at: null, confirmed_at: null, confirmed_via: null, notice_due: req.body.notify === false || !['scheduled', 'confirmed'].includes(row.status) ? null : 'moved' });
@@ -663,9 +669,12 @@ export default function scheduleRoutes({ db }) {
       brokenNote = req.body.broken_note == null ? null : String(req.body.broken_note).trim().slice(0, 300) || null;
       if (brokenReason === 'other' && !brokenNote) throw new HttpError(400, 'Add a few words about what happened when the reason is "Other"');
     }
+    // When it was cancelled (practice time, latecancel.js): kept if it already was, cleared when it's put back.
+    const now = await cancelledNow(db, req.user.practice_id);
     await recorded(db, 'appointments', existing.id, () => db.run(
-      "UPDATE appointments SET status = ?, confirmed_at = CASE WHEN ? = 'confirmed' THEN COALESCE(confirmed_at, datetime('now')) ELSE confirmed_at END WHERE id = ?",
-      status, status, existing.id,
+      `UPDATE appointments SET status = ?, confirmed_at = CASE WHEN ? = 'confirmed' THEN COALESCE(confirmed_at, datetime('now')) ELSE confirmed_at END,
+         cancelled_at = CASE WHEN ? = 'cancelled' THEN (CASE WHEN status = 'cancelled' THEN COALESCE(cancelled_at, ?) ELSE ? END) ELSE NULL END WHERE id = ?`,
+      status, status, status, now, now, existing.id,
     ));
     // "Left a message" is a contact attempt, not a confirmation.
     if (via) await recorded(db, 'appointments', existing.id, () => db.run('UPDATE appointments SET confirmed_via = ? WHERE id = ?', via, existing.id));
@@ -713,7 +722,7 @@ export default function scheduleRoutes({ db }) {
     if (status === 'cancelled' && req.body.scope === 'following' && existing.series_id) {
       const later = await db.all("SELECT id, start_time FROM appointments WHERE series_id = ? AND practice_id = ? AND start_time > ? AND status IN ('scheduled','confirmed')", existing.series_id, req.user.practice_id, existing.start_time);
       for (const occ of later) {
-        await recorded(db, 'appointments', occ.id, () => db.run("UPDATE appointments SET status = 'cancelled', broken_reason = COALESCE(?, broken_reason), broken_note = COALESCE(?, broken_note) WHERE id = ?", brokenReason, brokenNote, occ.id));
+        await recorded(db, 'appointments', occ.id, () => db.run("UPDATE appointments SET status = 'cancelled', cancelled_at = ?, broken_reason = COALESCE(?, broken_reason), broken_note = COALESCE(?, broken_note) WHERE id = ?", now, brokenReason, brokenNote, occ.id));
         await db.run("UPDATE recalls SET status = 'due', appointment_id = NULL WHERE appointment_id = ? AND status = 'scheduled'", occ.id);
         // Their pre-loaded type procedures are only placeholders; cancel them rather than leave "planned" work behind.
         for (const pr of await db.all("SELECT id FROM procedures WHERE appointment_id = ? AND status = 'planned' AND treatment_plan_id IS NULL", occ.id)) {
@@ -854,6 +863,8 @@ export default function scheduleRoutes({ db }) {
       blockouts: await nameTypes(db, pid, blockouts),
       production,
     });
+    // What the person was shown (predict/log.js): after the response, never holding it up.
+    logShown(db, req, noShowEntries(appointments), 'schedule');
   });
 
   // ASAP list: booked patients who'd take an earlier opening.

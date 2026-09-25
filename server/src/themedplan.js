@@ -89,13 +89,18 @@ const hash = (s) => { let h = 2166136261; for (let i = 0; i < s.length; i++) h =
 const slug = (s) => s.toLowerCase().normalize('NFD').replace(/[^a-z0-9]+/g, '');
 
 // ---- The whole practice ----
-export function buildPlan(sizeName, anchorDate) {
+// Version 2 makes missed visits realistic (see planVisits): who misses, when and how, instead of 5% of everyone's
+// visits at random, and confirmations that don't give the answer away. A seed keeps the version it started with
+// (demo_seed_state.plan_version), so one cut off part-way always finishes with the same plan.
+export const PLAN_VERSION = 2;
+
+export function buildPlan(sizeName, anchorDate, version = PLAN_VERSION) {
   const size = SIZES[sizeName] || SIZES.large;
   const anchor = dn(anchorDate);
   const histStart = addMonthsN(anchor, -size.months);
   const futEnd = anchor + size.futureDays;
   const R = rng(hash(`${sizeName}|${anchorDate}`));
-  const plan = { size: sizeName, anchor, anchorDate, histStart, futEnd, patients: [], households: [] };
+  const plan = { size: sizeName, anchor, anchorDate, histStart, futEnd, patients: [], households: [], version };
 
   // ---- Who works where, each day ----
   const opsByOffice = { riv: [], stk: [] };
@@ -254,6 +259,16 @@ export function buildPlan(sizeName, anchorDate) {
     p.risk = r.chance(0.2) ? 'high' : r.chance(0.5) ? 'medium' : 'low';
     p.sporadic = !p.named && r.chance(0.12);
     p.compliance = p.sporadic ? 0.3 : r.chance(0.2) ? 0.65 : 0.92;
+    if (version >= 2) {
+      // Habits (their own random stream, so the rest of the patient's plan draws the same numbers): most patients
+      // nearly always come; about one in five misses now and then; a few miss often. Those who miss are also more
+      // often slow to pay, so a balance owed goes with missed visits, as it does in real offices.
+      const q = rng(hash(`habits|${sizeName}|${p.idx}`));
+      const x = q();
+      p.missing = (x < 0.08 ? 3.2 : x < 0.3 ? 1.2 : 0.55) * (p.sporadic ? 1.5 : 1);
+      p.slowPayer = q.chance(0.12 + (p.missing > 3 ? 0.35 : p.missing > 1 ? 0.1 : 0));
+      p.habits = q;
+    }
     // Medical history.
     const med = r.pick(D.MEDICATIONS);
     p.medications = age >= 30 ? med : null;
@@ -293,17 +308,46 @@ function planVisits(plan, p, book) {
   const { anchor, histStart, futEnd } = plan;
   const r = p.r;
   const end = p.inactive ? p.leaveDay : futEnd;
-  const status = (slot, rebookable = true) => {
+  const v2 = plan.version >= 2;
+  // Version 2: how likely this visit is to be missed, relative to the practice's usual — the patient's habits, their
+  // misses so far, a Monday-morning or Friday-afternoon slot, a first visit, booked long ahead, owing money.
+  const riskOf = (slot, kind, lead) => {
+    let m = p.missing;
+    const prior = p.visits.filter((x) => x.day < slot.day && (x.status === 'no_show' || (x.status === 'cancelled' && x.late))).length;
+    m *= 1 + 0.6 * Math.min(3, prior);
+    const wd = weekday(slot.day);
+    if ((wd === 1 && slot.start < 10 * 60) || (wd === 5 && slot.start >= 13 * 60)) m *= 2;
+    if (kind === 'np') m *= 2.2;
+    if (lead != null) m *= lead >= 90 ? 1.5 : lead >= 30 ? 1.1 : lead <= 2 ? 0.5 : 0.9;
+    if (p.slowPayer) m *= 1.8;
+    return m;
+  };
+  // Days booked ahead: recall visits mostly at the last cleaning, treatment within weeks, emergencies the same day.
+  const leadFor = (kind) => {
+    const q = p.habits;
+    if (kind === 'hyg' || kind === 'perio') return q.chance(0.7) ? q.int(150, 200) : q.int(7, 45);
+    if (kind === 'np') return q.int(2, 21);
+    if (kind === 'emergency') return q.int(0, 1);
+    if (kind === 'seat' || kind === 'implantcrown') return q.int(14, 28);
+    return q.int(4, 35);
+  };
+  const status = (slot, rebookable = true, kind = null, lead = null) => {
+    const m = v2 ? riskOf(slot, kind, lead) : 1;
     if (slot.day > anchor) return 'future';
     if (slot.day === anchor) {
       // Today, as the morning huddle would see it at about half past eleven.
-      if (slot.start + slot.dur <= 11 * 60) return r.chance(0.05) ? 'no_show' : 'completed';
+      if (slot.start + slot.dur <= 11 * 60) return r.chance(Math.min(0.3, 0.05 * m)) ? 'no_show' : 'completed';
       if (slot.start <= 11 * 60 + 30) return r.chance(0.6) ? 'in_chair' : 'checked_in';
       return r.chance(0.7) ? 'confirmed' : 'scheduled';
     }
     const x = r();
-    if (!rebookable) return x < 0.04 ? 'no_show' : 'completed';
-    return x < 0.05 ? 'no_show' : x < 0.12 ? 'cancelled' : 'completed';
+    if (!v2) {
+      if (!rebookable) return x < 0.04 ? 'no_show' : 'completed';
+      return x < 0.05 ? 'no_show' : x < 0.12 ? 'cancelled' : 'completed';
+    }
+    const noShow = Math.min(0.45, 0.03 * m);
+    if (!rebookable) return x < noShow ? 'no_show' : 'completed';
+    return x < noShow ? 'no_show' : x < noShow + Math.min(0.3, 0.055 * Math.sqrt(m)) ? 'cancelled' : 'completed';
   };
   // Adds a visit (and books its slot); broken past visits are rebooked a week or three later.
   const visit = (kind, day, procs, extra = {}) => {
@@ -313,8 +357,17 @@ function planVisits(plan, p, book) {
       if (day > end || day > futEnd) return null;
       const slot = book(r, Math.max(day, p.joinDay), office, col, blocks);
       if (!slot) return null;
-      const st = status(slot, attempt < 2 && kind !== 'emergency');
+      const lead = v2 ? leadFor(kind) : null;
+      const st = status(slot, attempt < 2 && kind !== 'emergency', kind, lead);
       const v = { idx: p.visits.length, kind, ...slot, status: st, procs: [], ...extra };
+      if (v2) {
+        v.lead = lead;
+        if (st === 'cancelled') {
+          // How much notice they gave: riskier visits are more often cancelled at the last minute.
+          v.late = p.habits.chance(Math.min(0.85, 0.4 * Math.sqrt(riskOf(slot, kind, lead))));
+          v.notice = v.late ? p.habits.int(1, 22) : p.habits.int(2, 14) * 24 + p.habits.int(0, 8);
+        }
+      }
       p.visits.push(v);
       if ((st === 'no_show' || st === 'cancelled') && slot.day < anchor) {
         v.broken = st === 'cancelled' ? r.pick(['Sick', 'Work conflict', 'Car trouble', 'Called to an urgent quest', 'Family emergency']) : null;
@@ -626,7 +679,7 @@ function planMoney(plan, p, { planByKey, carrierByKey }) {
         }
         pp.status = left <= 0 ? 'completed' : 'active';
         paid = patientShare - left;
-      } else if (r.chance(payer ? 0.66 : mplan ? 0.9 : 0.78)) {
+      } else if (r.chance((payer ? 0.66 : mplan ? 0.9 : 0.78) * (p.slowPayer ? 0.5 : 1))) {
         const method = big ? r.pick(['credit_card', 'care_credit', 'check']) : payMethod();
         // Rarely, the first card payment was keyed in wrong: voided with a reason and taken again.
         if (r.chance(0.01) && ['credit_card', 'debit_card'].includes(method)) {
@@ -646,7 +699,7 @@ function planMoney(plan, p, { planByKey, carrierByKey }) {
       const due = patientShare - paid;
       if (due > 0) {
         const after = (claim?.payDay ?? v.day) + r.int(12, 45);
-        if (after < anchor && r.chance(0.88)) {
+        if (after < anchor && r.chance(p.slowPayer ? 0.45 : 0.88)) {
           L({ type: 'payment', amount: -due, day: after, desc: `Patient payment — statement (${r.chance(0.6) ? 'online' : 'mail'})`, method: r.chance(0.6) ? 'credit_card' : 'check', office: v.office });
         } else if (v.day < anchor - 400 && r.chance(0.5)) {
           L({ type: 'adjustment', adj: 'Bad debt write-off', amount: -due, day: v.day + r.int(300, 390), desc: 'Bad debt write-off — no response to four statements', office: v.office });
@@ -742,4 +795,38 @@ function finishMoney(plan) {
   }
   for (const k of plan.checks.values()) if (!k.electronic && k.day < anchor - 1) k.deposit = deposit('riv', k.day, k.amount);
   for (const p of plan.patients) for (const e of p.ledger) if (e.type === 'insurance_payment' && e.check && plan.checks.get(e.check).deposit) e.deposit = plan.checks.get(e.check).deposit;
+}
+
+// ---- One visit's booking, confirmation and cancellation times (version 2) ----
+// Written as the app would have left them: most kept visits were confirmed (about 88%), some never were; about 40% of
+// no-shows had confirmed; last-minute cancellations sometimes had, early ones almost never. cancelled_at is
+// v.notice hours before the start. r: the visit's own random stream. Times are [day number, minutes after midnight].
+export function visitFacts(plan, p, v, r) {
+  const { anchor } = plan;
+  let status = v.status;
+  const risky = (p.missing || 1) > 1.5 || !!p.slowPayer;
+  if (status === 'future') status = v.day <= anchor + 2 ? (r.chance(risky ? 0.45 : 0.7) ? 'confirmed' : 'scheduled') : r.chance(risky ? 0.15 : 0.25) ? 'confirmed' : 'scheduled';
+  const here = ['completed', 'in_chair', 'checked_in'].includes(status);
+  const split = (t) => [Math.floor(t / 1440), ((t % 1440) + 1440) % 1440];
+  const startAt = v.day * 1440 + v.start;
+  const lead = v.lead ?? r.int(1, 60);
+  // Booked: `lead` days before (never after today), during office hours; a same-day emergency an hour or two before.
+  const created = lead === 0 ? split(startAt - r.int(60, 180)) : [Math.min(v.day - lead, anchor), 600 + r.int(0, 400)];
+  const cancelled = status === 'cancelled' ? split(startAt - (v.notice ?? 72) * 60) : null;
+  let confirmed;
+  if (status === 'confirmed') confirmed = true;
+  else if (here) confirmed = r.chance(risky ? 0.8 : 0.9);
+  else if (status === 'no_show') confirmed = r.chance(0.4);
+  else if (status === 'cancelled') confirmed = v.late ? r.chance(0.3) : r.chance(0.04);
+  else confirmed = false;
+  let confirmedAt = null;
+  if (confirmed) {
+    // A day or three before, in the daytime; never before it was booked, after today, or after it was cancelled.
+    let t = (Math.min(anchor, v.day - r.int(1, 3))) * 1440 + 540 + r.int(0, 540);
+    const bookedAt = created[0] * 1440 + created[1];
+    if (cancelled) t = Math.min(t, cancelled[0] * 1440 + cancelled[1] - 30);
+    t = Math.max(t, bookedAt + 5);
+    confirmedAt = split(Math.min(t, startAt - 5));
+  }
+  return { status, created, confirmedAt, via: confirmed ? r.pick(['sms', 'sms', 'email', 'phone']) : null, cancelled };
 }
