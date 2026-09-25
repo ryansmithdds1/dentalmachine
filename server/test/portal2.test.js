@@ -3,7 +3,12 @@ import assert from 'node:assert/strict';
 import { harness } from './helpers.js';
 
 const h = harness({ config: { payments: 'sandbox' } });
-const day = (n) => new Date(Date.now() + n * 86400_000).toISOString().slice(0, 10);
+// n days out, moved forward to a weekday (the demo office is closed at weekends, so a Saturday booking fails).
+const day = (n) => {
+  let t = Date.now() + n * 86400_000;
+  while ([0, 6].includes(new Date(t).getUTCDay())) t += 86400_000;
+  return new Date(t).toISOString().slice(0, 10);
+};
 const waitFor = async (fn) => {
   for (let i = 0; i < 100 && !fn(); i++) await new Promise((r) => setTimeout(r, 10));
 };
@@ -27,7 +32,7 @@ test('portal: reschedule, secure messages, statement and receipts, membership si
 
   // Reschedule to another open time more than a day out.
   let target = day(9);
-  if ([0, 6].includes(new Date(`${target}T12:00:00Z`).getUTCDay())) target = day(11);
+  if (target === day(8)) target = day(11);
   const slots = (await portal.get(`/portal/appointments/${appt.id}/slots?date=${target}`)).data.slots;
   assert.ok(slots.length > 0);
   assert.equal((await portal.post(`/portal/appointments/${appt.id}/reschedule`, { start: `${target} 03:00` })).status, 409);

@@ -55,7 +55,10 @@ test('schedule-only access: no chart, money or DEA numbers on the huddle, route 
   const { api, provider, patient } = await h.practice();
   await api.put(`/providers/${provider.id}`, { dea_number: 'AB1234563', license_number: 'TX-999' });
   await api.put(`/patients/${patient.id}`, { allergies: 'Penicillin' });
-  const day = new Date(Date.now() + 86400_000).toISOString().slice(0, 10);
+  // Tomorrow, or the next weekday (the office is closed at weekends).
+  let t = Date.now() + 86400_000;
+  while ([0, 6].includes(new Date(t).getUTCDay())) t += 86400_000;
+  const day = new Date(t).toISOString().slice(0, 10);
   const appt = (await api.post('/appointments', { patient_id: patient.id, provider_id: provider.id, start_time: `${day} 09:00`, end_time: `${day} 10:00` })).data;
   const role = (await api.post('/roles', { name: 'Scheduler', permissions: ['schedule:read', 'schedule:write'] })).data;
   const email = `sched-${Date.now()}@example.com`;
