@@ -8,7 +8,8 @@ import { PATIENT_MODULES } from '../nav/navConfig.js';
 import './patient.css';
 import { money, fullName, age, fmtDate, fmtDateTime, label, practiceToday } from '../format.js';
 import { Modal, Badge, ErrorBox, useSubmit, Menu, SidePanel } from '../components/ui.jsx';
-import { Pin, Pill, TriangleAlert, MoreHorizontal, GitMerge, FileArchive, ShieldCheck, CalendarPlus, Pencil, Star, Mail } from 'lucide-react';
+import { Pin, Pill, TriangleAlert, MoreHorizontal, GitMerge, FileArchive, ShieldCheck, CalendarPlus, Pencil, Star, Mail, HeartOff, Undo2 } from 'lucide-react';
+import { markDeceased, undoDeceased } from '../deceased.js';
 import { requestReview } from '../reviewRequest.js';
 import PatientForm from '../components/PatientForm.jsx';
 import AppointmentForm from '../components/AppointmentForm.jsx';
@@ -100,14 +101,14 @@ export default function PatientDetail() {
 
   return (
     <>
-      <div className="card">
+      <div className="card pt-head">
         <div className="page-header" style={{ marginBottom: 0 }}>
           <div className="patient-banner">
             <PatientPhoto p={p} canEdit={can('patients:write')} onChange={reload} />
             <div>
               {inModule && <div className="pt-module" data-module={inModule.key}><ModIcon size={13} aria-hidden /> {inModule.label}</div>}
               {/* Name and birth date are corrected right here (click, fix, Enter — with Undo). */}
-              <h1><NameInPlace p={p} canEdit={can('patients:write')}>{fullName(p)}</NameInPlace> {p.status !== 'active' && <Badge value={p.status} />}</h1>
+              <h1><NameInPlace p={p} canEdit={can('patients:write')}>{fullName(p)}</NameInPlace> {p.deceased_at ? <Badge value="deceased" /> : p.status !== 'active' && <Badge value={p.status} />}</h1>
               <div className="muted">
                 #{p.id} · <DobInPlace p={p} canEdit={can('patients:write')}>{p.dob ? `${fmtDate(p.dob)} (${age(p.dob)} y)` : 'DOB not recorded'}</DobInPlace> {p.gender ? `· ${label(p.gender)}` : ''} {p.phone ? `· ${p.phone}` : ''}
               </div>
@@ -143,6 +144,9 @@ export default function PatientDetail() {
               can('clinical:read') && can('billing:read') && can('patients:write') && { label: 'Send the record to someone else…', icon: <FileArchive size={16} />, title: 'A court, the dental board, public health…: the record is downloaded and the disclosure recorded for the HIPAA accounting', onClick: () => navigate(`/compliance?tab=disclosures&new=1&export=1&patient=${p.id}`) },
               can('patients:write') && { label: 'Write a letter', icon: <Mail size={16} />, title: 'A letter from a template, filled in from the chart', onClick: () => navigate(`/letters?patient=${p.id}`) },
               user?.role === 'admin' && { label: 'Access log', icon: <ShieldCheck size={16} />, title: "Who viewed or changed this patient's record", onClick: () => navigate(`/settings?tab=audit&patient_id=${p.id}`) },
+              can('patients:write') && (p.deceased_at
+                ? { label: 'Not deceased (undo)', icon: <Undo2 size={16} />, title: 'Marked deceased by mistake: the chart, recall and messages come back, and cancelled visits are put back when their time is still free', onClick: () => undoDeceased(p.id, reload) }
+                : { label: 'Mark deceased', icon: <HeartOff size={16} />, title: 'Chart inactive; recall, statements and messages stopped; future visits cancelled — in one step, with Undo', onClick: () => markDeceased(p.id, reload) }),
               user?.role === 'admin' && { label: 'Merge a duplicate chart…', icon: <GitMerge size={16} />, title: "Move a duplicate chart's history into this one", onClick: () => setModal('merge') },
             ]} />
           </div>
@@ -156,7 +160,7 @@ export default function PatientDetail() {
           <button type="button" className="link" onClick={() => setPopup(null)} aria-label="Hide the office alert">Got it</button>
         </div>
       )}
-      <div className="tabs pt-tabs" style={{ marginTop: 16 }} ref={tabsRef}>
+      <div className="tabs pt-tabs" ref={tabsRef}>
         {groups.map((g) => (
           <div key={g.key} className={`pt-tab-group${inModule?.key === g.key ? ' in' : ''}`} data-module={g.key} role="group" aria-label={`${g.label} module`}>
             <span className="pt-tab-mod" aria-hidden>{g.label}</span>
@@ -253,7 +257,7 @@ function Overview({ p, reload }) {
         <div className="card">
           <h2>Recall</h2>
           <RecallPanel patientId={p.id} heading={false} />
-          <RecallStatus patientId={p.id} />
+          <RecallStatus patientId={p.id} onPatientChange={reload} />
         </div>
         <div className="card">
           <h2>Primary insurance</h2>

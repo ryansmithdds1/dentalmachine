@@ -57,10 +57,16 @@ export async function activate(t, patientId) {
   await t.page.waitForFunction((id) => sessionStorage.getItem('dm_active_patient') === String(id), patientId);
 }
 
-// Opens a page from the menu (kept open, as most people have it): the module's ▾, then the page.
+// Opens a page from the menu. Kept open (as most people have it, and as the robot's browsers are), the module's ▾
+// folds its pages out, then one click on the page. With the menu collapsed, resting the pointer on the module opens
+// its list (free: a rest isn't a click, see scoring.md).
 export async function menu(t, module, href, readySel, caption) {
   await t.step(caption, async () => {
     const link = t.page.locator(`.sidebar a[href="${href}"]`).first();
+    if (!(await link.isVisible()) && !(await t.page.locator('.app.rail-open').count())) {
+      await t.page.hover(`.rail-mod[data-module="${module}"] .rail-mod-btn`);
+      await link.waitFor({ state: 'visible', timeout: 1500 }).catch(() => {});
+    }
     if (!(await link.isVisible())) await t.click(`.rail-mod[data-module="${module}"] .rail-mod-chev`);
     await t.click(link);
     await t.see(readySel, { timeout: 20_000 });

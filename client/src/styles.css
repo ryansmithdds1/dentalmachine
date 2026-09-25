@@ -236,6 +236,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 @keyframes dictate-pulse { 50% { box-shadow: 0 0 0 6px rgba(194, 65, 12, 0.18); } }
 .dictate-type { flex: 1; min-width: 0; }
 .dictate-type input { width: 100%; border: none; background: transparent; box-shadow: none; }
+.dictate-bar .note-template-pick { width: auto; max-width: 170px; flex: none; font-size: 13px; min-height: 32px; padding: 4px 8px; }
 .dictate-status { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 8px; font-size: 12.5px; }
 .dictate-chip { border-radius: 999px; padding: 2px 9px; font-size: 12px; }
 .dictate-chip.filled { background: var(--primary-soft); color: var(--primary-ink); }

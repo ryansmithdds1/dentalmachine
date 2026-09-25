@@ -2,7 +2,7 @@ import {
   AlertTriangle, CalendarDays, Inbox as InboxIcon, CalendarRange, PackageCheck, Users, PhoneCall, Repeat, Send, ShieldCheck,
   MessageSquare, Phone, Headset, Megaphone, Star, Receipt, Banknote, ChartColumn, Gauge, CircleDollarSign, Landmark, Sparkles,
   Building2, ListChecks, ClipboardCheck, Clock, FolderOpen, BookOpen, LayoutDashboard, TrendingUp, Wallet, ClipboardList,
-  Stethoscope, Images, CheckCheck, Ruler, ScanSearch, Contact, Gift, Mail, ShieldAlert,
+  Stethoscope, Images, CheckCheck, Ruler, ScanSearch, Contact, Gift, Mail, ShieldAlert, MessageCircleHeart, Award,
 } from 'lucide-react';
 
 // The module bar, like Open Dental's: one click on a module goes straight to it, and the less used screens
@@ -83,6 +83,8 @@ export const MODULES = [
         { to: '/phones', label: 'Phones', icon: Headset, can: read('patients:read') },
         { to: '/campaigns', label: 'Campaigns', icon: Megaphone, can: read('patients:write') },
         { to: '/reputation', label: 'Reviews', icon: Star, can: read('patients:read') },
+        // What patients said after their visit (the "how did we do?" funnel) and the team's shout-outs.
+        { to: '/reviews', label: 'Patient feedback', icon: MessageCircleHeart, can: read('patients:read') },
       ] },
       { key: 'numbers', label: 'Numbers', pages: [
         { to: '/reports', label: 'Reports', icon: ChartColumn, can: read('reports:read') },
@@ -97,6 +99,7 @@ export const MODULES = [
         { to: '/office', label: 'To-do & labs', icon: ListChecks, can: () => true, badge: 'tasks' },
         { to: '/checklists', label: 'Checklists', icon: ClipboardCheck, can: () => true, badge: 'checklists' },
         { to: '/timeclock', label: 'Time clock', icon: Clock, can: () => true },
+        { to: '/bonus', label: 'My bonus', icon: Award, can: () => true },
         { to: '/intranet', label: 'Intranet', icon: BookOpen, can: () => true },
         { to: '/compliance', label: 'Compliance log', icon: ShieldAlert, can: read('patients:read') },
       ] },

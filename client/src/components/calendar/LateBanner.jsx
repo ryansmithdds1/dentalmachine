@@ -38,21 +38,22 @@ export default function LateBanner({ list, canText, canWrite, onText, onNoShow, 
           <X size={15} />
         </button>
       )}
+      {/* One line for up to three people at a normal width (it was a row each, ~120 px above the day): the time and
+          chair are on the name's tooltip, the actions are icons with their words for screen readers and tooltips. */}
       <ul className="late-list">
         {shown.map(({ appt: a, late }) => (
           <li key={a.id} className={late.level === 'very_late' ? 'very' : ''}>
-            <button type="button" className="link late-who" onClick={() => onOpen(a)} title="Open the visit">
+            <button type="button" className="link late-who" onClick={() => onOpen(a)} title={`Open the visit — ${fmtTime(a.start_time)}${a.operatory_name ? ` · ${a.operatory_name}` : ''}`}>
               <strong>{a.first_name} {a.last_name}</strong>
             </button>
             <span className="late-min">{waitLabel(late.minutes)}</span>
-            <span className="muted late-when">{fmtTime(a.start_time)}{a.operatory_name ? ` · ${a.operatory_name}` : ''}</span>
             <span className="late-actions">
               {canText && (texted[a.id]
-                ? <span className="late-done"><Check size={13} /> Texted</span>
-                : <button type="button" className="small" disabled={busy === a.id} onClick={() => text(a)} title="Text “are you on your way?”"><MessageSquareText size={14} /> Text</button>)}
-              {a.phone && <a className="btn small" href={`tel:${a.phone}`} title={`Call ${a.phone}`}><Phone size={14} /> Call</a>}
-              {canWrite && <button type="button" className="small" onClick={() => onNoShow(a)} title="Mark a no-show (pick the reason)"><UserX size={14} /> No-show</button>}
-              {canWrite && <button type="button" className="small" onClick={() => onMove(a)} title="Move the visit (arrow keys and Enter, or tap a new time)"><Move size={14} /> Move</button>}
+                ? <span className="late-done" title="Texted"><Check size={13} /><span className="sr-only">Texted</span></span>
+                : <button type="button" className="small icon-only" disabled={busy === a.id} onClick={() => text(a)} title={`Text ${a.first_name} “are you on your way?”`}><MessageSquareText size={14} aria-hidden /><span className="sr-only">Text</span></button>)}
+              {a.phone && <a className="btn small icon-only" href={`tel:${a.phone}`} title={`Call ${a.phone}`}><Phone size={14} aria-hidden /><span className="sr-only">Call</span></a>}
+              {canWrite && <button type="button" className="small icon-only" onClick={() => onNoShow(a)} title={`Mark ${a.first_name} a no-show (pick the reason)`}><UserX size={14} aria-hidden /><span className="sr-only">No-show</span></button>}
+              {canWrite && <button type="button" className="small icon-only" onClick={() => onMove(a)} title="Move the visit (arrow keys and Enter, or tap a new time)"><Move size={14} aria-hidden /><span className="sr-only">Move</span></button>}
             </span>
           </li>
         ))}

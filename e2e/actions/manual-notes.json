@@ -1,0 +1,2675 @@
+{
+ "_about": "Hand-written prose for the user manual (npm run manual → e2e/actions/manual.mjs). One entry per action in actions.json. Fields: q (the question, if the automatic one reads badly), keywords (extra words people search with), what (plain-language intro), where (overrides the route), start (text for the start picture), steps {index: better caption for the robot's step at that index}, skipSteps [indexes], mouse (the mouse way), tips [..], problems [[what you see, what to do]], related [ids], to (the screen to open; null for none), manualSteps [{text, keys, shot}] (used when the robot has no run, e.g. hardware), useManualSteps (use manualSteps even when the robot ran). Keep it accurate to the app: check the screen or the code, don't invent features.",
+ "A001": {
+  "keywords": "schedule calendar day view appointments today book open",
+  "what": "The schedule shows every visit for the day, one column per chair. Use it to see who is coming, who has arrived and where the gaps are. It opens on today.",
+  "mouse": "Click Schedule at the top of the menu on the left.",
+  "tips": [
+   "← and → go to the previous or next day; T comes back to today. D, W and A switch between the day, week and agenda (list) views.",
+   "F jumps to the visit happening now; then use the arrow keys to move from visit to visit and Enter to open one.",
+   "Press ? on the schedule to see every key it knows."
+  ],
+  "related": [
+   "A009",
+   "A020",
+   "A010",
+   "A016"
+  ]
+ },
+ "A002": {
+  "keywords": "find patient search look up open chart name phone birthday chart number",
+  "what": "The command bar finds any patient from any screen by name, phone number, birth date or chart number. Opening them makes them the active patient, so every other screen already knows who you are working on.",
+  "mouse": "Click Search at the top of the menu (it shows Ctrl K), type the name, and click the patient.",
+  "tips": [
+   "You can also press / (when you’re not typing in a box) to open the command bar.",
+   "Before you type anything, the command bar lists the patients you opened recently.",
+   "Type a verb first to go straight to a job: “book jane”, “pay smith”, “text 555-0100”, “perio doe”."
+  ],
+  "problems": [
+   [
+    "“No patients match …”",
+    "Check the spelling, or try the phone number or birth date instead. Inactive patients are found too."
+   ]
+  ],
+  "related": [
+   "A003",
+   "A055",
+   "A043"
+  ]
+ },
+ "A003": {
+  "q": "How do I see a patient’s alerts, balance, insurance and next visit at a glance?",
+  "keywords": "patient bar summary allergies alert balance owes insurance next appointment",
+  "what": "Once a patient is the active patient, the patient bar across the top of every screen shows their medical and office alerts, what they owe, their insurance and their next visit. You don’t have to open anything.",
+  "tips": [
+   "The buttons on the patient bar (Chart, Note, Book, Text, Ledger, Pay, Estimate…) each have an Alt shortcut, shown when you hover.",
+   "Alt+X clears the active patient when you’re done with them."
+  ],
+  "related": [
+   "A002",
+   "A024",
+   "A035"
+  ]
+ },
+ "A004": {
+  "keywords": "phone call incoming caller id ringing pop up screen pop",
+  "what": "When the office phone rings, a pop-up shows who is calling and makes them the active patient, so their chart is one key away before you pick up.",
+  "mouse": "Click the caller’s name on the call pop-up.",
+  "tips": [
+   "Missed callers are texted back automatically if that’s turned on in Settings → Phone line.",
+   "Unknown numbers get their own buttons: Text back, Attach to a patient, or New patient."
+  ],
+  "problems": [
+   [
+    "No pop-up appears",
+    "The phone line has to be connected in Settings → Phone line, and your computer must be signed in. Calls still show under Manage → Calls."
+   ]
+  ],
+  "related": [
+   "A066",
+   "A053",
+   "A002"
+  ]
+ },
+ "A005": {
+  "keywords": "text message sms reply inbox conversation",
+  "what": "Messages holds every text conversation with patients, newest first. Replying takes a few keys and the text goes out from the office number.",
+  "mouse": "Open Manage ▾ → Messages, click the conversation, type in the reply box and click Send.",
+  "tips": [
+   "J and K move down and up the list; Esc goes back to the list.",
+   "A patient who replied STOP can’t be texted until they text START back."
+  ],
+  "problems": [
+   [
+    "“This number replied STOP to our texts…”",
+    "The patient opted out. Call them instead, or ask them to text START to the office number."
+   ]
+  ],
+  "related": [
+   "A008",
+   "A036",
+   "A094"
+  ]
+ },
+ "A006": {
+  "keywords": "chart finding caries decay existing condition tooth surface odontogram",
+  "what": "On the Chart tab you chart by typing, the way you would say it: the tooth, the surfaces and the finding. It shows what it will chart before you press Enter.",
+  "tips": [
+   "Undo on the notice (or Ctrl/⌘ Z) takes the finding back for a few seconds.",
+   "Primary teeth are letters A–T."
+  ],
+  "problems": [
+   [
+    "“tooth must be 1-32, A-T…”",
+    "The tooth number isn’t a real tooth. Check it and type it again."
+   ],
+   [
+    "“… requires surfaces”",
+    "That code needs surfaces: add them, e.g. “30 MO caries”."
+   ]
+  ],
+  "related": [
+   "A021",
+   "A045",
+   "A015"
+  ]
+ },
+ "A007": {
+  "keywords": "xray x-ray radiograph images bitewing fmx pano view",
+  "what": "X opens the patient’s newest x-ray set on its first image. The arrow keys step through the images.",
+  "mouse": "Open the Images module (or the Documents & x-rays tab) and click the x-ray set.",
+  "tips": [
+   "In the viewer you can compare a spot with earlier visits, measure, and adjust brightness.",
+   "Esc closes the viewer."
+  ],
+  "related": [
+   "A031",
+   "A078",
+   "A056"
+  ]
+ },
+ "A008": {
+  "keywords": "text sms message send patient",
+  "what": "Alt+T opens a text conversation with the active patient from any screen, with the cursor ready to type.",
+  "mouse": "Click Text on the patient bar, type the message and click Send.",
+  "tips": [
+   "Every text is kept on the patient’s Messages & forms tab."
+  ],
+  "problems": [
+   [
+    "“Patient has no reachable phone or email (or has opted out)”",
+    "Add a mobile number on the chart (A043), or call them."
+   ]
+  ],
+  "related": [
+   "A005",
+   "A053",
+   "A065"
+  ]
+ },
+ "A009": {
+  "keywords": "schedule view chairs operatories providers doctor hygienist columns filter",
+  "what": "The schedule can show one column per chair, one column per provider, or just one provider’s day.",
+  "mouse": "In the command bar type “Schedule:” and pick Chairs view, Providers view or “show only …”.",
+  "tips": [
+   "V again shows the next provider, then everyone. Shift+V always shows everyone.",
+   "$ shows the day’s production (all, doctor, hygiene) when you’re allowed to see it."
+  ],
+  "related": [
+   "A001",
+   "A020"
+  ]
+ },
+ "A010": {
+  "keywords": "arrive arrived check in patient here waiting room",
+  "what": "Checking a patient in tells the back office they have arrived. The visit’s card changes colour for everyone.",
+  "start": "Select the visit on the schedule first (click it once, or press F and use the arrow keys).",
+  "mouse": "Click the visit’s next-step button on its card (“Check in”), or open the visit and click Check in.",
+  "tips": [
+   "Patients can also check themselves in by texting HERE or scanning the QR poster (Settings → Mobile check-in).",
+   "The steps after this are S (seat), R (ready for the doctor) and O (out)."
+  ],
+  "problems": [
+   [
+    "“… is already past check-in”",
+    "The visit was already checked in, seated or finished."
+   ]
+  ],
+  "related": [
+   "A012",
+   "A018",
+   "A013"
+  ]
+ },
+ "A011": {
+  "keywords": "clinical note progress note soap write document visit",
+  "what": "Alt+N opens today’s clinical note for the active patient, already drafted from the visit (the procedures and your template). Add what happened and save.",
+  "mouse": "Click Note on the patient bar, type, and click Save.",
+  "tips": [
+   "Ctrl/⌘ Shift Enter saves and signs in one go (if you are allowed to sign).",
+   "Alt+M starts dictation if your computer has a microphone (A052)."
+  ],
+  "problems": [
+   [
+    "“Signed notes cannot be edited; add an addendum instead”",
+    "Once signed, a note is locked. Add an addendum to it."
+   ],
+   [
+    "“A note can be at most 20,000 characters…”",
+    "Split it, or add an addendum."
+   ]
+  ],
+  "related": [
+   "A023",
+   "A052",
+   "A095"
+  ]
+ },
+ "A012": {
+  "keywords": "seat patient chair operatory in chair",
+  "what": "Seating the patient shows everyone that they are in the chair.",
+  "start": "Select the visit on the schedule first.",
+  "mouse": "Click the card’s next-step button (“Seat”), or open the visit and click Seat.",
+  "problems": [
+   [
+    "“… is already seated” / “… can’t be seated now”",
+    "The visit is already in the chair or finished."
+   ]
+  ],
+  "related": [
+   "A010",
+   "A018",
+   "A013"
+  ]
+ },
+ "A013": {
+  "keywords": "patient out done finished complete visit dismiss",
+  "what": "Marking a visit “out” records that the patient is done in the chair. On a visit that is already finished, O opens its checkout instead.",
+  "start": "Select the seated patient’s visit on the schedule first.",
+  "steps": {
+   "1": "Press O: the visit is marked out (visit complete)"
+  },
+  "mouse": "Open the visit and click “Out · visit complete”.",
+  "tips": [
+   "If the visit has planned procedures, the visit panel offers to complete them and post the charges — that is a deliberate click, because posted charges can’t be undone from the notice.",
+   "Shift+R marks “ready for checkout” instead, if the front desk should come and get them."
+  ],
+  "problems": [
+   [
+    "“Seat … first”",
+    "Only a seated patient can be marked out. Press S first."
+   ]
+  ],
+  "related": [
+   "A017",
+   "A015",
+   "A012"
+  ]
+ },
+ "A014": {
+  "keywords": "medical history review no changes health history update",
+  "what": "At each visit someone confirms the medical history. When nothing has changed, one key records “reviewed today, no changes” with your name.",
+  "start": "Open the patient’s chart overview (the Family module).",
+  "mouse": "Click “Reviewed today, no changes” in the medical history.",
+  "related": [
+   "A032",
+   "A033"
+  ]
+ },
+ "A015": {
+  "q": "How do I set today’s procedures complete (post the charges)?",
+  "keywords": "complete procedures post charges production set complete",
+  "what": "When the work is done, completing today’s procedures posts their charges to the ledger and counts the production. Shift+C finds today’s planned work and asks once.",
+  "start": "Open the patient’s Chart tab.",
+  "mouse": "Click Complete beside a procedure in the chart’s list, or complete the visit from its panel on the schedule.",
+  "tips": [
+   "Posted charges show on the ledger right away and go on the claim.",
+   "A completed procedure is un-completed (not deleted) if it was a mistake — the ledger keeps both entries."
+  ],
+  "problems": [
+   [
+    "“Only completed procedures can be un-completed”",
+    "The procedure wasn’t complete yet."
+   ]
+  ],
+  "related": [
+   "A017",
+   "A022",
+   "A021"
+  ]
+ },
+ "A016": {
+  "keywords": "confirm appointment confirmed call patient reminder",
+  "what": "Marks a visit as confirmed (by phone). Patients who reply C to a reminder text are confirmed automatically.",
+  "start": "Select the visit on the schedule first.",
+  "mouse": "Click the visit to open its panel and pick how it was confirmed in the Confirm list.",
+  "tips": [
+   "Undo on the notice takes it back.",
+   "U on the schedule lists the day’s unconfirmed visits; C confirms each one."
+  ],
+  "related": [
+   "A094",
+   "A001"
+  ]
+ },
+ "A017": {
+  "keywords": "checkout check out payment walkout next visit collect",
+  "what": "Checkout collects what is due, books the next visit and marks the patient checked out, on one screen. The amount is already filled in with what they owe today plus any earlier balance.",
+  "start": "Select the finished visit on the schedule.",
+  "mouse": "Open the visit and click “Check out…”; click Take payment, pick a suggested time, and click “Mark checked out”.",
+  "tips": [
+   "The payment method is the one this patient used last.",
+   "The walkout (route slip) can be printed from the same screen."
+  ],
+  "problems": [
+   [
+    "“Payment amount must be positive”",
+    "Type an amount above zero, or skip the payment if nothing is due."
+   ]
+  ],
+  "related": [
+   "A019",
+   "A027",
+   "A044"
+  ]
+ },
+ "A018": {
+  "keywords": "ready for doctor exam hygiene check flag",
+  "what": "Tells the dentist that the hygiene patient is ready for the exam. The card shows “Ready · Dr” for everyone.",
+  "start": "Select the seated patient’s visit on the schedule.",
+  "mouse": "Open the visit and click “Ready for doctor”.",
+  "tips": [
+   "Press R again to take the flag off."
+  ],
+  "problems": [
+   [
+    "“Seat … first, then mark them ready”",
+    "Only a seated patient can be marked ready. Press S first."
+   ]
+  ],
+  "related": [
+   "A012",
+   "A013"
+  ]
+ },
+ "A019": {
+  "keywords": "take payment collect money pay card cash check post payment",
+  "what": "Alt+P opens the active patient’s ledger with the payment panel, the amount already set to what they owe. Enter posts it.",
+  "mouse": "Click Pay on the patient bar, check the amount and method, and click Post payment.",
+  "tips": [
+   "The method (cash, check, card…) defaults to the one this person used last.",
+   "A payment posted by mistake is voided, not deleted (A102): the ledger keeps both lines."
+  ],
+  "problems": [
+   [
+    "“Payment amount must be positive”",
+    "Type an amount above zero."
+   ],
+   [
+    "“Missing permission: billing:write”",
+    "Your role can’t take payments — ask the office manager."
+   ]
+  ],
+  "related": [
+   "A017",
+   "A102",
+   "A024"
+  ]
+ },
+ "A020": {
+  "keywords": "book appointment schedule new visit make appointment",
+  "what": "Alt+B opens the booking form on the active patient’s next open time with their usual dentist or hygienist. Enter books it.",
+  "mouse": "Click Book on the patient bar, pick the time and click Book appointment.",
+  "tips": [
+   "On the schedule, N starts a booking for anyone.",
+   "Type “book jane” in the command bar to book straight from there."
+  ],
+  "related": [
+   "A029",
+   "A082",
+   "A027"
+  ]
+ },
+ "A021": {
+  "keywords": "treatment plan chart planned procedure code crown ada",
+  "what": "Type a tooth and a procedure code on the Chart tab and the fee and the patient’s estimated share show before you press Enter.",
+  "mouse": "Click the tooth on the drawing, search for the procedure and click it.",
+  "tips": [
+   "You can type words instead of codes (“crown”, “MO filling”, “rct”).",
+   "Planned work shows on the Treatment Plan module, ready to present."
+  ],
+  "problems": [
+   [
+    "“… requires a tooth”",
+    "That code needs a tooth number first."
+   ]
+  ],
+  "related": [
+   "A038",
+   "A025",
+   "A006"
+  ]
+ },
+ "A022": {
+  "keywords": "insurance claim create send bill submit",
+  "what": "The patient’s Insurance tab shows finished work that hasn’t been billed yet. B makes the claim and sends it to the clearinghouse.",
+  "mouse": "Click “Bill … claim” on the Insurance tab.",
+  "tips": [
+   "Before sending, a claim lists what is likely to be denied (frequencies, missing x-rays or narratives).",
+   "Billing staff can also approve claims in bulk (A048)."
+  ],
+  "problems": [
+   [
+    "A claim is rejected by the payer",
+    "It shows in Needs attention and on the claim; fix it and send a corrected claim (A106)."
+   ]
+  ],
+  "related": [
+   "A048",
+   "A056",
+   "A067"
+  ]
+ },
+ "A023": {
+  "keywords": "sign note signature finalize lock",
+  "what": "The dentist signs each note. A signed note is locked with the dentist’s name and NPI; later changes are addenda.",
+  "mouse": "Clinical notes tab → click Sign on the note.",
+  "tips": [
+   "Ctrl/⌘ Shift Enter saves and signs while you are writing.",
+   "Chart audit (A095) lists every unsigned note."
+  ],
+  "problems": [
+   [
+    "“Note already signed”",
+    "Someone signed it already. Add an addendum if something needs adding."
+   ]
+  ],
+  "related": [
+   "A011",
+   "A095"
+  ]
+ },
+ "A024": {
+  "q": "How do I explain a balance (show the ledger)?",
+  "keywords": "ledger balance account statement why owe history",
+  "what": "Alt+L opens the active patient’s ledger with “Why this balance”: each visit’s charges, what insurance paid, adjustments and payments, so you can walk the patient through it.",
+  "mouse": "Click Ledger on the patient bar (or the Account module).",
+  "tips": [
+   "Balances are always added up from the ledger lines; nothing is typed in by hand."
+  ],
+  "related": [
+   "A019",
+   "A064",
+   "A119"
+  ]
+ },
+ "A025": {
+  "keywords": "estimate cost quote patient portion how much insurance pay",
+  "what": "Shows what a procedure costs, what insurance should pay and what the patient pays — without charting anything.",
+  "mouse": "Click Estimate on the patient bar and type the procedure.",
+  "tips": [
+   "The estimate uses the patient’s plan, remaining maximum and deductible."
+  ],
+  "related": [
+   "A021",
+   "A035",
+   "A038"
+  ]
+ },
+ "A026": {
+  "keywords": "eligibility verify insurance check coverage active",
+  "what": "Checks the patient’s coverage with the payer and updates the policy. Tomorrow’s patients are also checked overnight automatically.",
+  "start": "Open the patient’s Insurance tab.",
+  "mouse": "Click “Check <carrier>” under Eligibility & benefits on the Insurance tab.",
+  "problems": [
+   [
+    "The payer doesn’t answer",
+    "Try again later, or verify by phone from Billing → Verification (P records a phone verification)."
+   ]
+  ],
+  "related": [
+   "A087",
+   "A035",
+   "A047"
+  ]
+ },
+ "A027": {
+  "keywords": "recall hygiene cleaning next visit book checkout six months",
+  "what": "At checkout the next cleaning is suggested with the patient’s hygienist, near the time of today’s visit. Enter books the first suggestion.",
+  "mouse": "On the checkout screen click “Book … recall” and click one of the suggested times.",
+  "tips": [
+   "When nothing is left to pay, the booking opens by itself."
+  ],
+  "related": [
+   "A017",
+   "A020",
+   "A037"
+  ]
+ },
+ "A028": {
+  "keywords": "task todo assign co-worker remind colleague",
+  "what": "Type “task …” in the command bar with @ and a name to give someone a task. It is about the active patient and due today unless you say otherwise.",
+  "mouse": "Manage ▾ → To-do & labs → New task (or press T there).",
+  "tips": [
+   "The person sees it in To-do & labs and in the menu’s badge."
+  ],
+  "related": [
+   "A034",
+   "A036"
+  ]
+ },
+ "A029": {
+  "keywords": "reschedule move appointment change time day drag",
+  "what": "M picks the selected visit up; the arrow keys move it; Enter puts it down. Shift+→ keeps the same time on the next day.",
+  "start": "Select the visit on the schedule first.",
+  "mouse": "Drag the visit to the new time, or open it and click Move….",
+  "tips": [
+   "Undo on the notice puts it back.",
+   "Pin parks a visit on the pinboard while you look for a day."
+  ],
+  "problems": [
+   [
+    "A warning that the new time clashes",
+    "Choose “Move anyway” only if the double-booking is on purpose."
+   ]
+  ],
+  "related": [
+   "A054",
+   "A020",
+   "A070"
+  ]
+ },
+ "A030": {
+  "keywords": "xray sensor capture radiograph take bitewings fmx tuxedo jazz twain",
+  "what": "With an x-ray sensor on the chair-side computer, x-rays go straight into the chart: the imaging studio shows which spot of the mount is next, and each exposure lands there within seconds.",
+  "where": "Images module (Documents & x-rays tab) → Capture from the sensor",
+  "manualSteps": [
+   {
+    "text": "Open the patient’s Images module (G then I, or the Documents & x-rays tab)."
+   },
+   {
+    "text": "Under “This computer”, check the workstation is the one at this chair, pick the mount (for example 4 bitewings) and click “Capture from <sensor>”. The imaging studio opens with the first spot glowing."
+   },
+   {
+    "text": "Take each exposure. Each image fills the next spot within a few seconds. Click an empty spot to aim the next exposure there."
+   },
+   {
+    "text": "To replace an image, hover over it and click Retake (the first one stays in the chart, marked as retaken). Close the studio with ✕ when you are done."
+   }
+  ],
+  "tips": [
+   "The sensor needs the imaging bridge on that computer (Settings → Imaging bridges; see docs/imaging-sensors.md).",
+   "Test takes one exposure without a patient, to check the sensor."
+  ],
+  "problems": [
+   [
+    "The workstation shows offline",
+    "The imaging bridge isn’t running on that computer — restart the computer or run the bridge again."
+   ],
+   [
+    "The driver opens its own window for each exposure",
+    "Set the TWAIN driver to capture automatically, with no preview."
+   ]
+  ],
+  "related": [
+   "A031",
+   "A007",
+   "A182"
+  ]
+ },
+ "A031": {
+  "keywords": "upload x-rays photos images add files drop pictures",
+  "what": "Add pictures from the computer to the chart. Each file is filed as a photo or an x-ray from the file itself.",
+  "mouse": "Documents & x-rays tab → click “Add files”, or drag the files onto the page.",
+  "tips": [
+   "Set Type and Tooth before adding if you want them filed that way.",
+   "A CBCT folder can be added as one study."
+  ],
+  "problems": [
+   [
+    "“That file is too large”",
+    "Shrink the picture or split the PDF."
+   ]
+  ],
+  "related": [
+   "A007",
+   "A069",
+   "A030"
+  ]
+ },
+ "A032": {
+  "keywords": "medical history allergy medication update health",
+  "what": "Opens the medical history on the Allergies line (A) or the Medications line (Shift+M). Saving also counts as today’s review.",
+  "start": "Open the patient’s chart overview (the Family module).",
+  "mouse": "Click the Allergies or Medications line in the medical history, type and click Save.",
+  "problems": [
+   [
+    "“Changing the medical history needs clinical access”",
+    "Front desk can’t change it; ask a clinical team member."
+   ]
+  ],
+  "related": [
+   "A014",
+   "A033",
+   "A046"
+  ]
+ },
+ "A033": {
+  "keywords": "vitals blood pressure bp pulse heart rate",
+  "what": "Type the reading as it is said — “122/78 68” — and it is read back as BP and pulse before you save.",
+  "start": "Open the patient’s chart overview.",
+  "mouse": "Click “Record vitals” under the medical history, type the reading and click Save.",
+  "problems": [
+   [
+    "“Enter both blood pressure numbers”",
+    "Type it as top/bottom, e.g. 122/78."
+   ]
+  ],
+  "related": [
+   "A032",
+   "A014"
+  ]
+ },
+ "A034": {
+  "keywords": "task done complete tick to-do",
+  "what": "To-do & labs lists your tasks; X marks the highlighted one done.",
+  "mouse": "Manage ▾ → To-do & labs, then tick the task’s box.",
+  "tips": [
+   "J and K move between tasks. Undo (or Ctrl/⌘ Z) reopens it."
+  ],
+  "related": [
+   "A028",
+   "A049"
+  ]
+ },
+ "A035": {
+  "keywords": "insurance benefits remaining maximum used deductible left",
+  "what": "The Insurance tab shows the annual maximum, what has been used and what is left, and the deductible.",
+  "mouse": "Open the patient (Family module) and click the Insurance tab.",
+  "related": [
+   "A025",
+   "A026"
+  ]
+ },
+ "A036": {
+  "keywords": "staff chat team message internal",
+  "what": "Team chat is the office’s own chat. Ctrl/⌘ J opens it on #Everyone with the cursor in the message box.",
+  "mouse": "Click Team chat at the top of the menu.",
+  "tips": [
+   "Ctrl/⌘ Shift J starts a message about the active patient."
+  ],
+  "related": [
+   "A028",
+   "A135"
+  ]
+ },
+ "A037": {
+  "keywords": "recall due overdue call book hygiene cleaning list",
+  "what": "Follow-up lists → Recall lists patients who are due or overdue, with their phone number. Book them from their row while you are on the phone.",
+  "mouse": "Family ▾ → Follow-up lists → Recall, then click Book on the row.",
+  "tips": [
+   "On the list, J/K move between patients, B books, L logs a call.",
+   "The recall autopilot texts and emails most patients before anyone has to call (A125)."
+  ],
+  "related": [
+   "A051",
+   "A125",
+   "A177"
+  ]
+ },
+ "A038": {
+  "keywords": "treatment plan build create new plan procedures",
+  "what": "N on the Treatment plans tab opens the plan builder. Type each piece of work and press Enter; Ctrl/⌘ Enter saves the plan and names it for you.",
+  "mouse": "Treatment Plan module → New plan, add each procedure, click Save.",
+  "tips": [
+   "Plans can have phases and alternatives; the patient’s share is estimated per line."
+  ],
+  "related": [
+   "A042",
+   "A021",
+   "A096"
+  ]
+ },
+ "A039": {
+  "keywords": "consent form sign signature treatment consent",
+  "what": "The right consent for the plan is chosen for you; the patient signs it on this screen (or on the iPad).",
+  "mouse": "Treatment plans tab → click Consent… on the plan → Sign here on this device.",
+  "tips": [
+   "Alt+F opens forms & consents for the active patient from anywhere: I hands the iPad over, T texts them, Q shows a QR code, H signs here."
+  ],
+  "related": [
+   "A042",
+   "A040"
+  ],
+  "manualSteps": [
+   {
+    "text": "Open the patient’s Treatment Plan module (the Treatment plans tab)."
+   },
+   {
+    "text": "Click “Consent…” on the plan: the right consent is chosen for you and “Sign here on this device” has the focus."
+   },
+   {
+    "text": "Press Enter (or click “Sign here on this device”): the consent opens for the patient to read and sign. Hand them the screen; when they have signed, it is filed on the chart."
+   }
+  ]
+ },
+ "A040": {
+  "keywords": "send forms intake paperwork before visit online",
+  "what": "Sends the patient the forms they still need, by text or email, to fill in before they come.",
+  "mouse": "Messages & forms tab → Send forms… → Text/email to patient.",
+  "tips": [
+   "The forms they still need are already ticked.",
+   "Answers come back to Sent in online (A046)."
+  ],
+  "related": [
+   "A046",
+   "A039"
+  ]
+ },
+ "A041": {
+  "keywords": "appointment type length duration note change edit",
+  "what": "Click a visit to open its panel beside the schedule. Changes there save at once.",
+  "tips": [
+   "Picking a new visit type also sets its usual length.",
+   "Undo on the notice takes the change back."
+  ],
+  "related": [
+   "A029",
+   "A044"
+  ]
+ },
+ "A042": {
+  "keywords": "present treatment plan case presentation sign accept",
+  "what": "Shows the plan to the patient on this screen for them to accept and sign — no birth-date check when you are with them.",
+  "mouse": "Treatment plans tab → “Present here for … to sign”. The patient ticks “I agree” and taps Accept & sign.",
+  "tips": [
+   "You can also text them a link to review and sign at home."
+  ],
+  "related": [
+   "A038",
+   "A039",
+   "A096"
+  ],
+  "steps": {
+   "2": "The patient sees their name on the signing line, ticks “I agree” and taps Accept & sign"
+  }
+ },
+ "A043": {
+  "keywords": "phone number email address update contact change",
+  "what": "E on the chart overview turns the mobile number into a box; type and press Enter.",
+  "mouse": "Click the number or email on the contact card, type the new one and press Enter.",
+  "tips": [
+   "Undo on the notice puts the old one back; the chart history keeps both."
+  ],
+  "problems": [
+   [
+    "“Invalid email”",
+    "Check the address for typos."
+   ]
+  ],
+  "related": [
+   "A143",
+   "A099"
+  ]
+ },
+ "A044": {
+  "keywords": "route slip walkout print visit",
+  "what": "The route slip lists the visit, what is planned and what is next, ready to print.",
+  "where": "Schedule → the visit’s panel → Route slip",
+  "mouse": "Click the visit on the schedule, then click “Route slip” in its panel; print with “Print route slip”.",
+  "tips": [
+   "Today’s dashboard also has a Route slip button on every visit.",
+   "At checkout, “Print walkout” prints what was done today for the patient to take home."
+  ],
+  "related": [
+   "A083",
+   "A017",
+   "A041"
+  ]
+ },
+ "A045": {
+  "keywords": "perio chart pocket depths probing bleeding periodontal",
+  "what": "Type the depths site by site; the cursor moves on by itself. B, U and P mark bleeding, pus or plaque on the site just probed.",
+  "mouse": "Chart ▾ → Perio, click Depths and type into each box.",
+  "tips": [
+   "Shift+B marks bleeding on the whole side.",
+   "Type 1 then 0–5 quickly for 10–15 mm.",
+   "Space or Enter moves on without a depth."
+  ],
+  "problems": [
+   [
+    "A depth goes into the wrong site",
+    "Click the site and type it again before saving."
+   ]
+  ],
+  "related": [
+   "A006",
+   "A097"
+  ]
+ },
+ "A046": {
+  "keywords": "intake online forms review merge sent in new patient paperwork",
+  "what": "Forms patients fill in online wait in “Sent in online” for someone to check. A merges what is new (allergies, medications, blood pressure) into the chart; nothing already on the chart is erased.",
+  "where": "Sent in online (/intake) — command bar “Sent in online”",
+  "mouse": "Open it from the command bar (“intake”) and click the green accept button on the item.",
+  "tips": [
+   "J and K move between items; Enter opens the patient; X sets a card photo or paperwork aside."
+  ],
+  "related": [
+   "A040",
+   "A032",
+   "A047"
+  ]
+ },
+ "A047": {
+  "keywords": "insurance card scan photo read policy new insurance",
+  "what": "Take or choose a photo of the insurance card: it is read into the policy form for you to check, then saved and checked with the payer.",
+  "start": "Open the patient’s Insurance tab.",
+  "mouse": "On the Insurance tab click “Scan card”, choose the photo, check the form and save it.",
+  "tips": [
+   "Always compare the member ID and group number with the card before saving."
+  ],
+  "problems": [
+   [
+    "A field was read wrong",
+    "Correct it in the form before you press Enter."
+   ]
+  ],
+  "related": [
+   "A091",
+   "A026"
+  ]
+ },
+ "A048": {
+  "keywords": "approve claims batch send ready billing queue",
+  "what": "Claims prepared from finished work wait under Ready to approve, one row per patient. Approving one makes and sends the claim.",
+  "where": "Account ▾ → Ready to approve (/claims?tab=approve)",
+  "tips": [
+   "J/K move between claims, A (or Enter) approves and sends, S skips one for now with a reason.",
+   "The badge on Account shows how many are waiting."
+  ],
+  "related": [
+   "A022",
+   "A056",
+   "A067"
+  ]
+ },
+ "A049": {
+  "keywords": "needs attention work queue problems failed issues exceptions",
+  "what": "Needs attention collects everything that went wrong in the background — a claim the payer rejected, a text that didn’t send, a payment that failed — so a person can fix it. Items clear themselves when a later attempt works.",
+  "where": "Manage ▾ → Needs attention (/attention)",
+  "tips": [
+   "The red badge on Manage is the count waiting.",
+   "Nothing fails silently: if something didn’t go through, it is listed here."
+  ],
+  "related": [
+   "A034",
+   "A083"
+  ]
+ },
+ "A050": {
+  "keywords": "intraoral camera photos pictures capture",
+  "what": "Most intraoral cameras work as an ordinary USB camera, so the imaging studio shows them live in the browser — no extra software. Each shot is filed in the chart as a photo.",
+  "where": "Images module (Documents & x-rays tab) → Intraoral camera",
+  "manualSteps": [
+   {
+    "text": "Open the patient’s Images module (G then I, or the Documents & x-rays tab)."
+   },
+   {
+    "text": "Click “Intraoral camera”. The studio opens with the camera’s live picture (the first time, allow the browser to use the camera and pick it from the list)."
+   },
+   {
+    "text": "Press the camera’s button, or click Capture. Freeze holds the picture first; Mirror and Upper flip it for mirror and upper-arch shots."
+   },
+   {
+    "text": "Each shot is filed as an intraoral photo (with the tooth, if you entered one). Close the studio with ✕."
+   }
+  ],
+  "tips": [
+   "“Learn button” teaches the studio which key the camera’s handpiece button sends."
+  ],
+  "problems": [
+   [
+    "It says it can’t start the camera",
+    "Another program may be using it, or the browser was not allowed to use it — check the camera permission in the browser’s address bar."
+   ]
+  ],
+  "related": [
+   "A031",
+   "A030",
+   "A007"
+  ]
+ },
+ "A051": {
+  "q": "How do I mark a recall call as “left a message”?",
+  "keywords": "recall call voicemail left message log call contacted",
+  "what": "After calling a recall patient, log how it went so the rest of the team knows. “Left voicemail” is already picked.",
+  "where": "Family ▾ → Follow-up lists → Recall",
+  "tips": [
+   "On the list, L opens the call log for the highlighted patient; 1–8 picks how it went; Enter saves.",
+   "One call covers all of that patient’s recalls."
+  ],
+  "related": [
+   "A037",
+   "A057"
+  ]
+ },
+ "A052": {
+  "keywords": "dictate voice microphone speech note talk",
+  "what": "Talk instead of typing: Alt+M in a note starts dictation, and what you say is written into the note (with a template, answered questions are filled in and wording that contradicts it is changed and flagged). Alt+M again stops.",
+  "where": "Clinical notes — Alt+M (needs a microphone)",
+  "manualSteps": [
+   {
+    "text": "On the patient’s Chart tab click “Dictate today’s note” (in a note that is already open, press Alt+M or click Dictate)."
+   },
+   {
+    "text": "Allow the microphone the first time, then talk: for example “two carpules articaine, IANB, rubber dam, shade A2, small distal caries into dentin.”"
+   },
+   {
+    "text": "Say “undo that” to take back the last change, or “stop dictating” (Alt+M again) to stop. Questions nobody answered stay as one-tap buttons."
+   },
+   {
+    "text": "Read it over, then save (Ctrl/⌘ Enter) or save and sign (Ctrl/⌘ Shift Enter)."
+   }
+  ],
+  "tips": [
+   "The AI scribe (Clinical notes) can instead listen to the whole visit and draft the note, procedures and findings for you to review; the conversation isn’t kept."
+  ],
+  "problems": [
+   [
+    "“Nothing was dictated”",
+    "The microphone heard nothing — check it is plugged in and allowed in the browser."
+   ],
+   [
+    "“That dictation is too long — dictate a section at a time”",
+    "Stop and start again for each part of the note."
+   ]
+  ],
+  "related": [
+   "A011",
+   "A023"
+  ]
+ },
+ "A053": {
+  "keywords": "log call phone note spoke called patient record call",
+  "what": "Alt+G opens “Log a call” beside whatever you are doing, already filled in: we called, spoke with them, just now, about the active patient. Type what was said and press Enter.",
+  "mouse": "Click Call on the patient bar, type the note and click Save.",
+  "tips": [
+   "The call is listed on the chart under Messages & forms → Calls."
+  ],
+  "related": [
+   "A004",
+   "A008",
+   "A051"
+  ]
+ },
+ "A054": {
+  "keywords": "cancel appointment cancellation reason rebook",
+  "what": "X cancels the selected visit. Pick the reason with its number; the next opening then shows with “Book it” ready, so you can rebook while the patient is on the phone.",
+  "start": "Select the visit on the schedule first.",
+  "mouse": "Open the visit, click “Cancel appointment”, pick the reason, then click Book it (or close if they’re not rebooking).",
+  "tips": [
+   "A cancelled visit is kept with its reason (it is never deleted).",
+   "If “Fill cancellations automatically” is on, the opening is texted to the ASAP list and the waitlist."
+  ],
+  "related": [
+   "A071",
+   "A029",
+   "A070"
+  ]
+ },
+ "A055": {
+  "keywords": "new patient add create register chart insurance",
+  "what": "Type the whole new patient on one line — name, birth date, phone, email, insurance and member ID — and press Enter. The chart and the insurance policy are made together.",
+  "mouse": "Family ▾ → Patients list → + New patient, or choose “New patient” in the command bar.",
+  "tips": [
+   "Anything the line doesn’t have can be added later on the chart.",
+   "If the patient may already exist, search first (A002) — a duplicate can be merged later (A121)."
+  ],
+  "problems": [
+   [
+    "“dob must be a real date of birth…”",
+    "Type the birth date as it’s written, e.g. 3/14/1985."
+   ]
+  ],
+  "related": [
+   "A002",
+   "A091",
+   "A090"
+  ]
+ },
+ "A056": {
+  "keywords": "attach xray attachment claim send narrative",
+  "what": "The claim suggests the right x-rays for its procedures (the #30 x-ray for work on #30). Attach them and send the attachment to the payer.",
+  "where": "The claim (Account ▾ → Billing & claims → the claim)",
+  "tips": [
+   "On the claim, A attaches the suggested x-rays or perio chart."
+  ],
+  "related": [
+   "A022",
+   "A048"
+  ]
+ },
+ "A057": {
+  "keywords": "unscheduled treatment call follow up plan not booked",
+  "what": "Patients with treatment that was planned but never booked are listed under Follow-up lists → Unscheduled treatment. Log each call on their row.",
+  "where": "Family ▾ → Follow-up lists → Unscheduled treatment",
+  "tips": [
+   "The number keys pick how the call went; Enter saves."
+  ],
+  "related": [
+   "A126",
+   "A051",
+   "A037"
+  ]
+ },
+ "A058": {
+  "keywords": "online booking request web appointment accept",
+  "what": "Bookings made on your website or Google are already on the schedule. Online requests lists them so someone can check each one and mark it seen.",
+  "where": "Schedule ▾ → Online requests (/requests)",
+  "related": [
+   "A180",
+   "A020"
+  ]
+ },
+ "A059": {
+  "keywords": "clock in time clock start shift punch",
+  "what": "The time clock records your hours for payroll. I clocks you in.",
+  "where": "Manage ▾ → Time clock (/timeclock), or the menu under your name",
+  "mouse": "Manage ▾ → Time clock → click Clock in.",
+  "problems": [
+   [
+    "You forgot to clock in",
+    "Ask your manager to add the missed time (A107)."
+   ]
+  ],
+  "related": [
+   "A060",
+   "A061",
+   "A107"
+  ]
+ },
+ "A060": {
+  "keywords": "clock out time clock end shift punch leave",
+  "what": "Press I again on the time clock to clock out.",
+  "where": "Manage ▾ → Time clock",
+  "mouse": "Manage ▾ → Time clock → click Clock out.",
+  "problems": [
+   [
+    "You forgot to clock out",
+    "Ask your manager to fix the punch (A107)."
+   ]
+  ],
+  "related": [
+   "A059",
+   "A061"
+  ]
+ },
+ "A061": {
+  "keywords": "lunch break start end time clock",
+  "what": "L starts your lunch break on the time clock; press L again when you are back.",
+  "where": "Manage ▾ → Time clock",
+  "related": [
+   "A059",
+   "A060"
+  ]
+ },
+ "A062": {
+  "keywords": "prescription rx write antibiotic painkiller favorite",
+  "what": "The Rx tab lists your favorite prescriptions with numbers. Press the number to fill one in, then Enter to save it (and print or send it).",
+  "where": "Chart ▾ → Rx tab",
+  "tips": [
+   "A controlled drug asks for a prescription-monitoring (PDMP) check first (A178)."
+  ],
+  "problems": [
+   [
+    "“Missing permission: clinical:sign”",
+    "Only a prescriber can write prescriptions."
+   ]
+  ],
+  "related": [
+   "A178",
+   "A011"
+  ]
+ },
+ "A063": {
+  "keywords": "era insurance payment post 835 electronic remittance eob autopilot",
+  "what": "Electronic insurance payments (ERAs) are posted automatically when they match. Insurance autopilot shows only what needs a person — for example a denial — highlighted.",
+  "where": "Account ▾ → Billing & claims → Insurance autopilot",
+  "tips": [
+   "J/K move between items; Enter opens the claim; Shift+P posts all clean payments at once.",
+   "Payments are matched against the bank deposit later (A127)."
+  ],
+  "related": [
+   "A072",
+   "A127",
+   "A109"
+  ]
+ },
+ "A064": {
+  "keywords": "adjustment write off discount courtesy credit ledger",
+  "what": "A opens the adjustment line on the ledger with the cursor on the amount; the type you used last is remembered. Enter posts it with its reason.",
+  "start": "Open the patient’s ledger (Alt+L).",
+  "mouse": "On the ledger click Adjustment, type the amount, pick the type and click “Post adjustment”.",
+  "tips": [
+   "Undo on the notice reverses it: the ledger keeps both lines."
+  ],
+  "problems": [
+   [
+    "“Write-offs over $… need an administrator”",
+    "Large write-offs need an administrator — ask one to post it."
+   ],
+   [
+    "“Adjustment amount cannot be zero”",
+    "Type the amount."
+   ]
+  ],
+  "related": [
+   "A019",
+   "A102",
+   "A024"
+  ]
+ },
+ "A065": {
+  "keywords": "review google ask patient rating",
+  "what": "Alt+R texts the active patient a link asking how their visit went. Everyone rates first; happy patients are invited to post on Google, a patient with a complaint can tell the office privately, and every patient can always post a public review.",
+  "mouse": "Click “Ask for review” on the chart, or Review on the patient bar.",
+  "related": [
+   "A130",
+   "A116"
+  ]
+ },
+ "A066": {
+  "keywords": "unknown caller text back missed call new number",
+  "what": "When a number that isn’t on file calls, the pop-up offers Text back, Attach (to a patient) and New patient. Text back already has a friendly message written.",
+  "related": [
+   "A004",
+   "A055"
+  ]
+ },
+ "A067": {
+  "keywords": "claim status look up find claim number",
+  "what": "Type the claim number in the command bar (“#33” or “claim 33”): the claim opens with its status and history.",
+  "mouse": "Account ▾ → Billing & claims and click the claim.",
+  "tips": [
+   "From Billing → Insurance follow-up, S asks the payer for a claim’s status."
+  ],
+  "related": [
+   "A075",
+   "A106"
+  ]
+ },
+ "A068": {
+  "keywords": "caries risk cambra assessment",
+  "what": "The caries risk assessment (CAMBRA) is a checklist of risk and protective factors; saving works out the risk level and recall advice.",
+  "where": "Chart ▾ → Risk & education tab",
+  "related": [
+   "A080",
+   "A097"
+  ]
+ },
+ "A069": {
+  "keywords": "scan paper document upload file pdf",
+  "what": "Add a scanned paper (a referral letter, an old record) to the chart’s documents.",
+  "mouse": "Documents & x-rays tab → Add files, or drag the file onto the page.",
+  "tips": [
+   "You can also scan with a phone: the Documents tab shows a code to scan, and the pages arrive as one PDF.",
+   "Documents are searchable by the words inside them from the command bar."
+  ],
+  "related": [
+   "A031",
+   "A153"
+  ]
+ },
+ "A070": {
+  "keywords": "asap list fill opening cancellation move up",
+  "what": "L on the schedule opens today’s plan on the first opening with the ASAP patient who fits it. B moves their visit up into the opening.",
+  "start": "Open the schedule on the day with the opening.",
+  "tips": [
+   "Undo on the notice puts the visit back.",
+   "Turn on “Fill cancellations automatically” (Settings → Messages) to text openings to ASAP patients automatically."
+  ],
+  "related": [
+   "A076",
+   "A054"
+  ]
+ },
+ "A071": {
+  "keywords": "no show missed appointment broken",
+  "what": "Shift+X marks the selected visit as a no-show; press the reason’s number. The next opening shows on the schedule in case you rebook now.",
+  "start": "Select the visit on the schedule first.",
+  "mouse": "Open the visit and click No-show, then pick the reason.",
+  "tips": [
+   "No-shows go on Follow-up lists → Broken appointments (A093)."
+  ],
+  "related": [
+   "A054",
+   "A093"
+  ]
+ },
+ "A072": {
+  "keywords": "paper eob insurance check post payment mail",
+  "what": "Post an insurance check that came by mail: pick the carrier, type the check number and amount, and it is matched to the claims it pays.",
+  "where": "Account ▾ → Billing & claims → Insurance payments",
+  "tips": [
+   "“Read a paper EOB” reads a scanned EOB and fills in paid and write-off per procedure for you to check."
+  ],
+  "problems": [
+   [
+    "“Check … was already posted on …”",
+    "The same check was posted before. Post it again only if the payer really sent it twice."
+   ],
+   [
+    "“… payment plus write-off is more than was billed”",
+    "Check the amounts against the EOB."
+   ]
+  ],
+  "related": [
+   "A063",
+   "A127",
+   "A084"
+  ]
+ },
+ "A073": {
+  "keywords": "lab case crown send lab new case",
+  "what": "L on To-do & labs starts a lab case for the active patient with the lab, the crown, the tooth and the dentist filled in; type the shade and press Enter.",
+  "where": "Manage ▾ → To-do & labs",
+  "tips": [
+   "Undo on the notice cancels the case.",
+   "“Write and send to the lab” sends a digital prescription with scans and x-rays."
+  ],
+  "related": [
+   "A074",
+   "A103"
+  ]
+ },
+ "A074": {
+  "keywords": "lab case back returned check in arrived",
+  "what": "When a case comes back from the lab, check it in: G for “looks good”, P to note a problem. The visit’s card on the schedule turns green.",
+  "where": "Schedule ▾ → Lab check-in (/lab-checkin)",
+  "tips": [
+   "F finds a case; C takes a photo of it; S scans the lab slip."
+  ],
+  "related": [
+   "A073",
+   "A103"
+  ]
+ },
+ "A075": {
+  "keywords": "insurance follow up unpaid claim call payer aging",
+  "what": "Insurance follow-up lists unpaid claims, the ones due a call first. L opens the call panel for the highlighted claim; pick the answer, type the reference, and the next follow-up date is set.",
+  "where": "Account ▾ → Billing & claims → Insurance follow-up",
+  "tips": [
+   "S checks the claim’s status with the payer electronically first — often no call is needed."
+  ],
+  "related": [
+   "A067",
+   "A109",
+   "A124"
+  ]
+ },
+ "A076": {
+  "keywords": "asap list waitlist earlier appointment sooner",
+  "what": "Put a patient who wants an earlier visit on the ASAP list; they will be offered any opening that fits.",
+  "tips": [
+   "The same button says “Remove from ASAP” once they are on it."
+  ],
+  "related": [
+   "A070",
+   "A054"
+  ]
+ },
+ "A077": {
+  "keywords": "payment link text card pay online",
+  "what": "Text the patient a secure link to pay their balance by card. The amount they owe is filled in. It needs card payments connected (the demo office uses the processor’s sandbox).",
+  "where": "Ledger → Send card payment link",
+  "tips": [
+   "Payments made from the link post to the ledger by themselves."
+  ],
+  "problems": [
+   [
+    "No “Send card payment link” on the ledger",
+    "Card payments aren’t connected yet — an administrator connects them in Settings → Integrations."
+   ],
+   [
+    "“Patient has no reachable phone or email (or has opted out)”",
+    "Add a mobile number or email first."
+   ]
+  ],
+  "related": [
+   "A019",
+   "A088"
+  ],
+  "manualSteps": [
+   {
+    "text": "Open the patient’s ledger (Alt+L, or Ledger on the patient bar).",
+    "keys": [
+     "Alt L"
+    ]
+   },
+   {
+    "text": "Click “Send card payment link”. The amount is the patient’s share (or pick the full balance), and it is sent by text or email — whichever the patient accepts."
+   },
+   {
+    "text": "Click “Create secure payment link”: the link is sent. When the patient pays, the payment posts to the ledger by itself."
+   }
+  ]
+ },
+ "A078": {
+  "keywords": "xray ai findings review caries bone loss artificial intelligence",
+  "what": "The AI outlines suspected caries, bone loss and other findings on x-rays; the dentist agrees (and charts them) or dismisses each one.",
+  "where": "Chart ▾ → X-ray AI review (/xray-review)",
+  "tips": [
+   "The AI only suggests; nothing is charted until the dentist agrees."
+  ],
+  "related": [
+   "A007",
+   "A006"
+  ]
+ },
+ "A079": {
+  "keywords": "checklist opening closing daily tasks tick",
+  "what": "Checklists shows today’s items for your position. Tick each as you do it.",
+  "where": "Manage ▾ → Checklists (/checklists)",
+  "tips": [
+   "J/K move; X or Space ticks; F records a fail; P adds a photo; U undoes a tick."
+  ],
+  "related": [
+   "A132",
+   "A034"
+  ]
+ },
+ "A080": {
+  "keywords": "patient education send after visit care instructions",
+  "what": "Tick the pages that fit the visit (for example “After your filling”) and send them by text.",
+  "where": "Chart ▾ → Risk & education tab",
+  "related": [
+   "A068",
+   "A008"
+  ]
+ },
+ "A081": {
+  "keywords": "pre-authorization predetermination preauth insurance",
+  "what": "Sends the treatment plan to the payer for a pre-authorization, through the clearinghouse.",
+  "where": "Treatment Plan module → the plan → Pre-authorize",
+  "tips": [
+   "Pre-authorizations are tracked under Billing & claims → Pre-authorizations."
+  ],
+  "related": [
+   "A038",
+   "A022"
+  ]
+ },
+ "A082": {
+  "keywords": "emergency same day toothache urgent book today",
+  "what": "N on the schedule starts a booking; type the patient’s name and the first open time today is suggested.",
+  "start": "Open the schedule on today.",
+  "tips": [
+   "The command bar also books: “book jane”."
+  ],
+  "related": [
+   "A020",
+   "A070"
+  ]
+ },
+ "A083": {
+  "q": "How do I run the morning huddle?",
+  "keywords": "morning huddle dashboard today flags unconfirmed balance due",
+  "what": "Today’s dashboard is the huddle: each visit is flagged with what needs doing (unconfirmed, balance due, unscheduled treatment, insurance not verified). Fix a flag right on the row.",
+  "where": "Manage (Today’s dashboard, /) — G then T",
+  "tips": [
+   "J/K move between patients; the keys shown on the row fix its flags (C confirms)."
+  ],
+  "related": [
+   "A049",
+   "A016",
+   "A044"
+  ]
+ },
+ "A084": {
+  "q": "How do I make the daily bank deposit?",
+  "keywords": "post a deposit bank deposit bag slip cash checks end of day",
+  "what": "Deposits & cash gathers the day’s cash and checks into one deposit, checked against the ledger. Type the bag or deposit slip number and press Enter; the deposit is locked and waits for a second person to verify it.",
+  "where": "Account ▾ → Deposits & cash (/deposits)",
+  "tips": [
+   "Someone other than the person who made the deposit verifies it on the History tab.",
+   "Print the slip, and add a photo of the stamped slip from the bank.",
+   "Cash drawers must be counted (A086) before their cash can go on a deposit."
+  ],
+  "problems": [
+   [
+    "“Enter the bag or deposit slip number”",
+    "Type the number printed on the bag or slip."
+   ],
+   [
+    "“This deposit doesn’t match the ledger — say why before submitting”",
+    "Recount; if it still doesn’t match, type the reason."
+   ],
+   [
+    "“A submitted deposit is locked…”",
+    "A manager can reopen it with a reason; a new deposit then replaces it."
+   ],
+   [
+    "“Someone other than the person who prepared the deposit has to verify it”",
+    "Ask a colleague to verify it."
+   ]
+  ],
+  "related": [
+   "A086",
+   "A085",
+   "A127"
+  ]
+ },
+ "A085": {
+  "keywords": "day sheet end of day report production collections close",
+  "what": "The day sheet lists the day’s production, collections and adjustments by provider, to check before closing the day.",
+  "where": "Manage ▾ → Reports → Day sheet",
+  "tips": [
+   "Every report can be downloaded as a spreadsheet (A142) or printed."
+  ],
+  "related": [
+   "A084",
+   "A104",
+   "A146"
+  ]
+ },
+ "A086": {
+  "keywords": "cash drawer count close till blind count",
+  "what": "Close and count the cash drawer: type how many of each note and coin. It is a blind count (the expected total is hidden) and is compared with the ledger when you submit.",
+  "where": "Account ▾ → Deposits & cash → Cash drawers",
+  "tips": [
+   "A second person verifies the count; then the cash can go on the deposit."
+  ],
+  "problems": [
+   [
+    "“This drawer’s count is waiting for a second person to verify it”",
+    "Ask a colleague to verify it."
+   ]
+  ],
+  "related": [
+   "A084"
+  ]
+ },
+ "A087": {
+  "keywords": "insurance verification tomorrow eligibility batch",
+  "what": "Billing → Verification lists tomorrow’s patients and their insurance status. R checks everyone now; clean answers are applied, and only the ones that need a person stay on the list.",
+  "where": "Account ▾ → Billing & claims → Verification",
+  "tips": [
+   "J/K move; E checks one; P records a phone verification; S shows the payer phone script; T texts the patient for a new card."
+  ],
+  "related": [
+   "A026",
+   "A047"
+  ]
+ },
+ "A088": {
+  "keywords": "financing carecredit sunbit cherry application lender",
+  "what": "Text the patient a financing application (CareCredit, Sunbit or Cherry). The lender and the plan’s patient share are filled in.",
+  "where": "Ledger → Send an application",
+  "tips": [
+   "Approvals and funding come back and post to the ledger.",
+   "The lenders’ links are set in Settings → Practice → Financing."
+  ],
+  "related": [
+   "A113",
+   "A077"
+  ]
+ },
+ "A089": {
+  "keywords": "referral refer out specialist endo oral surgeon letter",
+  "what": "Refer out opens beside the chart with the usual specialist chosen; type the reason and send. The letter prints or emails, and the patient gets the specialist’s number.",
+  "where": "Chart header (Family module) → Refer out…",
+  "tips": [
+   "Family ▾ → Referrals tracks each referral until the report comes back."
+  ],
+  "related": [
+   "A092",
+   "A152"
+  ]
+ },
+ "A090": {
+  "keywords": "family member household add child spouse",
+  "what": "Type the new family member’s first name and birth date in one box; the address, phone, last name and guarantor come from this patient.",
+  "where": "Family module → Family tab",
+  "problems": [
+   [
+    "“Choose the head of household as guarantor”",
+    "Pick the adult responsible for the account."
+   ]
+  ],
+  "related": [
+   "A055",
+   "A091"
+  ]
+ },
+ "A091": {
+  "keywords": "secondary insurance add policy dual coverage spouse",
+  "what": "Add a second policy: pick the carrier, set Priority to Secondary and type the subscriber and member ID.",
+  "where": "Family module → Insurance tab → + Type it in",
+  "tips": [
+   "Scanning the card (A047) fills most of the form for you."
+  ],
+  "related": [
+   "A047",
+   "A026"
+  ]
+ },
+ "A092": {
+  "keywords": "referred by referral source new patient who sent",
+  "what": "Records who referred the patient (a doctor, another patient, an ad). It feeds the referrals report (A152).",
+  "where": "Chart header → Referred by…",
+  "related": [
+   "A152",
+   "A089"
+  ]
+ },
+ "A093": {
+  "keywords": "broken appointments no show cancelled rebook list",
+  "what": "Broken appointments lists recent no-shows and cancellations who haven’t rebooked. Rebook opens the booking on a suggested time.",
+  "where": "Family ▾ → Follow-up lists → Broken appointments",
+  "related": [
+   "A071",
+   "A054"
+  ]
+ },
+ "A094": {
+  "keywords": "reminder text unconfirmed confirm all bulk",
+  "what": "The schedule shows how many visits aren’t confirmed. Open the list and text a reminder to all of them at once.",
+  "where": "Schedule → “N unconfirmed” → Text a reminder to all",
+  "tips": [
+   "Reminders also go out automatically on the schedule set in Settings → Messages & reviews.",
+   "In the list, C confirms a visit by phone."
+  ],
+  "related": [
+   "A016",
+   "A167"
+  ]
+ },
+ "A095": {
+  "keywords": "chart audit unsigned notes incomplete compliance",
+  "what": "Chart audit lists notes waiting to be signed and charts that need fixing.",
+  "where": "Chart ▾ → Chart audit (/chart-audit)",
+  "tips": [
+   "J/K move; Enter opens the visit; A adds an addendum; X sets one aside with a reason.",
+   "Alt+K checks the chart you are in."
+  ],
+  "related": [
+   "A023",
+   "A011"
+  ]
+ },
+ "A096": {
+  "keywords": "print treatment plan paper copy",
+  "what": "Prints the treatment plan with fees, insurance estimates and the patient’s share, for the patient to take home.",
+  "where": "Treatment Plan module → the plan → Print",
+  "tips": [
+   "The printable plan opens in a new browser tab; print it from there with Ctrl/⌘ P."
+  ],
+  "related": [
+   "A042",
+   "A038"
+  ],
+  "manualSteps": [
+   {
+    "text": "Open the patient’s Treatment Plan module (the Treatment plans tab)."
+   },
+   {
+    "text": "Click “Print” on the plan: the printable plan opens in a new browser tab."
+   },
+   {
+    "text": "Print it from that tab with Ctrl/⌘ P."
+   }
+  ]
+ },
+ "A097": {
+  "keywords": "recall interval frequency 3 4 6 months perio maintenance",
+  "what": "Change how often a patient is due for a cleaning. The usual intervals and reasons are one click each.",
+  "where": "Family module → Overview → Recall",
+  "tips": [
+   "The reason is kept with the change, so the next person knows why."
+  ],
+  "related": [
+   "A037",
+   "A125",
+   "A045"
+  ]
+ },
+ "A098": {
+  "keywords": "usual provider dentist hygienist primary change assign",
+  "what": "Sets the dentist or hygienist the patient usually sees. Bookings then default to them.",
+  "where": "Family module → Overview → Contact card",
+  "tips": [
+   "It saves as soon as you pick; Undo on the notice takes it back."
+  ],
+  "related": [
+   "A020",
+   "A099"
+  ]
+ },
+ "A099": {
+  "keywords": "office alert note popup warning flag patient",
+  "what": "An office alert pops up for the next person who opens the chart (for example “Always ask for the co-pay upfront”). Medical alerts belong in the medical history instead.",
+  "where": "Family module → Overview → Contact card → Office alert",
+  "tips": [
+   "Undo on the notice takes it back. Clear the text to remove the alert."
+  ],
+  "related": [
+   "A003",
+   "A032"
+  ]
+ },
+ "A100": {
+  "keywords": "who is clocked in today staff present time clock",
+  "what": "Shows everyone’s time-clock status today: in, on a break, out, or not in yet.",
+  "where": "Manage ▾ → Time clock → Today",
+  "related": [
+   "A059",
+   "A107",
+   "A122"
+  ]
+ },
+ "A101": {
+  "keywords": "ortho orthodontic adjustment wire elastics braces",
+  "what": "Log an orthodontic adjustment: the last visit’s wires and elastics are filled in, so you only type what changed.",
+  "where": "Chart ▾ → Ortho tab → + Log adjustment",
+  "related": [
+   "A011"
+  ]
+ },
+ "A102": {
+  "keywords": "void payment mistake reverse wrong payment delete payment",
+  "what": "A payment posted by mistake is voided with a reason, not deleted: the original stays on the ledger with a reversing line, so the history is complete.",
+  "where": "Ledger → the payment’s line → Void",
+  "tips": [
+   "Voiding needs billing permission and is recorded in the audit log.",
+   "To give money back to the patient, use a refund instead (A110)."
+  ],
+  "problems": [
+   [
+    "“Voiding charges over $… needs an administrator”",
+    "Ask an administrator to do it."
+   ],
+   [
+    "“Missing permission: …”",
+    "Your role can’t void — ask the office manager."
+   ],
+   [
+    "The payment is already on a deposit",
+    "A manager may need to reopen that deposit first (A084)."
+   ]
+  ],
+  "related": [
+   "A019",
+   "A110",
+   "A064"
+  ]
+ },
+ "A103": {
+  "keywords": "lab cases overdue due at risk outstanding",
+  "what": "To-do & labs lists every open lab case with its due date, flagged “at risk” when it may not be back for the visit.",
+  "where": "Manage ▾ → To-do & labs",
+  "related": [
+   "A073",
+   "A074"
+  ]
+ },
+ "A104": {
+  "keywords": "production collections report income provider month",
+  "what": "Production and collections by provider for any period.",
+  "where": "Manage ▾ → Reports → Production & income",
+  "tips": [
+   "On the report: D shows or hides the daily rows, E exports a spreadsheet, P prints."
+  ],
+  "related": [
+   "A085",
+   "A105",
+   "A146"
+  ]
+ },
+ "A105": {
+  "keywords": "kpi metrics dashboard numbers practice performance",
+  "what": "The practice’s key numbers (KPIs) in one place.",
+  "where": "Manage ▾ → Metrics (/metrics)",
+  "related": [
+   "A104",
+   "A137",
+   "A129"
+  ]
+ },
+ "A106": {
+  "keywords": "rejected claim resend corrected claim fix",
+  "what": "For a claim the payer already processed, send a corrected claim: type the payer’s claim number for the original and the corrected claim opens, ready to fix and send.",
+  "where": "The claim → Corrected claim…",
+  "tips": [
+   "A claim the clearinghouse rejected before the payer saw it can simply be fixed and sent again."
+  ],
+  "problems": [
+   [
+    "“The claim changed — reload and try again”",
+    "Someone else changed it at the same time; reload the page."
+   ]
+  ],
+  "related": [
+   "A114",
+   "A109",
+   "A067"
+  ]
+ },
+ "A107": {
+  "keywords": "missed punch forgot clock in out time correction",
+  "what": "Add the time someone forgot to punch. A row for the last workday (8:00–5:00, 60 minute break) is ready; pick the person and say why. The original punches are kept.",
+  "where": "Manage ▾ → Time clock → Corrections",
+  "problems": [
+   [
+    "“Clock-out must be after clock-in”",
+    "Check the times."
+   ],
+   [
+    "“Clock-in can’t be in the future”",
+    "Pick the right day."
+   ]
+  ],
+  "related": [
+   "A122",
+   "A059",
+   "A060"
+  ]
+ },
+ "A108": {
+  "keywords": "office manual intranet policies procedures handbook",
+  "what": "The intranet is the office’s own manual: policies, how-tos and links, plus announcements.",
+  "where": "Manage ▾ → Intranet (/intranet)",
+  "tips": [
+   "Managers press N for a new page, E to edit one; L lists all office links."
+  ],
+  "related": [
+   "A135"
+  ]
+ },
+ "A109": {
+  "keywords": "denied claim appeal letter denial",
+  "what": "D on a denied claim drafts an appeal letter from the chart; Ctrl/⌘ Enter files it on the chart, prints it and sets a follow-up in 30 days.",
+  "where": "The denied claim",
+  "tips": [
+   "Read the draft and change anything before sending; the AI only drafts."
+  ],
+  "related": [
+   "A106",
+   "A075"
+  ]
+ },
+ "A110": {
+  "keywords": "refund credit balance overpayment money back",
+  "what": "Credits & refunds lists accounts with a credit. R prepares the refund with the amount and the card filled in; Enter sends it. Money going out has no Undo, and it is audited.",
+  "where": "Account ▾ → Billing & claims → Credits & refunds",
+  "tips": [
+   "Staff who can’t refund can press R to ask a manager instead."
+  ],
+  "problems": [
+   [
+    "“A refund needs a manager — ask one to do it”",
+    "Only managers refund."
+   ],
+   [
+    "“Only $… of that payment is left to refund”",
+    "Part of it was refunded already."
+   ]
+  ],
+  "related": [
+   "A102",
+   "A019"
+  ]
+ },
+ "A111": {
+  "keywords": "supplies order reorder low stock inventory",
+  "what": "O on Supplies shows the reorder list — what is running low — with “Mark … ordered” ready.",
+  "where": "Manage ▾ → To-do & labs → Supplies",
+  "tips": [
+   "Undo on the notice takes it back."
+  ],
+  "related": [
+   "A112"
+  ]
+ },
+ "A112": {
+  "keywords": "supply delivery received stock inventory",
+  "what": "When an order arrives, mark it received and the stock count goes up.",
+  "where": "Manage ▾ → To-do & labs → Supplies",
+  "related": [
+   "A111"
+  ]
+ },
+ "A113": {
+  "keywords": "payment plan installments monthly",
+  "what": "Split a balance into monthly installments (6 by default).",
+  "where": "Ledger → Payment plans → + New plan",
+  "problems": [
+   [
+    "“Choose a card on file for this plan first”",
+    "Automatic charges need a saved card."
+   ]
+  ],
+  "related": [
+   "A088",
+   "A019"
+  ]
+ },
+ "A114": {
+  "keywords": "void claim cancel claim correct claim payer",
+  "what": "Cancel a claim the payer already has: type the payer’s claim number from the EOB and the void notice is made. The claim is voided, never deleted.",
+  "where": "The claim → Void at payer…",
+  "problems": [
+   [
+    "“Cannot void a claim that is …”",
+    "Some statuses can’t be voided; send a corrected claim instead (A106)."
+   ]
+  ],
+  "related": [
+   "A106",
+   "A067"
+  ]
+ },
+ "A115": {
+  "keywords": "block time schedule meeting lunch closed",
+  "what": "Blocks time on the schedule so nothing is booked there. Reasons like “Staff meeting” fill in the usual time.",
+  "where": "Schedule → Block time (⊘ above the schedule)",
+  "tips": [
+   "A block covers the whole office by default; choose chairs or providers to narrow it."
+  ],
+  "related": [
+   "A120",
+   "A163"
+  ]
+ },
+ "A116": {
+  "keywords": "online review reply google business",
+  "what": "Reviews shows every Google review once the Google Business Profile is connected. Write a reply (or “Draft with AI”, which never confirms the reviewer is a patient — a HIPAA rule) and post it to Google.",
+  "where": "Manage ▾ → Reviews (/reputation)",
+  "tips": [
+   "Low ratings become a task automatically."
+  ],
+  "problems": [
+   [
+    "No reviews listed",
+    "Connect the Google Business Profile first (an administrator does this)."
+   ]
+  ],
+  "related": [
+   "A130",
+   "A065"
+  ],
+  "manualSteps": [
+   {
+    "text": "Open Manage ▾ → Reviews. Every Google review is listed; the filters show the unanswered and the low ratings."
+   },
+   {
+    "text": "On a review, click “Draft with AI” (or type your own reply). The draft never confirms the reviewer is a patient or mentions their care."
+   },
+   {
+    "text": "Read it, change what you like, and click “Post reply”: it is posted to Google."
+   }
+  ]
+ },
+ "A117": {
+  "keywords": "inactive patient archive deactivate left practice",
+  "what": "Making a patient inactive marks them as no longer coming to the office. Their record is kept — nothing is deleted — and they can be made active again the same way.",
+  "where": "Chart header → Edit → Status",
+  "tips": [
+   "For a patient who has died, see A179."
+  ],
+  "related": [
+   "A179",
+   "A121"
+  ]
+ },
+ "A118": {
+  "keywords": "membership plan in-house enroll subscription",
+  "what": "Enroll an uninsured patient in the office’s membership plan.",
+  "where": "Family module → Overview → Membership → Enroll…",
+  "tips": [
+   "The plans themselves are set up in Settings → Memberships."
+  ],
+  "related": [
+   "A113"
+  ]
+ },
+ "A119": {
+  "keywords": "statements send billing patient balance mail email",
+  "what": "Sends statements to everyone who owes: by email or text, or through the mail service. Enter again prints the ones that have to be printed, as one PDF.",
+  "where": "Account ▾ → Billing & claims → Statements",
+  "related": [
+   "A024",
+   "A147"
+  ]
+ },
+ "A120": {
+  "keywords": "provider day off vacation hours special hours time off",
+  "what": "Give a provider a day off or different hours on a day. “Off all day” is the default.",
+  "where": "Settings → Providers → Time off & special hours",
+  "related": [
+   "A115",
+   "A172"
+  ]
+ },
+ "A121": {
+  "keywords": "merge duplicate patients charts combine",
+  "what": "Duplicate charts lists pairs that look like the same person. Compare them side by side, then type MERGE: everything moves to one chart and the duplicate is archived (not deleted).",
+  "where": "Settings → Duplicate charts",
+  "tips": [
+   "J/K move between pairs; Enter compares them."
+  ],
+  "problems": [
+   [
+    "“Only administrators can merge patients”",
+    "Ask an administrator."
+   ],
+   [
+    "“That chart was already merged into another one”",
+    "Refresh the list."
+   ]
+  ],
+  "related": [
+   "A055",
+   "A117"
+  ]
+ },
+ "A122": {
+  "keywords": "payroll approve hours pay period timesheet",
+  "what": "The pay period shows everyone’s hours with overtime worked out. Approve them before exporting payroll.",
+  "where": "Manage ▾ → Time clock → Pay period",
+  "tips": [
+   "Shift+A approves everyone who is ready."
+  ],
+  "related": [
+   "A138",
+   "A107"
+  ]
+ },
+ "A123": {
+  "keywords": "staff schedule shifts work hours rota",
+  "what": "Set each person’s shifts for the week. Their usual hours are filled in.",
+  "where": "Manage ▾ → Time clock → Schedules",
+  "tips": [
+   "← and → move between weeks."
+  ],
+  "related": [
+   "A133",
+   "A100"
+  ]
+ },
+ "A124": {
+  "keywords": "ar aging accounts receivable owed insurance outstanding",
+  "what": "Who owes what, grouped by how old the balance is.",
+  "where": "Manage ▾ → Reports → Day sheet, production & A/R",
+  "related": [
+   "A075",
+   "A147",
+   "A085"
+  ]
+ },
+ "A125": {
+  "keywords": "recall autopilot automatic reminders texts results",
+  "what": "The recall autopilot reminds patients who are due for their cleaning. This page shows what it sent and what came of it, and the calls a person still needs to make.",
+  "where": "Family ▾ → Recall autopilot (/recall)",
+  "related": [
+   "A037",
+   "A126"
+  ]
+ },
+ "A126": {
+  "keywords": "treatment follow up letters unscheduled results",
+  "what": "Treatment follow-up reminds patients about planned treatment they haven’t booked, and shows the results.",
+  "where": "Treatment Plan ▾ → Treatment follow-up",
+  "tips": [
+   "J/K move between letters; A approves and sends one; X ticks it for a batch."
+  ],
+  "related": [
+   "A057",
+   "A125"
+  ]
+ },
+ "A127": {
+  "keywords": "reconcile insurance payments bank deposits eft",
+  "what": "Matches the insurance payments posted in the ledger with the money that reached the bank, and shows what doesn’t match.",
+  "where": "Account ▾ → Billing & claims → Insurance autopilot → Reconciliation",
+  "related": [
+   "A063",
+   "A148",
+   "A084"
+  ]
+ },
+ "A128": {
+  "keywords": "phones calls missed calls report answered booked",
+  "what": "Calls, missed calls and why callers didn’t book, by day and by person.",
+  "where": "Manage ▾ → Phones (/phones)",
+  "related": [
+   "A004",
+   "A149"
+  ]
+ },
+ "A129": {
+  "keywords": "capacity schedule utilization open time chairs",
+  "what": "How full the schedule is ahead, by provider and chair, against your targets.",
+  "where": "Schedule ▾ → Capacity (/capacity)",
+  "tips": [
+   "T edits the targets; R refreshes."
+  ],
+  "related": [
+   "A105",
+   "A163"
+  ]
+ },
+ "A130": {
+  "keywords": "patient feedback reviews ratings comments shout outs",
+  "what": "Ratings and comments patients left after their visits, including private feedback and team shout-outs.",
+  "where": "Manage ▾ → Patient feedback (/reviews)",
+  "related": [
+   "A065",
+   "A116"
+  ],
+  "manualSteps": [
+   {
+    "text": "Press Ctrl/⌘ K, type “reviews & patient feedback” and press Enter.",
+    "keys": [
+     "Ctrl/⌘ K",
+     "Enter"
+    ]
+   },
+   {
+    "text": "Ratings, comments and private feedback from recent visits are listed; “Team shout-outs” shows the team members patients named."
+   }
+  ]
+ },
+ "A131": {
+  "keywords": "bonus my bonus goal team incentive",
+  "what": "Shows the team bonus plan and how close the team is to it.",
+  "where": "Manage ▾ → My bonus (/bonus)",
+  "related": [
+   "A162"
+  ],
+  "manualSteps": [
+   {
+    "text": "Press Ctrl/⌘ K, type “my bonus” and press Enter.",
+    "keys": [
+     "Ctrl/⌘ K",
+     "Enter"
+    ]
+   },
+   {
+    "text": "The team bonus plan shows with how close the team is to its goal."
+   }
+  ]
+ },
+ "A132": {
+  "keywords": "spore test sterilizer autoclave biological indicator",
+  "what": "The spore test is an item on a checklist: take a photo of the strip and record Pass or Fail. The photo is kept with the result.",
+  "where": "Manage ▾ → Checklists",
+  "related": [
+   "A079",
+   "A169"
+  ]
+ },
+ "A133": {
+  "keywords": "time off request vacation pto holiday leave",
+  "what": "Ask for time off; your manager is told and approves or declines it.",
+  "where": "Manage ▾ → Time clock → Time off",
+  "problems": [
+   [
+    "“The last day must be on or after the first”",
+    "Check the dates."
+   ]
+  ],
+  "related": [
+   "A134",
+   "A123"
+  ]
+ },
+ "A134": {
+  "keywords": "approve time off request vacation pto",
+  "what": "Approve (or decline, with a reason the person sees) a time-off request.",
+  "where": "Manage ▾ → Time clock → Time off → Requests",
+  "related": [
+   "A133"
+  ]
+ },
+ "A135": {
+  "keywords": "announcement team news post intranet",
+  "what": "Post an announcement for the whole team; it is pinned for a week.",
+  "where": "Manage ▾ → Intranet → A",
+  "related": [
+   "A108",
+   "A036"
+  ]
+ },
+ "A136": {
+  "keywords": "newsletter campaign email text blast marketing mass message",
+  "what": "Send a message to a group of patients (reactivation, office news). The campaign is named and written for you; pick who gets it, fill in anything in [brackets], and send. It can’t be taken back, so this is the one step that asks you to confirm.",
+  "where": "Manage ▾ → Campaigns (/campaigns)",
+  "tips": [
+   "Patients who opted out are left out automatically.",
+   "“Mailing labels” prints labels for the audience."
+  ],
+  "problems": [
+   [
+    "The message still says [date] or another bracket",
+    "Click it under the message and type the real text before sending."
+   ]
+  ],
+  "related": [
+   "A177",
+   "A149"
+  ]
+ },
+ "A137": {
+  "keywords": "business view what pays profitability margin",
+  "what": "Business shows what pays: what the office earns for the time and the costs that go into it.",
+  "where": "Manage ▾ → Business (/business)",
+  "related": [
+   "A148",
+   "A105"
+  ]
+ },
+ "A138": {
+  "keywords": "payroll export gusto adp paychex hours",
+  "what": "Download the approved hours in your payroll provider’s format.",
+  "where": "Manage ▾ → Time clock → Export",
+  "tips": [
+   "Approve the pay period first (A122)."
+  ],
+  "related": [
+   "A122"
+  ]
+ },
+ "A139": {
+  "keywords": "insurance carrier add payer id company",
+  "what": "Add an insurance company with its payer ID so policies and claims can use it.",
+  "where": "Settings → Insurance carriers",
+  "tips": [
+   "Undo on the notice removes it again."
+  ],
+  "related": [
+   "A155",
+   "A091"
+  ]
+ },
+ "A140": {
+  "keywords": "ask your data question ai numbers report",
+  "what": "Ask questions about your numbers in plain words — “how did production compare with last month?”, “who owes us the most?” — answered from your own records.",
+  "where": "Manage ▾ → Ask your data (/ask)",
+  "related": [
+   "A158",
+   "A105"
+  ]
+ },
+ "A141": {
+  "keywords": "patient record copy export download request hipaa access zip",
+  "what": "Patients have the right to a copy of their record. Export record downloads everything as one ZIP: a summary PDF, the data, the images and the documents.",
+  "where": "Chart header → ⋯ (More) → Export record",
+  "tips": [
+   "Exports are recorded in the audit log.",
+   "To send the record to someone else (another dentist, a lawyer), use “Send the record to someone else…” on the same menu — it is recorded as a disclosure (A175)."
+  ],
+  "related": [
+   "A175",
+   "A160"
+  ]
+ },
+ "A142": {
+  "keywords": "export report spreadsheet csv excel download",
+  "what": "Reports download as a spreadsheet (CSV, which opens in Excel or Google Sheets). From the command bar, “export” and the report’s name downloads it straight away; on any report table, the ⬇ CSV button does the same.",
+  "where": "Command bar “export day sheet”, or any report → ⬇ CSV",
+  "tips": [
+   "On the production report, E exports and P prints."
+  ],
+  "related": [
+   "A085",
+   "A158"
+  ],
+  "manualSteps": [
+   {
+    "text": "Open the report — for example press Ctrl/⌘ K, type “day sheet” and press Enter.",
+    "keys": [
+     "Ctrl/⌘ K",
+     "Enter"
+    ],
+    "shot": "A085/01-press-ctrl-k-type-day-sheet-enter-today-s-day-shee.png"
+   },
+   {
+    "text": "Click “⬇ CSV” above the table: it downloads as a spreadsheet that opens in Excel or Google Sheets."
+   }
+  ]
+ },
+ "A143": {
+  "keywords": "correct name spelling date of birth dob fix patient",
+  "what": "Click the name on the chart header to correct it in place. The chart history keeps the old name.",
+  "where": "Chart header → the patient’s name (or Edit for the birth date)",
+  "tips": [
+   "Undo on the notice puts the old value back.",
+   "The birth date is changed with Edit on the chart header."
+  ],
+  "problems": [
+   [
+    "“Name cannot be blank”",
+    "Type the name."
+   ],
+   [
+    "“dob must be a real date of birth…”",
+    "Check the date; it can’t be in the future."
+   ]
+  ],
+  "related": [
+   "A043",
+   "A121"
+  ]
+ },
+ "A144": {
+  "keywords": "group offices compare locations dso multi-office",
+  "what": "Group shows every office side by side: production, collections, schedule and more.",
+  "where": "Manage ▾ → Group (/group)",
+  "related": [
+   "A145",
+   "A105"
+  ]
+ },
+ "A145": {
+  "keywords": "switch office location change practice",
+  "what": "People who work at more than one office switch between them from the menu under their name; every screen then works in that office.",
+  "where": "Your name (bottom of the menu) → the office",
+  "tips": [
+   "Each office’s schedule, deposits and reports are kept separately; Group compares them (A144)."
+  ],
+  "related": [
+   "A144"
+  ],
+  "manualSteps": [
+   {
+    "text": "Click your name at the bottom of the menu."
+   },
+   {
+    "text": "Pick the office in the Office list. The page reloads and every screen now shows that office (or All offices, if you are allowed to see them all)."
+   }
+  ]
+ },
+ "A146": {
+  "keywords": "month end close books period lock",
+  "what": "Closing the month locks it so nothing can be posted into it by mistake, and gives you the month-end packet to print.",
+  "where": "Manage ▾ → Reports → Close (command bar “month-end close”)",
+  "tips": [
+   "On the close screen: M month-end, D end-of-day, C closes, P prints the packet.",
+   "Undo on the notice reopens it straight away."
+  ],
+  "related": [
+   "A085",
+   "A104",
+   "A148"
+  ]
+ },
+ "A147": {
+  "keywords": "collections agency past due send account bad debt",
+  "what": "Collections lists past-due accounts, oldest first. Open one to see its history and send it to the collection agency.",
+  "where": "Account ▾ → Billing & claims → Collections",
+  "tips": [
+   "Undo on the notice takes it back out of collections."
+  ],
+  "related": [
+   "A119",
+   "A124"
+  ]
+ },
+ "A148": {
+  "keywords": "finance bank books reconcile quickbooks plaid overhead",
+  "what": "Finance connects the business bank (and QuickBooks) and matches every deposit to what was collected, with overhead by category.",
+  "where": "Manage ▾ → Finance (/finance)",
+  "related": [
+   "A127",
+   "A137",
+   "A084"
+  ]
+ },
+ "A149": {
+  "keywords": "marketing results sources roi new patients ads",
+  "what": "Where new patients came from and what they are worth, by source.",
+  "where": "Manage ▾ → Marketing results (/marketing)",
+  "tips": [
+   "J/K move between rows; Enter shows the patients behind a row."
+  ],
+  "related": [
+   "A152",
+   "A128"
+  ]
+ },
+ "A150": {
+  "keywords": "hygiene report recall reappointment perio",
+  "what": "Hygiene production and how many hygiene patients left with their next visit booked.",
+  "where": "Manage ▾ → Reports → Hygiene",
+  "related": [
+   "A104",
+   "A125"
+  ]
+ },
+ "A151": {
+  "keywords": "treatment plan acceptance case acceptance report",
+  "what": "How much of the treatment presented was accepted and scheduled, by provider.",
+  "where": "Manage ▾ → Reports → Treatment plans",
+  "related": [
+   "A126",
+   "A104"
+  ]
+ },
+ "A152": {
+  "keywords": "referrals report new patients source who referred",
+  "what": "Where new patients come from: referring doctors, patients and other sources.",
+  "where": "Manage ▾ → Reports → Referrals",
+  "related": [
+   "A092",
+   "A149"
+  ]
+ },
+ "A153": {
+  "keywords": "office document osha policy file upload contract",
+  "what": "Office documents keeps the practice’s own papers — contracts, licences, OSHA and HIPAA policies. Its type is worked out from the file name.",
+  "where": "Images ▾ → Office documents (/documents)",
+  "mouse": "Click “Add files” and choose the file.",
+  "related": [
+   "A170",
+   "A069"
+  ]
+ },
+ "A154": {
+  "keywords": "fee schedule raise fees increase percent office fees",
+  "what": "Raise the office’s fees by a percentage from a date. 5% from next January 1 are the defaults, with a preview of what it does to a year’s production.",
+  "where": "Settings → Fee updates & history",
+  "tips": [
+   "The old fees are kept as the version before, so history stays correct.",
+   "Fee changes need the stronger permission and are audited."
+  ],
+  "related": [
+   "A155",
+   "A165"
+  ]
+ },
+ "A155": {
+  "keywords": "ppo fee schedule insurance update new fees contract",
+  "what": "When a payer sends a new fee schedule it waits in Fee updates & history for approval, with every difference side by side. Approving applies it; the old fees are kept.",
+  "where": "Settings → Fee updates & history",
+  "related": [
+   "A154",
+   "A139"
+  ],
+  "steps": {
+   "2": "Click the new schedule waiting for approval (the payer’s file): every difference is shown side by side"
+  }
+ },
+ "A156": {
+  "keywords": "add user staff login invite new employee account",
+  "what": "Invite a new team member: type their name and email and press Enter. They get an email with a link to choose their own password, and start as front desk.",
+  "where": "Settings → Users & roles",
+  "tips": [
+   "Change their role afterwards if needed (A157)."
+  ],
+  "related": [
+   "A157",
+   "A174"
+  ]
+ },
+ "A157": {
+  "keywords": "permissions role change user access staff",
+  "what": "Pick a new role for someone; it saves at once, is audited, and they are signed out to sign in with the new role.",
+  "where": "Settings → Users & roles",
+  "tips": [
+   "Undo on the notice puts the old role back."
+  ],
+  "related": [
+   "A156",
+   "A160"
+  ],
+  "steps": {
+   "2": "Pick the new role (here Billing) in the person’s Role list: saved at once (audited; they sign in again; Undo shows)"
+  }
+ },
+ "A158": {
+  "keywords": "custom report builder schedule saved report",
+  "what": "The report builder makes your own report: pick what to report on, run it, then save it (and have it emailed on a schedule).",
+  "where": "Manage ▾ → Reports → Report builder / Saved & scheduled",
+  "related": [
+   "A142",
+   "A140"
+  ]
+ },
+ "A159": {
+  "keywords": "backup backups ran data safe",
+  "what": "Shows when the last backups ran and whether they worked.",
+  "where": "Settings → Backups",
+  "problems": [
+   [
+    "A backup failed",
+    "It is also listed in Needs attention (A049). Contact support if it keeps failing."
+   ]
+  ],
+  "related": [
+   "A160",
+   "A049"
+  ]
+ },
+ "A160": {
+  "keywords": "audit log who changed history trail",
+  "what": "The audit log shows who changed what, when, and what it was before. Type a patient’s chart number to see every change to their chart.",
+  "where": "Settings → Audit log",
+  "tips": [
+   "The audit log can’t be edited by anyone."
+  ],
+  "related": [
+   "A159",
+   "A157"
+  ]
+ },
+ "A161": {
+  "keywords": "note template clinical template edit create",
+  "what": "Write the template the way you want notes to start; its name comes from its first words unless you type one.",
+  "where": "Settings → Note templates",
+  "related": [
+   "A011",
+   "A052"
+  ]
+ },
+ "A162": {
+  "keywords": "team bonus setup goal incentive plan",
+  "what": "Set up a team bonus (for example a daily or weekly goal); the plan opens filled in. Then switch team bonuses on so the team sees its progress.",
+  "where": "Settings → Team bonus",
+  "related": [
+   "A131"
+  ]
+ },
+ "A163": {
+  "keywords": "perfect day template schedule blocks crown prep",
+  "what": "A perfect-day template keeps time on the schedule for the work you want (for example crown preps on Monday mornings). The block shows as a lane on the schedule.",
+  "where": "Settings → Perfect day & late patients",
+  "related": [
+   "A115",
+   "A129"
+  ]
+ },
+ "A164": {
+  "keywords": "appointment type add visit type length",
+  "what": "Add a kind of visit with its usual length.",
+  "where": "Settings → Appointment types",
+  "tips": [
+   "Undo on the notice removes it again."
+  ],
+  "related": [
+   "A165",
+   "A041"
+  ]
+ },
+ "A165": {
+  "keywords": "procedure code add ada cdt fee",
+  "what": "Type the whole line — code, description, fee — and press Enter. The category follows from the code.",
+  "where": "Settings → Procedure codes & fees",
+  "related": [
+   "A154",
+   "A164"
+  ]
+ },
+ "A166": {
+  "keywords": "form consent edit wording financial policy",
+  "what": "Edit the wording of a form or consent with a live preview. Saving makes a new version; copies patients already signed keep the wording they saw.",
+  "where": "Settings → Forms & consents",
+  "related": [
+   "A039",
+   "A040"
+  ]
+ },
+ "A167": {
+  "keywords": "reminder settings text schedule confirmation messages",
+  "what": "Sets when reminders go out (for example a week before, then 1 or 2 days before) and the other message settings.",
+  "where": "Settings → Messages & reviews",
+  "tips": [
+   "Ctrl/⌘ S saves (the Save bar comes up when something changed)."
+  ],
+  "related": [
+   "A094",
+   "A016"
+  ]
+ },
+ "A168": {
+  "keywords": "complaint incident log record patient complaint",
+  "what": "Record a complaint or incident about the active patient; a follow-up for the manager in a week is set and put on the owner’s to-do list.",
+  "where": "Manage ▾ → Compliance log → N",
+  "related": [
+   "A169",
+   "A175"
+  ]
+ },
+ "A169": {
+  "keywords": "exposure sharps needle stick injury osha",
+  "what": "Log a needle-stick or other exposure with the post-exposure checklist (“reported today” is already ticked).",
+  "where": "Manage ▾ → Compliance log → Exposure log → N",
+  "related": [
+   "A168",
+   "A132"
+  ]
+ },
+ "A170": {
+  "keywords": "license licence cpr ce dea radiology certificate expiry expiration track staff credentials",
+  "what": "Documents → Staff licences keeps everyone’s licence, CPR card, DEA, radiology permit and CE deadline on one screen, with how long is left. One line adds or renews one: a first name, what it is and the expiry date — “casey cpr 08/25/2028” (add “#12345” for a number). The person gets a to-do 60 days before it expires (90 for CE).",
+  "where": "Images ▾ → Office documents → Staff licences (command bar “Staff licences”)",
+  "tips": [
+   "Due and expired ones are listed first.",
+   "Undo on the notice takes the line back.",
+   "File a scan of the card itself in Office documents (A153) if you want the copy on record."
+  ],
+  "related": [
+   "A153",
+   "A156"
+  ]
+ },
+ "A171": {
+  "keywords": "letter template write print patient letter",
+  "what": "Letters for the active patient are numbered: press the number to fill one in from the chart, Enter to print it (it is filed on the chart), M to email it.",
+  "where": "Family ▾ → Letters (/letters)",
+  "tips": [
+   "E changes the wording for this one letter; the templates are in Settings → Letter templates."
+  ],
+  "related": [
+   "A177",
+   "A089"
+  ]
+ },
+ "A172": {
+  "keywords": "add provider dentist hygienist new doctor",
+  "what": "Add a dentist or hygienist so they can be booked and credited with production.",
+  "where": "Settings → Providers",
+  "tips": [
+   "Undo on the notice removes it again."
+  ],
+  "related": [
+   "A173",
+   "A156",
+   "A120"
+  ]
+ },
+ "A173": {
+  "keywords": "operatory chair add room",
+  "what": "Add a chair (operatory) so it shows as a column on the schedule.",
+  "where": "Settings → Operatories",
+  "related": [
+   "A172",
+   "A009"
+  ]
+ },
+ "A174": {
+  "keywords": "change password my account security",
+  "what": "Change your own password: type the current one, then the new one (at least 10 characters).",
+  "where": "Settings → My account",
+  "problems": [
+   [
+    "The new password is refused",
+    "It needs at least 10 characters."
+   ]
+  ],
+  "related": [
+   "A181"
+  ]
+ },
+ "A175": {
+  "keywords": "hipaa disclosure accounting of disclosures record released",
+  "what": "Record that you gave a patient’s information to someone (a lawyer, another office…). It goes on the patient’s accounting of disclosures. The reason defaults to the last one used.",
+  "where": "Manage ▾ → Compliance log → Disclosures → N",
+  "tips": [
+   "“Send the record to someone else…” on the chart’s ⋯ menu records the disclosure for you."
+  ],
+  "related": [
+   "A141",
+   "A168"
+  ]
+ },
+ "A176": {
+  "keywords": "sell product toothbrush whitening retail sale",
+  "what": "Sell a product from the patient’s account: press its number, then Enter. Tax is worked out and it goes on the account as a charge.",
+  "where": "Account (ledger) → Sell a product",
+  "tips": [
+   "Undo on the notice takes it back. Products and sales tax are set in Settings → Products for sale."
+  ],
+  "related": [
+   "A019",
+   "A184"
+  ]
+ },
+ "A177": {
+  "keywords": "mailing labels print avery postcards",
+  "what": "Prints an Avery 5160 sheet of labels for everyone on the list.",
+  "where": "Follow-up → Recall (also on report results and a campaign’s audience) → Mailing labels",
+  "related": [
+   "A037",
+   "A136"
+  ]
+ },
+ "A178": {
+  "keywords": "pdmp prescription monitoring opioid controlled substance",
+  "what": "Before a controlled drug is prescribed, the state prescription monitoring program (PDMP) is checked; the result is saved with the prescription.",
+  "where": "Chart ▾ → Rx tab",
+  "tips": [
+   "The demo office uses the PDMP sandbox."
+  ],
+  "related": [
+   "A062"
+  ]
+ },
+ "A179": {
+  "keywords": "deceased died passed away patient death",
+  "what": "Mark a patient deceased from the Recall box on their chart. The chart becomes inactive, recall reminders, statements and messages stop, and any future visit is cancelled — with Undo on the notice. The record itself is kept.",
+  "where": "Family module → Overview → Recall → Don’t recall… → Deceased",
+  "related": [
+   "A117"
+  ]
+ },
+ "A180": {
+  "keywords": "online booking link website button qr google book",
+  "what": "Your online booking page, a button to paste into your website, a QR code, and “Add the Book button” for your Google listing.",
+  "where": "Settings → Online booking links",
+  "related": [
+   "A058"
+  ]
+ },
+ "A181": {
+  "keywords": "two step two factor 2fa authenticator security sign in",
+  "what": "Two-step sign-in asks for a code from your phone as well as your password. Scan the QR code with an authenticator app and type the code it shows.",
+  "where": "Settings → My account → Set up authenticator app",
+  "related": [
+   "A174"
+  ]
+ },
+ "A182": {
+  "keywords": "imaging bridge integration connect sensor dexis carestream workstation",
+  "what": "The imaging bridge connects a chair-side computer’s imaging programs and x-ray sensor to Dental Machine. An administrator sets up each workstation once.",
+  "where": "Settings → Imaging bridges (and Settings → Integrations)",
+  "manualSteps": [
+   {
+    "text": "Settings → Imaging bridges → “Set up a workstation”. Name it (for example “Op 2”) and choose Windows (or Mac/Linux)."
+   },
+   {
+    "text": "Pick the imaging programs installed on that computer, and the sensor if it has one (Tuxedo, Jazz or another TWAIN sensor)."
+   },
+   {
+    "text": "Click “Add workstation and download”. The download holds the workstation’s key, shown only once."
+   },
+   {
+    "text": "On that computer, unzip the folder and double-click install.cmd (answer Yes). The bridge starts now and at every sign-in."
+   },
+   {
+    "text": "Back in Settings → Imaging bridges the workstation shows Online. Open a test patient and press “Open in …” to check the right patient opens."
+   }
+  ],
+  "tips": [
+   "docs/imaging-bridges.md and docs/imaging-sensors.md have the full set-up and the first test.",
+   "Other connections (card payments, texting, email, labs) are in Settings → Integrations; each call they make shows in Settings → Connection activity."
+  ],
+  "related": [
+   "A030",
+   "A183"
+  ]
+ },
+ "A183": {
+  "keywords": "import convert data open dental dentrix eaglesoft switch migrate",
+  "what": "Bring patients, families, insurance, appointments, treatment, balances, notes and perio over from another system. A dry run shows what would come across before anything is saved, and the import is reconciled against the export.",
+  "where": "Settings → Import from another system",
+  "tips": [
+   "Nothing is final until you say so, and an import can be undone."
+  ],
+  "related": [
+   "A182"
+  ]
+ },
+ "A184": {
+  "keywords": "gift certificate sell redeem voucher gift card",
+  "what": "N on Gift certificates sells one: the buyer is the active patient and it is paid the way you usually take payments. Type the amount and press Enter; the code is shown with “Print the certificate”.",
+  "where": "Account ▾ → Gift certificates (/gift-certificates)",
+  "tips": [
+   "To use one, choose “Gift certificate” on the ledger (or “Use a gift certificate” in the command bar)."
+  ],
+  "related": [
+   "A176",
+   "A019"
+  ]
+ }
+}

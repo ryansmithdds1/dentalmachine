@@ -28,6 +28,7 @@ import { runFeeSchedules } from './feeimport.js';
 import { runSecondLook } from './xrayai.js';
 import { createBenchmarkClient, runBenchmarkSends } from './benchmarks.js';
 import { runBillingAutopilot } from './billingauto.js';
+import { runCredentialReminders } from './routes/credentials.js';
 import { runMonthlyWorkJobs } from './monthlywork.js';
 import { runScheduledReports } from './savedreports.js';
 import { runSurveys } from './surveys.js';
@@ -161,6 +162,12 @@ if (process.env.READINESS_JOBS !== 'off') {
   const readiness = () => runExclusive('readiness', 30 * 60 * 1000, () => runReadinessJob(db)).catch(jobFailed('Visit readiness'));
   setInterval(readiness, 60 * 60 * 1000).unref();
   setTimeout(readiness, 100_000).unref();
+}
+// Staff licences & CPR: a to-do for each one whose reminder date has come (hourly; idempotent).
+if (process.env.CREDENTIAL_JOBS !== 'off') {
+  const credentials = () => runExclusive('credentials', 30 * 60 * 1000, () => runCredentialReminders(db)).catch(jobFailed('Staff licence reminders'));
+  setInterval(credentials, 60 * 60 * 1000).unref();
+  setTimeout(credentials, 140_000).unref();
 }
 // Referral follow-up: critical referrals re-alerted weekly, reports matched to open referrals (hourly).
 if (process.env.REFERRAL_JOBS !== 'off') {

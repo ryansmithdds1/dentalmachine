@@ -3,26 +3,28 @@
 :root[data-theme='dark'] { --late: #f87171; --late-soft: rgba(248, 113, 113, 0.12); --late-ink: #fecaca; }
 
 /* The banner at the top of the schedule. */
-.late-banner { display: flex; align-items: flex-start; gap: 6px 14px; flex-wrap: wrap; margin: 0 0 8px; padding: 8px 12px; border-radius: var(--radius);
+.late-banner { display: flex; align-items: center; gap: 4px 14px; flex-wrap: wrap; margin: 0 0 8px; padding: 5px 12px; border-radius: var(--radius);
   background: var(--late-soft); border: 1px solid color-mix(in srgb, var(--late) 35%, transparent); border-left: 4px solid var(--late); color: var(--late-ink); }
 .late-banner:has(.notice-hide) { position: relative; padding-right: 44px; }
 /* ✕: hide it for today (comes back when someone new is late). Top right, whatever wraps below. */
-.notice-hide { position: absolute; top: 7px; right: 8px; color: inherit; border-color: transparent; background: transparent; }
+.notice-hide { position: absolute; top: 4px; right: 8px; color: inherit; border-color: transparent; background: transparent; }
 .notice-hide:hover { background: color-mix(in srgb, var(--late) 14%, transparent); }
-.late-head { display: flex; align-items: center; gap: 8px; min-height: 30px; white-space: nowrap; }
+.late-head { display: flex; align-items: center; gap: 8px; min-height: 28px; white-space: nowrap; }
 .late-head strong { font-size: 14px; }
 .late-banner.very .late-head svg { animation: late-ring 1.6s ease-in-out infinite; }
 .late-sound { color: inherit; border-color: transparent; background: transparent; }
-.late-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; flex: 1 1 520px; min-width: 0; }
-.late-list li { display: flex; align-items: center; gap: 6px 10px; flex-wrap: wrap; min-height: 30px; }
-.late-banner .late-who { color: inherit; font-size: 13.5px; }
-.late-min { font-weight: 750; font-variant-numeric: tabular-nums; padding: 1px 8px; border-radius: 99px; background: color-mix(in srgb, var(--late) 16%, transparent); font-size: 12.5px; }
+/* The people side by side (one line for up to three at 1400 px), each with its own small actions. */
+.late-list { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 18px; flex: 1 1 520px; min-width: 0; }
+.late-list li { display: flex; align-items: center; gap: 6px; min-height: 28px; }
+.late-list li + li { padding-left: 18px; border-left: 1px solid color-mix(in srgb, var(--late) 25%, transparent); margin-left: -18px; }
+.late-banner .late-who { color: inherit; font-size: 13.5px; white-space: nowrap; }
+.late-min { font-weight: 750; font-variant-numeric: tabular-nums; padding: 1px 8px; border-radius: 99px; background: color-mix(in srgb, var(--late) 16%, transparent); font-size: 12.5px; white-space: nowrap; }
 .late-list li.very .late-min { background: var(--late); color: #fff; }
-.late-when { font-size: 12.5px; }
-.late-actions { display: inline-flex; gap: 4px; margin-left: auto; flex-wrap: wrap; }
-.late-actions .small, .late-actions .btn.small { min-height: 28px; padding: 2px 9px; font-size: 12.5px; text-decoration: none; }
+.late-actions { display: inline-flex; gap: 2px; }
+.late-actions .small, .late-actions .btn.small { min-height: 26px; padding: 2px 6px; font-size: 12.5px; text-decoration: none; }
+.late-actions .icon-only { display: inline-flex; align-items: center; justify-content: center; min-width: 28px; }
 .late-done { display: inline-flex; align-items: center; gap: 3px; font-size: 12.5px; font-weight: 600; color: var(--ok); padding: 0 6px; }
-.late-more { align-self: center; font-size: 12.5px; color: inherit; }
+.late-more { align-self: center; font-size: 12.5px; color: inherit; white-space: nowrap; }
 
 /* A late visit on the schedule: a strong red outline and "Late 7 min"; very late pulses. */
 .cal-appt.late { outline: 2px solid var(--late); outline-offset: -1px; }

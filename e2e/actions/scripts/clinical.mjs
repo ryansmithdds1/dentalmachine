@@ -162,7 +162,7 @@ export default {
     async run(t, { p, plan }) {
       await t.open(`/patients/${p.id}?tab=treatment`, `.card[data-plan="${plan.id}"]`);
       await t.step('Click "Consent" on the plan: the right consent is chosen, "Sign here on this device" has focus', async () => {
-        await t.click(t.page.locator(`.card[data-plan="${plan.id}"]`).locator('button:has-text("Consent")'));
+        await t.click(t.page.locator(`.card[data-plan="${plan.id}"]`).locator('button:text-is("Consent…")'));
         await t.page.waitForFunction(() => document.activeElement?.textContent === 'Sign here on this device');
       });
       await t.step('Press Enter: the consent opens for the patient to sign (no birth-date check)', async () => {
@@ -261,7 +261,7 @@ export default {
       await t.open(`/patients/${p.id}?tab=treatment`, `.card[data-plan="${plan.id}"]`);
       await t.step('Click "Print" on the plan: the printable plan opens in a new tab', async () => {
         const tab = t.ctx.waitForEvent('page');
-        await t.click(t.page.locator(`.card[data-plan="${plan.id}"]`).locator('button:has-text("Print")'));
+        await t.click(t.page.locator(`.card[data-plan="${plan.id}"]`).locator('button:text-is("Print")'));
         const pg = await tab;
         await pg.waitForLoadState();
         await pg.close();

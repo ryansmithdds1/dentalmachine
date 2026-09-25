@@ -137,3 +137,15 @@
 .pscan-page .n { position: absolute; left: 4px; top: 4px; background: var(--text); color: var(--panel); font-size: 11px; border-radius: 999px; padding: 0 6px; }
 .pscan-page .tools { display: flex; justify-content: space-between; }
 .pscan-page .tools button { min-height: 0; padding: 2px 6px; font-size: 12px; }
+
+/* Documents → Staff licences & CPR (StaffCredentials.jsx) */
+.staff-creds h2 { display: flex; align-items: center; gap: 8px; }
+.cred-add { margin: 4px 0 14px; }
+.cred-add input { width: 100%; max-width: 560px; }
+.cred-preview { font-size: 13px; margin-top: 4px; min-height: 18px; }
+.cred-preview.warn { color: var(--warn-ink, #92400e); }
+.cred-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.cred-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; padding: 3px 8px; border-radius: 999px; background: var(--hover); border: 1px solid var(--border); }
+.cred-chip.due { background: var(--warn-soft, #fef3c7); border-color: #f59e0b; }
+.cred-chip.expired { background: var(--danger-soft, #fee2e2); border-color: #ef4444; }
+.cred-chip .inline-ask { display: inline-flex; gap: 4px; align-items: center; }

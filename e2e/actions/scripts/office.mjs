@@ -1,6 +1,6 @@
 // Office: tasks, the huddle, lab cases, supplies, the time clock, checklists, Needs attention, the intranet.
 /* global document */
-import { newPatient, activate, refs, MOD, viaCommandBar, menu } from '../lib/fixtures.mjs';
+import { newPatient, activate, refs, MOD, viaCommandBar, menu, pick } from '../lib/fixtures.mjs';
 
 const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63f8cfc0f01f0005000201a5d1a1a40000000049454e44ae426082', 'hex');
 let made = null;
@@ -279,40 +279,56 @@ export default {
 
   A122: {
     role: 'admin',
+    async setup(t) {
+      // Someone worked in the last pay period (the one the page opens on), so there are hours to approve.
+      const period = await t.as('admin').get('/timeclock/period');
+      const users = (await t.as('admin').get('/users')).filter((u) => u.active && u.role !== 'admin');
+      let day = period.period.start;
+      const next = (d) => new Date(Date.parse(`${d}T12:00:00Z`) + 86400_000).toISOString().slice(0, 10);
+      while ([0, 6].includes(new Date(`${day}T12:00:00Z`).getUTCDay())) day = next(day);
+      for (const u of users.slice(0, 2)) {
+        await t.as('admin').post('/timeclock/punches', { user_id: u.id, clock_in: `${day} 08:00`, clock_out: `${day} 16:30`, break_minutes: 30, reason: 'Worked the day (robot set-up)' }).catch((e) => { if (e.status !== 409 && e.status !== 423) throw e; });
+      }
+      return {};
+    },
     async run(t) {
       await t.open('/', '.sidebar');
-      await viaCommandBar(t, 'approve payroll hours', 'main h2, main table', 'Press Ctrl/⌘K, type "approve payroll hours", Enter: the pay period');
-      const approve = t.page.locator('main button:has-text("Approve")').first();
-      if (await approve.count()) {
-        await t.step('Click "Approve"', async () => {
-          await t.click(approve);
-          await t.wait(600);
-        });
-      } else t.note('No hours waiting for approval in the demo office.');
+      await viaCommandBar(t, 'approve payroll hours', 'main h2, main table', 'Press Ctrl/⌘K, type "approve payroll hours", Enter: the pay period that just ended');
+      await t.step('Press Shift+A: everyone whose hours are ready is approved (locked for payroll)', async () => {
+        await t.see('main button:has-text("Approve all ready"):not([disabled])');
+        await t.key('Shift+A');
+        await t.see('.toast:has-text("Approved")');
+      });
     },
   },
 
   A138: {
     role: 'admin',
-    async run(t) {
-      await t.open('/', '.sidebar');
-      await viaCommandBar(t, 'payroll export', 'main h2, main button', 'Press Ctrl/⌘K, type "payroll export", Enter');
-      const dl = t.page.locator('main button:has-text("Download"), main button:has-text("Export"), main a:has-text("Download")').first();
-      if (await dl.count()) {
-        await t.step('Click the export/download button', async () => {
-          await t.click(dl);
-          await t.wait(800);
-        });
-      }
-      for (const pg of t.ctx.pages()) if (pg !== t.page) await pg.close();
+    async setup(t) {
+      // Payroll goes out after the hours are approved (A122): make sure the period that just ended has some.
+      const period = await t.as('admin').get('/timeclock/period');
+      if (period.approved_count > 0) return {};
+      const u = (await t.as('admin').get('/users')).find((x) => x.active && x.role !== 'admin');
+      let day = period.period.start;
+      while ([0, 6].includes(new Date(`${day}T12:00:00Z`).getUTCDay())) day = new Date(Date.parse(`${day}T12:00:00Z`) + 86400_000).toISOString().slice(0, 10);
+      await t.as('admin').post('/timeclock/punches', { user_id: u.id, clock_in: `${day} 08:00`, clock_out: `${day} 16:30`, break_minutes: 30, reason: 'Worked the day (robot set-up)' }).catch(() => {});
+      await t.as('admin').post('/timeclock/period/approve', { start: period.period.start });
+      return {};
     },
-  },
-
-  A131: {
-    role: 'frontdesk',
     async run(t) {
       await t.open('/', '.sidebar');
-      await viaCommandBar(t, 'my bonus', 'main h1, main h2', 'Press Ctrl/⌘K, type "my bonus", Enter');
+      // Batch 3: "export payroll" downloads the pay period that just ended in the format the office used last,
+      // without opening the time clock (it was: open the Export tab, 3 actions, then a click).
+      await t.step('Press Ctrl/⌘K, type "export payroll", Enter: the pay period that just ended downloads for the payroll company', async () => {
+        const dl = t.page.waitForEvent('download', { timeout: 10_000 });
+        await t.key(`${MOD}+k`);
+        await t.cmd('export payroll');
+        await pick(t, 'export payroll');
+        await t.key('Enter');
+        const file = await dl;
+        if (!/payroll/i.test(file.suggestedFilename())) throw new Error(`downloaded ${file.suggestedFilename()}`);
+        await t.see('.toast:has-text("Downloaded")');
+      });
     },
   },
 

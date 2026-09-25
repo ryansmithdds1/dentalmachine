@@ -26,6 +26,8 @@ const PAGES = [
   ['Record a HIPAA disclosure', '/compliance?tab=disclosures&new=1'], ['Accounting of disclosures (HIPAA)', '/compliance?tab=disclosures'], ['Write a letter', '/letters'],
   ['Letter templates', '/settings?tab=letters'], ['Print mailing labels (recall list)', '/followups?tab=recall'], ['Sell a gift certificate', '/gift-certificates?new=1'],
   ['Gift certificates (balances, outstanding)', '/gift-certificates'], ['Products for sale & sales tax', '/settings?tab=retail'],
+  // Batch 3: the per-person licence tracker.
+  ['Staff licences & CPR (who is due)', '/documents?tab=staff'],
   ['A/R aging (who owes what)', '/reports?tab=ops&view=aging'], ['Treatment plan acceptance', '/reports?tab=plans'], ['Hygiene report', '/reports?tab=hygiene'], ['Referrals report (where new patients come from)', '/reports?tab=referrals'],
 ];
 
@@ -89,13 +91,13 @@ export default function CommandPalette() {
       window.removeEventListener('dm:search', onOpen);
     };
   }, []);
+  // Empty every time it opens — cleared as it closes too, so the first frame of the next opening never shows (or
+  // types onto) the words from last time (batch 3: a quick reopen kept "export day sheet" in the box).
   useEffect(() => {
-    if (open) {
-      pointer.current = null;
-      shown.current = { q: null, keys: [] };
-      setQ('');
-      setIdx(0);
-    }
+    pointer.current = null;
+    shown.current = { q: null, keys: [] };
+    setQ('');
+    setIdx(0);
   }, [open]);
   const action = ACTIONS.find((a) => a.verb.test(q));
   const term = action ? q.replace(action.verb, '') : q;

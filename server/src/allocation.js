@@ -27,7 +27,8 @@ export function allocate(entries, claimLines = []) {
     const part = Math.min(amount, charge.open);
     if (part <= 0) return 0;
     charge.open -= part;
-    allocations.push({ credit_id: credit.id, credit_type: creditType(credit), credit_date: credit.entry_date, charge_id: charge.id, procedure_id: charge.procedure_id ?? null, provider_id: charge.provider_id ?? null, amount: part });
+    // retail: what paid for a product sale or a gift certificate bought (no provider's work: the reports keep it apart).
+    allocations.push({ credit_id: credit.id, credit_type: creditType(credit), credit_date: credit.entry_date, charge_id: charge.id, procedure_id: charge.procedure_id ?? null, provider_id: charge.provider_id ?? null, retail: !!(charge.retail_sale_id || charge.gift_certificate_id), amount: part });
     return part;
   };
   for (const credit of live.filter((e) => e.amount < 0)) {

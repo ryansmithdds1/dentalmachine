@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { requirePermission, HttpError, can } from '../auth.js';
-import { practiceNow, utcRange, mapSeq, paged } from '../util.js';
+import { practiceNow, utcRange, mapSeq, paged, toCsv, audit } from '../util.js';
 import { allocationsForRange } from '../allocation.js';
 import { agingReport } from '../aging.js';
 import { restricted } from '../officeaccess.js';
@@ -224,16 +224,18 @@ export default function reportRoutes({ db }) {
     const providers = await db.all('SELECT id, name, type FROM providers WHERE practice_id = ? ORDER BY name', pid);
     const rows = new Map(providers.map((p) => [p.id, { ...p, production: 0, adjustments: 0, patient_collections: 0, insurance_collections: 0 }]));
     const unassigned = { id: null, name: 'Unapplied credit', production: 0, adjustments: 0, patient_collections: 0, insurance_collections: 0 };
+    // Payments for products and gift certificates sold are collections too, but for nobody's dental work: their own row.
+    const retail = { id: null, kind: 'retail', name: 'Retail & gift certificates', production: 0, adjustments: 0, patient_collections: 0, insurance_collections: 0 };
     for (const r of await db.all(
       `SELECT provider_id, SUM(amount) AS n FROM ledger_entries WHERE practice_id = ? AND type = 'charge' AND retail_sale_id IS NULL AND entry_date BETWEEN ? AND ?${atLocation(req).sql} GROUP BY provider_id`, pid, from, to, ...atLocation(req).args,
     )) (rows.get(r.provider_id) || unassigned).production += r.n;
     for (const a of await allocationsForRange(db, pid, from, to)) {
-      const row = (a.provider_id && rows.get(a.provider_id)) || unassigned;
+      const row = a.retail ? retail : (a.provider_id && rows.get(a.provider_id)) || unassigned;
       if (a.credit_type === 'payment') row.patient_collections += a.amount;
       else if (a.credit_type === 'insurance_payment') row.insurance_collections += a.amount;
       else if (a.credit_type === 'adjustment') row.adjustments += a.amount;
     }
-    const list = [...rows.values(), unassigned].filter((r) => r.production || r.adjustments || r.patient_collections || r.insurance_collections)
+    const list = [...rows.values(), retail, unassigned].filter((r) => r.production || r.adjustments || r.patient_collections || r.insurance_collections)
       .map((r) => ({ ...r, collections: r.patient_collections + r.insurance_collections, net_production: r.production - r.adjustments }));
     res.json({ from, to, rows: list });
   });
@@ -273,6 +275,19 @@ export default function reportRoutes({ db }) {
       `SELECT status, COUNT(*) AS n FROM appointments WHERE practice_id = ? AND start_time >= ? AND start_time < ?${atLocation(req).sql} GROUP BY status`,
       pid, `${date} 00:00`, `${date} 24:00`, ...atLocation(req).args,
     );
+    // ?format=csv: the day's lines as a spreadsheet (the "export day sheet" command, and the page's CSV). An export
+    // of patient names and money, so it is recorded like every other report export.
+    if (req.query.format === 'csv') {
+      const who = (e) => e.provider_name || e.created_by_name || 'Online';
+      const csv = toCsv(entries, [
+        ['Date', (e) => e.entry_date], ['Type', (e) => e.type], ['Patient', (e) => `${e.first_name} ${e.last_name}`], ['Description', (e) => e.description || ''],
+        ['Method', (e) => e.method || ''], ['Reference', (e) => e.reference || ''], ['Provider / by', who], ['Amount ($)', (e) => (e.amount / 100).toFixed(2)],
+      ]);
+      await audit(db, req, 'report.export', 'ledger_entries', null, { report: 'day-sheet', date, rows: entries.length, location_id: Number(req.query.location_id) || null });
+      res.set('Content-Type', 'text/csv; charset=utf-8');
+      res.set('Content-Disposition', `attachment; filename="day-sheet-${date}.csv"`);
+      return res.send(csv);
+    }
     res.json({
       date,
       totals: {

@@ -109,7 +109,7 @@ export default function growthRoutes({ db, messenger, config, mailer = { enabled
     const rows = (await db.all(
       `SELECT g.id, g.first_name, g.last_name, g.email, g.email_opt_in, g.address, g.city, g.state, g.zip, g.statement_sent_at,
          (SELECT COALESCE(SUM(l.amount),0) FROM ledger_entries l JOIN patients m ON m.id = l.patient_id WHERE m.id = g.id OR m.guarantor_id = g.id) AS balance
-       FROM patients g WHERE g.practice_id = ? AND g.guarantor_id IS NULL AND g.status != 'archived'
+       FROM patients g WHERE g.practice_id = ? AND g.guarantor_id IS NULL AND g.status != 'archived' AND g.deceased_at IS NULL
          AND (g.statement_sent_at IS NULL OR g.statement_sent_at < ?)`, pid, cutoff,
     )).filter((x) => x.balance >= minBalance);
     // Same patient-portion rule as the ledger and portal: minus what insurance and in-network discounts will cover.

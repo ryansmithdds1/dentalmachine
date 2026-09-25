@@ -169,9 +169,27 @@ export default {
 
   A145: { // switch office
     role: 'admin',
-    async run(t) {
-      const locations = await t.api.get('/locations').catch(() => []);
-      if ((locations.rows || locations).length < 2) t.blocked('The demo practice has one office, so there is nothing to switch to');
+    async setup(t) {
+      // A second office for the practice (the demo has one); put away again afterwards so other actions see one.
+      const list = await t.as('admin').get('/locations');
+      const second = (list.rows || list).find((l) => l.name === 'Northside Office') || await t.as('admin').post('/locations', { name: 'Northside Office', city: 'Austin', state: 'TX' });
+      if (!second.active) await t.as('admin').put(`/locations/${second.id}`, { active: 1 });
+      t.after(() => t.as('admin').put(`/locations/${second.id}`, { active: 0 }));
+      return { second };
+    },
+    async run(t, { second }) {
+      await t.open('/schedule', '.sidebar');
+      await t.step('Click your name (bottom of the menu): the office is at the top of that menu', async () => {
+        await t.click('.rail-foot button.user-button');
+        await t.see('select[aria-label="Office"]');
+      });
+      await t.step('Pick "Northside Office": every screen now works in that office', async () => {
+        const sel = t.page.locator('select[aria-label="Office"]');
+        await t.click(sel);
+        await Promise.all([t.page.waitForLoadState('load'), sel.selectOption(String(second.id))]);
+        await t.page.waitForFunction((id) => localStorage.getItem('dm_location') === String(id) || document.querySelector('select[aria-label="Office"]')?.value === String(id), second.id); // eslint-disable-line no-undef
+      });
+      t.note('Batch 3: measured with a second office added to the demo practice for the action (and put away afterwards).');
     },
   },
 };

@@ -125,19 +125,24 @@ export default {
     },
   },
 
-  A170: { // a staff member's CPR card, with its expiry date
+  A170: { // a staff member's CPR card, with its expiry date, on the per-person tracker
     role: 'admin',
-    async run(t) {
-      await t.open('/documents', 'button:has-text("Add files")');
-      await t.step('Office documents: click "Expires" and type the card’s expiry date', async () => {
-        await t.click('main label:has-text("Expires") input');
-        await t.type(`${addDays(t.today, 700).slice(5, 7)}${addDays(t.today, 700).slice(8, 10)}${addDays(t.today, 700).slice(0, 4)}`);
+    async setup(t) {
+      const users = (await t.as('admin').get('/users')).filter((u) => u.active);
+      const first = (u) => u.name.replace(/^dr\.?\s+/i, '').split(/\s+/)[0];
+      const who = users.find((u) => users.filter((x) => first(x).toLowerCase() === first(u).toLowerCase()).length === 1 && u.role !== 'admin') || users[0];
+      return { first: first(who) };
+    },
+    async run(t, { first }) {
+      await t.open('/documents?tab=staff', 'input[aria-label="Add or renew a licence"]');
+      const exp = addDays(t.today, 700);
+      await t.step(`Documents → Staff licences: type "${first.toLowerCase()} cpr ${exp.slice(5, 7)}/${exp.slice(8, 10)}/${exp.slice(0, 4)}" and press Enter: on their row, with a to-do for them 60 days before`, async () => {
+        await t.type(`${first.toLowerCase()} cpr ${exp.slice(5, 7)}/${exp.slice(8, 10)}/${exp.slice(0, 4)}`);
+        await t.see('.cred-preview:has-text("Enter adds it")');
+        await t.key('Enter');
+        await t.see('.toast:has-text("CPR")');
       });
-      await t.step('Press U and choose the scan of the card: filed as a licence, on the "Expiring in 90 days" list when it’s due', async () => {
-        await t.pickFile(() => t.page.locator('main button:has-text("Add files")').click(), { name: 'CPR card Maria Lopez.pdf', mimeType: 'application/pdf', buffer: PDF });
-        await t.see('main :text("CPR card Maria Lopez")');
-      });
-      t.note('The type (licence/certificate) is worked out from the name; the list filters "Expiring in 90 days". There is no per-person tracker or reminder yet.');
+      t.note('Batch 3: a per-person tracker (Documents → Staff licences & CPR) with reminders; the scan itself still goes in Office documents.');
     },
   },
 

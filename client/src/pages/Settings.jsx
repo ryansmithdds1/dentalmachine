@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import ConnectionActivity from '../components/ConnectionActivity.jsx';
 import PhoneLineSettings from '../components/PhoneLineSettings.jsx';
 import EducationSettings from '../components/EducationSettings.jsx';
@@ -1681,6 +1681,9 @@ function ImagingBridges() {
   const [wizard, setWizard] = useState(false);
   const [testing, setTesting] = useState(null);
   const isAdmin = user?.role === 'admin';
+  // No workstation yet: the setup is open straight away (there is nothing else to do here).
+  const opened = useRef(false);
+  useEffect(() => { if (agents && !agents.length && isAdmin && !opened.current) { opened.current = true; setWizard(true); } }, [agents, isAdmin]);
   const download = async (path, filename) => {
     const blob = await (await fetch(`/api${path}`, { headers: { Authorization: `Bearer ${getToken()}` } })).blob();
     Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: filename }).click();

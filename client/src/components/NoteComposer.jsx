@@ -209,24 +209,24 @@ export default function NoteComposer({
   return (
     <div className="note-composer" ref={rootRef}>
       <ErrorBox error={error || loadErr} />
-      <div className="inline" style={{ marginBottom: 8, flexWrap: 'wrap', gap: 6 }}>
-        <select value="" onChange={(e) => insertTemplate(e.target.value)} style={{ maxWidth: 240 }} aria-label="Insert a template">
-          <option value="">Insert template…</option>
-          {templates.filter((t) => t.active).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-        </select>
-        {ids && <button type="button" className="small" onClick={() => draft()}>Draft from procedures</button>}
-      </div>
-
+      {/* One way in (batch 3, scorecard UI review — it was three: a template picker, Dictate and "Or type it", over the
+          note box): say or type what happened in the one line, Enter; a template, if wanted, is picked at its end.
+          The note below fills in as you go and can be edited directly. */}
       <div className={`dictate-bar${mic.listening ? ' live' : ''}`}>
         {mic.supported && (
-          <button type="button" className={mic.listening ? 'dictate-btn live' : 'dictate-btn'} onClick={mic.toggle} title="Alt+M" aria-pressed={mic.listening}>
+          <button type="button" className={mic.listening ? 'dictate-btn live' : 'dictate-btn'} onClick={mic.toggle} title="Dictate (Alt+M)" aria-pressed={mic.listening}>
             {mic.listening ? <><MicOff size={18} aria-hidden /> Stop</> : <><Mic size={18} aria-hidden /> Dictate</>}
           </button>
         )}
         <form className="dictate-type" onSubmit={(e) => { e.preventDefault(); dictate(typed); setTyped(''); }}>
           <input ref={inputRef} value={typed} onChange={(e) => setTyped(e.target.value)} aria-label="Type what to add"
-            placeholder={mic.listening ? (mic.interim || 'Listening… say it the way you’d tell your assistant') : mic.supported ? 'Or type it: “2 carpules articaine, rubber dam, shade A2”' : 'Type what to add: “2 carpules articaine, rubber dam, shade A2”'} />
+            placeholder={mic.listening ? (mic.interim || 'Listening… say it the way you’d tell your assistant') : `${mic.supported ? 'Say or type' : 'Type'} what happened: “2 carpules articaine, rubber dam, shade A2” — Enter`} />
         </form>
+        <select className="note-template-pick" value="" onChange={(e) => insertTemplate(e.target.value)} aria-label="Insert a template" title="Start from a template (remembered for this kind of visit)">
+          <option value="">Template…</option>
+          {templates.filter((t) => t.active).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+        </select>
+        {ids && <button type="button" className="small" onClick={() => draft()}>Draft from procedures</button>}
         {history.length > 0 && <button type="button" className="small" onClick={undo} title="Undo the last change (or say “undo that”)"><Undo2 size={15} aria-hidden /> Undo</button>}
       </div>
       {mic.error && <div className="error">{mic.error}</div>}
@@ -261,7 +261,7 @@ export default function NoteComposer({
           </div>
         </div>
       )}
-      <textarea rows={12} value={body} onChange={(e) => setBody(e.target.value)} aria-label="Clinical note" placeholder="Clinical note — pick a template, or just start dictating…" />
+      <textarea rows={12} value={body} onChange={(e) => setBody(e.target.value)} aria-label="Clinical note" placeholder="The note builds here from what you say or type above (and a template, if you pick one). You can edit it right here too." />
       <div className="form-grid" style={{ marginTop: 10 }}>
         <label>
           Provider

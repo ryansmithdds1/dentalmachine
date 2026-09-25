@@ -4,7 +4,9 @@ import { useApi } from '../../hooks.js';
 import { ErrorBox, useSubmit } from '../ui.jsx';
 import './bridgesetup.css';
 
-const STEPS = ['Workstation', 'Imaging programs', 'Sensor', 'Download'];
+// Three steps (batch 3; it was four): the programs and the sensor are chosen on one screen, whose button adds the
+// workstation and downloads its package at once.
+const STEPS = ['Workstation', 'Programs & sensor', 'Install'];
 const HANDOFF = { args: 'Opens with the patient', file: 'Opens with the patient', 'file+args': 'Opens with the patient', none: 'Staff pick the patient in the program' };
 
 // The install package is made with the key the server just handed back (it's shown only once), so it
@@ -61,8 +63,7 @@ export default function BridgeSetup({ onClose, onCreated }) {
   const missingPath = picked.find((x) => byId[x.preset]?.needs_command && !x.command.trim());
   const canNext = [
     name.trim().length > 0,
-    !missingPath,
-    picked.length > 0 || !!sensor.preset,
+    !missingPath && (picked.length > 0 || !!sensor.preset),
     true,
   ][step];
   const body = () => ({
@@ -81,6 +82,7 @@ export default function BridgeSetup({ onClose, onCreated }) {
     }
     await downloadPackage(ws, body());
     setDone(true);
+    setStep(2);
   });
   const configOnly = () => {
     const b = body();
@@ -103,7 +105,8 @@ export default function BridgeSetup({ onClose, onCreated }) {
         <div className="form-grid">
           <label>
             Workstation name
-            <input autoFocus value={name} disabled={!!created} onChange={(e) => setName(e.target.value)} placeholder='For example "Op 2" or "Pano room"' maxLength={80} />
+            <input autoFocus value={name} disabled={!!created} onChange={(e) => setName(e.target.value)} placeholder='For example "Op 2" or "Pano room"' maxLength={80}
+              onKeyDown={(e) => { if (e.key === 'Enter' && name.trim()) { e.preventDefault(); setStep(1); } }} />
           </label>
           <label>
             This computer runs
@@ -154,11 +157,7 @@ export default function BridgeSetup({ onClose, onCreated }) {
             </div>
           )}
           {missingPath && <div className="error" style={{ marginTop: 8 }}>Enter the program path for {byId[missingPath.preset]?.name}.</div>}
-        </>
-      )}
-
-      {step === 2 && (
-        <>
+          <h3 style={{ margin: '16px 0 6px', fontSize: 14 }}>Sensor</h3>
           <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>Optional: take x-rays straight from a sensor plugged into this computer (needs the sensor&apos;s TWAIN driver and the free NAPS2 app).</p>
           <div className="chips" role="radiogroup" aria-label="Sensor">
             {[{ id: '', name: 'No sensor on this PC' }, ...(catalog?.sensors || [])].map((s) => (
@@ -175,7 +174,7 @@ export default function BridgeSetup({ onClose, onCreated }) {
         </>
       )}
 
-      {step === 3 && (
+      {step === 2 && (
         <>
           <dl className="kv">
             <dt>Workstation</dt><dd>{name.trim()} <span className="muted">({{ windows: 'Windows', mac: 'macOS', linux: 'Linux' }[platform]})</span></dd>
@@ -202,14 +201,20 @@ export default function BridgeSetup({ onClose, onCreated }) {
         </>
       )}
 
+      <ErrorBox error={step === 1 ? make.error : null} />
       <div className="form-actions">
-        {step > 0 && <button type="button" onClick={() => setStep(step - 1)} disabled={make.busy}>Back</button>}
-        {step < 3 && <button type="button" className="primary" disabled={!canNext} onClick={() => setStep(step + 1)}>Next</button>}
-        {step === 3 && (
+        {step > 0 && !created && <button type="button" onClick={() => setStep(step - 1)} disabled={make.busy}>Back</button>}
+        {step === 0 && <button type="button" className="primary" disabled={!canNext} onClick={() => setStep(1)}>Next</button>}
+        {step === 1 && (
+          <button type="button" className="primary" disabled={!canNext || make.busy} onClick={() => make.submit()}>
+            {make.busy ? 'Preparing…' : 'Add workstation and download'}
+          </button>
+        )}
+        {step === 2 && (
           <>
             {created && <button type="button" onClick={configOnly} title="Just the settings file, for setting the bridge up by hand">bridge-config.json only</button>}
             <button type="button" className="primary" disabled={make.busy} onClick={() => make.submit()}>
-              {make.busy ? 'Preparing…' : done || created ? 'Download package again' : 'Add workstation and download'}
+              {make.busy ? 'Preparing…' : 'Download package again'}
             </button>
           </>
         )}

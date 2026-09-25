@@ -63,8 +63,9 @@ test('NAV the same seven modules for everyone, with only the pages each person c
   assert.deepEqual(await itemsOf(a, 'treatment'), ['/recall?type=treatment']);
   assert.deepEqual(await itemsOf(a, 'chart'), ['tab:perio', '/chart-audit', '/xray-review']);
   assert.deepEqual(await itemsOf(a, 'images'), ['/documents']);
-  assert.deepEqual(await itemsOf(a, 'manage'), ['/attention', '/messages', '/calls', '/phones', '/campaigns', '/reputation', '/reports', '/metrics', '/business',
-    '/marketing', '/finance', '/ask', '/group', '/office', '/checklists', '/timeclock', '/intranet', '/compliance']);
+  // Batch 3: Patient feedback (/reviews) beside Reviews, and My bonus (/bonus) beside the time clock.
+  assert.deepEqual(await itemsOf(a, 'manage'), ['/attention', '/messages', '/calls', '/phones', '/campaigns', '/reputation', '/reviews', '/reports', '/metrics', '/business',
+    '/marketing', '/finance', '/ask', '/group', '/office', '/checklists', '/timeclock', '/bonus', '/intranet', '/compliance']);
   // Manage puts what a role uses most first.
   assert.deepEqual(await sectionsOf(a, 'manage'), ['Today', 'Messages & calls', 'Numbers', 'Office']);
   assert.deepEqual(await sectionsOf(people.billing.page, 'manage'), ['Numbers', 'Today', 'Messages & calls', 'Office']);

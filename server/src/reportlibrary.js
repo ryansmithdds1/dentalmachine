@@ -542,16 +542,17 @@ def({
   async run(ctx) {
     const names = await providerNames(ctx);
     const rows = new Map();
-    const row = (id) => {
-      const key = id ?? 'none';
-      if (!rows.has(key)) rows.set(key, { provider_id: id ?? null, provider: id ? names.get(id)?.name || 'Provider' : 'Unapplied credit', production: 0, patient: 0, insurance: 0 });
+    // Product and gift certificate sales are nobody's dental work: what paid for them is its own row, not "unapplied".
+    const row = (id, retail = false) => {
+      const key = retail ? 'retail' : id ?? 'none';
+      if (!rows.has(key)) rows.set(key, { provider_id: retail ? null : id ?? null, provider: retail ? 'Retail & gift certificates' : id ? names.get(id)?.name || 'Provider' : 'Unapplied credit', production: 0, patient: 0, insurance: 0 });
       return rows.get(key);
     };
     for (const c of await chargesByProvider(ctx)) row(c.provider_id).production += num(c.production);
     for (const a of await allocatedByProvider(ctx)) {
       if (ctx.providerId && a.provider_id !== ctx.providerId) continue;
-      if (a.credit_type === 'payment') row(a.provider_id).patient += a.amount;
-      else if (a.credit_type === 'insurance_payment') row(a.provider_id).insurance += a.amount;
+      if (a.credit_type === 'payment') row(a.provider_id, a.retail).patient += a.amount;
+      else if (a.credit_type === 'insurance_payment') row(a.provider_id, a.retail).insurance += a.amount;
     }
     const list = [...rows.values()].map((r) => ({ ...r, collections: r.patient + r.insurance, collection_pct: pct(r.patient + r.insurance, r.production) }))
       .filter((r) => r.production || r.collections).sort((a, b) => b.collections - a.collections || b.production - a.production);

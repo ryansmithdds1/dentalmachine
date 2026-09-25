@@ -43,7 +43,7 @@ more than one action). “Robot” is the latest score from the measuring robot 
 | A027 | Book the next hygiene visit at checkout ⌨ | front desk | frequent | 14 | Checkout — R (or it opens by itself when nothing is left to pay), Enter on the first suggestion | 16 | [16-next-hygiene](../../docs/workflows/specs/16-next-hygiene.md) | [11-12-16-17-18-money](../../e2e/workflows/11-12-16-17-18-money.test.mjs) | 100 A |
 | A028 | Send a task to a co-worker | everyone | frequent | 12 | Command bar "task … @name" | 28 | [28-staff-tasks](../../docs/workflows/specs/28-staff-tasks.md) | [21-22-23-25-28](../../e2e/workflows/21-22-23-25-28.test.mjs) | 100 A |
 | A029 | Reschedule an appointment ⌨ | front desk | frequent | 12 | Schedule — M, arrows, Enter (or drag) | 10 | [10-reschedule](../../docs/workflows/specs/10-reschedule.md) | [09-10-13-19-schedule](../../e2e/workflows/09-10-13-19-schedule.test.mjs) | 100 A |
-| A030 | Take x-rays with the sensor | assistant, hygienist | frequent | 12 | Imaging studio (needs a sensor and the imaging bridge) | 14 | [14-xrays-photos](../../docs/workflows/specs/14-xrays-photos.md) |  | not measurable |
+| A030 | Take x-rays with the sensor | assistant, hygienist | frequent | 12 | Imaging studio (needs a sensor and the imaging bridge) | 14 | [14-xrays-photos](../../docs/workflows/specs/14-xrays-photos.md) |  | 100 A |
 | A031 | Add x-rays or photos to the chart ⌨ | assistant, hygienist | frequent | 12 | Documents & x-rays tab — U (file picker) or drop files | 14 | [14-xrays-photos](../../docs/workflows/specs/14-xrays-photos.md) | [14-15-images-medical](../../e2e/workflows/14-15-images-medical.test.mjs) | 100 A |
 | A032 | Update medical history (add an allergy or medication) ⌨ | hygienist, assistant | frequent | 10 | Chart overview — A (allergies) or Shift+M (medications), type, Ctrl/⌘+Enter; or click the line | 15 | [15-medical-history](../../docs/workflows/specs/15-medical-history.md) | [14-15-images-medical](../../e2e/workflows/14-15-images-medical.test.mjs) | 100 A |
 | A033 | Record blood pressure and pulse | hygienist, assistant | frequent | 10 | Chart overview — V, type "122/78 68", Enter |  | [15-medical-history](../../docs/workflows/specs/15-medical-history.md) | [14-15-images-medical](../../e2e/workflows/14-15-images-medical.test.mjs) | 100 A |
@@ -63,9 +63,9 @@ more than one action). “Robot” is the latest score from the measuring robot 
 | A047 | Scan a new insurance card into a policy | front desk | daily | 5 | Insurance tab — S, photo, Enter | 31 | [31-insurance-card](../../docs/workflows/specs/31-insurance-card.md) | [20-30-31-insurance](../../e2e/workflows/20-30-31-insurance.test.mjs) | 96 A |
 | A048 | Approve claims that are ready to send | billing | daily | 5 | Billing → Ready to approve (/claims?tab=approve) | 24 | [24-claims](../../docs/workflows/specs/24-claims.md) | [24b-claims-approve](../../e2e/workflows/24b-claims-approve.test.mjs) | 100 A |
 | A049 | Work the Needs attention list | office manager, billing | daily | 5 | Needs attention (/attention) |  |  |  | 100 A |
-| A050 | Take intraoral photos with the camera | assistant, hygienist | daily | 5 | Imaging studio → camera (needs a camera) | 14 | [14-xrays-photos](../../docs/workflows/specs/14-xrays-photos.md) |  | not measurable |
+| A050 | Take intraoral photos with the camera | assistant, hygienist | daily | 5 | Imaging studio → camera (needs a camera) | 14 | [14-xrays-photos](../../docs/workflows/specs/14-xrays-photos.md) |  | 100 A |
 | A051 | Mark a recall call as "left a message" | front desk | daily | 5 | Follow-up lists → Recall — one row per patient: Log call (L), Enter | 37 | [RF-recall-frequencies](../../docs/workflows/specs/RF-recall-frequencies.md) | [RF-recall](../../e2e/workflows/RF-recall.test.mjs) | 100 A |
-| A052 | Dictate a note by voice | dentist, hygienist | daily | 5 | Clinical notes — microphone (needs a microphone) | 7 | [07-clinical-notes](../../docs/workflows/specs/07-clinical-notes.md) |  | not measurable |
+| A052 | Dictate a note by voice | dentist, hygienist | daily | 5 | Clinical notes — microphone (needs a microphone) | 7 | [07-clinical-notes](../../docs/workflows/specs/07-clinical-notes.md) |  | 100 A |
 | A053 | Log a phone call with a patient | front desk | daily | 5 | Alt+G from any screen (active patient) or Messages & forms → Calls → Log a call: type the note, Enter |  | [PH-phones](../../docs/workflows/specs/PH-phones.md) | [PH-phones](../../e2e/workflows/PH-phones.test.mjs) | 100 A |
 | A054 | Cancel an appointment (with a reason, and rebook) ⌨ | front desk | daily | 4 | Schedule — X, reason number, Enter | 19 | [19-cancel-no-show](../../docs/workflows/specs/19-cancel-no-show.md) | [09-10-13-19-schedule](../../e2e/workflows/09-10-13-19-schedule.test.mjs) | 100 A |
 | A055 | Set up a new patient (with insurance) | front desk | daily | 4 | Command bar "new patient", one line | 32 | [32-new-patient](../../docs/workflows/specs/32-new-patient.md) | [32-44-daily](../../e2e/workflows/32-44-daily.test.mjs) | 91 A |
@@ -90,7 +90,7 @@ more than one action). “Robot” is the latest score from the measuring robot 
 | A074 | Check in a case back from the lab | assistant | daily | 2 | Lab check-in (/lab-checkin) | 35 | [LB-labcheckin](../../docs/workflows/specs/LB-labcheckin.md) | [LB-labcheckin](../../e2e/workflows/LB-labcheckin.test.mjs) | 100 A |
 | A075 | Call an insurance company about an unpaid claim | billing | daily | 2 | Billing → Insurance follow-up (/claims?tab=followup) — L | 45 | [45-claim-follow-up](../../docs/workflows/specs/45-claim-follow-up.md) | [45-54-monthly](../../e2e/workflows/45-54-monthly.test.mjs) | 100 A |
 | A076 | Put a patient on the ASAP list | front desk | daily | 2 | Appointment drawer — ASAP | 26 | [26-asap-fill](../../docs/workflows/specs/26-asap-fill.md) |  | 100 A |
-| A077 | Send a payment link by text | front desk, billing | daily | 2 | Ledger tab — text a payment link |  | [BL-billing](../../docs/workflows/specs/BL-billing.md) |  | blocked |
+| A077 | Send a payment link by text | front desk, billing | daily | 2 | Ledger tab — Send card payment link (text-to-pay; in sandbox it opens the practice’s Pay my bill page) |  | [BL-billing](../../docs/workflows/specs/BL-billing.md) |  | 96 A |
 | A078 | Review x-ray AI findings | dentist | daily | 2 | X-ray AI review (/xray-review) |  | [XR-xray-ai](../../docs/workflows/specs/XR-xray-ai.md) |  | 94 A |
 | A079 | Complete the opening or closing checklist | everyone | daily | 2 | Checklists (/checklists) |  | [RCL-checklists](../../docs/workflows/specs/RCL-checklists.md) | [RCL-checklists](../../e2e/workflows/RCL-checklists.test.mjs) | 100 A |
 | A080 | Send patient education after a visit | dentist, hygienist | daily | 2 | Risk & education tab |  |  |  | 100 A |
@@ -129,40 +129,40 @@ more than one action). “Robot” is the latest score from the measuring robot 
 | A113 | Set up a payment plan | billing | weekly | 1.5/wk | Billing → Payment plans (/claims?tab=plans) |  | [BL-billing](../../docs/workflows/specs/BL-billing.md) |  | 96 A |
 | A114 | Void or correct a claim | billing | weekly | 1.5/wk | Claim (/claims/:id) — Void / Correct | 24 | [24-claims](../../docs/workflows/specs/24-claims.md) |  | 100 A |
 | A115 | Block time on the schedule (meeting, lunch) | front desk, office manager | weekly | 1.5/wk | Schedule — drag on a chair → Block time | 50 | [S2-perfect-day](../../docs/workflows/specs/S2-perfect-day.md) | [S5-S2-production](../../e2e/workflows/S5-S2-production.test.mjs) | 100 A |
-| A116 | Reply to an online review | office manager | weekly | 1.5/wk | Reviews (/reputation) |  | [RV-reviews](../../docs/workflows/specs/RV-reviews.md) |  | blocked |
+| A116 | Reply to an online review | office manager | weekly | 1.5/wk | Reviews (/reputation) |  | [RV-reviews](../../docs/workflows/specs/RV-reviews.md) |  | 100 A |
 | A117 | Make a patient inactive | front desk | weekly | 1.5/wk | Chart → Edit patient → Status |  |  |  | 96 A |
 | A118 | Sign a patient up for the membership plan | front desk | weekly | 1.5/wk | Ledger / Memberships |  |  |  | 96 A |
 | A119 | Send patient statements | billing | weekly | 1/wk | Billing → Statements (/claims?tab=statements) — Enter, Enter | 47 | [47-statements](../../docs/workflows/specs/47-statements.md) | [45-54-monthly](../../e2e/workflows/45-54-monthly.test.mjs) | 100 A |
 | A120 | Give a provider a day off or change their hours | office manager | weekly | 1/wk | Settings → Providers → Time off & special hours | 50 | [50-schedule-hours](../../docs/workflows/specs/50-schedule-hours.md) | [45-54-monthly](../../e2e/workflows/45-54-monthly.test.mjs) | 100 A |
 | A121 | Merge duplicate patient charts | office manager | weekly | 1/wk | Settings → Duplicate charts — Enter, MERGE, Enter | 51 | [51-merge-duplicates](../../docs/workflows/specs/51-merge-duplicates.md) | [45-54-monthly](../../e2e/workflows/45-54-monthly.test.mjs) | 100 A |
-| A122 | Approve payroll hours | office manager | weekly | 1/wk | Time clock → Pay period (/timeclock?tab=period) |  | [TC-timeclock](../../docs/workflows/specs/TC-timeclock.md) |  | 100 A |
+| A122 | Approve payroll hours | office manager | weekly | 1/wk | Time clock → Pay period (/timeclock?tab=period) |  | [TC-timeclock](../../docs/workflows/specs/TC-timeclock.md) |  | 94 A |
 | A123 | Edit staff work schedules | office manager | weekly | 1/wk | Time clock → Schedules |  | [TC-timeclock](../../docs/workflows/specs/TC-timeclock.md) |  | 100 A |
 | A124 | Review insurance A/R aging | billing, office manager | weekly | 1/wk | Command bar "A/R aging" (Reports → Day sheet, production & A/R) | 45 | [49-reports](../../docs/workflows/specs/49-reports.md) |  | 94 A |
-| A125 | Check what the recall autopilot did | office manager, front desk | weekly | 1/wk | Recall autopilot (/recall) | 37 | [RC-recall](../../docs/workflows/specs/RC-recall.md) |  | 88 B |
-| A126 | Check treatment follow-up results | office manager | weekly | 1/wk | Treatment follow-up (/recall?type=treatment) | 37 | [TF-treatment-followup](../../docs/workflows/specs/TF-treatment-followup.md) | [TF-followup](../../e2e/workflows/TF-followup.test.mjs) | 88 B |
+| A125 | Check what the recall autopilot did | office manager, front desk | weekly | 1/wk | Family ▾ → Recall autopilot (/recall) | 37 | [RC-recall](../../docs/workflows/specs/RC-recall.md) |  | 94 A |
+| A126 | Check treatment follow-up results | office manager | weekly | 1/wk | Treatment Plan ▾ → Treatment follow-up (/recall?type=treatment) | 37 | [TF-treatment-followup](../../docs/workflows/specs/TF-treatment-followup.md) | [TF-followup](../../e2e/workflows/TF-followup.test.mjs) | 94 A |
 | A127 | Reconcile insurance payments with the bank | billing | weekly | 1/wk | Billing → Insurance autopilot → reconciliation | 42 | [A-eob-autopilot](../../docs/workflows/specs/A-eob-autopilot.md) |  | 100 A |
 | A128 | Review phone results (missed calls, why they didn't book) | office manager | weekly | 1/wk | Phones (/phones) |  | [PH-phones](../../docs/workflows/specs/PH-phones.md) | [PH-phones](../../e2e/workflows/PH-phones.test.mjs) | 94 A |
-| A129 | Review schedule capacity | office manager | weekly | 1/wk | Capacity (/capacity) |  | [CAP-capacity](../../docs/workflows/specs/CAP-capacity.md) | [CAP-capacity](../../e2e/workflows/CAP-capacity.test.mjs) | 88 B |
-| A130 | Read patient feedback | office manager | weekly | 1/wk | Reviews & feedback (/reviews) |  | [RV-reviews](../../docs/workflows/specs/RV-reviews.md) |  | 88 B |
-| A131 | Check my bonus | everyone | weekly | 1/wk | My bonus (/bonus) |  | [BN-bonus](../../docs/workflows/specs/BN-bonus.md) |  | 88 B |
+| A129 | Review schedule capacity | office manager | weekly | 1/wk | Schedule ▾ → Capacity (/capacity) |  | [CAP-capacity](../../docs/workflows/specs/CAP-capacity.md) | [CAP-capacity](../../e2e/workflows/CAP-capacity.test.mjs) | 94 A |
+| A130 | Read patient feedback | office manager | weekly | 1/wk | Manage ▾ → Patient feedback (/reviews) |  | [RV-reviews](../../docs/workflows/specs/RV-reviews.md) |  | 94 A |
+| A131 | Check my bonus | everyone | weekly | 1/wk | Manage ▾ → My bonus (/bonus) |  | [BN-bonus](../../docs/workflows/specs/BN-bonus.md) |  | 94 A |
 | A132 | Log a sterilizer spore test | assistant | weekly | 1/wk | Checklists (a spore-test item on a checklist) |  | [RCL-checklists](../../docs/workflows/specs/RCL-checklists.md) |  | 100 A |
 | A133 | Request time off | everyone | weekly | 0.8/wk | Time clock → Time off |  | [TC-timeclock](../../docs/workflows/specs/TC-timeclock.md) |  | 100 A |
 | A134 | Approve a time-off request | office manager | weekly | 0.8/wk | Time clock → Time off |  | [TC-timeclock](../../docs/workflows/specs/TC-timeclock.md) |  | 100 A |
 | A135 | Post an announcement for the team | office manager | monthly | 2.1/mo | Intranet → Announcements |  | [I-intranet](../../docs/workflows/specs/I-intranet.md) |  | 100 A |
 | A136 | Send a newsletter or campaign | office manager | monthly | 2.1/mo | Campaigns (/campaigns) |  | [MK-marketing](../../docs/workflows/specs/MK-marketing.md) |  | 96 A |
-| A137 | See what pays (business view) | office manager | monthly | 2.1/mo | Business (/business) |  | [BV-business-view](../../docs/workflows/specs/BV-business-view.md) | [BV-business](../../e2e/workflows/BV-business.test.mjs) | 88 B |
-| A138 | Export payroll | office manager | monthly | 2.1/mo | Time clock → Export |  | [TC-timeclock](../../docs/workflows/specs/TC-timeclock.md) |  | 94 A |
+| A137 | See what pays (business view) | office manager | monthly | 2.1/mo | Manage ▾ → Business (/business) |  | [BV-business-view](../../docs/workflows/specs/BV-business-view.md) | [BV-business](../../e2e/workflows/BV-business.test.mjs) | 94 A |
+| A138 | Export payroll | office manager | monthly | 2.1/mo | Command bar "export payroll" (downloads the pay period that just ended), or Time clock → Export |  | [TC-timeclock](../../docs/workflows/specs/TC-timeclock.md) |  | 94 A |
 | A139 | Add an insurance carrier | billing | monthly | 2.1/mo | Settings → Insurance carriers |  |  |  | 97 A |
 | A140 | Ask a question about your numbers | office manager | monthly | 2.1/mo | Ask your data (/ask) |  |  |  | 94 A |
 | A141 | Give a patient a copy of their record | front desk | monthly | 2.1/mo | Chart → Export record (ZIP) |  |  |  | 100 A |
-| A142 | Export a report to a spreadsheet | office manager, billing | monthly | 2.1/mo | Reports → any table → CSV | 49 | [49-reports](../../docs/workflows/specs/49-reports.md) |  | 88 B |
+| A142 | Export a report to a spreadsheet | office manager, billing | monthly | 2.1/mo | Command bar "export <report>" (downloads it at once), or Reports → any table → CSV | 49 | [49-reports](../../docs/workflows/specs/49-reports.md) |  | 94 A |
 | A143 | Correct a patient's name or date of birth | front desk | monthly | 2.1/mo | Chart → Edit patient |  |  |  | 100 A |
-| A144 | Compare offices (group view) | office manager | monthly | 2.1/mo | Group (/group) |  |  | [dso](../../e2e/workflows/dso.test.mjs) | 88 B |
-| A145 | Switch to another office | everyone | monthly | 2.1/mo | Office picker (header) |  |  |  | blocked |
+| A144 | Compare offices (group view) | office manager | monthly | 2.1/mo | Manage ▾ → Group (/group) |  |  | [dso](../../e2e/workflows/dso.test.mjs) | 94 A |
+| A145 | Switch to another office | everyone | monthly | 2.1/mo | Your name (bottom of the menu) → Office |  |  |  | 100 A |
 | A146 | Close the month | office manager | monthly | 1.1/mo | Command bar "month-end close" → packet → C | 54 | [54-month-end-close](../../docs/workflows/specs/54-month-end-close.md) | [45-54-monthly](../../e2e/workflows/45-54-monthly.test.mjs) | 100 A |
 | A147 | Send an account to collections | billing | monthly | 1.1/mo | Billing → Collections (/claims?tab=collections) |  | [BL-billing](../../docs/workflows/specs/BL-billing.md) |  | 100 A |
 | A148 | Reconcile the bank and books (Finance) | office manager | monthly | 1.1/mo | Finance (/finance) |  |  |  | 100 A |
-| A149 | Look at marketing results | office manager | monthly | 1.1/mo | Marketing results (/marketing) |  | [MK-marketing](../../docs/workflows/specs/MK-marketing.md) |  | 88 B |
+| A149 | Look at marketing results | office manager | monthly | 1.1/mo | Manage ▾ → Marketing results (/marketing) |  | [MK-marketing](../../docs/workflows/specs/MK-marketing.md) |  | 94 A |
 | A150 | Check the hygiene report | office manager | monthly | 1.1/mo | Command bar "hygiene report" (Reports → Hygiene) |  |  |  | 94 A |
 | A151 | Check treatment plan acceptance | office manager | monthly | 1.1/mo | Command bar "treatment plan acceptance" (Reports → Treatment plans) |  |  |  | 94 A |
 | A152 | Check where new patients come from (referrals report) | office manager | monthly | 1.1/mo | Command bar "referrals report" (Reports → Referrals) |  | [RT-referrals](../../docs/workflows/specs/RT-referrals.md) |  | 94 A |
@@ -183,7 +183,7 @@ more than one action). “Robot” is the latest score from the measuring robot 
 | A167 | Change reminder and message settings | office manager | rare | 5/yr | Settings → Messages & reviews |  |  |  | 97 A |
 | A168 | Record a patient complaint or incident | office manager | rare | 5/yr | Manage → Compliance log (/compliance) — N; command bar “Record a complaint or incident” |  |  | [B2B-new-actions](../../e2e/workflows/B2B-new-actions.test.mjs) | 100 A |
 | A169 | Log an exposure or sharps injury | office manager | rare | 5/yr | Manage → Compliance log → Exposure log (/compliance?tab=exposures) — N |  |  | [B2B-new-actions](../../e2e/workflows/B2B-new-actions.test.mjs) | 94 A |
-| A170 | Track staff licenses, CPR and CE due dates | office manager | rare | 5/yr | Office documents (/documents) — file the licence or certificate with an expiry date; the list filters “Expiring in 90 days” (no per-person tracker or reminders) |  |  |  | 94 A |
+| A170 | Track staff licenses, CPR and CE due dates | office manager | rare | 5/yr | Documents → Staff licences & CPR (/documents?tab=staff): "maria cpr 10/30/2027", Enter — a to-do goes to the person 60 days before |  |  |  | 100 A |
 | A171 | Write a letter to a patient from a template | front desk | rare | 5/yr | Family → Letters (/letters) — 1–9 picks the letter, Enter prints (filed on the chart), M emails; command bar “Write a letter” |  |  | [B2B-new-actions](../../e2e/workflows/B2B-new-actions.test.mjs) | 100 A |
 | A172 | Add a provider | office manager | rare | 2.5/yr | Settings → Providers |  |  |  | 97 A |
 | A173 | Add an operatory (chair) | office manager | rare | 2.5/yr | Settings → Operatories |  |  |  | 97 A |
@@ -192,9 +192,9 @@ more than one action). “Robot” is the latest score from the measuring robot 
 | A176 | Sell a product (toothbrush, whitening kit) | front desk | rare | 2.5/yr | Account (ledger) → Sell a product — 1–9, Enter; command bar “Sell a product” |  |  | [B2B-new-actions](../../e2e/workflows/B2B-new-actions.test.mjs) | 100 A |
 | A177 | Print mailing labels | front desk | rare | 2.5/yr | “Mailing labels” on Follow-up → Recall, on report results and on a campaign's audience |  |  | [B2B-new-actions](../../e2e/workflows/B2B-new-actions.test.mjs) | 100 A |
 | A178 | Check the prescription monitoring program (PDMP) before an opioid | dentist | rare | 2.5/yr | Chart → Rx: a controlled drug → Check the PDMP (Enter) → Save & print |  |  | [B2B-new-actions](../../e2e/workflows/B2B-new-actions.test.mjs) | 100 A |
-| A179 | Mark a patient deceased | front desk | rare | 1.3/yr | Recall → Deceased / Edit patient |  |  |  | 100 A |
+| A179 | Mark a patient deceased | front desk | rare | 1.3/yr | Chart ⋯ → Mark deceased, or Recall → Don’t recall… → Deceased: chart inactive, recall/statements/messages stopped, future visits cancelled (Undo) |  |  |  | 100 A |
 | A180 | Set up an online booking link | office manager | rare | 1.3/yr | Settings → Online booking links |  | [OS-online-scheduling](../../docs/workflows/specs/OS-online-scheduling.md) |  | 97 A |
 | A181 | Turn on two-step sign-in | everyone | rare | 1.3/yr | Settings → My account |  |  |  | 95 A |
-| A182 | Connect an imaging bridge or integration | office manager | rare | 1.3/yr | Settings → Imaging bridges / Integrations |  |  |  | not measurable |
+| A182 | Connect an imaging bridge or integration | office manager | rare | 1.3/yr | Settings → Imaging bridges / Integrations |  |  |  | 97 A |
 | A183 | Import data from another system | office manager | rare | 0.8/yr | Settings → Import from another system |  |  | [conversion](../../e2e/workflows/conversion.test.mjs) | 97 A |
 | A184 | Sell or redeem a gift certificate | front desk | rare | 0.5/yr | Account → Gift certificates (/gift-certificates) — N sells; ledger → “Gift certificate” uses one |  |  | [B2B-new-actions](../../e2e/workflows/B2B-new-actions.test.mjs) | 100 A |

@@ -1,6 +1,6 @@
 // Patient records outside the chart's contact card (phase 2, batch 2A): a health history sent in online, and a
 // patient who has died.
-import { newPatient } from '../lib/fixtures.mjs';
+import { newPatient, book, quietDay } from '../lib/fixtures.mjs';
 
 // A patient fills in their health history from the link the office texted: the office sends the forms (API) and
 // the patient submits them on the public form (their birth date first), as the phone would.
@@ -44,16 +44,21 @@ export default {
 
   A179: { // mark a patient deceased
     role: 'frontdesk',
-    setup: async (t) => ({ p: await newPatient(t, 'Walter') }),
+    async setup(t) {
+      const p = await newPatient(t, 'Walter');
+      await book(t, p, quietDay(t.today, 6), 9 * 60); // a visit still on the books
+      return { p };
+    },
     async run(t, { p }) {
       await t.open(`/patients/${p.id}`, '#medical-history');
-      await t.step('Chart overview → Recall autopilot: "Don’t recall…" → Deceased: no more recall reminders', async () => {
+      await t.step('Chart overview → Recall: "Don’t recall…" → Deceased: chart inactive, recall, statements and messages stopped, the future visit cancelled — with Undo', async () => {
         const sel = t.page.locator('select[aria-label="Don’t recall this patient"]');
         await t.click(sel);
         await sel.selectOption('deceased');
-        await t.see('.toast:has-text("Recall stopped")');
+        await t.see('.toast:has-text("marked deceased")');
+        await t.see('h1 .badge.deceased');
       });
-      t.note('Stops recall reminders only; making the chart inactive is Edit patient → Status (not measured here).');
+      t.note('Batch 3: one step does it all (it was recall only). Also in the chart’s ⋯ menu as "Mark deceased".');
     },
   },
 };

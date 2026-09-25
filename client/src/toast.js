@@ -4,7 +4,7 @@
 const listeners = new Set();
 let seq = 0;
 export function toast(message, { undo = null, tone = 'ok', ms = undo ? 8000 : 4000 } = {}) {
-  const t = { id: ++seq, message, undo, tone, ms };
+  const t = { id: ++seq, message, undo, tone, ms, at: Date.now() };
   listeners.forEach((f) => f(t));
   return t.id;
 }

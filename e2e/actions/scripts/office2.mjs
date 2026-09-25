@@ -127,9 +127,33 @@ export default {
 
   A116: { // reply to an online review
     role: 'admin',
+    async setup(t) {
+      // The owner connected the office's Google listing once (the sandbox listing: GOOGLE_BUSINESS=sandbox), and the
+      // reviews came in. Done through the API as the owner's browser would (the sign-in round trip and its cookie).
+      const auth = { Authorization: `Bearer ${t.tokens.admin}` };
+      const start = await fetch(`${t.base}/api/reputation/google/connect`, { headers: auth });
+      if (start.status === 501) t.blocked('Reviews: no Google Business Profile, not even the sandbox (GOOGLE_BUSINESS=sandbox)');
+      const { url } = await start.json();
+      const cookie = (start.headers.get('set-cookie') || '').split(';')[0];
+      const back = await fetch(url, { headers: { Cookie: cookie }, redirect: 'manual' });
+      if (/google=error/.test(back.headers.get('location') || '') || back.status >= 400) throw new Error(`connecting the sandbox listing failed: ${back.status} ${back.headers.get('location')}`);
+      await t.as('admin').post('/reputation/sync', {});
+      return {};
+    },
     async run(t) {
       await t.open('/reputation', 'main h1');
-      if (await t.page.locator('h2:has-text("Connect your Google Business Profile")').count()) t.blocked('Reviews: Google Business Profile isn’t connected in the demo office');
+      const card = t.page.locator('main .card, main li, main article').filter({ hasText: 'Waited 40 minutes' }).last();
+      await card.waitFor();
+      await t.step('Reviews: the 2-star review waits at the top. Click its reply box and write the answer', async () => {
+        await t.click(card.locator('textarea[aria-label="Reply"]'));
+        await t.type('We’re sorry about the wait, Tom — that isn’t the visit we want for you. Please call Morgan at the front desk so we can make it right.');
+      });
+      await t.step('Click "Post reply": it’s on Google under the review', async () => {
+        await t.click(card.locator('button:has-text("Post reply")'));
+        await card.locator('textarea[aria-label="Reply"]').waitFor({ state: 'detached', timeout: 10_000 }).catch(() => {});
+        await t.see('main :text("We’re sorry about the wait")');
+      });
+      t.note('Batch 3: measured on the sandbox Google listing (GOOGLE_BUSINESS=sandbox). "Draft with AI" writes a first draft when the office has an AI key.');
     },
   },
 

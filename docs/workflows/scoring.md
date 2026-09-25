@@ -60,7 +60,9 @@ under the hood — a crash, a console error, a failed request or an error answer
 
 **Not scored:** *MISSING* (the app can’t do it), *BLOCKED* (the demo office isn’t set up for it — e.g. no card
 processor or Google connection), *NOT MEASURABLE* (needs an x-ray sensor, camera or microphone) and *NOT YET MEASURED*
-(no robot script yet).
+(no robot script yet). Since batch 3 devices and outside services are simulated for the robot (a sensor behind a
+simulated imaging bridge, Chromium's fake camera, a speech recogniser that hears the dentist, the sandbox card processor
+and Google listing — `e2e/actions/lib/devices.mjs`): what the device does is never counted, only what the person does.
 
 ### Example
 

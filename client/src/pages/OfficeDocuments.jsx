@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { FolderOpen, Inbox, Flag, Search, Upload, CalendarClock, StickyNote, Download, UserCheck } from 'lucide-react';
+import { FolderOpen, Inbox, Flag, Search, Upload, CalendarClock, StickyNote, Download, UserCheck, BadgeCheck } from 'lucide-react';
+import StaffCredentials from '../components/StaffCredentials.jsx';
 import { api, getToken } from '../api.js';
 import { useApi } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
@@ -15,7 +16,7 @@ import { downloadDoc } from '../components/docs/DocPreview.jsx';
 import { ACCEPT, OFFICE_CATEGORIES, PATIENT_CATEGORIES, catLabel, KindIcon, fmtSize } from '../components/docs/filekinds.jsx';
 import '../components/docs/docs.css';
 
-const TABS = [['office', 'Office documents', FolderOpen], ['inbox', 'Scan inbox', Inbox], ['review', 'To review', Flag], ['search', 'Search all documents', Search]];
+const TABS = [['office', 'Office documents', FolderOpen], ['inbox', 'Scan inbox', Inbox], ['review', 'To review', Flag], ['search', 'Search all documents', Search], ['staff', 'Staff licences & CPR', BadgeCheck]];
 const today = () => new Date().toISOString().slice(0, 10);
 const soon = (d) => d && d <= new Date(Date.now() + 60 * 86400_000).toISOString().slice(0, 10);
 const uploadKey = () => `up-${globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2, 12)}`}`;
@@ -46,13 +47,14 @@ export default function OfficeDocuments() {
     <div className="offdocs">
       <div className="page-header"><h1>Documents</h1></div>
       <div className="offdocs-tabs" role="tablist" aria-label="Documents">
-        {TABS.filter(([k]) => (k === 'office' ? officeOk : k === 'inbox' ? can('clinical:write') : true)).map(([k, l, Icon]) => (
+        {TABS.filter(([k]) => (k === 'office' || k === 'staff' ? officeOk : k === 'inbox' ? can('clinical:write') : true)).map(([k, l, Icon]) => (
           <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)}><Icon size={15} aria-hidden /> {l}</button>
         ))}
       </div>
       {tab === 'office' && (officeOk ? <OfficeList onOpen={(doc) => setViewing({ doc, office: true })} /> : <div className="card empty">Office documents are for managers — ask an administrator for access.</div>)}
       {tab === 'inbox' && <InboxList onOpen={(doc) => setViewing({ doc, inbox: true })} />}
       {tab === 'review' && <ReviewList onOpen={(doc) => setViewing({ doc, office: !doc.patient_id })} />}
+      {tab === 'staff' && (officeOk ? <StaffCredentials /> : <div className="card empty">Staff licences are for managers — ask an administrator for access.</div>)}
       {tab === 'search' && <SearchAll initial={params.get('q') || ''} onOpen={(doc) => setViewing({ doc, office: !doc.patient_id })} />}
       {viewing && <Viewer viewing={viewing} onClose={close} />}
     </div>

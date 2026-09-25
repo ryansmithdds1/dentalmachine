@@ -11,10 +11,21 @@
 /* Which menu module you're in (nav/navConfig.js): a small label over the name, and the tabs grouped under their
    modules — Family, Account, Treatment Plan, Chart, Images — in the menu's order. */
 .pt-module { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--primary-ink); margin-bottom: 2px; }
-.tabs.pt-tabs { gap: 0; align-items: flex-end; }
-.pt-tab-group { flex: none; display: flex; flex-direction: column; padding: 0 3px; border-left: 1px solid var(--border); }
-.pt-tabs .pt-tab-row button { padding: 10px 11px; }
+/* Batch 3 (scorecard UI review): header and tabs take ~170 px instead of ~310, so the whole tooth chart fits at 900 px —
+   the tab groups stay on one row at 1400 px (tighter tabs), and the patient card is shorter. */
+.tabs.pt-tabs { gap: 0; align-items: flex-end; margin: 8px 0 10px; }
+.pt-tab-group { flex: none; display: flex; flex-direction: column; padding: 0 1px; border-left: 1px solid var(--border); }
+.pt-tabs .pt-tab-row button { padding: 6px 6px 7px; font-size: 13px; }
+.card.pt-head { padding: 10px 18px; }
+.card.pt-head .patient-banner { gap: 14px; }
+.card.pt-head .patient-banner h1 { font-size: 21px; margin: 0; }
+.card.pt-head .inline { margin-top: 4px !important; }
 .pt-tab-group:first-child { border-left: none; padding-left: 0; }
-.pt-tab-mod { font-size: 10px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; color: var(--faint); padding: 4px 11px 0; white-space: nowrap; }
+.pt-tab-mod { font-size: 10px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; color: var(--faint); padding: 2px 6px 0; white-space: nowrap; }
 .pt-tab-group.in .pt-tab-mod { color: var(--primary-ink); }
 .pt-tab-row { display: flex; gap: 2px; }
+.card.pt-head .avatar { width: 48px; height: 48px; font-size: 17px; }
+/* The chart's own toolbar on one line (dentition, "as of", supernumerary, dictate, print). */
+.chart-toolbar .tabs button { padding: 6px 10px; }
+.chart-toolbar > label.inline { display: inline-flex; flex-direction: row; align-items: center; gap: 6px; flex-wrap: nowrap; white-space: nowrap; margin: 0; }
+.chart-toolbar > label.inline input[type='date'] { width: 140px !important; }

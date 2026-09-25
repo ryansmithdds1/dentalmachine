@@ -22,6 +22,9 @@ const OUT = process.env.ACTIONS_OUT || join(here, 'out');
 const TIMEOUT = Number(process.env.ACTIONS_TIMEOUT) || 60_000;
 // Calls and texts come in as signed Twilio webhooks (scripts/comms.mjs); the local server needs to know the test token.
 process.env.TWILIO_AUTH_TOKEN ||= 'robot-twilio-token';
+// The outside services the demo office would connect, in their sandbox modes (batch 3): a pretend Google Business
+// listing with sample reviews (A116). Card payments are already the sandbox (e2e/lib/server.mjs).
+process.env.GOOGLE_BUSINESS ||= 'sandbox';
 
 const actions = JSON.parse(readFileSync(join(here, 'actions.json'), 'utf8'));
 const byId = Object.fromEntries(actions.map((a) => [a.id, a]));
@@ -69,7 +72,8 @@ async function main() {
   }
   mkdirSync(OUT, { recursive: true });
   const app = await startApp();
-  const browser = await chromium.launch({ headless: !process.env.ACTIONS_HEADED, ...(process.env.PLAYWRIGHT_CHROMIUM ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM } : {}) });
+  // A simulated camera and microphone (the intraoral camera, A050), with the permission prompt answered.
+  const browser = await chromium.launch({ headless: !process.env.ACTIONS_HEADED, args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'], ...(process.env.PLAYWRIGHT_CHROMIUM ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM } : {}) });
   // One sign-in per role that's needed (sign-ins are rate limited per address). Against a server you started
   // (E2E_URL) the tokens are kept in the output folder and reused while they still work.
   const tokens = {};
@@ -115,10 +119,11 @@ async function main() {
         const setup = def.setup ? await withTimeout(def.setup(t), TIMEOUT, 'set-up') : undefined;
         await withTimeout(def.run(t, setup), TIMEOUT, 'the action');
         result = await t.finish();
-        for (const fn of t.afters) await fn().catch(() => {});
       } catch (error) {
         result = await t.finish({ error });
       }
+      // Clean-up runs whether or not the action finished (a simulated device left running would keep the run alive).
+      for (const fn of t.afters) await Promise.resolve().then(fn).catch(() => {});
       await ctx.close().catch(() => {});
       const s = scoreOf(result, action);
       Object.assign(result, s, { area: def.area, measuredAt: new Date().toISOString() });

@@ -144,6 +144,7 @@ export async function download(path, fallbackName = 'download') {
   }
   const name = (res.headers.get('Content-Disposition') || '').match(/filename="(.+)"/)?.[1] || fallbackName;
   saveBlob(await res.blob(), name);
+  return name;
 }
 
 // Opens a file from the API (a PDF to print) in a new tab. The tab opens first so popup blockers allow it.

@@ -5,17 +5,20 @@ import { useApi } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
 import { toast } from '../toast.js';
 import { fmtDate } from '../format.js';
+import { markDeceased, undoDeceased } from '../deceased.js';
 import '../pages/recall.css';
 
 export const CHANNEL_ICONS = { text: MessageSquare, email: Mail, ai_call: Bot, task_call: PhoneCall, letter: FileText, postcard: Mailbox };
 export const CHANNEL_NAMES = { text: 'Text', email: 'Email', ai_call: 'AI call', task_call: 'Team call', letter: 'Letter', postcard: 'Postcard' };
 const STATE = { sent: 'sent', done: 'done', failed: 'failed', skipped: 'skipped', task: 'call to make', claimed: 'sending', due: 'due now', planned: 'planned' };
 const HOLDS = [['deceased', 'Deceased'], ['moved', 'Moved away'], ['no_contact', 'Asked not to be contacted']];
+// "Deceased" is the whole step (deceased.js): chart inactive, recall, statements and messages stopped, visits cancelled.
+const OPTION = { deceased: 'Deceased (stops everything, cancels visits)' };
 
 // A patient's recall autopilot at a glance, for the patient page: where they are in the sequence (what went,
 // what's next), why it stopped, and a way to stop recall for someone who moved, died or asked not to be
 // contacted (and to lift that again). <RecallStatus patientId={id} />
-export default function RecallStatus({ patientId }) {
+export default function RecallStatus({ patientId, onPatientChange }) {
   const { can } = useAuth();
   const { data, error, reload } = useApi(patientId ? `/cadence/patients/${patientId}` : null);
   const [stopping, setStopping] = useState(null);
@@ -27,6 +30,7 @@ export default function RecallStatus({ patientId }) {
 
   const hold = async (reason) => {
     if (!reason) return;
+    if (reason === 'deceased') return markDeceased(patientId, () => { reload(); onPatientChange?.(); });
     try {
       await api.post(`/cadence/patients/${patientId}/holds`, { reason });
       toast(`Recall stopped: ${HOLDS.find(([k]) => k === reason)?.[1]}.`);
@@ -36,6 +40,7 @@ export default function RecallStatus({ patientId }) {
     }
   };
   const release = async (h) => {
+    if (h.reason === 'deceased') return undoDeceased(patientId, () => { reload(); onPatientChange?.(); });
     try {
       await api.post(`/cadence/holds/${h.id}/release`, {});
       toast('Recall reminders can go to them again.');
@@ -94,7 +99,7 @@ export default function RecallStatus({ patientId }) {
         {can('patients:write') && !holds.length && (
           <select value="" onChange={(e) => hold(e.target.value)} aria-label="Don’t recall this patient">
             <option value="">Don’t recall…</option>
-            {HOLDS.map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+            {HOLDS.map(([k, v]) => <option key={k} value={k}>{OPTION[k] || v}</option>)}
           </select>
         )}
       </div>

@@ -122,7 +122,7 @@ export default function LedgerTab({ patient, onChange }) {
             {(patient.guarantor || patient.family_size > 1) && <Link to={`/patients/${patient.id}/statement?family=1`}><button>Family statement</button></Link>}
             {can('billing:write') && (
               <>
-                {payConfig?.enabled && <button onClick={() => setModal('paylink')}>Send card payment link</button>}
+                {(payConfig?.enabled || payConfig?.links) && <button onClick={() => setModal('paylink')}>Send card payment link</button>}
                 {terminal.readers.length > 0 && <button onClick={() => setModal('reader')}>Card reader</button>}
                 <button onClick={() => setModal('adjustment')} title="A">Adjustment</button>
                 {hasProducts && <button onClick={() => setModal('sell')}>Sell a product</button>}

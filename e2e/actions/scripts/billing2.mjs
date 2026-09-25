@@ -155,16 +155,17 @@ export default {
       await t.open(`/patients/${p.id}?tab=ledger`, 'button:has-text("Take payment")');
       const btn = t.page.locator('button:has-text("Send card payment link")');
       if (!(await btn.count())) {
-        t.blocked('No "Send card payment link" on the ledger: card payments (Stripe) aren’t connected in the demo office');
+        t.blocked('No "Send card payment link" on the ledger: card payments aren’t connected (not even the sandbox)');
       }
       await t.step('Ledger: click "Send card payment link": the amount they owe is filled in', async () => {
         await t.click(btn);
         await t.see('.modal');
       });
-      await t.step('Click "Create secure payment link": texted to the patient', async () => {
+      await t.step('Click "Create secure payment link": texted to the patient (the demo office’s card payments are the sandbox: the link opens its Pay my bill page)', async () => {
         await t.click('.modal button:has-text("Create secure payment link")');
-        await t.wait(800);
+        await t.see('.modal :text("Link sent to")');
       });
+      t.note('Batch 3: measured on the sandbox card processor (PAYMENTS=sandbox): the text-to-pay link opens the practice’s Pay my bill page, which takes test cards only.');
     },
   },
 

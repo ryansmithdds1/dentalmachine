@@ -198,6 +198,10 @@ export function robot({ page, ctx, base, api, action, outDir, today }) {
     const t0 = Date.now();
     const file = join(dir, `${String(t.steps.length).padStart(2, '0')}-${slug(name)}.png`);
     await page.waitForTimeout(150); // let the screen paint what the step did
+    // The pictures are the user manual's screenshots (npm run manual): wait (up to 3 s, not counted in the
+    // action's time) for a screen that is still "Loading…" to show what it loaded.
+    await page.waitForFunction(() => ![...document.querySelectorAll('main *')]
+      .some((el) => el.childElementCount === 0 && /^Loading\b.{0,40}(…|\.\.\.)$/.test((el.textContent || '').trim()) && el.offsetParent !== null), null, { timeout: 3000, polling: 100 }).catch(() => {});
     await page.screenshot({ path: file }).catch(() => {});
     t.shotTime += Date.now() - t0;
     return { file, caption };

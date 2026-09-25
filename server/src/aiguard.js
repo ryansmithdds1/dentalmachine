@@ -63,6 +63,7 @@ export const HIGH_RISK = [
   ['POST', /^\/(retail-sales\/\d+\/void|gift-certificates(\/\d+\/void|\/redemptions\/\d+\/void)?)$/, 'selling or voiding gift certificates and product sales'],
   ['POST', /^\/retail\/products$/, 'product prices'],
   ['PUT', /^\/retail\/(settings|products\/\d+)$/, 'product prices, sales tax and gift certificate rules'],
+  ['POST', /^\/patients\/\d+\/deceased(\/undo)?$/, 'marking a patient deceased (patient identity; cancels their visits)'],
   ['DELETE', /./, 'removing records'],
 ];
 

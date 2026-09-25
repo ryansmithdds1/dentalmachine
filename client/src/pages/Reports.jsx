@@ -184,7 +184,7 @@ function Operational() {
             <thead><tr><th>Provider</th><th className="num">Net production</th><th className="num">Collections</th><th className="num">Rate</th></tr></thead>
             <tbody>
               {byProv?.rows.map((r) => (
-                <tr key={r.id ?? 'none'}>
+                <tr key={r.kind || r.id || 'none'}>
                   <td>{r.name}</td>
                   <td className="num">{money(r.net_production)}</td>
                   <td className="num" title={`Patients ${money(r.patient_collections)} · Insurance ${money(r.insurance_collections)}`}>{money(r.collections)}</td>

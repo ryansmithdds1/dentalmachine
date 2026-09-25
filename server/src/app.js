@@ -133,6 +133,8 @@ import complianceRoutes from './routes/compliance.js';
 import letterRoutes from './routes/letters.js';
 import retailRoutes from './routes/retail.js';
 import pdmpRoutes from './routes/pdmp.js';
+import deceasedRoutes from './routes/deceased.js';
+import credentialRoutes from './routes/credentials.js';
 import { createPdmp, pdmpConfig } from './pdmp.js';
 import assistantRoutes, { assistantConfig } from './routes/assistant.js';
 import { startWebhooks } from './webhooks.js';
@@ -375,6 +377,8 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(letterRoutes({ db, storage, messenger }));
   api.use(retailRoutes({ db }));
   api.use(pdmpRoutes({ db, pdmp }));
+  api.use(deceasedRoutes({ db }));
+  api.use(credentialRoutes({ db }));
   api.use(assistantRoutes({ db, config, secret, app: () => app }));
   api.use(financeRoutes({ db, config, secret, plaid, qbo }));
   api.use(scribeRoutes({ db, config }));

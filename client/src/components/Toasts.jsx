@@ -3,7 +3,14 @@ import { onToast } from '../toast.js';
 import { isMac, typingIn } from '../shortcuts.js';
 import OnlineBookingAlerts from './OnlineBookingAlerts.jsx';
 
-// Bottom-of-screen notices. The newest with an Undo also answers Ctrl/⌘+Z (when you're not typing in a box).
+// When something was last typed into a box (any box): Ctrl/⌘+Z in a box undoes the typing, unless nothing has
+// been typed since the newest undoable notice — then it undoes that (an add line clears itself and keeps the
+// cursor, so Ctrl/⌘+Z right after Enter means "take back what I just added", not "bring the words back").
+let lastTyped = 0;
+if (typeof document !== 'undefined') document.addEventListener('input', () => { lastTyped = Date.now(); }, true);
+
+// Bottom-of-screen notices. The newest with an Undo also answers Ctrl/⌘+Z (when you're not typing in a box, or
+// haven't typed anything since it appeared).
 export default function Toasts() {
   const [list, setList] = useState([]);
   const listRef = useRef(list);
@@ -18,9 +25,9 @@ export default function Toasts() {
   };
   useEffect(() => {
     const onKey = (e) => {
-      if (!(isMac ? e.metaKey : e.ctrlKey) || e.key.toLowerCase() !== 'z' || e.shiftKey || typingIn(e.target)) return;
+      if (!(isMac ? e.metaKey : e.ctrlKey) || e.key.toLowerCase() !== 'z' || e.shiftKey) return;
       const t = [...listRef.current].reverse().find((x) => x.undo);
-      if (!t) return;
+      if (!t || (typingIn(e.target) && lastTyped > t.at)) return;
       e.preventDefault();
       run(t);
     };

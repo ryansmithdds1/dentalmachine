@@ -7,3 +7,4 @@ dist/
 data/
 dump.rdb
 e2e/actions/out/
+docs/manual/out/

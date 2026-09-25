@@ -11,9 +11,11 @@ import { ActivePatientProvider } from './activePatient.jsx';
 import CommandPalette from './components/CommandPalette.jsx';
 import IntranetCommands from './components/intranet/IntranetCommands.jsx';
 import DocumentCommands from './components/docs/DocumentCommands.jsx';
+import ManualCommands from './components/manual/ManualCommands.jsx';
 import ChecklistCommands from './components/checklists/ChecklistCommands.jsx';
 import PaperworkCommands from './components/consents/PaperworkCommands.jsx';
 import QuickCommands from './components/QuickCommands.jsx';
+import ExportCommands from './components/ExportCommands.jsx';
 import ChatPanel from './components/chat/ChatPanel.jsx';
 import ChatBadge from './components/chat/ChatBadge.jsx';
 import UrgentBanner from './components/chat/UrgentBanner.jsx';
@@ -380,8 +382,10 @@ function Shell() {
       <CommandPalette />
       <IntranetCommands />
       <DocumentCommands />
+      <ManualCommands />
       <ChecklistCommands />
       <QuickCommands />
+      <ExportCommands />
       <PaperworkCommands />
       <KeyboardHelp />
       <Toasts />

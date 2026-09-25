@@ -551,7 +551,7 @@
   "spec": "docs/workflows/specs/14-xrays-photos.md",
   "e2e": null,
   "target": 3,
-  "needs": "hardware (sensor, camera or microphone): the robot cannot drive it"
+  "simulated": "measured with a simulated sensor on a simulated imaging bridge (e2e/actions/lib/devices.mjs)"
  },
  {
   "id": "A031",
@@ -891,7 +891,7 @@
   "spec": "docs/workflows/specs/14-xrays-photos.md",
   "e2e": null,
   "target": 3,
-  "needs": "hardware (sensor, camera or microphone): the robot cannot drive it"
+  "simulated": "measured with Chromium’s simulated camera"
  },
  {
   "id": "A051",
@@ -927,7 +927,7 @@
   "spec": "docs/workflows/specs/07-clinical-notes.md",
   "e2e": null,
   "target": 3,
-  "needs": "hardware (sensor, camera or microphone): the robot cannot drive it"
+  "simulated": "measured with a simulated speech recogniser"
  },
  {
   "id": "A053",
@@ -1343,11 +1343,12 @@
   "area": "payments",
   "band": "daily",
   "perDay": 2,
-  "route": "Ledger tab — text a payment link",
+  "route": "Ledger tab — Send card payment link (text-to-pay; in sandbox it opens the practice’s Pay my bill page)",
   "workflow": null,
   "spec": "docs/workflows/specs/BL-billing.md",
   "e2e": null,
-  "target": 2
+  "target": 2,
+  "simulated": "measured on the sandbox card processor (PAYMENTS=sandbox)"
  },
  {
   "id": "A078",
@@ -1986,7 +1987,8 @@
   "workflow": null,
   "spec": "docs/workflows/specs/RV-reviews.md",
   "e2e": null,
-  "target": 3
+  "target": 3,
+  "simulated": "measured on the sandbox Google listing (GOOGLE_BUSINESS=sandbox)"
  },
  {
   "id": "A117",
@@ -2128,7 +2130,7 @@
   "area": "recall",
   "band": "weekly",
   "perDay": 0.2,
-  "route": "Recall autopilot (/recall)",
+  "route": "Family ▾ → Recall autopilot (/recall)",
   "workflow": [
    37
   ],
@@ -2145,7 +2147,7 @@
   "area": "recall",
   "band": "weekly",
   "perDay": 0.2,
-  "route": "Treatment follow-up (/recall?type=treatment)",
+  "route": "Treatment Plan ▾ → Treatment follow-up (/recall?type=treatment)",
   "workflow": [
    37
   ],
@@ -2194,7 +2196,7 @@
   "area": "reports",
   "band": "weekly",
   "perDay": 0.2,
-  "route": "Capacity (/capacity)",
+  "route": "Schedule ▾ → Capacity (/capacity)",
   "workflow": null,
   "spec": "docs/workflows/specs/CAP-capacity.md",
   "e2e": "e2e/workflows/CAP-capacity.test.mjs",
@@ -2209,7 +2211,7 @@
   "area": "communication",
   "band": "weekly",
   "perDay": 0.2,
-  "route": "Reviews & feedback (/reviews)",
+  "route": "Manage ▾ → Patient feedback (/reviews)",
   "workflow": null,
   "spec": "docs/workflows/specs/RV-reviews.md",
   "e2e": null,
@@ -2224,7 +2226,7 @@
   "area": "HR & time clock",
   "band": "weekly",
   "perDay": 0.2,
-  "route": "My bonus (/bonus)",
+  "route": "Manage ▾ → My bonus (/bonus)",
   "workflow": null,
   "spec": "docs/workflows/specs/BN-bonus.md",
   "e2e": null,
@@ -2315,7 +2317,7 @@
   "area": "reports",
   "band": "monthly",
   "perDay": 0.1,
-  "route": "Business (/business)",
+  "route": "Manage ▾ → Business (/business)",
   "workflow": null,
   "spec": "docs/workflows/specs/BV-business-view.md",
   "e2e": "e2e/workflows/BV-business.test.mjs",
@@ -2330,7 +2332,7 @@
   "area": "HR & time clock",
   "band": "monthly",
   "perDay": 0.1,
-  "route": "Time clock → Export",
+  "route": "Command bar \"export payroll\" (downloads the pay period that just ended), or Time clock → Export",
   "workflow": null,
   "spec": "docs/workflows/specs/TC-timeclock.md",
   "e2e": null,
@@ -2391,7 +2393,7 @@
   "area": "reports",
   "band": "monthly",
   "perDay": 0.1,
-  "route": "Reports → any table → CSV",
+  "route": "Command bar \"export <report>\" (downloads it at once), or Reports → any table → CSV",
   "workflow": [
    49
   ],
@@ -2423,7 +2425,7 @@
   "area": "multi-office",
   "band": "monthly",
   "perDay": 0.1,
-  "route": "Group (/group)",
+  "route": "Manage ▾ → Group (/group)",
   "workflow": null,
   "spec": null,
   "e2e": "e2e/workflows/dso.test.mjs",
@@ -2438,11 +2440,12 @@
   "area": "multi-office",
   "band": "monthly",
   "perDay": 0.1,
-  "route": "Office picker (header)",
+  "route": "Your name (bottom of the menu) → Office",
   "workflow": null,
   "spec": null,
   "e2e": null,
-  "target": 2
+  "target": 2,
+  "simulated": "measured with a second office added to the demo practice for the action"
  },
  {
   "id": "A146",
@@ -2500,7 +2503,7 @@
   "area": "reports",
   "band": "monthly",
   "perDay": 0.05,
-  "route": "Marketing results (/marketing)",
+  "route": "Manage ▾ → Marketing results (/marketing)",
   "workflow": null,
   "spec": "docs/workflows/specs/MK-marketing.md",
   "e2e": null,
@@ -2823,7 +2826,7 @@
   "area": "HR & time clock",
   "band": "rare",
   "perDay": 0.02,
-  "route": "Office documents (/documents) — file the licence or certificate with an expiry date; the list filters “Expiring in 90 days” (no per-person tracker or reminders)",
+  "route": "Documents → Staff licences & CPR (/documents?tab=staff): \"maria cpr 10/30/2027\", Enter — a to-do goes to the person 60 days before",
   "workflow": null,
   "spec": null,
   "e2e": null,
@@ -2958,7 +2961,7 @@
   "area": "front desk",
   "band": "rare",
   "perDay": 0.005,
-  "route": "Recall → Deceased / Edit patient",
+  "route": "Chart ⋯ → Mark deceased, or Recall → Don’t recall… → Deceased: chart inactive, recall/statements/messages stopped, future visits cancelled (Undo)",
   "workflow": null,
   "spec": null,
   "e2e": null,
@@ -3008,7 +3011,7 @@
   "spec": null,
   "e2e": null,
   "target": 6,
-  "needs": "hardware (sensor, camera or microphone): the robot cannot drive it"
+  "simulated": "the operatory PC is simulated: a robot bridge starts with the key from the downloaded package"
  },
  {
   "id": "A183",

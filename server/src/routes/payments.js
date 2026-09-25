@@ -8,7 +8,7 @@ import { runAutopay } from '../payments.js';
 import { autoReceipt } from '../receipts.js';
 import { refreshTerminalPayment } from './terminal.js';
 import { finishBooking } from '../onlinebooking.js';
-import { postOnlinePayment, afterOnlinePayment, paymentFailed } from '../billpay.js';
+import { postOnlinePayment, afterOnlinePayment, paymentFailed, payCodeFor } from '../billpay.js';
 import { sendMessage, preferredChannel, sendAppointmentReminder } from '../messaging.js';
 import { handleBillingEvent, cardFromLink, returnedPaymentFee, TEST_CARDS } from '../billingauto.js';
 
@@ -18,7 +18,9 @@ export default function paymentRoutes({ db, config, messenger, payments, mailer 
   const enabled = () => payments.mode === 'stripe';
   const stripe = (path, params) => payments.stripe('POST', path, params);
 
-  r.get('/payments/config', (_req, res) => res.json({ enabled: enabled(), mode: payments.mode, cards_on_file: payments.enabled, mail: { enabled: !!mailer?.enabled, name: mailer?.name } }));
+  // links: text-to-pay links can be sent — through Stripe Checkout, or in sandbox through the practice's own "Pay my
+  // bill" page, which takes the published test cards only (so the whole flow can be tried without a processor).
+  r.get('/payments/config', (_req, res) => res.json({ enabled: enabled(), links: enabled() || payments.mode === 'sandbox', mode: payments.mode, cards_on_file: payments.enabled, mail: { enabled: !!mailer?.enabled, name: mailer?.name } }));
 
   // ---- Cards on file (belong to the guarantor) ----
   const guarantorOf = async (patient) => (patient.guarantor_id ? db.get('SELECT * FROM patients WHERE id = ?', patient.guarantor_id) : patient);
@@ -89,15 +91,22 @@ export default function paymentRoutes({ db, config, messenger, payments, mailer 
 
   // Creates a hosted card-payment page for the patient and optionally texts/emails the link ("text-to-pay").
   r.post('/patients/:id/payment-requests', requirePermission('billing:write'), async (req, res) => {
-    if (!enabled()) throw new HttpError(501, 'Card payments are not configured. Set STRIPE_SECRET_KEY on the server.');
+    const sandbox = !enabled() && payments.mode === 'sandbox';
+    if (!enabled() && !sandbox) throw new HttpError(501, 'Card payments are not configured. Set STRIPE_SECRET_KEY on the server.');
     const patient = await findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient');
-    const practice = await db.get('SELECT name FROM practices WHERE id = ?', req.user.practice_id);
+    const practice = await db.get('SELECT name, slug, portal_enabled FROM practices WHERE id = ?', req.user.practice_id);
+    if (sandbox && (!practice.slug || practice.portal_enabled === 0)) throw new HttpError(409, 'Sandbox payment links open the practice’s “Pay my bill” page: set the practice’s web address name and turn on the patient portal in Settings');
     // No amount given: ask for what the patient owes, not what insurance is still expected to pay.
     const portion = async () => (await patientBalance(db, req.user.practice_id, patient.id)) - (await pendingInsurance(db, req.user.practice_id, patient.id)).total;
     const amount = toCents(req.body?.amount ?? (await portion()));
     if (amount < 50) throw new HttpError(400, 'Amount must be at least $0.50');
     const id = await insert(db, 'payment_requests', { practice_id: req.user.practice_id, patient_id: patient.id, amount, created_by: req.user.id });
-    const session = await stripe('checkout/sessions', {
+    // Sandbox: this account's "Pay my bill" page (its statement code filled in), which posts a test-card payment to
+    // the ledger like a real one; the request is marked with a sandbox session id so it's never mistaken for Stripe's.
+    const session = sandbox ? {
+      id: `sbx_cs_${id}`,
+      url: `${config.appUrl}/billpay/${encodeURIComponent(practice.slug)}?code=${await payCodeFor(db, req.user.practice_id, patient.guarantor_id || patient.id)}`,
+    } : await stripe('checkout/sessions', {
       mode: 'payment',
       'line_items[0][quantity]': '1',
       'line_items[0][price_data][currency]': 'usd',

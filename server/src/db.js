@@ -5660,6 +5660,51 @@ CREATE TABLE IF NOT EXISTS pdmp_checks (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_pdmp_checks_patient ON pdmp_checks(practice_id, patient_id, created_at);
+-- A patient marked deceased in one step (routes/deceased.js): what that step changed — the chart's status before,
+-- the recall hold, the future visits it cancelled (and the planned work they held), the balance texts it ended —
+-- so it can be explained, and put back if it was a mistake. One open record per patient (a second click is the
+-- same step); an undo closes it (undone_at) and the row stays.
+CREATE TABLE IF NOT EXISTS patient_deaths (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  date_of_death TEXT,
+  prior_status TEXT NOT NULL,
+  hold_id INTEGER REFERENCES cadence_holds(id),
+  cancelled TEXT NOT NULL DEFAULT '[]',
+  ended_bill_ids TEXT NOT NULL DEFAULT '[]',
+  stopped_enrollments INTEGER NOT NULL DEFAULT 0,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  undone_at TEXT,
+  undone_by INTEGER REFERENCES users(id),
+  undo_note TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_patient_deaths_open ON patient_deaths(patient_id) WHERE undone_at IS NULL;
+-- Staff licences, CPR cards, DEA registrations and CE deadlines, per person (routes/credentials.js). Each has an
+-- expiry date; a to-do for the office manager is made remind_days before it (reminder_task_id: once), and a
+-- renewal replaces the old row (status 'replaced', kept) rather than editing its date.
+CREATE TABLE IF NOT EXISTS staff_credentials (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  kind TEXT NOT NULL CHECK (kind IN ('license','cpr','dea','radiology','ce','other')),
+  label TEXT,
+  number TEXT,
+  expires_on TEXT NOT NULL,
+  remind_days INTEGER NOT NULL DEFAULT 60,
+  document_id INTEGER REFERENCES documents(id),
+  reminder_task_id INTEGER REFERENCES tasks(id),
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','replaced','archived')),
+  replaced_by_id INTEGER REFERENCES staff_credentials(id),
+  client_key TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  archived_at TEXT,
+  archived_by INTEGER REFERENCES users(id)
+);
+CREATE INDEX IF NOT EXISTS idx_staff_credentials_due ON staff_credentials(practice_id, status, expires_on);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_staff_credentials_key ON staff_credentials(practice_id, client_key);
 `;
 
 // Columns added after the first release. SQLite has no ADD COLUMN IF NOT EXISTS, so check first.
@@ -6150,6 +6195,9 @@ const COLUMNS = [
   ['patients', 'marketing_first_touch_id', 'INTEGER'],
   ['patients', 'marketing_last_touch_id', 'INTEGER'],
   ['patients', 'marketing_pinned', 'INTEGER NOT NULL DEFAULT 0'],
+  // Marked deceased (routes/deceased.js): when, and the date of death when it's known. Nothing is sent to them.
+  ['patients', 'deceased_at', 'TEXT'],
+  ['patients', 'deceased_on', 'TEXT'],
   ['appointments', 'online_booking_id', 'INTEGER REFERENCES online_bookings(id)'],
   // Visit readiness and the schedule optimizer.
   ['lab_cases', 'check_status', 'TEXT'],

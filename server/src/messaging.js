@@ -127,7 +127,9 @@ const OPT_OUT_EXEMPT = new Set(['portal_code']);
 async function blockedReason(db, { practiceId, patientId, channel, to, kind }) {
   if (channel === 'portal' || OPT_OUT_EXEMPT.has(kind)) return null;
   if (patientId) {
-    const p = await db.get('SELECT sms_opt_in, email_opt_in FROM patients WHERE id = ?', patientId);
+    const p = await db.get('SELECT sms_opt_in, email_opt_in, deceased_at FROM patients WHERE id = ?', patientId);
+    // Marked deceased (routes/deceased.js): nothing more goes to them, whatever sent it.
+    if (p?.deceased_at) return 'Patient is deceased — nothing is sent to them';
     if (p && channel === 'sms' && !p.sms_opt_in) return 'Patient has opted out of text messages';
     if (p && channel === 'email' && !p.email_opt_in) return 'Patient has opted out of email';
   }

@@ -19,20 +19,23 @@ export default {
   A037: {
     role: 'frontdesk',
     setup: async (t) => ({ p: await overdue(t, 'Rena') }),
-    async run(t, { p }) {
-      await t.open('/followups?tab=recall', 'main table');
-      const row = rowOf(t, p);
-      if (!(await row.count())) throw new Error('the overdue patient is not on the recall list');
-      await t.step('Follow-up → Recall: overdue patients with their phone number. Call them; they want to book. Click "Book" on their row', async () => {
-        await t.click(row.locator('button:has-text("Book")'));
+    async run(t) {
+      await t.open('/followups?tab=recall', 'main table tr.kb-row');
+      // The person calls down the list from the top (the most overdue first): the robot books whoever is first.
+      const top = Number(await t.page.locator('main tr.kb-row').getAttribute('data-patient-id'));
+      await t.step('Follow-up → Recall: the most overdue patient is highlighted. Call them; they want to book. Press B: the booking panel opens on the first free time', async () => {
+        await t.key('b');
         await t.see('.book-panel');
       });
-      await t.step('The booking form opens; press Enter / click Book appointment on the suggested time', async () => {
+      await t.step('Press Enter: booked (J / K move between patients, L logs a call instead)', async () => {
         await t.page.waitForTimeout(400);
-        const focused = await t.page.evaluate(() => document.activeElement?.textContent || ''); // eslint-disable-line no-undef
-        if (/Book appointment/.test(focused)) await t.key('Enter');
-        else await t.click('.book-panel button.primary:has-text("Book")');
+        await t.key('Enter');
         await t.see('.book-panel', { state: 'detached' });
+      });
+      // Leave the demo schedule as it was for the other actions.
+      t.after(async () => {
+        const list = await t.as('admin').get(`/appointments?from=${t.today}&to=2099-12-31&patient_id=${top}`).catch(() => []);
+        for (const a of (list.rows || list).filter((x) => x.patient_id === top && x.status === 'scheduled')) await t.as('admin').raw('PATCH', `/appointments/${a.id}/status`, { status: 'cancelled' }).catch(() => {});
       });
     },
   },
