@@ -6413,6 +6413,34 @@ function pgSchema(sql) {
     .replace(/ COLLATE NOCASE/g, '');
 }
 
+// Postgres connection pool sizing. On serverless (Vercel) every warm copy of the server holds its own pool, so
+// ten connections each ran the database's pooler out of its 200 client slots under load (EMAXCONN, 25 Sep 2026):
+// there, keep a few per copy and let idle ones go quickly. PG_POOL_SIZE still overrides.
+export function poolOptions(env = process.env) {
+  const serverless = !!(env.VERCEL || env.SERVERLESS === '1');
+  return {
+    max: Number(env.PG_POOL_SIZE) || (serverless ? 3 : 10),
+    idleTimeoutMillis: serverless ? 5000 : 10000,
+  };
+}
+
+// "The database is full right now" — refused while connecting, before any statement ran, so trying again is
+// safe (nothing can be written twice). 53300 is Postgres's too_many_connections; EMAXCONN is Supabase's pooler.
+export const isConnectionLimit = (err) => err?.code === '53300' || /EMAXCONN|max client connections|too many (clients|connections)/i.test(String(err?.message || ''));
+
+// Retries fn while the database refuses new connections, waiting a little longer each time; any other error
+// (and the last refusal) is thrown as is.
+export async function retryOnConnectionLimit(fn, delays = [150, 400, 1000]) {
+  for (let i = 0; ; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (i >= delays.length || !isConnectionLimit(err)) throw err;
+      await new Promise((r) => setTimeout(r, delays[i]));
+    }
+  }
+}
+
 async function openPostgres(url, { freshSchema = false } = {}) {
   const { default: pg } = await import('pg');
   pg.types.setTypeParser(20, (v) => Number(v)); // int8 (COUNT, SUM) -> number
@@ -6428,10 +6456,10 @@ async function openPostgres(url, { freshSchema = false } = {}) {
   }
   const pool = new pg.Pool({
     connectionString: url,
-    max: Number(process.env.PG_POOL_SIZE) || 10,
+    ...poolOptions(),
     ...(schema ? { options: `-c search_path=${schema}` } : {}),
   });
-  const setup = await pool.connect();
+  const setup = await retryOnConnectionLimit(() => pool.connect());
   // Skip the migration when this exact schema is already in place (serverless cold starts would
   // otherwise re-run hundreds of statements each time).
   const version = createHash('sha256').update(JSON.stringify([SCHEMA, COLUMNS, INDEXES, RELAXED, NULLABLE, GUARDS_PG])).digest('hex').slice(0, 16);
@@ -6466,8 +6494,11 @@ async function openPostgres(url, { freshSchema = false } = {}) {
   const query = (sql, params) => {
     let text = translated.get(sql);
     if (!text) translated.set(sql, (text = toPostgres(sql)));
-    const client = inTx.getStore() || pool;
-    return client.query(text, params.map((v) => (typeof v === 'boolean' ? Number(v) : v === undefined ? null : v)));
+    const values = params.map((v) => (typeof v === 'boolean' ? Number(v) : v === undefined ? null : v));
+    const client = inTx.getStore();
+    if (client) return client.query(text, values);
+    // Outside a transaction the pool connects first; a refusal there means the statement never ran.
+    return retryOnConnectionLimit(() => pool.query(text, values));
   };
   return {
     dialect: 'postgres',
@@ -6488,7 +6519,7 @@ async function openPostgres(url, { freshSchema = false } = {}) {
     },
     async tx(fn) {
       if (inTx.getStore()) return fn();
-      const client = await pool.connect();
+      const client = await retryOnConnectionLimit(() => pool.connect());
       try {
         await client.query('BEGIN');
         const out = await inTx.run(client, fn);
