@@ -98,20 +98,16 @@ export default {
     setup: async (t) => ({ p: await newPatient(t, 'Allie') }),
     async run(t, { p }) {
       await t.open(`/patients/${p.id}`, '#medical-history');
-      await t.step('Press M: the medical history editor opens on the alerts line', async () => {
-        await t.key('m');
-        await t.page.waitForFunction(() => document.activeElement?.name === 'medical_alerts');
-      });
-      await t.step('Press Tab to Allergies', async () => {
-        await t.key('Tab');
+      await t.step('Press A: the medical history editor opens on the Allergies line', async () => {
+        await t.key('a');
         await t.page.waitForFunction(() => document.activeElement?.name === 'allergies');
       });
-      await t.step('Type the allergy and press Ctrl/⌘+Enter: saved', async () => {
+      await t.step('Type the allergy and press Ctrl/⌘+Enter: saved (and counted as today’s review)', async () => {
         await t.type('Latex');
         await t.key(`${MOD}+Enter`);
         await t.see('.med-kv .med-value:has-text("Latex")');
       });
-      t.note('By mouse it is 3 actions (click the line, type, Ctrl/⌘+Enter).');
+      t.note('Shift+M opens it on Medications; M on the alerts; by mouse it is 3 actions (click the line, type, Ctrl/⌘+Enter).');
     },
   },
 
@@ -197,16 +193,18 @@ export default {
         await t.page.waitForURL(/\/tp\//);
         await t.see(`h1:has-text("Your treatment plan, ${p.first_name}")`);
       });
-      await t.step('Patient: types their name', async () => {
-        await t.page.waitForFunction(() => document.activeElement?.getAttribute('autocomplete') === 'name');
-        await t.type(`${p.first_name} ${p.last_name}`);
-      });
-      await t.step('Patient: ticks "I agree" and taps Accept & sign', async () => {
+      await t.page.waitForFunction(() => document.activeElement?.getAttribute('autocomplete') === 'name');
+      const prefilled = await t.page.inputValue('input[autocomplete=name]');
+      if (!prefilled) {
+        t.flag('asks-known', 'The patient in the chair types their own name although the office opened the plan for them');
+        await t.step('Patient: types their name', async () => { await t.type(`${p.first_name} ${p.last_name}`); });
+      }
+      await t.step(`Patient: their name is on the signing line ("${prefilled || '…'}"); they tick "I agree" and tap Accept & sign`, async () => {
         await t.click('label.checkbox input[type=checkbox]');
         await t.click('button:has-text("Accept & sign")');
         await t.see('h1:has-text("Thank you")');
       });
-      t.note('2 staff actions + 3 patient actions.');
+      t.note(`2 staff actions + ${prefilled ? 2 : 3} patient actions.`);
     },
   },
 

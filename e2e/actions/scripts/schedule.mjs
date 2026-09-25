@@ -126,18 +126,17 @@ export default {
       for (const [i, first] of ['Una', 'Cora'].entries()) made.push(await book(t, await newPatient(t, first), day, (13 + i) * 60, 30));
       return { day, made };
     },
-    async run(t, { day }) {
-      await t.open(`/schedule?date=${day}&view=day`, '.cal-col-head');
-      await t.step('Click "N unconfirmed" on the schedule: the day’s unconfirmed list opens', async () => {
-        await t.click('.unconfirmed-link');
-        await t.see('tr.kb-row');
-      });
-      const first = Number(await t.page.getAttribute('tr.kb-row', 'data-appt-id'));
-      await t.step('Press C: the highlighted visit is confirmed (Undo shows)', async () => {
+    async run(t, { day, made }) {
+      const [a] = made;
+      // The person has the visit in front of them on the schedule (the call about it), as with the other flow keys.
+      await t.open(`/schedule?date=${day}&view=day`, cardSel(a.id));
+      await t.page.focus(cardSel(a.id));
+      await t.step('With the visit selected, press C: confirmed by phone (Undo shows)', async () => {
         await t.key('c');
-        await t.page.waitForSelector(`tr[data-appt-id="${first}"]`, { state: 'detached' });
+        await t.see(`${cardSel(a.id)}.status-confirmed:not(.pending)`);
       });
-      await until(t, async () => (await t.api.get(`/appointments/${first}`)).status === 'confirmed', 'the confirmation');
+      await until(t, async () => (await t.api.get(`/appointments/${a.id}`)).status === 'confirmed', 'the confirmation');
+      t.note('The day’s whole unconfirmed list is U (or the "N unconfirmed" pill), then C per row.');
     },
   },
 

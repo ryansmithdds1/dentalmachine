@@ -49,12 +49,15 @@ export default function MedicalHistory({ p, reload }) {
   useShortcuts([
     { combo: 'r', handler: markReviewed, label: 'Medical history reviewed today, no changes', section: 'Medical history', enabled: canEdit && !editing },
     { combo: 'm', handler: () => setEditing('medical_alerts'), label: 'Update the medical history', section: 'Medical history', enabled: canEdit && !editing },
+    // Straight to the line people change most (A032): no Tab from the alerts line first.
+    { combo: 'a', handler: () => setEditing('allergies'), label: 'Add an allergy (the history opens on Allergies)', section: 'Medical history', enabled: canEdit && !editing },
+    { combo: 'shift+m', handler: () => setEditing('medications'), label: 'Add a medication (the history opens on Medications)', section: 'Medical history', enabled: canEdit && !editing },
   ]);
 
   const conditions = parseList(p.medical_conditions);
-  const line = (field, name, value, empty) => (
+  const line = (field, name, value, empty, key) => (
     <>
-      <dt>{name}</dt>
+      <dt>{name}{key && canEdit && <kbd className="med-key" title={`${key} opens the history on this line`}>{key}</kbd>}</dt>
       <dd>
         {canEdit ? (
           <button type="button" className="med-value" onClick={() => setEditing(field)} title={`Change ${name.toLowerCase()}`}>{value || <span className="muted">{empty}</span>}</button>
@@ -89,8 +92,8 @@ export default function MedicalHistory({ p, reload }) {
       ) : (
         <dl className="kv med-kv">
           {line('medical_alerts', 'Alerts', p.medical_alerts, 'None')}
-          {line('allergies', 'Allergies', p.allergies, 'Not recorded — ask the patient')}
-          {line('medications', 'Medications', p.medications, 'None reported')}
+          {line('allergies', 'Allergies', p.allergies, 'Not recorded — ask the patient', 'A')}
+          {line('medications', 'Medications', p.medications, 'None reported', '⇧M')}
           {line('medical_conditions', 'Conditions', conditions.length ? <span className="med-badges">{conditions.map((c) => <span key={c} className="badge warn">{c}</span>)}</span> : null, 'None checked')}
           {line('asa_class', 'ASA', p.asa_class ? `ASA ${p.asa_class} — ${ASA.find((a) => a[0] === p.asa_class)?.[1] || ''}` : null, 'Not assessed')}
           {line('premed_required', 'Premedication', p.premed_required ? <span className="badge danger">Required</span> : null, 'Not needed')}
@@ -163,36 +166,55 @@ function MedicalEditor({ p, focus, onCancel, onSaved, reload }) {
   );
 }
 
-// Latest blood pressure and pulse, recorded inline.
+// Blood pressure and pulse typed the way they're said: "122/78 68" (or just "122/78", or "p 68"). Returns
+// { bp_systolic, bp_diastolic, pulse } or null when it can't tell what was meant.
+export function parseVitals(text) {
+  const t = String(text || '').trim().toLowerCase().replace(/\s*(mmhg|bpm)\b/g, ' ').trim();
+  if (!t) return null;
+  const both = t.match(/^(\d{2,3})\s*\/\s*(\d{2,3})(?:\s*[,;]?\s*(?:(?:p|pulse|hr)\s*:?\s*)?(\d{2,3}))?$/);
+  if (both) return { bp_systolic: Number(both[1]), bp_diastolic: Number(both[2]), pulse: both[3] ? Number(both[3]) : null };
+  const pulse = t.match(/^(?:(?:p|pulse|hr)\s*:?\s*)?(\d{2,3})$/);
+  return pulse ? { bp_systolic: null, bp_diastolic: null, pulse: Number(pulse[1]) } : null;
+}
+const vitalsText = (v) => [v.bp_systolic ? `BP ${v.bp_systolic}/${v.bp_diastolic} mmHg` : null, v.pulse ? `pulse ${v.pulse} bpm` : null].filter(Boolean).join(' · ');
+
+// Latest blood pressure and pulse, recorded inline (A033): V (or the button) opens one box with the cursor in it;
+// type "122/78 68" and press Enter. Each reading is its own record (who, when); a wrong one is fixed by recording again.
 function Vitals({ p }) {
   const { can } = useAuth();
+  const canWrite = can('clinical:write');
   const { data: vitals, reload: reloadVitals } = useApi(`/patients/${p.id}/vitals`);
-  const [vForm, setVForm] = useState(null);
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState('');
   const [warning, setWarning] = useState(null);
   const latest = vitals?.[0];
+  const parsed = parseVitals(text);
   const { submit, busy, error } = useSubmit(async () => {
-    const v = await api.post(`/patients/${p.id}/vitals`, vForm);
+    if (!parsed) throw new Error('Type the blood pressure and pulse like 122/78 68');
+    const v = await api.post(`/patients/${p.id}/vitals`, parsed);
     setWarning(v.warning);
-    setVForm(null);
+    toast(`Vitals recorded: ${vitalsText(v)}`);
+    setOpen(false);
+    setText('');
     reloadVitals();
   });
+  useShortcuts([{ combo: 'v', handler: () => { setWarning(null); setOpen(true); }, label: 'Record blood pressure and pulse (type “122/78 68”, Enter)', section: 'Medical history', enabled: canWrite && !open }]);
   return (
     <div style={{ margin: '10px 0' }}>
       <div className="inline" style={{ flexWrap: 'wrap', gap: 8, fontSize: 13 }}>
         <strong>Vitals:</strong>
         {latest ? <span>BP {latest.bp_systolic ? `${latest.bp_systolic}/${latest.bp_diastolic}` : '—'} · pulse {latest.pulse || '—'} <span className="muted">({fmtDate(latest.recorded_at.slice(0, 10))})</span></span> : <span className="muted">none recorded</span>}
-        {can('clinical:write') && !vForm && <button className="small" onClick={() => setVForm({ bp_systolic: '', bp_diastolic: '', pulse: '' })}>Record vitals</button>}
+        {canWrite && !open && <button className="small" onClick={() => { setWarning(null); setOpen(true); }} title="Record vitals (V)">Record vitals <kbd>V</kbd></button>}
       </div>
       {warning && <div className="error" style={{ marginTop: 6 }}>{warning}</div>}
-      {vForm && (
-        <form className="inline" style={{ gap: 6, marginTop: 6, flexWrap: 'wrap' }} onSubmit={(e) => { e.preventDefault(); submit(); }}>
+      {open && (
+        <form className="inline" style={{ gap: 6, marginTop: 6, flexWrap: 'wrap' }} onSubmit={(e) => { e.preventDefault(); submit(); }}
+          onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setOpen(false); setText(''); } }}>
           <ErrorBox error={error} />
-          <input type="number" placeholder="Systolic" style={{ width: 90 }} value={vForm.bp_systolic} onChange={(e) => setVForm({ ...vForm, bp_systolic: e.target.value })} aria-label="Systolic" />
-          /
-          <input type="number" placeholder="Diastolic" style={{ width: 90 }} value={vForm.bp_diastolic} onChange={(e) => setVForm({ ...vForm, bp_diastolic: e.target.value })} aria-label="Diastolic" />
-          <input type="number" placeholder="Pulse" style={{ width: 80 }} value={vForm.pulse} onChange={(e) => setVForm({ ...vForm, pulse: e.target.value })} aria-label="Pulse" />
-          <button className="small primary" disabled={busy}>Save</button>
-          <button type="button" className="small" onClick={() => setVForm(null)}>Cancel</button>
+          <input autoFocus value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); if (!busy) submit(); } }} placeholder="122/78 68" aria-label="Blood pressure and pulse" style={{ width: 150 }} inputMode="numeric" autoComplete="off" />
+          <span className="muted" aria-live="polite" style={{ fontSize: 12 }}>{parsed ? vitalsText(parsed) : text ? 'BP as 122/78, then the pulse' : 'BP (mmHg), then pulse (bpm)'}</span>
+          <button className="small primary" disabled={busy || !parsed}>Save <kbd>Enter</kbd></button>
+          <button type="button" className="small" onClick={() => { setOpen(false); setText(''); }}>Cancel</button>
         </form>
       )}
       {vitals?.length > 1 && (

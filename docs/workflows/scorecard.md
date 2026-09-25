@@ -12,21 +12,21 @@ written by hand. Screenshot paths are in `e2e/actions/out/` after a run (not com
 ## Summary
 
 <!-- robot:summary -->
-Last robot run: 2026-09-25 15:59 UTC, on a fresh local demo server.
+Last robot run: 2026-09-25 17:05 UTC, on a fresh local demo server.
 
-**184 actions** · **158 measured** · 9 missing from the app · 3 blocked (the demo office can’t do them) · 4 need hardware · 10 not yet measured.
+**184 actions** · **159 measured** · 8 missing from the app · 3 blocked (the demo office can’t do them) · 4 need hardware · 10 not yet measured.
 
-Grades: A 108 · B 26 · C 15 · D 5 · F 4. Keyboard-only top-20 jobs: 23 of 27 measured ones done without the mouse.
+Grades: A 129 · B 24 · C 3 · D 3 · F 0. Keyboard-only top-20 jobs: 27 of 27 measured ones done without the mouse.
 
 | Band | Actions | Measured | Missing | Not measured | Average score |
 |---|---|---|---|---|---|
 | Constant (100+/day) | 4 | 4 | 0 | 0 | 100 |
-| Very frequent (30–100/day) | 12 | 12 | 0 | 0 | 95 |
-| Frequent (10–30/day) | 21 | 20 | 0 | 1 | 95 |
-| Daily (1–10/day) | 64 | 59 | 1 | 4 | 93 |
-| Weekly (about 1–5 a week) | 33 | 32 | 0 | 1 | 94 |
-| Monthly | 29 | 25 | 0 | 4 | 83 |
-| Rare (a few times a year) | 21 | 6 | 8 | 7 | 78 |
+| Very frequent (30–100/day) | 12 | 12 | 0 | 0 | 100 |
+| Frequent (10–30/day) | 21 | 20 | 0 | 1 | 100 |
+| Daily (1–10/day) | 64 | 60 | 0 | 4 | 96 |
+| Weekly (about 1–5 a week) | 33 | 32 | 0 | 1 | 96 |
+| Monthly | 29 | 25 | 0 | 4 | 90 |
+| Rare (a few times a year) | 21 | 6 | 8 | 7 | 84 |
 <!-- /robot:summary -->
 
 **Reading the numbers.** Most of the top-20 workflows score A: the earlier redesign (results.md) gave them one-key
@@ -42,68 +42,72 @@ estimate, billing can't pre-authorize or refund — which show up as dead ends r
 Priority = times per day × (100 − score); a missing feature counts as 100. "What the robot saw" combines the counts, the
 script's own notes and the reviewer's; the proposed fixes are the reviewer's.
 
-Not in this ranking: jobs the usual person **can't do at all** because of permissions — the robot measured them as
-someone who can (bugs 4–8: front desk adding documents and estimates, billing pre-authorizing and refunding, front
-desk voiding). By frequency they belong near the top (the front-desk estimate alone is ~15 a day) and should be
-decided together, as one permissions batch, in phase 2.
+Permissions (bugs 4–9) were decided as one batch in phase 2 (1B): the robot now measures A025 and A069 as the front
+desk and A081 as billing; refunds (A110) and cash voids (A102) stay with a manager by the owner's decision, measured
+as the manager, with the others told up front and given "ask a manager". Robot re-runs in batch 1B covered only its
+own actions (command bar, billing, claims, insurance, treatment presentation, permissions, campaigns, settings);
+the schedule/checkout rows are batch 1A's.
 
 <!-- robot:queue -->
 | # | Id | Action | ~/day | Score | Priority | What the robot saw | Proposed fix |
 |---|---|---|---|---|---|---|---|
-| 1 | A013 | Mark a visit finished (patient out) | 30 | 57 F | 1290 | 5 actions; a good design needs about 2; O opens "Today’s plan" (the schedule optimizer also uses O) instead of marking the visit out — the visit stays in the chair; a top-20 job that the robot could not finish with the keyboard alone (`docs/workflows/scorecard-shots/bug-o-key-opens-plan.png`) | Give Out its key back: move "Open today's plan" to Shift+O (OptimizerPanel.jsx:264, HuddlePlanCard.jsx:20) and let a focused visit win over page-level keys. Then O = 1 key (2 with charges), as budgeted. Re-enable the #3 test. |
-| 2 | A017 | Check a patient out (charges, payment, next visit) | 28 | 77 C | 644 | 7 actions; a good design needs about 4; Checkout: "Suggested now $0.00" and an empty amount although the account has a balance — the person works out what to collect and types it (`docs/workflows/scorecard-shots/checkout-suggests-zero.png`) | Prefill the amount with the patient portion plus any older balance (show both, portion selected); open Checkout from the drawer with C and focus the amount; make 'Book recall' and 'Mark checked out' keys (R, Enter) so the whole walk-out is keyboard-only: target 4. |
-| 3 | A053 | Log a phone call with a patient | 5 | MISSING | 500 | Not in the app. Phone-line calls are logged automatically (Calls page) and the follow-up lists have Log call, but there is no way to note an ordinary call on a patient's chart | Add "Log a call" to the patient bar/command bar (Ctrl/⌘K "call …"): outcome keys 1–8 and a note, saved to the chart's communication log — reuse the follow-up lists' call form, not a new model. |
-| 4 | A016 | Confirm an appointment | 30 | 85 B | 450 | a top-20 job that the robot could not finish with the keyboard alone | Add C on a focused visit in the schedule (confirm with Undo) and make the "N unconfirmed" pill reachable by a key (U), so confirming is keyboard-only from where people already are. |
-| 5 | A033 | Record blood pressure and pulse | 10 | 65 D | 350 | 8 actions; a good design needs about 3; Record vitals doesn’t put the cursor in the first box: one more click before typing | Focus Systolic when "Record vitals" opens and accept "122/78 68" typed in one box; add V as a key on the chart overview. |
-| 6 | A027 | Book the next hygiene visit at checkout | 14 | 85 B | 210 | a top-20 job that the robot could not finish with the keyboard alone | Give "Book … recall" a key on the checkout page (R) and focus the first suggested slot, so it's R, Enter. |
-| 7 | A031 | Add x-rays or photos to the chart | 12 | 85 B | 180 | a top-20 job that the robot could not finish with the keyboard alone | Keep drag-and-drop (it is one action) but add U to open the file picker on the Documents tab for keyboard users (the Office documents page already has U). |
-| 8 | A007 | Open a patient's x-rays | 40 | 96 A | 160 | 1 dialog opened | Fine as is (X, →). The viewer is a full-screen dialog by design; consider a side-by-side compare mode instead of a second viewer. |
-| 9 | A067 | Look up a claim's status | 3 | 54 F | 138 | 9 actions; a good design needs about 3; Command bar: typing "Claim #33" doesn’t put "Claim #33" first — Enter would open "olivia garcia ⚠69y · 1956-10-09 · (512) 555-2184"; the person has to arrow down 6× | Rank an exact claim number ("33", "#33", "claim 33") above patients whose phone contains the digits; show "Claim #33" first. |
-| 10 | A042 | Present a treatment plan and get it signed | 6 | 78 C | 132 | 5 actions; a good design needs about 2; 1 dialog opened | Staff side is 2 (budget). The patient types their name, ticks and taps: prefill the name for an in-office signing pass so the patient only ticks and signs (2 taps). |
-| 11 | A025 | Estimate what the patient will owe | 15 | 94 A | 90 | 3 actions; a good design needs about 2 (`docs/workflows/scorecard-shots/frontdesk-chart-view-only.png`) | Let the front desk use the chart entry box in preview-only mode (estimate without charting), or add Ctrl/⌘K "estimate 14 D2740" for everyone with billing:read. |
-| 12 | A020 | Book an appointment for an existing patient | 22 | 96 A | 88 | 1 dialog opened | Already 2 keys. The booking dialog has 12+ fields below the suggestion; collapse Reason/Notes/Repeat/Video under "More" so the dialog fits a laptop screen. |
-| 13 | A032 | Update medical history (add an allergy or medication) | 10 | 94 A | 60 | 4 actions; a good design needs about 3 | Let M take a field letter (M then A = allergies) or open on the first empty line, saving the Tab. |
-| 14 | A072 | Post a paper EOB / insurance check | 2 | 72 C | 56 | 8 actions; a good design needs about 4; 1 dialog opened | Default the check amount to the total of the carrier's open claims being paid, prefill each line's paid = estimate, and offer the paper-EOB scan (AI read) on the same screen; target 4. |
-| 15 | A051 | Mark a recall call as "left a message" | 5 | 91 A | 45 | The recall list shows the same patient on 2 rows (one per recall type: exam, cleaning, x-rays); a call has to be logged per row; 1 dialog opened; 1 unlabeled box/button | One row per patient on the recall list (exam, prophy, x-rays as chips) with Log call applying to all; log the call inline (keys 1–8) instead of a dialog. |
-| 16 | A037 | Call a patient who is due for recall | 10 | 96 A | 40 | 1 dialog opened | Row actions by key on the recall list (J/K, B book, L log) like the other worklists. |
-| 17 | A055 | Set up a new patient (with insurance) | 4 | 91 A | 36 | 2 screen changes; 1 dialog opened; 1 unlabeled box/button (`docs/workflows/scorecard-shots/command-bar-document-search-first.png`) | Fix the command-bar ranking (bug 2); the one-line form itself is good. Label the unlabeled box. |
-| 18 | A038 | Build a treatment plan | 8 | 96 A | 32 | 1 dialog opened | Fine (budget met). The builder is a dialog; it could be an inline panel on the plan list. |
-| 19 | A039 | Have the patient sign a consent form | 8 | 96 A | 32 | 1 dialog opened | Fine (2). Consider a side panel instead of the dialog. |
-| 20 | A040 | Send forms to a patient before the visit | 8 | 96 A | 32 | 1 dialog opened | Fine (2). The dialog could be an inline panel on Messages & forms. |
-| 21 | A041 | Change an appointment's type, length or note | 8 | 96 A | 32 | 1 dialog opened | Change type/length inline in the visit panel (type picker with keys, length follows) instead of opening the 12-field Edit dialog on top of the panel. |
-| 22 | A101 | Record an orthodontic adjustment visit | 1 | 72 C | 28 | 8 actions; a good design needs about 4; 1 dialog opened | Carry the last visit's wires and elastics into the new adjustment (prefilled, edit what changed); give dentists the Start treatment button or say who can. |
-| 23 | A057 | Call a patient about unscheduled treatment | 4 | 94 A | 24 | 1 dialog opened; 1 unlabeled box/button | Same as recall: J/K rows, L to log with keys 1–8, inline. |
-| 24 | A074 | Check in a case back from the lab | 2 | 88 B | 24 | 4 actions; a good design needs about 2 | Fine for a case with a photo (3); make the photo optional (G = Looks good) when nothing is wrong. |
-| 25 | A085 | Check the day sheet at the end of the day | 1 | 78 C | 22 | 4 actions; a good design needs about 2; Command bar: typing "day sheet" doesn’t put "day sheet" first — Enter would open "search all documents for “day sheet” 0 found"; the person has to arrow down 1× | Fix the command-bar ranking (bug 2); add a Day sheet key on Reports. |
-| 26 | A100 | See who is clocked in today | 1 | 78 C | 22 | 4 actions; a good design needs about 2; Command bar: typing "who’s in today" doesn’t put "who’s in today" first — Enter would open "search all documents for “who’s in today” 0 found"; the person has to arrow down 1× | Fix the command-bar ranking (bug 2). |
-| 27 | A047 | Scan a new insurance card into a policy | 5 | 96 A | 20 | 1 dialog opened | Fine (3). The read-back is a dialog; could be inline under the card photo. |
-| 28 | A071 | Mark a no-show | 2 | 90 A | 20 | 3 actions; a good design needs about 2; 1 dialog opened | No-show asks for a reason and then opens the rebook dialog: make the rebook an inline suggestion under the card (Enter books, Esc skips). |
-| 29 | A058 | Accept an online booking request | 3 | 94 A | 18 | 3 actions; a good design needs about 2 | Open Online requests from the schedule's toast/badge directly; mark bookings seen when opened (no Seen click). |
-| 30 | A061 | Start or end a lunch break | 3 | 94 A | 18 | 2 actions; a good design needs about 1 | One key (L) for lunch on the Time clock page, like I for in/out; the same toggle ends lunch. |
-| 31 | A069 | Upload a scanned paper document | 3 | 94 A | 18 | 3 actions; a good design needs about 2 (`docs/workflows/scorecard-shots/frontdesk-cannot-add-documents.png`) | Give the front desk permission to add (not delete) chart documents; the S menu itself is good (3 = file). |
-| 32 | A097 | Change a patient's recall interval | 1 | 82 B | 18 | 6 actions; a good design needs about 3 | Offer the common intervals as chips (3 / 4 / 6 mo) with the reason list (perio history, caries risk) so it's click, click. |
-| 33 | A089 | Refer a patient to a specialist | 1 | 83 B | 17 | 4 actions; a good design needs about 3; Refer out (chart): the specialist starts on "Choose…" and the referring provider on "—" although the signed-in dentist and the office’s usual endodontist are known (the Referrals page fills them); 1 dialog opened; 1 unlabeled box/button | Use the Referrals page's form (usual specialist, signed-in dentist, reason from the chart) for Refer out on the chart: one referral flow, not two. |
-| 34 | A054 | Cancel an appointment (with a reason, and rebook) | 4 | 96 A | 16 | 1 dialog opened | Fine (3 incl. reason and rebook). |
-| 35 | A090 | Add a family member to a household | 1 | 84 B | 16 | 6 actions; a good design needs about 4; 1 dialog opened | Accept "Kit 6/6/2016" in one box (like the new-patient line) so it's click, type, Enter. |
-| 36 | A091 | Add a secondary insurance policy | 1 | 85 B | 15 | 7 actions; a good design needs about 6; Adding a second policy starts on Priority "primary" although the patient already has a primary; 1 dialog opened | Default Priority to Secondary when a primary exists, and start the subscriber on the spouse/guarantor already on the family. |
-| 37 | A099 | Add an office alert to a patient | 1 | 87 B | 13 | 4 actions; a good design needs about 3; The office alert is only in the full Edit form (a dialog), not editable in place on the chart like phone and address; 1 dialog opened | Make the office alert an in-place line on the chart header (click or A, type, Enter) like phone and address. |
-| 38 | A078 | Review x-ray AI findings | 2 | 94 A | 12 | 3 actions; a good design needs about 2 | Fix the command-bar ranking; otherwise fine. |
-| 39 | A098 | Change a patient's usual provider or hygienist | 1 | 88 B | 12 | The patient’s usual dentist/hygienist isn’t on the chart overview: Edit patient → All fields; 1 dialog opened | Show usual dentist and hygienist on the overview contact card, editable in place (click → pick). |
-| 40 | A107 | Fix a missed time-clock punch | 2/wk | 71 C | 11.6 | 8 actions; a good design needs about 4; Add missed time starts on today 8:00–5:00; today’s times are refused until 5 PM ("Clock-out can’t be in the future") and most missed punches are from an earlier day, so both dates are retyped (`docs/workflows/scorecard-shots/missed-time-default-in-future.png`) | Default the missed-time row to the last shift the person didn't clock (or yesterday), never to a time in the future; plain-language error for bad dates. |
+| 1 | A042 | Present a treatment plan and get it signed | 6 | 84 B | 96 | 4 actions; a good design needs about 2; 1 dialog opened | Done (1B): in-office hand-off fills the patient's name on the signing line (2 staff + 2 patient taps). Next: open the plan without the Present dialog when there is nothing to choose (Enter on the plan = open here). |
+| 2 | A020 | Book an appointment for an existing patient | 22 | 96 A | 88 | 1 dialog opened | Already 2 keys. The booking dialog has 12+ fields below the suggestion; collapse Reason/Notes/Repeat/Video under "More" so the dialog fits a laptop screen. |
+| 3 | A037 | Call a patient who is due for recall | 10 | 96 A | 40 | 1 dialog opened | Row actions by key on the recall list (J/K, B book, L log) like the other worklists. |
+| 4 | A055 | Set up a new patient (with insurance) | 4 | 91 A | 36 | 2 screen changes; 1 dialog opened; 1 unlabeled box/button (`docs/workflows/scorecard-shots/command-bar-document-search-first.png`) | Command bar fixed (bug 2). Label the unlabeled box on the one-line new-patient form. |
+| 5 | A038 | Build a treatment plan | 8 | 96 A | 32 | 1 dialog opened | Fine (budget met). The builder is a dialog; it could be an inline panel on the plan list. |
+| 6 | A039 | Have the patient sign a consent form | 8 | 96 A | 32 | 1 dialog opened | Fine (2). Consider a side panel instead of the dialog. |
+| 7 | A040 | Send forms to a patient before the visit | 8 | 96 A | 32 | 1 dialog opened | Fine (2). The dialog could be an inline panel on Messages & forms. |
+| 8 | A041 | Change an appointment's type, length or note | 8 | 96 A | 32 | 1 dialog opened | Change type/length inline in the visit panel (type picker with keys, length follows) instead of opening the 12-field Edit dialog on top of the panel. |
+| 9 | A101 | Record an orthodontic adjustment visit | 1 | 72 C | 28 | 8 actions; a good design needs about 4; 1 dialog opened | Carry the last visit's wires and elastics into the new adjustment (prefilled, edit what changed); give dentists the Start treatment button or say who can. |
+| 10 | A074 | Check in a case back from the lab | 2 | 88 B | 24 | 4 actions; a good design needs about 2 | Fine for a case with a photo (3); make the photo optional (G = Looks good) when nothing is wrong. |
+| 11 | A047 | Scan a new insurance card into a policy | 5 | 96 A | 20 | 1 dialog opened | Fine (3). The read-back is a dialog; could be inline under the card photo. |
+| 12 | A071 | Mark a no-show | 2 | 90 A | 20 | 3 actions; a good design needs about 2; 1 dialog opened | No-show asks for a reason and then opens the rebook dialog: make the rebook an inline suggestion under the card (Enter books, Esc skips). |
+| 13 | A072 | Post a paper EOB / insurance check | 2 | 90 A | 20 | 5 actions; a good design needs about 4; 1 dialog opened | Done (1B): carrier → check # Enter → amount (matched to the claim(s) it pays by expected payment) → Enter posts: 8 → 5 actions. Next: open the form with P on the Insurance payments tab; remember the last carrier. |
+| 14 | A058 | Accept an online booking request | 3 | 94 A | 18 | 3 actions; a good design needs about 2 | Open Online requests from the schedule's toast/badge directly; mark bookings seen when opened (no Seen click). |
+| 15 | A069 | Upload a scanned paper document | 3 | 94 A | 18 | 3 actions; a good design needs about 2 (`docs/workflows/scorecard-shots/frontdesk-cannot-add-documents.png`) | Done (1B): front desk and billing add documents (documents:add; not change or remove). Next: make 3 (file) the focused choice so S, Enter picks the file. |
+| 16 | A097 | Change a patient's recall interval | 1 | 82 B | 18 | 6 actions; a good design needs about 3 | Offer the common intervals as chips (3 / 4 / 6 mo) with the reason list (perio history, caries risk) so it's click, click. |
+| 17 | A089 | Refer a patient to a specialist | 1 | 83 B | 17 | 4 actions; a good design needs about 3; Refer out (chart): the specialist starts on "Choose…" and the referring provider on "—" although the signed-in dentist and the office’s usual endodontist are known (the Referrals page fills them); 1 dialog opened; 1 unlabeled box/button | Use the Referrals page's form (usual specialist, signed-in dentist, reason from the chart) for Refer out on the chart: one referral flow, not two. |
+| 18 | A054 | Cancel an appointment (with a reason, and rebook) | 4 | 96 A | 16 | 1 dialog opened | Fine (3 incl. reason and rebook). |
+| 19 | A090 | Add a family member to a household | 1 | 84 B | 16 | 6 actions; a good design needs about 4; 1 dialog opened | Accept "Kit 6/6/2016" in one box (like the new-patient line) so it's click, type, Enter. |
+| 20 | A099 | Add an office alert to a patient | 1 | 87 B | 13 | 4 actions; a good design needs about 3; The office alert is only in the full Edit form (a dialog), not editable in place on the chart like phone and address; 1 dialog opened | Make the office alert an in-place line on the chart header (click or A, type, Enter) like phone and address. |
+| 21 | A078 | Review x-ray AI findings | 2 | 94 A | 12 | 3 actions; a good design needs about 2 | Command bar fixed (bug 2). Next: none. |
+| 22 | A098 | Change a patient's usual provider or hygienist | 1 | 88 B | 12 | The patient’s usual dentist/hygienist isn’t on the chart overview: Edit patient → All fields; 1 dialog opened | Show usual dentist and hygienist on the overview contact card, editable in place (click → pick). |
+| 23 | A091 | Add a secondary insurance policy | 1 | 90 A | 10 | 7 actions; a good design needs about 6; 1 dialog opened | Done (1B): a second policy starts on Secondary. Next: start the subscriber on the spouse/guarantor already on the family. |
+| 24 | A073 | Create a lab case | 2 | 96 A | 8 | 1 dialog opened | — |
+| 25 | A106 | Resend or fix a rejected claim | 2.5/wk | 85 B | 7.5 | Corrected claim asks for the payer’s original claim number in a browser prompt box; 1 "are you sure?"/browser box | — |
+| 26 | A082 | Book a same-day emergency visit | 1.5 | 96 A | 6 | 1 dialog opened | — |
+| 27 | A083 | Morning huddle | 1 | 94 A | 6 | 2 actions; a good design needs about 1 | — |
+| 28 | A085 | Check the day sheet at the end of the day | 1 | 94 A | 6 | 3 actions; a good design needs about 2 | Command bar fixed (bug 2). Next: a Day sheet key on Reports. |
+| 29 | A095 | Fix unsigned or incomplete notes (chart audit) | 1 | 94 A | 6 | 3 actions; a good design needs about 2 | — |
+| 30 | A100 | See who is clocked in today | 1 | 94 A | 6 | 3 actions; a good design needs about 2 | Command bar fixed (bug 2). Next: none. |
+| 31 | A103 | Look up remaining lab cases / what is overdue | 4/wk | 94 A | 4.8 | 2 actions; a good design needs about 1 | — |
+| 32 | A088 | Send a financing application | 1 | 96 A | 4 | 1 dialog opened | — |
+| 33 | A092 | Record who referred a new patient | 1 | 96 A | 4 | 1 dialog opened | — |
+| 34 | A093 | Work the broken-appointments list | 1 | 96 A | 4 | 1 dialog opened | — |
+| 35 | A102 | Void a payment posted by mistake | 4/wk | 96 A | 3.2 | 1 dialog opened (`docs/workflows/scorecard-shots/frontdesk-void-403.png`) | Done (1B): cash voids say "needs a manager" before the reason is typed and send it to one as a to-do. Next: none. |
+| 36 | A139 | Add an insurance carrier | 2.1/mo | 69 D | 3.1 | 8 actions; a good design needs about 4; 2 screen changes; 1 dialog opened | — |
+| 37 | A105 | Check practice KPIs and metrics | 2.5/wk | 94 A | 3 | 3 actions; a good design needs about 2 | — |
+| 38 | A108 | Read the office manual (intranet) | 2/wk | 94 A | 2.4 | 3 actions; a good design needs about 2 | Fine; an empty intranet should offer the starter pages (it does, on the page). |
+| 39 | A125 | Check what the recall autopilot did | 1/wk | 88 B | 2.4 | 3 actions; a good design needs about 1 | — |
+| 40 | A126 | Check treatment follow-up results | 1/wk | 88 B | 2.4 | 3 actions; a good design needs about 1 | — |
 <!-- /robot:queue -->
 
 ## Bugs found
 
 Real defects seen while measuring (phase 2 fixes them). Evidence screenshots are in [scorecard-shots/](scorecard-shots/).
 
-1. **O on the schedule opens "Today's plan" instead of marking the visit out** (all roles) — A013.
+1. **O on the schedule opens "Today's plan" instead of marking the visit out** (all roles) — A013. **Fixed (phase 2
+   batch 1A):** the plan is Shift+O; O is always Out (and on a finished visit opens its checkout); test #3 re-enabled.
    Repro: Schedule → focus a seated visit (click it or F / arrows) → press **O** → the schedule optimizer panel opens
    and the visit stays "In chair". The existing test `e2e/workflows/02-03-schedule.test.mjs` (#3) now fails on this
    step. Cause: `components/optimizer/OptimizerPanel.jsx:264` registers `o` ("Open today's plan") and
    `components/calendar/flow.js:9` uses `o` for "Out"; the panel's listener runs first and swallows the key.
    (`scorecard-shots/bug-o-key-opens-plan.png`)
 2. **Command bar: Enter opens an empty document search instead of the page you typed** — A055, A104, A105, A085, A146
-   and every other "Ctrl/⌘K, name, Enter". Repro: Ctrl/⌘K → type `new patient` (or `production & income`, `month-end
+   and every other "Ctrl/⌘K, name, Enter". **Fixed (phase 2 batch 1B):** rows never move once shown (late answers are
+   added below); an exact name ("day sheet", "new patient") is first; document hits come last, and "Search all
+   documents" only when something was found (`e2e/workflows/nav.test.mjs` pauses 1.5 s before Enter). Repro: Ctrl/⌘K → type `new patient` (or `production & income`, `month-end
    close`) → wait half a second → Enter → "Documents: No documents found". A row "Search all documents for “…” — 0
    found" arrives after the others and goes to the top. The workflow tests still pass only because they press Enter
    before it arrives. Cause: `components/docs/DocumentCommands.jsx:58` always adds that row as a screen command (even
@@ -111,43 +115,65 @@ Real defects seen while measuring (phase 2 fixes them). Evidence screenshots are
    (`scorecard-shots/command-bar-document-search-first.png`: typed at a normal speed, the document row is first.) In the
    baseline run it hit A085, A100, A129, A138, A140, A144, A146, A149 and A151; the robot moves to the right row with ↓
    (counted) and flags it, so which of these lose points varies a little from run to run.
-3. **Command bar: a claim number finds patients first** — A067. Ctrl/⌘K → type `33` → six patients whose phone
+3. **Command bar: a claim number finds patients first** — A067. **Fixed (1B):** "#33", "claim 33" and "Claim #33" put
+   the claim first (a bare "33" puts the patient with chart #33 first, then the claim); claims only for people who can
+   see billing. Ctrl/⌘K → type `33` → six patients whose phone
    contains 33 come before "Claim #33"; the person arrows down six times.
 4. **Front desk can't add a document to a chart** (scanned referral letter, ID, signed paper form) — A069. Documents &
    x-rays shows no Add/Scan button and S does nothing for the front desk; uploads need `clinical:write`
-   (`components/patient/DocumentsTab.jsx:62`). (`scorecard-shots/frontdesk-cannot-add-documents.png`)
+   (`components/patient/DocumentsTab.jsx:62`). (`scorecard-shots/frontdesk-cannot-add-documents.png`) **Fixed (1B):**
+   new `documents:add` for front desk and billing — Scan (S), Add files (U), drop, paste — and Undo of their own upload
+   for 15 minutes; changing or removing stays `clinical:write`, and the server says so in words.
 5. **Front desk can't get a quick estimate** — A025. Their chart is "View only", so typing "14 D2740" on the chart (the
    estimate path from workflow 18) does nothing for the people who answer "how much will it cost?" calls.
-   (`scorecard-shots/frontdesk-chart-view-only.png`)
+   (`scorecard-shots/frontdesk-chart-view-only.png`) **Fixed (1B):** the box is an estimate only for anyone with
+   billing:read who can't chart ("Estimate only", Enter charts nothing); Alt+E / "Estimate" on the patient bar opens it
+   from any screen (2 actions, `e2e/workflows/18b-estimate-frontdesk.test.mjs`).
 6. **Pre-authorize is hidden from the billing team (and from dentists)** — A081. The button on a treatment plan needs
    both `clinical:write` and `billing:write` (`components/patient/TreatmentTab.jsx:122–125`), which only the admin role
-   has.
+   has. **Fixed (1B):** it follows `billing:write`, like the server; dentists present and change the plan, billing
+   pre-authorizes.
 7. **Refunds: billing sees "R refund" but R does nothing** — A110. The Credits & refunds queue shows the J/K/R hint;
    refunds need `deposits:manage`, the shortcut is silently disabled (`components/billing/RefundQueue.jsx:24–29`). Say
-   who can refund, or offer "ask a manager".
+   who can refund, or offer "ask a manager". **Fixed (1B), owner decision kept (refunds need a manager):** billing sees
+   "R ask a manager to refund", and R (or the row's button) makes a to-do with the patient, amount and card — once.
 8. **Voiding a cash payment fails only after the reason is typed** — A102. Front desk sees Void on the ledger line,
    types the reason, clicks Void entry, then gets "Voiding a cash payment needs a manager". Check (or explain) before
-   the form. (`scorecard-shots/frontdesk-void-403.png`)
+   the form. (`scorecard-shots/frontdesk-void-403.png`) **Fixed (1B):** the ledger marks such lines "Void (manager)…";
+   the form says "needs a manager" before any typing and sends the reason to one as a to-do (the server still refuses).
 9. **"Sign" is offered on notes the viewer isn't allowed to sign** — A023. A dentist sees Sign on a note written for
    the hygienist; clicking it answers 403 "Only Sam Okafor, RDH can sign this note".
-   (`scorecard-shots/sign-button-shown-then-403.png`)
+   (`scorecard-shots/sign-button-shown-then-403.png`) **Fixed (1B):** the notes list carries the server's own sign rule;
+   Sign shows only to someone who may sign, others see "Waiting for Sam Okafor, RDH to sign".
 10. **A campaign can go out with "[date]" still in it** — A136. New campaign → Who: All active patients → the
     office-news message reads "our office will be closed on [date]" → Send now sends it to all 54 recipients after one
     "are you sure?" box. No check for unfilled placeholders. (`scorecard-shots/campaign-sends-placeholder-date.png`)
-11. **Time clock → Add missed time starts on an invalid time** — A107. The row defaults to today 8:00–5:00, which is
+    **Fixed (1B):** blanks ("[date]", "____") block Send on screen and on the server (send, reschedule edits, and a
+    scheduled one is put back to a draft with a Needs attention item); "Fill in [date]" selects it for typing over; the
+    preview is headed "What Emma will get"; Send says "Send to 55 patients now…" and one in-page step (no browser box)
+    says how many are texted and emailed and that it can't be taken back.
+11. **Time clock → Add missed time starts on an invalid time** — A107. **Fixed (phase 2 batch 1A):** the row starts on
+    the last weekday before today; bad dates say so in plain words. The row defaults to today 8:00–5:00, which is
     refused ("Clock-out can't be in the future") at any time before 5 PM; a mistyped date gives the developer message
     "clock_out must be a real date and time (YYYY-MM-DD HH:MM)". (`scorecard-shots/missed-time-default-in-future.png`)
-12. **Checkout suggests collecting $0.00 while the account owes money** — A017. "Account balance $150.00 … Suggested now
+12. **Checkout suggests collecting $0.00 while the account owes money** — A017. **Fixed (phase 2 batch 1A):** the amount
+    is what's due now from the ledger — today's share plus any earlier balance, less what insurance is still expected
+    to pay — and the screen shows each part (in the baseline case the $150 was all expected from insurance). "Account balance $150.00 … Suggested now
     $0.00" and an empty amount box; the person decides what to collect and types it.
     (`scorecard-shots/checkout-suggests-zero.png`)
 13. **Settings forms reject missing fields with developer wording** — A172 "type is required", A165 "Missing required
     fields: category"; neither field is marked required, and Add provider doesn't use the "DDS" already typed in the
-    name.
+    name. **Fixed (1B):** required fields are marked and checked on screen; the server says "Please fill in “Category”"
+    (all missing-field answers, and database not-null errors); Type follows "DDS/DMD/RDH" in the name, Category follows
+    the CDT code; the cursor starts in the first box and Enter saves.
 14. **"+ Invite user" doesn't invite** — A156. It opens "New user" and asks the manager to make up a temporary password
-    to pass on (by hand) instead of emailing a sign-up link.
+    to pass on (by hand) instead of emailing a sign-up link. **Fixed (1B):** it emails a one-time link to choose their
+    own password (the password-reset link, good for 7 days; shown to copy when email isn't set up); nobody makes up a
+    password.
 15. **The one-line new patient box rejects names with digits with a misleading message** ("Type at least a first and
     last name") — seen with the robot's generated names; minor, but the message should say what it didn't understand.
 16. **Ortho tab tells dentists to "Start treatment" but has no button for them** (it needs `billing:write`) — A101.
+    **Fixed (1B):** without billing:write the tab says the front desk or billing team starts it (contract and billing).
 17. **Online requests → "Recent patient messages" lists the office's own outgoing texts** (education links, intake
     forms) as patient messages, and patients' replies show status "Sent".
 
@@ -172,11 +198,14 @@ Real defects seen while measuring (phase 2 fixes them). Evidence screenshots are
   while the Referrals page fills both: two referral flows with different defaults.
 - **Office alert (A099)** is only editable in the full Edit form, unlike phone and address, which edit in place.
 - **Settings.** Three fee sections with near-identical names ("Fee schedule" = procedure codes, "Fee schedules" = PPO
-  schedules, "Fee updates & history"). Add forms are dialogs of 6–12 fields. 38 `window.confirm`/`window.prompt` boxes
+  schedules, "Fee updates & history"). Add forms are dialogs of 6–12 fields (1B: required fields marked, smart Type and
+  Category, cursor in the first box, Enter saves). 38 `window.confirm`/`window.prompt` boxes
   remain in the client (e.g. corrected claim and void at payer ask for the payer's claim number in a prompt box — A106,
   A114; saving a report asks for its name in one).
-- **Second insurance (A091)** starts on Priority "Primary" when the patient already has a primary.
-- **Payment plan (A113)** starts with Total empty although the balance is on screen behind it.
+- **Second insurance (A091)** starts on Priority "Primary" when the patient already has a primary. **Fixed (1B):**
+  a new policy starts on the next free priority.
+- **Payment plan (A113)** starts with Total empty although the balance is on screen behind it. **Fixed (1B):** Total
+  starts on the patient's share after insurance, with the cursor in it.
 
 ## What couldn't be measured, and why
 
@@ -193,8 +222,8 @@ Real defects seen while measuring (phase 2 fixes them). Evidence screenshots are
   and the remaining rare set-up screens (online booking link, forms editor, message settings,
   perfect-day templates, team bonus, import, PPO fee approval, marking a patient deceased) — they are covered by
   feature tests (FS-fees, S5-S2, conversion) or used a few times a year; phase 2 can add them the same way.
-- **Only the staff side of patient-facing flows** is timed, except A042 (presenting a plan includes the patient's 3
-  taps). Online booking by the patient is measured by `e2e/workflows/OS-online-booking.test.mjs`.
+- **Only the staff side of patient-facing flows** is timed, except A042 (presenting a plan includes the patient's
+  taps: 2 since 1B — their name is already on the signing line). Online booking by the patient is measured by `e2e/workflows/OS-online-booking.test.mjs`.
 
 ## Every action
 
@@ -207,91 +236,91 @@ Real defects seen while measuring (phase 2 fixes them). Evidence screenshots are
 | A004 | Answer a call and open the caller's chart | constant | 100 | A | 0 | 1 | 0 | 1 | 0 | 0.1 s | yes | — |
 | A005 | Reply to a patient's text | very frequent | 100 | A | 0 | 2 | 1 | 0 | 0 | 0.3 s | yes | — |
 | A006 | Chart a finding on a tooth ("30 MO caries") | very frequent | 100 | A | 0 | 2 | 1 | 0 | 0 | 0.2 s | yes | — |
-| A007 | Open a patient's x-rays | very frequent | 96 | A | 0 | 2 | 0 | 0 | 1 | 0.2 s | yes | 1 dialog opened |
+| A007 | Open a patient's x-rays | very frequent | 100 | A | 0 | 2 | 0 | 0 | 0 | 0.2 s | yes | — |
 | A008 | Text a patient | very frequent | 100 | A | 0 | 2 | 1 | 1 | 0 | 0.5 s | yes | — |
 | A009 | Switch the schedule between chairs, providers or one provider | very frequent | 100 | A | 0 | 3 | 0 | 0 | 0 | 0.2 s | yes | — |
 | A010 | Check a patient in | very frequent | 100 | A | 0 | 1 | 0 | 0 | 0 | 0.1 s | yes | — |
 | A011 | Write a clinical note | very frequent | 100 | A | 0 | 2 | 1 | 1 | 0 | 0.7 s | yes | — |
 | A012 | Seat a patient | very frequent | 100 | A | 0 | 1 | 0 | 0 | 0 | 0.1 s | yes | — |
-| A013 | Mark a visit finished (patient out) | very frequent | 57 | F | 3 | 2 | 0 | 0 | 0 | 1.4 s | no | 5 actions; a good design needs about 2; O opens "Today’s plan" (the schedule optimizer also uses O) instead of marking the visit out — the visit stays in the chair; a top-20 job that the robot could not finish with the keyboard alone |
+| A013 | Mark a visit finished (patient out) | very frequent | 100 | A | 0 | 1 | 0 | 0 | 0 | 0.2 s | yes | — |
 | A014 | Review medical history — no changes | very frequent | 100 | A | 0 | 1 | 0 | 0 | 0 | 0.1 s | yes | — |
 | A015 | Set today's procedures complete (post production) | very frequent | 100 | A | 0 | 2 | 0 | 0 | 0 | 0.1 s | yes | — |
-| A016 | Confirm an appointment | very frequent | 85 | B | 1 | 1 | 0 | 1 | 0 | 0.9 s | no | a top-20 job that the robot could not finish with the keyboard alone |
-| A017 | Check a patient out (charges, payment, next visit) | frequent | 77 | C | 4 | 2 | 1 | 1 | 0 | 0.9 s | no | 7 actions; a good design needs about 4; Checkout: "Suggested now $0.00" and an empty amount although the account has a balance — the person works out what to collect and types it |
-| A018 | Mark a patient ready for the doctor | frequent | 100 | A | 0 | 1 | 0 | 0 | 0 | 0.0 s | yes | — |
+| A016 | Confirm an appointment | very frequent | 100 | A | 0 | 1 | 0 | 0 | 0 | 0.1 s | yes | — |
+| A017 | Check a patient out (charges, payment, next visit) | frequent | 100 | A | 0 | 3 | 0 | 1 | 0 | 0.7 s | yes | — |
+| A018 | Mark a patient ready for the doctor | frequent | 100 | A | 0 | 1 | 0 | 0 | 0 | 0.1 s | yes | — |
 | A019 | Take a patient payment | frequent | 100 | A | 0 | 2 | 0 | 1 | 0 | 0.5 s | yes | — |
-| A020 | Book an appointment for an existing patient | frequent | 96 | A | 0 | 2 | 0 | 0 | 1 | 0.2 s | yes | 1 dialog opened |
+| A020 | Book an appointment for an existing patient | frequent | 96 | A | 0 | 2 | 0 | 0 | 1 | 0.6 s | yes | 1 dialog opened |
 | A021 | Chart planned treatment ("14 D2740") | frequent | 100 | A | 0 | 2 | 1 | 0 | 0 | 0.3 s | yes | — |
 | A022 | Create and send an insurance claim | frequent | 100 | A | 0 | 1 | 0 | 0 | 0 | 0.1 s | yes | — |
 | A023 | Sign a clinical note | frequent | 100 | A | 1 | 0 | 0 | 0 | 0 | 0.1 s | no | — |
 | A024 | Explain a balance / show the ledger | frequent | 100 | A | 0 | 1 | 0 | 1 | 0 | 0.9 s | yes | — |
-| A025 | Estimate what the patient will owe | frequent | 94 | A | 0 | 2 | 1 | 0 | 0 | 0.4 s | yes | 3 actions; a good design needs about 2 |
+| A025 | Estimate what the patient will owe | frequent | 100 | A | 0 | 1 | 1 | 1 | 0 | 1.0 s | yes | — |
 | A026 | Verify insurance eligibility | frequent | 100 | A | 0 | 1 | 0 | 0 | 0 | 0.1 s | yes | — |
-| A027 | Book the next hygiene visit at checkout | frequent | 85 | B | 1 | 1 | 0 | 0 | 0 | 0.1 s | no | a top-20 job that the robot could not finish with the keyboard alone |
+| A027 | Book the next hygiene visit at checkout | frequent | 100 | A | 0 | 1 | 1 | 0 | 0 | 0.1 s | yes | — |
 | A028 | Send a task to a co-worker | frequent | 100 | A | 0 | 2 | 1 | 0 | 0 | 0.3 s | yes | — |
-| A029 | Reschedule an appointment | frequent | 100 | A | 0 | 3 | 0 | 0 | 0 | 0.3 s | yes | — |
+| A029 | Reschedule an appointment | frequent | 100 | A | 0 | 3 | 0 | 0 | 0 | 0.6 s | yes | — |
 | A030 | Take x-rays with the sensor | frequent | NOT MEASURABLE |  |  |  |  |  |  |  |  | hardware (sensor, camera or microphone): the robot cannot drive it |
-| A031 | Add x-rays or photos to the chart | frequent | 85 | B | 1 | 0 | 0 | 0 | 0 | 0.1 s | no | a top-20 job that the robot could not finish with the keyboard alone |
-| A032 | Update medical history (add an allergy or medication) | frequent | 94 | A | 0 | 3 | 1 | 0 | 0 | 0.1 s | yes | 4 actions; a good design needs about 3 |
-| A033 | Record blood pressure and pulse | frequent | 65 | D | 2 | 3 | 3 | 0 | 0 | 0.2 s | no | 8 actions; a good design needs about 3; Record vitals doesn’t put the cursor in the first box: one more click before typing |
+| A031 | Add x-rays or photos to the chart | frequent | 100 | A | 0 | 2 | 0 | 0 | 0 | 0.3 s | yes | — |
+| A032 | Update medical history (add an allergy or medication) | frequent | 100 | A | 0 | 2 | 1 | 0 | 0 | 0.3 s | yes | — |
+| A033 | Record blood pressure and pulse | frequent | 100 | A | 0 | 2 | 1 | 0 | 0 | 0.2 s | yes | — |
 | A034 | Mark a task done | frequent | 100 | A | 0 | 1 | 0 | 0 | 0 | 0.1 s | yes | — |
 | A035 | Look up how much insurance benefit is left | frequent | 100 | A | 1 | 0 | 0 | 1 | 0 | 0.1 s | no | — |
 | A036 | Send a message in staff chat | frequent | 100 | A | 0 | 2 | 1 | 0 | 0 | 0.3 s | yes | — |
-| A037 | Call a patient who is due for recall | frequent | 96 | A | 1 | 1 | 0 | 0 | 1 | 0.6 s | no | 1 dialog opened |
+| A037 | Call a patient who is due for recall | frequent | 96 | A | 1 | 1 | 0 | 0 | 1 | 0.9 s | no | 1 dialog opened |
 | A038 | Build a treatment plan | daily | 96 | A | 0 | 5 | 3 | 0 | 1 | 0.3 s | yes | 1 dialog opened |
 | A039 | Have the patient sign a consent form | daily | 96 | A | 1 | 1 | 0 | 1 | 1 | 0.2 s | no | 1 dialog opened |
 | A040 | Send forms to a patient before the visit | daily | 96 | A | 2 | 0 | 0 | 0 | 1 | 0.2 s | no | 1 dialog opened |
-| A041 | Change an appointment's type, length or note | daily | 96 | A | 3 | 0 | 0 | 0 | 1 | 0.5 s | no | 1 dialog opened |
-| A042 | Present a treatment plan and get it signed | daily | 78 | C | 3 | 1 | 1 | 1 | 1 | 0.4 s | no | 5 actions; a good design needs about 2; 1 dialog opened |
+| A041 | Change an appointment's type, length or note | daily | 96 | A | 3 | 0 | 0 | 0 | 1 | 0.6 s | no | 1 dialog opened |
+| A042 | Present a treatment plan and get it signed | daily | 84 | B | 3 | 1 | 0 | 1 | 1 | 0.4 s | no | 4 actions; a good design needs about 2; 1 dialog opened |
 | A043 | Update a phone number or email | daily | 100 | A | 0 | 2 | 1 | 0 | 0 | 0.1 s | yes | — |
 | A044 | Print the route slip / walkout for a visit | daily | 100 | A | 1 | 1 | 0 | 1 | 0 | 1.0 s | no | — |
 | A045 | Chart perio (pocket depths and bleeding) | daily | 100 | A | 2 | 0 | 7 | 0 | 0 | 0.6 s | no | — |
 | A046 | Review an online intake form | daily | NOT YET MEASURED |  |  |  |  |  |  |  |  | No robot script yet |
-| A047 | Scan a new insurance card into a policy | daily | 96 | A | 1 | 2 | 0 | 0 | 1 | 0.2 s | no | 1 dialog opened |
+| A047 | Scan a new insurance card into a policy | daily | 96 | A | 1 | 2 | 0 | 0 | 1 | 0.3 s | no | 1 dialog opened |
 | A048 | Approve claims that are ready to send | daily | 100 | A | 2 | 0 | 0 | 1 | 0 | 0.3 s | no | — |
 | A049 | Work the Needs attention list | daily | 100 | A | 2 | 0 | 0 | 1 | 0 | 0.6 s | no | — |
 | A050 | Take intraoral photos with the camera | daily | NOT MEASURABLE |  |  |  |  |  |  |  |  | hardware (sensor, camera or microphone): the robot cannot drive it |
-| A051 | Mark a recall call as "left a message" | daily | 91 | A | 2 | 0 | 0 | 0 | 1 | 0.2 s | no | The recall list shows the same patient on 2 rows (one per recall type: exam, cleaning, x-rays); a call has to be logged per row; 1 dialog opened; 1 unlabeled box/button |
+| A051 | Mark a recall call as "left a message" | daily | 100 | A | 1 | 1 | 0 | 0 | 0 | 0.2 s | no | — |
 | A052 | Dictate a note by voice | daily | NOT MEASURABLE |  |  |  |  |  |  |  |  | hardware (sensor, camera or microphone): the robot cannot drive it |
-| A053 | Log a phone call with a patient | daily | MISSING |  |  |  |  |  |  |  |  | Phone-line calls are logged automatically (Calls page) and the follow-up lists have Log call, but there is no way to note an ordinary call on a patient's chart |
-| A054 | Cancel an appointment (with a reason, and rebook) | daily | 96 | A | 0 | 3 | 0 | 0 | 1 | 0.2 s | yes | 1 dialog opened |
-| A055 | Set up a new patient (with insurance) | daily | 91 | A | 0 | 4 | 1 | 2 | 1 | 1.8 s | yes | 2 screen changes; 1 dialog opened; 1 unlabeled box/button |
+| A053 | Log a phone call with a patient | daily | 100 | A | 0 | 2 | 1 | 0 | 0 | 0.4 s | yes | — |
+| A054 | Cancel an appointment (with a reason, and rebook) | daily | 96 | A | 0 | 3 | 0 | 0 | 1 | 0.5 s | yes | 1 dialog opened |
+| A055 | Set up a new patient (with insurance) | daily | 91 | A | 0 | 4 | 1 | 2 | 1 | 1.4 s | yes | 2 screen changes; 1 dialog opened; 1 unlabeled box/button |
 | A056 | Attach x-rays to a claim | daily | 100 | A | 2 | 0 | 0 | 0 | 0 | 0.2 s | no | — |
-| A057 | Call a patient about unscheduled treatment | daily | 94 | A | 3 | 0 | 0 | 0 | 1 | 0.3 s | no | 1 dialog opened; 1 unlabeled box/button |
+| A057 | Call a patient about unscheduled treatment | daily | 100 | A | 1 | 2 | 0 | 0 | 0 | 0.2 s | no | — |
 | A058 | Accept an online booking request | daily | 94 | A | 3 | 0 | 0 | 1 | 0 | 1.0 s | no | 3 actions; a good design needs about 2 |
 | A059 | Clock in | daily | 100 | A | 0 | 1 | 0 | 0 | 0 | 0.1 s | yes | — |
 | A060 | Clock out | daily | 100 | A | 0 | 1 | 0 | 0 | 0 | 0.1 s | yes | — |
-| A061 | Start or end a lunch break | daily | 94 | A | 2 | 0 | 0 | 0 | 0 | 0.2 s | no | 2 actions; a good design needs about 1 |
+| A061 | Start or end a lunch break | daily | 100 | A | 0 | 1 | 0 | 0 | 0 | 0.1 s | yes | — |
 | A062 | Write a prescription | daily | 100 | A | 0 | 2 | 0 | 0 | 0 | 0.1 s | yes | — |
 | A063 | Post an insurance payment from an ERA | daily | 100 | A | 0 | 1 | 0 | 0 | 0 | 0.1 s | yes | — |
 | A064 | Post an adjustment or write-off | daily | 100 | A | 0 | 2 | 1 | 0 | 0 | 0.1 s | yes | — |
 | A065 | Ask a patient for a review | daily | 100 | A | 0 | 1 | 0 | 0 | 0 | 0.1 s | yes | — |
 | A066 | Text back an unknown caller | daily | 100 | A | 1 | 1 | 0 | 0 | 0 | 0.3 s | no | — |
-| A067 | Look up a claim's status | daily | 54 | F | 0 | 8 | 1 | 1 | 0 | 0.9 s | yes | 9 actions; a good design needs about 3; Command bar: typing "Claim #33" doesn’t put "Claim #33" first — Enter would open "olivia garcia ⚠69y · 1956-10-09 · (512) 555-2184"; the person has to arrow down 6× |
+| A067 | Look up a claim's status | daily | 100 | A | 0 | 2 | 1 | 1 | 0 | 0.9 s | yes | — |
 | A068 | Record a caries risk assessment | daily | 100 | A | 4 | 0 | 0 | 0 | 0 | 0.2 s | no | — |
-| A069 | Upload a scanned paper document | daily | 94 | A | 1 | 2 | 0 | 0 | 0 | 0.5 s | no | 3 actions; a good design needs about 2 |
+| A069 | Upload a scanned paper document | daily | 94 | A | 1 | 2 | 0 | 0 | 0 | 0.6 s | no | 3 actions; a good design needs about 2 |
 | A070 | Fill an opening from the ASAP list | daily | 100 | A | 0 | 2 | 0 | 0 | 0 | 0.2 s | yes | — |
-| A071 | Mark a no-show | daily | 90 | A | 0 | 3 | 0 | 0 | 1 | 0.2 s | yes | 3 actions; a good design needs about 2; 1 dialog opened |
-| A072 | Post a paper EOB / insurance check | daily | 72 | C | 5 | 0 | 3 | 0 | 1 | 2.0 s | no | 8 actions; a good design needs about 4; 1 dialog opened |
+| A071 | Mark a no-show | daily | 90 | A | 0 | 3 | 0 | 0 | 1 | 0.6 s | yes | 3 actions; a good design needs about 2; 1 dialog opened |
+| A072 | Post a paper EOB / insurance check | daily | 90 | A | 1 | 2 | 2 | 0 | 1 | 0.2 s | no | 5 actions; a good design needs about 4; 1 dialog opened |
 | A073 | Create a lab case | daily | 96 | A | 0 | 2 | 1 | 0 | 1 | 0.2 s | yes | 1 dialog opened |
 | A074 | Check in a case back from the lab | daily | 88 | B | 4 | 0 | 0 | 0 | 0 | 0.2 s | no | 4 actions; a good design needs about 2 |
 | A075 | Call an insurance company about an unpaid claim | daily | 100 | A | 0 | 3 | 1 | 0 | 0 | 0.2 s | yes | — |
 | A076 | Put a patient on the ASAP list | daily | 100 | A | 2 | 0 | 0 | 0 | 0 | 0.3 s | no | — |
 | A077 | Send a payment link by text | daily | BLOCKED |  |  |  |  |  |  |  |  | No "Send card payment link" on the ledger: card payments (Stripe) aren’t connected in the demo office |
-| A078 | Review x-ray AI findings | daily | 94 | A | 0 | 3 | 0 | 1 | 0 | 0.9 s | yes | 3 actions; a good design needs about 2 |
+| A078 | Review x-ray AI findings | daily | 94 | A | 0 | 3 | 0 | 1 | 0 | 0.8 s | yes | 3 actions; a good design needs about 2 |
 | A079 | Complete the opening or closing checklist | daily | 100 | A | 1 | 0 | 0 | 0 | 0 | 0.1 s | no | — |
 | A080 | Send patient education after a visit | daily | 100 | A | 2 | 0 | 0 | 0 | 0 | 0.2 s | no | — |
 | A081 | Send a pre-authorization | daily | 100 | A | 1 | 0 | 0 | 0 | 0 | 0.1 s | no | — |
 | A082 | Book a same-day emergency visit | daily | 96 | A | 0 | 3 | 1 | 0 | 1 | 0.6 s | yes | 1 dialog opened |
 | A083 | Morning huddle | daily | 94 | A | 1 | 1 | 0 | 0 | 0 | 0.2 s | no | 2 actions; a good design needs about 1 |
 | A084 | Make the daily bank deposit | daily | 100 | A | 2 | 1 | 1 | 1 | 0 | 0.5 s | no | — |
-| A085 | Check the day sheet at the end of the day | daily | 78 | C | 0 | 4 | 0 | 1 | 0 | 1.7 s | yes | 4 actions; a good design needs about 2; Command bar: typing "day sheet" doesn’t put "day sheet" first — Enter would open "search all documents for “day sheet” 0 found"; the person has to arrow down 1× |
+| A085 | Check the day sheet at the end of the day | daily | 94 | A | 0 | 3 | 0 | 1 | 0 | 1.6 s | yes | 3 actions; a good design needs about 2 |
 | A086 | Count the cash drawer | daily | 100 | A | 2 | 0 | 1 | 0 | 0 | 0.2 s | no | — |
 | A087 | Review tomorrow's insurance verification list | daily | 100 | A | 0 | 1 | 0 | 0 | 0 | 0.1 s | yes | — |
 | A088 | Send a financing application | daily | 96 | A | 1 | 1 | 0 | 0 | 1 | 0.1 s | no | 1 dialog opened |
 | A089 | Refer a patient to a specialist | daily | 83 | B | 3 | 0 | 1 | 0 | 1 | 0.5 s | no | 4 actions; a good design needs about 3; Refer out (chart): the specialist starts on "Choose…" and the referring provider on "—" although the signed-in dentist and the office’s usual endodontist are known (the Referrals page fills them); 1 dialog opened |
 | A090 | Add a family member to a household | daily | 84 | B | 2 | 2 | 2 | 0 | 1 | 0.3 s | no | 6 actions; a good design needs about 4; 1 dialog opened |
-| A091 | Add a secondary insurance policy | daily | 85 | B | 4 | 1 | 2 | 0 | 1 | 0.6 s | no | 7 actions; a good design needs about 6; Adding a second policy starts on Priority "primary" although the patient already has a primary; 1 dialog opened |
+| A091 | Add a secondary insurance policy | daily | 90 | A | 4 | 1 | 2 | 0 | 1 | 0.5 s | no | 7 actions; a good design needs about 6; 1 dialog opened |
 | A092 | Record who referred a new patient | daily | 96 | A | 2 | 0 | 0 | 0 | 1 | 0.2 s | no | 1 dialog opened |
 | A093 | Work the broken-appointments list | daily | 96 | A | 1 | 1 | 0 | 0 | 1 | 0.6 s | no | 1 dialog opened |
 | A094 | Text a reminder to everyone unconfirmed | daily | 100 | A | 2 | 0 | 0 | 1 | 0 | 0.9 s | no | — |
@@ -300,20 +329,20 @@ Real defects seen while measuring (phase 2 fixes them). Evidence screenshots are
 | A097 | Change a patient's recall interval | daily | 82 | B | 3 | 1 | 2 | 0 | 0 | 0.2 s | no | 6 actions; a good design needs about 3 |
 | A098 | Change a patient's usual provider or hygienist | daily | 88 | B | 2 | 0 | 0 | 0 | 1 | 0.2 s | no | The patient’s usual dentist/hygienist isn’t on the chart overview: Edit patient → All fields; 1 dialog opened |
 | A099 | Add an office alert to a patient | daily | 87 | B | 3 | 0 | 1 | 0 | 1 | 0.4 s | no | 4 actions; a good design needs about 3; The office alert is only in the full Edit form (a dialog), not editable in place on the chart like phone and address; 1 dialog opened |
-| A100 | See who is clocked in today | daily | 78 | C | 0 | 4 | 0 | 1 | 0 | 0.7 s | yes | 4 actions; a good design needs about 2; Command bar: typing "who’s in today" doesn’t put "who’s in today" first — Enter would open "search all documents for “who’s in today” 0 found"; the person has to arrow down 1× |
+| A100 | See who is clocked in today | daily | 94 | A | 0 | 3 | 0 | 1 | 0 | 0.8 s | yes | 3 actions; a good design needs about 2 |
 | A101 | Record an orthodontic adjustment visit | daily | 72 | C | 5 | 0 | 3 | 0 | 1 | 0.7 s | no | 8 actions; a good design needs about 4; 1 dialog opened |
-| A102 | Void a payment posted by mistake | weekly | 96 | A | 2 | 0 | 1 | 0 | 1 | 0.4 s | no | 1 dialog opened |
+| A102 | Void a payment posted by mistake | weekly | 96 | A | 2 | 0 | 1 | 0 | 1 | 0.5 s | no | 1 dialog opened |
 | A103 | Look up remaining lab cases / what is overdue | weekly | 94 | A | 2 | 0 | 0 | 1 | 0 | 0.5 s | no | 2 actions; a good design needs about 1 |
-| A104 | Look at the production & collections report | weekly | 100 | A | 0 | 3 | 0 | 1 | 0 | 1.7 s | yes | — |
-| A105 | Check practice KPIs and metrics | weekly | 94 | A | 0 | 3 | 0 | 1 | 0 | 0.9 s | yes | 3 actions; a good design needs about 2 |
+| A104 | Look at the production & collections report | weekly | 100 | A | 0 | 3 | 0 | 1 | 0 | 1.8 s | yes | — |
+| A105 | Check practice KPIs and metrics | weekly | 94 | A | 0 | 3 | 0 | 1 | 0 | 0.8 s | yes | 3 actions; a good design needs about 2 |
 | A106 | Resend or fix a rejected claim | weekly | 85 | B | 1 | 0 | 0 | 0 | 0 +1 browser box | 1.1 s | no | Corrected claim asks for the payer’s original claim number in a browser prompt box; 1 "are you sure?"/browser box |
-| A107 | Fix a missed time-clock punch | weekly | 71 | C | 5 | 0 | 3 | 0 | 0 | 0.5 s | no | 8 actions; a good design needs about 4; Add missed time starts on today 8:00–5:00; today’s times are refused until 5 PM ("Clock-out can’t be in the future") and most missed punches are from an earlier day, so both dates are retyped |
+| A107 | Fix a missed time-clock punch | weekly | 100 | A | 3 | 0 | 1 | 0 | 0 | 0.8 s | no | — |
 | A108 | Read the office manual (intranet) | weekly | 94 | A | 0 | 3 | 0 | 1 | 0 | 0.7 s | yes | 3 actions; a good design needs about 2 |
 | A109 | Appeal a denied claim | weekly | 100 | A | 0 | 2 | 0 | 0 | 0 | 0.1 s | yes | — |
 | A110 | Refund a credit balance | weekly | 100 | A | 0 | 2 | 0 | 0 | 0 | 0.1 s | yes | — |
 | A111 | Order supplies that are running low | weekly | 100 | A | 0 | 2 | 0 | 0 | 0 | 0.1 s | yes | — |
 | A112 | Receive a supply delivery | weekly | 100 | A | 1 | 0 | 0 | 0 | 0 | 0.1 s | no | — |
-| A113 | Set up a payment plan | weekly | 91 | A | 2 | 0 | 1 | 0 | 1 | 0.2 s | no | New payment plan: "Total" starts empty although the patient’s balance is known; 1 dialog opened |
+| A113 | Set up a payment plan | weekly | 96 | A | 2 | 0 | 0 | 0 | 1 | 0.2 s | no | 1 dialog opened |
 | A114 | Void or correct a claim | weekly | 95 | A | 1 | 0 | 0 | 0 | 0 +1 browser box | 0.8 s | no | Void at payer asks for the payer’s claim number in a browser prompt box (the ERA/claim status may already have it) |
 | A115 | Block time on the schedule (meeting, lunch) | weekly | 96 | A | 3 | 0 | 0 | 0 | 1 | 0.3 s | no | 1 dialog opened |
 | A116 | Reply to an online review | weekly | BLOCKED |  |  |  |  |  |  |  |  | Reviews: Google Business Profile isn’t connected in the demo office |
@@ -324,56 +353,56 @@ Real defects seen while measuring (phase 2 fixes them). Evidence screenshots are
 | A121 | Merge duplicate patient charts | weekly | 100 | A | 0 | 3 | 0 | 0 | 0 | 0.2 s | yes | — |
 | A122 | Approve payroll hours | weekly | 100 | A | 0 | 3 | 0 | 1 | 0 | 0.8 s | yes | — |
 | A123 | Edit staff work schedules | weekly | 100 | A | 2 | 0 | 0 | 0 | 0 | 0.7 s | no | — |
-| A124 | Review insurance A/R aging | weekly | 79 | C | 2 | 3 | 0 | 2 | 0 | 3.1 s | no | 5 actions; a good design needs about 2; 2 screen changes |
+| A124 | Review insurance A/R aging | weekly | 94 | A | 0 | 3 | 0 | 1 | 0 | 1.1 s | yes | 3 actions; a good design needs about 2 |
 | A125 | Check what the recall autopilot did | weekly | 88 | B | 0 | 3 | 0 | 1 | 0 | 0.9 s | yes | 3 actions; a good design needs about 1 |
 | A126 | Check treatment follow-up results | weekly | 88 | B | 0 | 3 | 0 | 1 | 0 | 0.8 s | yes | 3 actions; a good design needs about 1 |
 | A127 | Reconcile insurance payments with the bank | weekly | 100 | A | 0 | 3 | 0 | 1 | 0 | 1.8 s | yes | — |
 | A128 | Review phone results (missed calls, why they didn't book) | weekly | 94 | A | 0 | 3 | 0 | 1 | 0 | 0.7 s | yes | 3 actions; a good design needs about 2 |
-| A129 | Review schedule capacity | weekly | 72 | C | 0 | 4 | 0 | 1 | 0 | 0.8 s | yes | 4 actions; a good design needs about 1; Command bar: typing "capacity" doesn’t put "capacity" first — Enter would open "search all documents for “capacity” 0 found"; the person has to arrow down 1× |
+| A129 | Review schedule capacity | weekly | 88 | B | 0 | 3 | 0 | 1 | 0 | 0.9 s | yes | 3 actions; a good design needs about 1 |
 | A130 | Read patient feedback | weekly | 88 | B | 0 | 3 | 0 | 1 | 0 | 1.0 s | yes | 3 actions; a good design needs about 1 |
 | A131 | Check my bonus | weekly | 88 | B | 0 | 3 | 0 | 1 | 0 | 0.7 s | yes | 3 actions; a good design needs about 1 |
 | A132 | Log a sterilizer spore test | weekly | 100 | A | 3 | 0 | 0 | 0 | 0 | 0.3 s | no | — |
 | A133 | Request time off | weekly | 100 | A | 2 | 0 | 1 | 0 | 0 | 0.9 s | no | — |
 | A134 | Approve a time-off request | weekly | 100 | A | 1 | 0 | 0 | 0 | 0 | 0.9 s | no | — |
 | A135 | Post an announcement for the team | monthly | 82 | B | 1 | 3 | 2 | 0 | 0 | 1.2 s | no | 6 actions; a good design needs about 3 |
-| A136 | Send a newsletter or campaign | monthly | 76 | C | 3 | 0 | 1 | 0 | 1 +1 browser box | 2.4 s | no | The template goes out with an unfilled placeholder ("[date]") — nothing stops a campaign being sent to every patient with it; 1 dialog opened; 1 "are you sure?"/browser box |
+| A136 | Send a newsletter or campaign | monthly | 96 | A | 3 | 1 | 1 | 0 | 1 | 1.7 s | no | 1 dialog opened |
 | A137 | See what pays (business view) | monthly | 88 | B | 0 | 3 | 0 | 0 | 0 | 0.8 s | yes | 3 actions; a good design needs about 1 |
-| A138 | Export payroll | monthly | 78 | C | 0 | 4 | 0 | 1 | 0 | 0.8 s | yes | 4 actions; a good design needs about 2; Command bar: typing "payroll export" doesn’t put "payroll export" first — Enter would open "search all documents for “payroll export” 0 found"; the person has to arrow down 1× |
-| A139 | Add an insurance carrier | monthly | 57 | F | 6 | 2 | 2 | 2 | 1 | 1.1 s | no | 10 actions; a good design needs about 4; 2 screen changes; 1 dialog opened |
-| A140 | Ask a question about your numbers | monthly | 78 | C | 0 | 4 | 0 | 1 | 0 | 0.9 s | yes | 4 actions; a good design needs about 2; Command bar: typing "ask your data" doesn’t put "ask your data" first — Enter would open "search all documents for “ask your data” 0 found"; the person has to arrow down 1× |
+| A138 | Export payroll | monthly | 94 | A | 0 | 3 | 0 | 1 | 0 | 0.8 s | yes | 3 actions; a good design needs about 2 |
+| A139 | Add an insurance carrier | monthly | 69 | D | 4 | 2 | 2 | 2 | 1 | 0.9 s | no | 8 actions; a good design needs about 4; 2 screen changes; 1 dialog opened |
+| A140 | Ask a question about your numbers | monthly | 94 | A | 0 | 3 | 0 | 1 | 0 | 0.8 s | yes | 3 actions; a good design needs about 2 |
 | A141 | Give a patient a copy of their record | monthly | 100 | A | 2 | 0 | 0 | 0 | 0 | 0.1 s | no | — |
-| A142 | Export a report to a spreadsheet | monthly | 88 | B | 1 | 3 | 0 | 1 | 0 | 1.7 s | no | 4 actions; a good design needs about 2 |
+| A142 | Export a report to a spreadsheet | monthly | 88 | B | 1 | 3 | 0 | 1 | 0 | 1.6 s | no | 4 actions; a good design needs about 2 |
 | A143 | Correct a patient's name or date of birth | monthly | 84 | B | 3 | 1 | 1 | 0 | 1 | 0.5 s | no | 5 actions; a good design needs about 3; 1 dialog opened |
-| A144 | Compare offices (group view) | monthly | 72 | C | 0 | 4 | 0 | 1 | 0 | 1.0 s | yes | 4 actions; a good design needs about 1; Command bar: typing "group" doesn’t put "group" first — Enter would open "search all documents for “group” 0 found"; the person has to arrow down 1× |
+| A144 | Compare offices (group view) | monthly | 88 | B | 0 | 3 | 0 | 1 | 0 | 0.7 s | yes | 3 actions; a good design needs about 1 |
 | A145 | Switch to another office | monthly | BLOCKED |  |  |  |  |  |  |  |  | The demo practice has one office, so there is nothing to switch to |
-| A146 | Close the month | monthly | 84 | B | 0 | 5 | 0 | 1 | 0 | 2.0 s | yes | 5 actions; a good design needs about 4; Command bar: typing "month-end close" doesn’t put "month-end close" first — Enter would open "search all documents for “month-end close” 0 found"; the person has to arrow down 1× |
+| A146 | Close the month | monthly | 100 | A | 0 | 4 | 0 | 1 | 0 | 1.3 s | yes | — |
 | A147 | Send an account to collections | monthly | 84 | B | 2 | 0 | 0 | 0 | 1 +1 browser box | 1.6 s | no | 1 dialog opened; 1 "are you sure?"/browser box; 1 unlabeled box/button |
 | A148 | Reconcile the bank and books (Finance) | monthly | 100 | A | 0 | 3 | 0 | 1 | 0 | 0.8 s | yes | — |
-| A149 | Look at marketing results | monthly | 72 | C | 0 | 4 | 0 | 1 | 0 | 1.1 s | yes | 4 actions; a good design needs about 1; Command bar: typing "marketing results" doesn’t put "marketing results" first — Enter would open "search all documents for “marketing results” 0 found"; the person has to arrow down 1× |
-| A150 | Check the hygiene report | monthly | 85 | B | 1 | 3 | 0 | 2 | 0 | 2.6 s | no | 4 actions; a good design needs about 2; 2 screen changes |
-| A151 | Check treatment plan acceptance | monthly | 69 | D | 1 | 4 | 0 | 2 | 0 | 2.7 s | no | 5 actions; a good design needs about 2; Command bar: typing "practice kpis" doesn’t put "practice kpis" first — Enter would open "search all documents for “practice kpis” 0 found"; the person has to arrow down 1×; 2 screen changes |
-| A152 | Check where new patients come from (referrals report) | monthly | 85 | B | 1 | 3 | 0 | 2 | 0 | 2.6 s | no | 4 actions; a good design needs about 2; 2 screen changes |
+| A149 | Look at marketing results | monthly | 88 | B | 0 | 3 | 0 | 1 | 0 | 0.8 s | yes | 3 actions; a good design needs about 1 |
+| A150 | Check the hygiene report | monthly | 94 | A | 0 | 3 | 0 | 1 | 0 | 1.6 s | yes | 3 actions; a good design needs about 2 |
+| A151 | Check treatment plan acceptance | monthly | 94 | A | 0 | 3 | 0 | 1 | 0 | 1.6 s | yes | 3 actions; a good design needs about 2 |
+| A152 | Check where new patients come from (referrals report) | monthly | 94 | A | 0 | 3 | 0 | 1 | 0 | 1.5 s | yes | 3 actions; a good design needs about 2 |
 | A153 | File an office document (OSHA, policy) | monthly | 100 | A | 1 | 1 | 0 | 0 | 0 | 0.1 s | no | — |
 | A154 | Update the office fee schedule (+X%) | monthly | 97 | A | 3 | 1 | 0 | 2 | 0 | 1.0 s | no | 2 screen changes |
 | A155 | Update an insurance (PPO) fee schedule | monthly | NOT YET MEASURED |  |  |  |  |  |  |  |  | No robot script yet |
-| A156 | Add a staff member's login | monthly | 57 | F | 7 | 0 | 3 | 2 | 1 | 1.3 s | no | 10 actions; a good design needs about 5; "+ Invite user" opens "New user" and asks the manager to make up a temporary password to pass on, instead of emailing an invitation link; 2 screen changes |
+| A156 | Add a staff member's login | monthly | 79 | C | 4 | 1 | 2 | 2 | 1 | 0.9 s | no | 7 actions; a good design needs about 5; 2 screen changes; 1 dialog opened |
 | A157 | Change a staff member's permissions | monthly | 85 | B | 4 | 0 | 0 | 2 | 1 | 0.9 s | no | 4 actions; a good design needs about 3; 2 screen changes; 1 dialog opened |
 | A158 | Build or schedule a custom report | monthly | 100 | A | 2 | 0 | 0 | 1 | 0 | 1.7 s | no | — |
 | A159 | Check that backups ran | monthly | 97 | A | 2 | 0 | 0 | 2 | 0 | 0.6 s | no | 2 screen changes |
 | A160 | Look up who changed something (audit log) | monthly | 85 | B | 3 | 1 | 1 | 2 | 0 | 1.5 s | no | 5 actions; a good design needs about 3; 2 screen changes |
-| A161 | Edit a note template | monthly | 68 | D | 6 | 0 | 2 | 2 | 1 | 1.3 s | no | 8 actions; a good design needs about 4; 2 screen changes; 1 dialog opened |
+| A161 | Edit a note template | monthly | 68 | D | 6 | 0 | 2 | 2 | 1 | 1.2 s | no | 8 actions; a good design needs about 4; 2 screen changes; 1 dialog opened |
 | A162 | Set up the team bonus | monthly | NOT YET MEASURED |  |  |  |  |  |  |  |  | No robot script yet |
 | A163 | Set up a perfect-day schedule template | monthly | NOT YET MEASURED |  |  |  |  |  |  |  |  | No robot script yet |
-| A164 | Add an appointment type | rare | 62 | D | 6 | 2 | 2 | 2 | 1 | 1.0 s | no | 10 actions; a good design needs about 5; 2 screen changes; 1 dialog opened |
-| A165 | Add a procedure code | rare | 60 | D | 7 | 0 | 3 | 2 | 1 | 1.3 s | no | 10 actions; a good design needs about 5; 2 screen changes; 1 dialog opened |
+| A164 | Add an appointment type | rare | 75 | C | 4 | 2 | 2 | 2 | 1 | 1.0 s | no | 8 actions; a good design needs about 5; 2 screen changes; 1 dialog opened |
+| A165 | Add a procedure code | rare | 67 | D | 3 | 3 | 3 | 2 | 1 | 0.9 s | no | 9 actions; a good design needs about 5; 2 screen changes; 1 dialog opened |
 | A166 | Edit a form or consent | rare | NOT YET MEASURED |  |  |  |  |  |  |  |  | No robot script yet |
 | A167 | Change reminder and message settings | rare | NOT YET MEASURED |  |  |  |  |  |  |  |  | No robot script yet |
 | A168 | Record a patient complaint or incident | rare | MISSING |  |  |  |  |  |  |  |  | Not in the app |
 | A169 | Log an exposure or sharps injury | rare | MISSING |  |  |  |  |  |  |  |  | Not in the app |
 | A170 | Track staff licenses, CPR and CE due dates | rare | NOT YET MEASURED |  |  |  |  |  |  |  |  | No robot script yet |
 | A171 | Write a letter to a patient from a template | rare | MISSING |  |  |  |  |  |  |  |  | Not in the app |
-| A172 | Add a provider | rare | 93 | A | 5 | 0 | 1 | 2 | 1 | 1.0 s | no | 2 screen changes; 1 dialog opened |
-| A173 | Add an operatory (chair) | rare | 75 | C | 5 | 1 | 1 | 2 | 1 | 0.9 s | no | 7 actions; a good design needs about 4; 2 screen changes; 1 dialog opened |
+| A172 | Add a provider | rare | 93 | A | 3 | 1 | 1 | 2 | 1 | 0.7 s | no | 2 screen changes; 1 dialog opened |
+| A173 | Add an operatory (chair) | rare | 87 | B | 3 | 1 | 1 | 2 | 1 | 0.8 s | no | 5 actions; a good design needs about 4; 2 screen changes; 1 dialog opened |
 | A174 | Change my password | rare | 85 | B | 4 | 0 | 2 | 2 | 0 | 1.1 s | no | 6 actions; a good design needs about 4; 2 screen changes |
 | A175 | Record a HIPAA disclosure (accounting of disclosures) | rare | MISSING |  |  |  |  |  |  |  |  | Not in the app |
 | A176 | Sell a product (toothbrush, whitening kit) | rare | MISSING |  |  |  |  |  |  |  |  | Not in the app |

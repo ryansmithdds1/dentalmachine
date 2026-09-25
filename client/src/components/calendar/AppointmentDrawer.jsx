@@ -139,7 +139,7 @@ export default function AppointmentDrawer({ appt: a, can, onClose, onStatus, onS
         {w && active && a.status === 'scheduled' && (
           <div className="drawer-actions">
             <select value="" aria-label="Confirm" onChange={(e) => e.target.value && onStatus(e.target.value === 'left_message' ? 'scheduled' : 'confirmed', null, { confirmed_via: e.target.value })} style={{ width: 'auto' }}>
-              <option value="">Confirm…</option>
+              <option value="">Confirm… (C = by phone)</option>
               {CONFIRM.map(([v, l]) => <option key={v} value={v}>Confirmed {l.toLowerCase()}</option>)}
               <option value="left_message">Left a message</option>
             </select>
@@ -167,7 +167,7 @@ export default function AppointmentDrawer({ appt: a, can, onClose, onStatus, onS
         )}
         {a.status === 'completed' && onCheckout && w && (
           <div className="drawer-actions">
-            <button className={a.checked_out_at ? '' : 'primary'} onClick={onCheckout}>{a.checked_out_at ? 'Checkout & walkout' : 'Check out…'}</button>
+            <button className={a.checked_out_at ? '' : 'primary'} onClick={onCheckout} title="Checkout (O on the finished visit)">{a.checked_out_at ? 'Checkout & walkout' : 'Check out…'}{kbd(STEP_KEYS.out)}</button>
           </div>
         )}
         <dl className="kv" style={{ gridTemplateColumns: '110px 1fr' }}>

@@ -19,6 +19,11 @@ const VIEWS = [
   ['A149', 'admin', 'marketing results', 'main h1, main h2', 'Press Ctrl/⌘K, type "marketing results", Enter'],
   ['A078', 'dentist', 'x-ray ai review', 'main h1, main h2', 'Press Ctrl/⌘K, type "x-ray AI review", Enter'],
   ['A095', 'dentist', 'chart audit', 'main h1, main h2', 'Press Ctrl/⌘K, type "chart audit", Enter: notes to sign and charts to fix'],
+  // Report tabs, by name from the command bar (they used to be Reports → the tab → a button).
+  ['A124', 'billing', 'a/r aging', '.seg button.active:has-text("A/R aging")', 'Press Ctrl/⌘K, type "A/R aging", Enter: who owes what, by age'],
+  ['A150', 'admin', 'hygiene report', 'main .tabs button.active:has-text("Hygiene")', 'Press Ctrl/⌘K, type "hygiene report", Enter'],
+  ['A151', 'admin', 'treatment plan acceptance', 'main .tabs button.active:has-text("Treatment plans")', 'Press Ctrl/⌘K, type "treatment plan acceptance", Enter'],
+  ['A152', 'admin', 'referrals report', 'main .tabs button.active:has-text("Referrals")', 'Press Ctrl/⌘K, type "referrals report", Enter: where new patients come from'],
 ];
 
 const scripts = {};
@@ -28,31 +33,6 @@ for (const [id, role, words, ready, caption] of VIEWS) {
     async run(t) {
       await t.open('/schedule', '.sidebar');
       await viaCommandBar(t, words, ready, caption);
-    },
-  };
-}
-
-// Report tabs with no command-bar entry: Reports, then the tab.
-const TABS = [
-  ['A124', 'billing', 'Day sheet, production & A/R', 'A/R aging'],
-  ['A150', 'admin', 'Hygiene', null],
-  ['A151', 'admin', 'Treatment plans', null],
-  ['A152', 'admin', 'Referrals', null],
-];
-for (const [id, role, tab, sub] of TABS) {
-  scripts[id] = {
-    role,
-    async run(t) {
-      await t.open('/schedule', '.sidebar');
-      await viaCommandBar(t, 'practice kpis', 'main .tabs', 'Press Ctrl/⌘K, type "practice KPIs", Enter: Reports opens');
-      await t.step(`Click the "${tab}" tab`, async () => {
-        await t.click(`main .tabs button:has-text("${tab}")`);
-        await t.wait(800);
-      });
-      if (sub) {
-        const b = t.page.locator(`main button:has-text("${sub}")`).first();
-        if (await b.count()) await t.step(`Click "${sub}"`, async () => { await t.click(b); await t.wait(600); });
-      }
     },
   };
 }

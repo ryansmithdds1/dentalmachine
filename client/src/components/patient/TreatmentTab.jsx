@@ -119,9 +119,11 @@ export default function TreatmentTab({ patient, onChange }) {
                 {!plan.signed_at && plan.presented_at && ` · Sent to patient ${fmtDate(plan.presented_at)}`}
               </div>
             </div>
-            {can('clinical:write') && plan.status !== 'completed' && (
+            {/* Clinical staff change and present the plan; the billing team (billing:write) pre-authorizes it —
+                the same permission the server asks for (POST /preauths). */}
+            {(can('clinical:write') || can('billing:write')) && plan.status !== 'completed' && (
               <div className="actions">
-                {!plan.signed_at && <button className="small primary" onClick={() => setPresenting(plan)}>Present & e-sign…</button>}
+                {can('clinical:write') && !plan.signed_at && <button className="small primary" onClick={() => setPresenting(plan)}>Present & e-sign…</button>}
                 {plan.estimate?.policy && can('billing:write') && plan.procedures.some((p) => p.status === 'planned') && (
                   <button className="small" title="Makes the pre-authorization and sends it to the payer" onClick={() => act(async () => {
                     // Workflow 38: made and sent in one step (the 837 file only when no clearinghouse is connected).
@@ -132,10 +134,10 @@ export default function TreatmentTab({ patient, onChange }) {
                 )}
                 <button className="small" onClick={() => window.open(`/treatment-plans/${plan.id}/print`, '_blank')}>Print</button>
                 <button className="small" onClick={() => download(`/treatment-plans/${plan.id}/pdf`, 'treatment-plan.pdf')}>PDF</button>
-                {plan.procedures.some((p) => p.status === 'planned') && <button className="small" title="Informed consent for this plan's procedures" onClick={() => setConsent(plan)}>Consent…</button>}
-                {plan.status !== 'rejected' && <button className="small" onClick={() => setAdding(plan)}>+ Add work</button>}
-                {plan.status === 'proposed' && <button className="small" title="A copy of this plan's unstarted work to change into another option (e.g. implant vs bridge). Accepting one option declines the others." onClick={() => act(() => api.post(`/treatment-plans/${plan.id}/duplicate`, {}))}>+ Alternative</button>}
-                {plan.status !== 'rejected' && (
+                {can('clinical:write') && plan.procedures.some((p) => p.status === 'planned') && <button className="small" title="Informed consent for this plan's procedures" onClick={() => setConsent(plan)}>Consent…</button>}
+                {can('clinical:write') && plan.status !== 'rejected' && <button className="small" onClick={() => setAdding(plan)}>+ Add work</button>}
+                {can('clinical:write') && plan.status === 'proposed' && <button className="small" title="A copy of this plan's unstarted work to change into another option (e.g. implant vs bridge). Accepting one option declines the others." onClick={() => act(() => api.post(`/treatment-plans/${plan.id}/duplicate`, {}))}>+ Alternative</button>}
+                {can('clinical:write') && plan.status !== 'rejected' && (
                   <InlineEdit
                     label="Discount on the patient's share (%) — posted as an adjustment as each procedure is done" suffix="%" width={64}
                     value={String(plan.discount_pct || 0)} display={<span className="small-button">Discount{plan.discount_pct ? ` ${plan.discount_pct}%` : '…'}</span>}
@@ -143,8 +145,8 @@ export default function TreatmentTab({ patient, onChange }) {
                     onSave={(v) => withUndo(`Discount set to ${Number(v)}%`, () => api.put(`/treatment-plans/${plan.id}`, { discount_pct: Number(v) }), () => api.put(`/treatment-plans/${plan.id}`, { discount_pct: plan.discount_pct || 0 }))}
                   />
                 )}
-                {plan.status === 'proposed' && <button className="small" onClick={() => act(() => api.put(`/treatment-plans/${plan.id}`, { status: 'accepted' }))}>Accepted verbally</button>}
-                {plan.status === 'proposed' && <button className="small danger" onClick={() => act(() => api.put(`/treatment-plans/${plan.id}`, { status: 'rejected' }))}>Declined</button>}
+                {can('clinical:write') && plan.status === 'proposed' && <button className="small" onClick={() => act(() => api.put(`/treatment-plans/${plan.id}`, { status: 'accepted' }))}>Accepted verbally</button>}
+                {can('clinical:write') && plan.status === 'proposed' && <button className="small danger" onClick={() => act(() => api.put(`/treatment-plans/${plan.id}`, { status: 'rejected' }))}>Declined</button>}
               </div>
             )}
           </div>

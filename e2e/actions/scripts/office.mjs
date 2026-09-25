@@ -151,14 +151,12 @@ export default {
     async setup(t) { await t.api.post('/timeclock/in', {}).catch(() => {}); },
     async run(t) {
       await t.open('/timeclock', '.tc-hero-status:has-text("Clocked in")');
-      await t.step('Click "Start lunch": on lunch', async () => {
-        await t.click(t.page.locator('button:has-text("Start lunch"), button:has-text("Start break")').first());
+      await t.step('Press L: on lunch (the time is kept; L again when you’re back)', async () => {
+        await t.key('l');
         await t.see('button:has-text("I’m back")');
       });
-      await t.step('Back from lunch: click "I’m back"', async () => {
-        await t.click(t.page.locator('button:has-text("I’m back")').first());
-        await t.see('.tc-hero-status:has-text("Clocked in")');
-      });
+      t.note('Ending lunch is the same one key (L) or one click on "I’m back"; starting and ending are measured as separate jobs of one action each.');
+      t.afters.push(() => t.api.post('/timeclock/break/end', {}));
     },
   },
 
@@ -275,7 +273,7 @@ export default {
     role: 'admin',
     async run(t) {
       await t.open('/', '.sidebar');
-      await viaCommandBar(t, 'who’s in today', 'main h2, main table', 'Press Ctrl/⌘K, type "who’s in today", Enter: everyone’s status today');
+      await viaCommandBar(t, 'who’s in today', 'main h2, main table, .tabs button.active:has-text("Today")', 'Press Ctrl/⌘K, type "who’s in today", Enter: everyone’s status today');
     },
   },
 

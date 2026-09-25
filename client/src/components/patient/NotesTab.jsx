@@ -97,7 +97,9 @@ export default function NotesTab({ patient }) {
             {!n.signed && editing?.id !== n.id && (
               <div className="form-actions" style={{ marginTop: 8 }}>
                 {(n.author_id === user.id || user.role === 'admin') && <button className="small" onClick={() => setEditing({ id: n.id, body: n.body })}>Edit</button>}
-                {can('clinical:sign') && <button className="small primary" onClick={() => act(() => api.post(`/notes/${n.id}/sign`))}>Sign</button>}
+                {/* Sign only for someone who may sign this note; otherwise say who signs it (the server's rule). */}
+                {can('clinical:sign') && n.can_sign !== false && <button className="small primary" onClick={() => act(() => api.post(`/notes/${n.id}/sign`))}>Sign</button>}
+                {can('clinical:sign') && n.sign_blocker && <span className="muted note-sign-blocker" style={{ fontSize: 12 }}>{n.sign_blocker.replace(/^Only (.+) can sign this note$/, 'Waiting for $1 to sign')}</span>}
               </div>
             )}
             {n.addenda?.map((a) => (

@@ -13,7 +13,8 @@ everyone who hasn't confirmed". Most confirmations already happen automatically 
 ## Target: 1 action per row
 | Step | Keys / clicks | Actions (measured) |
 |---|---|---|
-| Open the day's unconfirmed list from the schedule | click "N unconfirmed" (or the command bar: "Schedule: unconfirmed visits") | **1** |
+| Confirm the visit in front of you on the schedule (focused or open in the panel) | **C** (Undo shows) | **1** |
+| Open the day's unconfirmed list from the schedule | **U**, or click "N unconfirmed" (or the command bar: "Schedule: unconfirmed visits") | **1** |
 | Confirm the row the keyboard is on (by phone) | C | **1** per row |
 | Move between rows | J / K | 1 |
 | Select rows, confirm them all | X on each, Shift+C (or "Confirm N selected") | 2 per row + 1 |
@@ -45,3 +46,9 @@ everyone who hasn't confirmed". Most confirmations already happen automatically 
 - `e2e/workflows/09-10-13-19-schedule.test.mjs` (#13): pill = 1 click to the day's list; text all = 1 click
   ("Reminder sent to 3"); C = 1 key per row; Ctrl+Z restores the last one on the server; X/J/Shift+C confirms the
   rest.
+
+## Phase 2 batch 1A: confirming from the schedule
+C on a selected visit nobody has confirmed yet confirms it by phone through the same route as the list
+(`POST /followups/unconfirmed/confirm`, idempotent, audited), with Undo; on any other visit, or with none selected,
+C is still the Chairs view. U opens the day's unconfirmed list. `e2e/workflows/09-10-13-19-schedule.test.mjs`
+(#13 on the schedule): C = 1 key, confirmed once however often it's pressed, Undo restores it on the server, U = 1 key.

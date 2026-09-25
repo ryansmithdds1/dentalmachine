@@ -185,7 +185,7 @@ export default function phoneCoachRoutes({ db, config = {}, messenger = null, sc
     const head = patient.guarantor_id || patient.id;
     const people = req.query.family === '1' ? (await db.all('SELECT id FROM patients WHERE practice_id = ? AND (id = ? OR guarantor_id = ?)', req.user.practice_id, head, head)).map((p) => p.id) : [patient.id];
     const rows = await db.all(
-      `SELECT c.id, c.patient_id, c.direction, c.purpose, c.outcome, c.desk_result, c.duration, c.summary, c.call_type, c.agent_id, c.appointment_id, c.created_at,
+      `SELECT c.id, c.patient_id, c.direction, c.purpose, c.outcome, c.desk_result, c.duration, c.summary, c.notes, c.caller_name, c.call_type, c.agent_id, c.appointment_id, c.created_at,
          c.recording_key IS NOT NULL AS has_recording, c.transcript IS NOT NULL AS has_transcript, u.name AS agent_name, p.first_name, n.reason AS no_book_reason
        FROM calls c LEFT JOIN users u ON u.id = c.agent_id LEFT JOIN patients p ON p.id = c.patient_id LEFT JOIN call_no_book n ON n.call_id = c.id
        WHERE c.practice_id = ? AND c.patient_id IN (${people.map(() => '?').join(',')}) ORDER BY c.created_at DESC LIMIT 200`, req.user.practice_id, ...people,

@@ -30,3 +30,18 @@
 .phones-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 12px; }
 .protocol-step { display: grid; grid-template-columns: 1fr 70px 90px 28px; gap: 6px; align-items: center; margin-bottom: 4px; }
 @media (max-width: 640px) { .protocol-step { grid-template-columns: 1fr 60px; } }
+
+/* Log a call (A053): a side panel from any screen, or inline on the chart's Calls card. Not a dialog. */
+.side-panel { position: fixed; top: 64px; right: 16px; width: 380px; max-width: calc(100vw - 32px); max-height: calc(100vh - 80px); overflow-y: auto; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-lg); z-index: 45; padding: 14px 16px; animation: slide-in 0.16s ease-out; }
+.logcall { display: flex; flex-direction: column; gap: 10px; }
+.logcall-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.logcall-head h2 { margin: 0; font-size: 16px; }
+.logcall-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.logcall-row .chip kbd { margin-left: 4px; font-size: 10px; opacity: .7; }
+.logcall-row select { width: auto; }
+.logcall-recent { background: var(--info-soft); border-radius: var(--radius-sm); padding: 8px 10px; font-size: 13px; display: flex; flex-direction: column; gap: 4px; }
+.logcall-recent .checkbox { color: var(--text); }
+.logcall .form-actions kbd { margin-left: 4px; }
+.card .logcall { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 10px; }
+.call-note { white-space: pre-wrap; font-size: 12.5px; }
+@media (max-width: 600px) { .side-panel { top: auto; bottom: 0; right: 0; left: 0; width: auto; max-width: none; border-radius: 16px 16px 0 0; } }

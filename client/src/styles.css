@@ -807,7 +807,11 @@ a.button.primary { background: var(--primary); color: #fff; }
 
 /* ---- Imaging studio (always dark: x-rays are read on black) ---- */
 body.studio-open { overflow: hidden; }
-.studio { position: fixed; inset: 0; z-index: 45; background: #0a0d14; color: #e5e9f0; display: flex; flex-direction: column; animation: toast-in 0.14s ease-out; }
+/* A full view of the page area, not a dialog: the menu stays on the left (Schedule, the command bar, the other
+   modules are one click away) and Esc or ✕ goes back to the chart. On a phone it takes the whole screen. */
+.studio { position: fixed; inset: 0 0 0 var(--rail-w); z-index: 39; background: #0a0d14; color: #e5e9f0; display: flex; flex-direction: column; animation: toast-in 0.14s ease-out; }
+.rail-open .studio { left: var(--rail-open-w); }
+@media (max-width: 800px) { .studio, .rail-open .studio { inset: 0; z-index: 45; } }
 .studio-top { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid #1c2330; background: #0d111a; flex-wrap: wrap; }
 .studio-title { display: flex; flex-direction: column; line-height: 1.2; margin-right: 6px; }
 .studio-title strong { font-size: 15px; }
@@ -1427,3 +1431,11 @@ button.assist-fab.busy { animation: assist-busy 1.4s ease-in-out infinite; }
 /* Patient picker rows (↑/↓ to move). */
 .picker-row { padding: 7px 10px; cursor: pointer; border-radius: 6px; }
 .picker-row.hl { background: var(--subtle, #f1f5f9); }
+
+/* A short note above a form: what this person can and can't do here, said before they start typing. */
+.notice { padding: 8px 12px; margin: 0 0 10px; border-radius: 8px; background: var(--panel-2, var(--panel)); border: 1px solid var(--border); font-size: 13px; }
+.notice.warn { background: color-mix(in srgb, var(--warn) 12%, var(--panel)); border-color: color-mix(in srgb, var(--warn) 40%, var(--border)); }
+/* Campaigns: blanks left in the message ("[date]"), each a button that selects it for typing over. */
+.campaign-blanks { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; padding: 6px 10px; border-radius: 8px; font-size: 13px; background: color-mix(in srgb, var(--warn) 12%, var(--panel)); border: 1px solid color-mix(in srgb, var(--warn) 40%, var(--border)); }
+.campaign-confirm { align-items: center; gap: 10px; padding: 10px 12px; border-radius: 8px; background: color-mix(in srgb, var(--warn) 10%, var(--panel)); }
+.req { color: var(--danger); font-weight: 600; }

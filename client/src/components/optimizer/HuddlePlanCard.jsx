@@ -8,7 +8,7 @@ import OptimizerPanel, { ProviderProgress } from './OptimizerPanel.jsx';
 import './optimizer.css';
 
 // The morning huddle's plan (OPT3): each provider's progress to goal, "N moves get Dr. Chen to 104%", and the first
-// few moves. O (or the button) opens the side panel to act on them.
+// few moves. Shift+O (or the button) opens the side panel to act on them.
 const whole = (c) => (c == null ? '' : money(c).replace(/\.00$/, ''));
 
 export default function HuddlePlanCard({ date, locationId = null }) {
@@ -17,7 +17,7 @@ export default function HuddlePlanCard({ date, locationId = null }) {
   const opt = useOptimizer(date, locationId, { enabled: allowed });
   const [open, setOpen] = useState(false);
   const [focusId, setFocusId] = useState(null);
-  useShortcuts([{ combo: 'o', handler: () => setOpen((v) => !v), label: 'Open today’s plan (schedule optimizer)', section: 'Huddle', enabled: allowed && !opt.missing }]);
+  useShortcuts([{ combo: 'shift+o', handler: () => setOpen((v) => !v), label: 'Open today’s plan (schedule optimizer)', section: 'Huddle', enabled: allowed && !opt.missing }]);
   useEffect(() => {
     const on = (e) => { setFocusId(e.detail?.id ?? null); setOpen(true); };
     window.addEventListener('dm:optimizer', on);
@@ -30,7 +30,7 @@ export default function HuddlePlanCard({ date, locationId = null }) {
     <section className="card opt-huddle" aria-label="Today’s plan">
       <div className="opt-huddle-head">
         <h3><Target size={16} /> Today’s plan</h3>
-        <button className="small" onClick={() => setOpen(true)}>Open the plan <kbd>O</kbd></button>
+        <button className="small" onClick={() => setOpen(true)}>Open the plan <kbd>Shift+O</kbd></button>
       </div>
       {!d && !opt.error && <div className="muted">Working out today’s plan…</div>}
       {opt.error && <div className="error">{opt.error.message}</div>}

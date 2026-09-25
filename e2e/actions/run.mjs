@@ -123,8 +123,10 @@ async function main() {
       const s = scoreOf(result, action);
       Object.assign(result, s, { area: def.area, measuredAt: new Date().toISOString() });
       writeFileSync(join(OUT, id, 'result.json'), JSON.stringify(result, null, 2));
-      all[id] = result;
-      writeFileSync(file, JSON.stringify(all, null, 2));
+      // Re-read before writing: another run (another builder) may have written its own results meanwhile.
+      const latest = existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : all;
+      latest[id] = result;
+      writeFileSync(file, JSON.stringify(latest, null, 2));
       n++;
       const why = result.hardFail ? `  ✗ ${result.hardFail}` : '';
       console.log(`${id} ${String(result.score).padStart(3)} ${result.grade}  ${String(result.actions).padStart(2)} actions (${result.clicks}c ${result.keys}k ${result.fields}f) ${result.screens} screens ${(result.ms / 1000).toFixed(1)}s  ${action.name}${why}`);

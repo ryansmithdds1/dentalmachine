@@ -22,11 +22,12 @@ function redeem(code) {
   return inFlight.get(code);
 }
 
-// kind: 'tp' or 'form' (as LinkPass uses). Returns { checking, pass, back }.
+// kind: 'tp' or 'form' (as LinkPass uses). Returns { checking, pass, back, signerName } — signerName: the
+// patient's name for the signing line, only on the device the office handed over (never from a copied link).
 export function useHandoff(kind, token) {
   const [state, setState] = useState(() => {
     const code = new URLSearchParams(window.location.hash.slice(1)).get('here');
-    return { checking: !!code, code, pass: null, back: readBack(token) };
+    return { checking: !!code, code, pass: null, back: readBack(token), signerName: null };
   });
   useEffect(() => {
     if (!state.code) return;
@@ -38,7 +39,7 @@ export function useHandoff(kind, token) {
         savePass(kind, token, d.pass);
         try { if (back) sessionStorage.setItem(backKey(token), back); } catch { /* storage unavailable */ }
       }
-      setState({ checking: false, code: null, pass: d?.pass || null, back });
+      setState({ checking: false, code: null, pass: d?.pass || null, back, signerName: d?.pass && typeof d.signer_name === 'string' ? d.signer_name.slice(0, 120) : null });
     });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   return state;

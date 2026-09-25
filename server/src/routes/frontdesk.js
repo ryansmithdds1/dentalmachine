@@ -6,7 +6,7 @@ import { publish } from '../events.js';
 import { emitAppointment } from '../webhooks.js';
 import { sendMessage, preferredChannel, recipientFor } from '../messaging.js';
 import { messageText, patientLang, subjectFor } from '../templates.js';
-import { primaryPolicy, patientBalance, estimateCoverage, completeProcedure } from '../services.js';
+import { primaryPolicy, patientBalance, pendingInsurance, estimateCoverage, completeProcedure } from '../services.js';
 import { recallTypes } from '../recalls.js';
 import { historyChanges } from '../forms.js';
 import { patientScope, appointmentScope } from '../officeaccess.js';
@@ -43,11 +43,20 @@ export default function frontDeskRoutes({ db, messenger }) {
     );
     const paidToday = -ledger.filter((e) => e.type === 'payment' && e.entry_date === today).reduce((s, e) => s + e.amount, 0);
     const balance = await patientBalance(db, pid, a.patient_id);
-    // What to ask for now: today's estimated patient share, less what they've paid today, never more than they owe.
-    const suggested = Math.max(0, Math.min(balance, estimate.total_patient - paidToday));
+    // What to ask for now (A017): everything the patient owes on the ledger (SUM of its entries, never a stored
+    // balance) less what insurance is still expected to pay — the payers' estimates on open claims, and for today's
+    // finished work that isn't on a claim yet, its estimated insurance share and in-network write-off. That is
+    // today's patient portion plus anything older they still owe, net of what they've paid today.
+    const pending = await pendingInsurance(db, pid, a.patient_id);
+    const unclaimed = new Set(done.filter((p) => !p.claim_id).map((p) => p.id));
+    const expected = (estimate.items || []).filter((i) => unclaimed.has(i.procedure_id)).reduce((s, i) => s + (i.insurance || 0) + (i.write_off || 0), 0);
+    const suggested = Math.max(0, balance - pending.total - expected);
+    // The same amount in two parts, for the screen: today's share and what was owed before today.
+    const earlier = Math.max(0, suggested + paidToday - estimate.total_patient);
     const types = await recallTypes(db, pid);
     return {
       appointment: a, procedures, estimate, ledger, paid_today: paidToday, balance, suggested_payment: suggested,
+      due: { now: suggested, today_share: estimate.total_patient, earlier, insurance_expected: pending.total + expected },
       policy: policy ? { id: policy.id, carrier_name: policy.carrier_name } : null,
       unclaimed: policy ? done.filter((p) => !p.claim_id && p.fee > 0).map((p) => p.id) : [],
       recalls: (await db.all("SELECT * FROM recalls WHERE patient_id = ? AND practice_id = ? AND status != 'inactive' ORDER BY due_date", a.patient_id, pid))
@@ -64,7 +73,7 @@ export default function frontDeskRoutes({ db, messenger }) {
   r.get('/appointments/:id/checkout', requirePermission('schedule:read'), async (req, res) => {
     const s = await checkoutSummary(req.user.practice_id, Number(req.params.id));
     // Scheduling access alone shows the visit, not the money or the chart.
-    if (!can(req.user, 'billing:read')) Object.assign(s, { estimate: null, ledger: [], paid_today: null, balance: null, suggested_payment: null, policy: null, unclaimed: [] });
+    if (!can(req.user, 'billing:read')) Object.assign(s, { estimate: null, ledger: [], paid_today: null, balance: null, suggested_payment: null, due: null, policy: null, unclaimed: [] });
     if (!can(req.user, 'clinical:read')) s.procedures = [];
     res.json(s);
   });
@@ -489,9 +498,27 @@ export default function frontDeskRoutes({ db, messenger }) {
     requireFields({ kind, outcome }, ['kind', 'outcome']);
     if (!['unscheduled', 'broken', 'recall', 'collections', 'claim', 'general'].includes(kind)) throw new HttpError(400, 'Invalid follow-up kind');
     if (!OUTCOMES.includes(outcome)) throw new HttpError(400, `outcome must be one of: ${OUTCOMES.join(', ')}`);
-    const id = await insert(db, 'followups', { practice_id: req.user.practice_id, patient_id: patient.id, kind, outcome, note: note ? String(note).slice(0, 1000) : null, created_by: req.user.id });
-    await audit(db, req, 'followup.create', 'followups', id, { kind, outcome });
-    res.status(201).json(await db.get('SELECT * FROM followups WHERE id = ?', id));
+    // A recall call covers every recall the patient is due for (exam, cleaning, x-rays are one call, A051): the
+    // ones still "due" become "contacted", so the cadence and the recall board know someone reached out. A note or
+    // a wrong number isn't a contact. recall_ids narrows it to some of them (all must be this patient's).
+    let recallIds = [];
+    if (kind === 'recall') {
+      const ask = req.body?.recall_ids;
+      if (ask != null && (!Array.isArray(ask) || ask.length > 50 || ask.some((x) => !Number.isInteger(Number(x)) || Number(x) <= 0))) throw new HttpError(400, 'recall_ids must be a list of recall ids');
+      const mine = await db.all("SELECT id, status FROM recalls WHERE practice_id = ? AND patient_id = ? AND status IN ('due','contacted')", req.user.practice_id, patient.id);
+      if (ask != null && ask.some((x) => !mine.some((r) => r.id === Number(x)))) throw new HttpError(404, 'Recall not found');
+      recallIds = mine.filter((r) => r.status === 'due' && (ask == null || ask.map(Number).includes(r.id))).map((r) => r.id);
+      if (['note', 'wrong_number'].includes(outcome)) recallIds = [];
+    }
+    let id;
+    await db.tx(async () => {
+      id = await insert(db, 'followups', { practice_id: req.user.practice_id, patient_id: patient.id, kind, outcome, note: note ? String(note).slice(0, 1000) : null, created_by: req.user.id });
+      for (const rid of recallIds) {
+        await recorded(db, 'recalls', rid, () => db.run("UPDATE recalls SET status = 'contacted', last_contacted_at = datetime('now') WHERE id = ? AND status = 'due'", rid));
+      }
+    });
+    await audit(db, req, 'followup.create', 'followups', id, { kind, outcome, ...(recallIds.length ? { recalls_contacted: recallIds } : {}) });
+    res.status(201).json({ ...(await db.get('SELECT * FROM followups WHERE id = ?', id)), recalls_contacted: recallIds });
   });
 
   // Medical histories patients submitted that nobody has reviewed yet, with what would change on the chart.
@@ -536,9 +563,14 @@ export default function frontDeskRoutes({ db, messenger }) {
     const q = String(req.query.q || '').trim().slice(0, 100);
     if (q.length < 2) return res.json({ patients: [], claims: [] });
     const pid = req.user.practice_id;
-    const patients = await searchPatients(db, pid, q, { scope: patientScope(req.user) });
-    const claims = /^#?\d+$/.test(q)
-      ? await db.all('SELECT c.id, c.status, p.first_name, p.last_name FROM claims c JOIN patients p ON p.id = c.patient_id WHERE c.practice_id = ? AND c.id = ?', pid, Number(q.replace('#', '')))
+    // "claim 33" / "claim #33" is only a claim; "#33" and "33" can also be a chart number, so patients are
+    // searched too (the command bar ranks: "#33" → the claim first, "33" → the chart-number patient first).
+    const claimWord = /^claim\s*#?\s*(\d+)$/i.exec(q);
+    const claimNo = claimWord ? claimWord[1] : (/^#?\s*(\d+)$/.exec(q) || [])[1];
+    const patients = claimWord ? [] : await searchPatients(db, pid, q, { scope: patientScope(req.user) });
+    // Claims (number, patient, status) are billing information: only for people who can see claims.
+    const claims = claimNo && can(req.user, 'billing:read') && Number(claimNo) <= Number.MAX_SAFE_INTEGER
+      ? await db.all('SELECT c.id, c.status, p.first_name, p.last_name FROM claims c JOIN patients p ON p.id = c.patient_id WHERE c.practice_id = ? AND c.id = ?', pid, Number(claimNo))
       : [];
     res.json({ patients, claims });
   });

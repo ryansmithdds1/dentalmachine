@@ -6,7 +6,8 @@
 **Today (audit):** 5–6 actions including leaving the schedule; the form opened at 09:00 with the first provider
 and 60 minutes whatever the recall type; no suggested time.
 
-**Budget:** 2 actions (click *Book … recall*, Enter to accept the first suggestion).
+**Budget:** 2 actions (**R** or click *Book … recall*, Enter to accept the first suggestion) — 1 when nothing is left
+to pay: checkout then opens with the suggestions showing and the first one focused, so it's just Enter.
 
 **Redesign:**
 - **`GET /patients/:id/next-slots?appointment_type_id=&provider_id=&from=&count=3`** (`server/src/routes/nextslots.js`,
@@ -29,3 +30,10 @@ refuses (patient conflict).
 **Acceptance:** `e2e/workflows/11-12-16-17-18-money.test.mjs` — at checkout, click then Enter books the first
 suggestion with the hygienist in 2 actions. `server/test/moneyflows.test.js` — hygienist choice, type length,
 patient conflicts skipped, booked slot no longer offered, never in the past, bad dates 400, other practice 404.
+
+## Phase 2 batch 1A
+- **R** on the checkout page (also from the amount box) opens the suggestions; they open by themselves when there is
+  nothing to collect, and right after a payment is posted. Esc skips to "Mark checked out".
+- **Same time of day:** checkout passes the time of today's visit (`near=HH:MM`); on each day the open time closest
+  to it is offered instead of the first one of the day (`server/test/frontdesk-b1a.test.js`). Recall interval (from
+  the due date) and the patient's hygienist are as before.

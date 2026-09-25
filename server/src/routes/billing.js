@@ -55,6 +55,19 @@ export default function billingRoutes({ db, payments = { enabled: false }, confi
       e.kind = entryKind(e);
       e.linkable = !linkProblem(e, lock);
     }
+    // Which voids need a manager (the cash controls in cashdeposits.js): cash in or out, and anything on a
+    // submitted deposit. Said up front, so nobody types a reason only to be told no.
+    if (!isManager(req.user)) {
+      const depositIds = [...new Set(entries.map((e) => e.deposit_id).filter(Boolean))];
+      const locked = new Set(depositIds.length
+        ? (await db.all(`SELECT DISTINCT deposit_id FROM deposit_slips WHERE deposit_id IN (${depositIds.map(() => '?').join(',')}) AND stage <> 'reopened'`, ...depositIds)).map((x) => x.deposit_id)
+        : []);
+      for (const e of entries) {
+        if (e.voided_at || e.reverses_id) continue;
+        if (e.deposit_id && locked.has(e.deposit_id)) e.void_needs_manager = 'It’s on a deposit that has been submitted';
+        else if (e.method === 'cash' && ['payment', 'refund'].includes(e.type)) e.void_needs_manager = 'Voiding cash needs a manager (cash controls)';
+      }
+    }
     res.json({
       entries, balance: running, pending_insurance: pending.insurance, pending_write_off: pending.write_off, patient_portion: running - pending.total, lock_date: lock,
       unapplied_credit: unapplied.reduce((s, u) => s + u.amount, 0), visits, not_applied: notApplied,

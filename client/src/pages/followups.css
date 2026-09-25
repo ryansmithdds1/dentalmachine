@@ -6,3 +6,13 @@
 .unconf-table tr.kb-row td { background: var(--primary-soft, rgba(14, 165, 233, 0.08)); }
 .unconf-table tr.kb-row td:first-child { box-shadow: inset 3px 0 0 var(--primary); }
 .remind-result { margin-bottom: 10px; }
+/* Recall list (A051): one row per patient, the recalls they're due for as chips; calls logged inline under the row. */
+.recall-chips { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.recall-chip { display: inline-flex; align-items: center; gap: 2px; }
+.recall-chip-x { all: unset; cursor: pointer; padding: 0 3px; border-radius: 4px; opacity: .55; }
+.recall-chip-x:hover, .recall-chip-x:focus-visible { opacity: 1; background: var(--hover); }
+.logcall-row-inline > td { background: var(--subtle); }
+.logcall-inline { display: flex; flex-direction: column; gap: 8px; padding: 4px 0; }
+.logcall-inline .chip kbd, .logcall-inline button kbd { margin-left: 4px; font-size: 10px; opacity: .7; }
+.logcall-inline textarea { min-height: 34px; }
+.logcall-history { font-size: 12px; }

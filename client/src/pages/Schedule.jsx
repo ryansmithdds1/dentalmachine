@@ -413,7 +413,7 @@ export default function Schedule() {
   // Opportunity finder: what each visit today is eligible for (G opens the list for the selected visit).
   const [focusOpps, setFocusOpps] = useState(0);
   const opps = useDayOpportunities(view === 'day' ? date : null, getLocationId(), { enabled: can('clinical:read') });
-  // Today's optimizer: goal gaps and the moves that close them (O opens the plan).
+  // Today's optimizer: goal gaps and the moves that close them (Shift+O opens the plan).
   const optimizer = useOptimizer(view === 'day' ? date : null, getLocationId(), { enabled: can('schedule:read') });
   const openOpps = (a) => { setSelectedId(a.id); makeActive(a); setFocusOpps((n) => n + 1); };
   // Lab case and parts readiness (LB1/LB5): one icon per visit; clicking it opens the check-in for that visit.
@@ -449,8 +449,28 @@ export default function Schedule() {
   const stepKey = (kind) => () => {
     const a = target();
     if (!a) return toast('Pick a visit first: click it, or press F to jump to the one happening now');
+    // O on a visit that's already out is the next thing the front desk does with it: its checkout.
+    if (kind === 'out' && a.status === 'completed') return leaveTo(a, `/checkout/${a.id}`);
     runStep(a, kind);
   };
+  // C on a visit nobody has confirmed yet (focused or open in the panel): confirmed by phone, with Undo — the same
+  // route as the Unconfirmed list (workflow 13), which skips visits already confirmed, so a double press or a retry
+  // changes nothing twice. Anywhere else C is still the Chairs view.
+  const confirmVisit = async (a) => {
+    const before = a;
+    const saved = (status, extra = {}) => { replaceAppt({ ...a, ...extra, status }); cache.current.clear(); };
+    replaceAppt({ ...a, status: 'confirmed', _pending: true });
+    await undoable(`Confirmed ${a.first_name} ${a.last_name}`,
+      () => api.post('/followups/unconfirmed/confirm', { ids: [a.id], confirmed_via: 'phone' }).then(() => saved('confirmed', { confirmed_via: 'phone' })),
+      () => api.post('/followups/unconfirmed/confirm', { ids: [a.id], undo: true, left_message_ids: before.confirmed_via === 'left_message' ? [a.id] : [] })
+        .then(() => saved('scheduled', { confirmed_via: before.confirmed_via }))).catch(() => replaceAppt(before));
+  };
+  const chairsOrConfirm = () => {
+    const a = w ? target() : null;
+    if (a && a.status === 'scheduled') return confirmVisit(a);
+    showBy('operatory');
+  };
+  const unconfirmedList = () => nav(`/followups?tab=unconfirmed${view === 'week' ? '&days=7' : `&date=${date}`}`);
   // F: put the keyboard on the visit happening now (or the next one today), so the flow keys work from there.
   const focusNow = () => {
     const today0 = appts.filter((a) => a.start_time.startsWith(date) && !['cancelled', 'no_show'].includes(a.status)).sort((x, y) => x.start_time.localeCompare(y.start_time));
@@ -550,7 +570,8 @@ export default function Schedule() {
   };
   const w = can('schedule:write');
   useShortcuts([
-    { combo: 'c', handler: () => showBy('operatory'), label: 'Chairs view (one column per chair)', section: 'Schedule views' },
+    { combo: 'c', handler: chairsOrConfirm, label: 'Chairs view (one column per chair) — on a selected visit nobody has confirmed: confirm it', section: 'Schedule views' },
+    { combo: 'u', handler: unconfirmedList, label: 'Unconfirmed visits for this day (C confirms each)', section: 'Schedule views' },
     { combo: 'p', handler: () => showBy('provider'), label: 'Providers view (one column per provider)', section: 'Schedule views' },
     { combo: 'v', handler: cycleProvider, label: 'Show one provider (press again for the next, then all)', section: 'Schedule views' },
     { combo: 'shift+v', handler: () => { setProviderFilter(''); toast('Showing all providers'); }, label: 'Show all providers', section: 'Schedule views' },
@@ -560,7 +581,7 @@ export default function Schedule() {
     { combo: STEP_KEYS.seat, handler: stepKey('seat'), label: 'Seat', section: 'Patient flow', enabled: w },
     { combo: STEP_KEYS.ready, handler: stepKey('ready'), label: 'Ready for the doctor (again to clear)', section: 'Patient flow', enabled: w },
     { combo: STEP_KEYS.ready_checkout, handler: stepKey('ready_checkout'), label: 'Ready for checkout (again to clear)', section: 'Patient flow', enabled: w },
-    { combo: STEP_KEYS.out, handler: stepKey('out'), label: 'Out — visit complete', section: 'Patient flow', enabled: w },
+    { combo: STEP_KEYS.out, handler: stepKey('out'), label: 'Out — visit complete (on a finished visit: open its checkout)', section: 'Patient flow', enabled: w },
     // No visit picked: stay quiet — G is also the start of the "G then a letter" page jumps (G P → Patients).
     { combo: 'g', handler: () => { const a = target(); if (a) openOpps(a); }, label: 'Opportunities for the selected visit (Enter adds one)', section: 'Patient flow', enabled: can('clinical:read') },
     { combo: 'm', handler: () => { const a = target(); if (a || !pins.length) pickUp(a); else pickUp(pins.at(-1), true); }, label: 'Move the selected visit (or the last pinned one): ↑ ↓ ← →, Enter to put it down', section: 'Moving visits', enabled: w },
@@ -574,7 +595,7 @@ export default function Schedule() {
     ...providers.map((p) => ({ id: `sched-only-${p.id}`, label: `Schedule: show only ${p.name}`, hint: 'V cycles providers', run: () => setProviderFilter(p.id) })),
     { id: 'sched-today', label: 'Schedule: today', hint: 'T', run: () => go({ date: today }) },
     ...(prodData?.money ? KINDS.map((k) => ({ id: `sched-prod-${k}`, label: `Schedule: production for ${k === 'all' ? 'everyone' : KIND_LABEL[k].toLowerCase()}`, hint: '$', run: () => rememberKind(k) })) : []),
-    { id: 'sched-unconfirmed', label: 'Schedule: unconfirmed visits', run: () => nav(`/followups?tab=unconfirmed${view === 'week' ? '&days=7' : `&date=${date}`}`) },
+    { id: 'sched-unconfirmed', label: 'Schedule: unconfirmed visits', hint: 'U', run: unconfirmedList },
   ]);
 
   // ---- Keyboard shortcuts: ←/→ move, T today, D/W/A views, N new, Esc close ----
@@ -814,7 +835,7 @@ export default function Schedule() {
             return n > 0 ? <button className="stat-pill warn hidden-chairs" onClick={() => setChairLayout({ ...chairLayout, hidden: [] })} title="Some chairs are hidden on this computer — show them all"><EyeOff size={13} /> {n} in hidden chairs</button> : null;
           })()}
           {unconfirmed > 0 && (
-            <button className="stat-pill warn unconfirmed-link" onClick={() => nav(`/followups?tab=unconfirmed${view === 'week' ? '&days=7' : `&date=${date}`}`)} title="Open the list to confirm them or text a reminder">
+            <button className="stat-pill warn unconfirmed-link" onClick={unconfirmedList} title="Open the list to confirm them or text a reminder (U) — or press C on a visit to confirm it">
               {unconfirmed} unconfirmed
             </button>
           )}

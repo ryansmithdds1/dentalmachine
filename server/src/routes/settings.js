@@ -1,8 +1,9 @@
 import { Router } from 'express';
 import { failed } from '../issues.js';
 import { SOURCES } from '../actor.js';
+import { randomBytes } from 'node:crypto';
 import { HttpError, hashPassword, PERMISSION_CATALOG, PERMISSIONS } from '../auth.js';
-import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, toCents, practiceNow, staffPractice, toCsv } from '../util.js';
+import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, toCents, practiceNow, staffPractice, toCsv, newToken } from '../util.js';
 import { validatePassword } from './auth.js';
 import { validateHours, validateWorkingHours } from '../hours.js';
 import { validateReminderSteps } from '../messaging.js';
@@ -85,6 +86,9 @@ export function cleanKpiTargets(input) {
   }
   return Object.keys(out).length ? JSON.stringify(out) : null;
 }
+
+// How long an invitation link to choose a password works.
+const INVITE_DAYS = 7;
 
 export default function settingsRoutes({ db, secret, config = {}, messenger = null }) {
   const r = Router();
@@ -254,16 +258,40 @@ export default function settingsRoutes({ db, secret, config = {}, messenger = nu
     `SELECT ${req.user.role === 'admin' ? USER_COLS : 'id, name, role, active'} FROM users WHERE practice_id = ? ORDER BY name`, req.user.practice_id,
   )));
 
+  // A new login. With `invite: true` (the Settings screen's "+ Invite user") nobody makes up a password: the
+  // person gets an email with a link to choose their own (the password-reset link, good for INVITE_DAYS), and
+  // the manager gets the same link to pass on if the email can't reach them. Otherwise a temporary password
+  // (API clients, scripts).
   r.post('/users', requireAdmin, async (req, res) => {
     const row = pick(req.body, ['email', 'name', 'role']);
     requireFields(row, ['email', 'name', 'role']);
+    row.email = String(row.email).trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(row.email)) throw new HttpError(400, 'That doesn’t look like an email address');
     requireOneOf(row.role, ROLES, 'role');
-    validatePassword(req.body.password);
-    if (await db.get('SELECT id FROM users WHERE lower(email) = lower(?)', row.email)) throw new HttpError(409, 'Email already in use');
+    const invite = req.body.invite === true || req.body.invite === 1;
+    if (!invite) validatePassword(req.body.password);
+    if (await db.get('SELECT id FROM users WHERE lower(email) = lower(?)', row.email)) throw new HttpError(409, 'Someone already signs in with that email');
     await permFields(req, row);
-    const id = await insert(db, 'users', { ...row, practice_id: req.user.practice_id, password_hash: hashPassword(req.body.password), must_change_password: req.body.must_change_password ? 1 : 0 });
-    await audit(db, req, 'user.create', 'users', id, { role: row.role });
-    res.status(201).json(await db.get(`SELECT ${USER_COLS} FROM users WHERE id = ?`, id));
+    // An invited person's starting password is random and never shown to anyone: they set theirs from the link.
+    const password = invite ? randomBytes(24).toString('base64url') : req.body.password;
+    const id = await insert(db, 'users', { ...row, practice_id: req.user.practice_id, password_hash: hashPassword(password), must_change_password: !invite && req.body.must_change_password ? 1 : 0 });
+    let inviteLink = null;
+    let emailed = false;
+    if (invite) {
+      const { token, hash } = newToken();
+      await insert(db, 'password_resets', { user_id: id, token_hash: hash, expires_at: new Date(Date.now() + INVITE_DAYS * 86400_000).toISOString() });
+      inviteLink = `${config.appUrl || ''}/#reset=${token}`;
+      if (messenger) {
+        const practice = await db.get('SELECT name FROM practices WHERE id = ?', req.user.practice_id);
+        emailed = true;
+        messenger.send({
+          channel: 'email', to: row.email, subject: `${req.user.name} invited you to ${practice.name} on Dental Machine`,
+          body: `Hi ${row.name},\n\n${req.user.name} set up a Dental Machine login for you at ${practice.name}. Choose your password here (the link works once, for ${INVITE_DAYS} days):\n\n${inviteLink}\n\nYou'll sign in with this email address: ${row.email}`,
+        }).catch(failed(db, { practiceId: req.user.practice_id, kind: 'integration', key: `user-invite:${id}`, role: 'admin', title: `The invitation email to ${row.name} couldn't be sent — copy the link from Settings → Users & roles` }));
+      }
+    }
+    await audit(db, req, 'user.create', 'users', id, { role: row.role, invited: invite });
+    res.status(201).json({ ...(await db.get(`SELECT ${USER_COLS} FROM users WHERE id = ?`, id)), ...(invite ? { invite_link: inviteLink, invite_emailed: emailed, invite_days: INVITE_DAYS } : {}) });
   });
 
   r.put('/users/:uid', requireAdmin, async (req, res) => {

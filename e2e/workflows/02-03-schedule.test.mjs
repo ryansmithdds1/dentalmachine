@@ -130,6 +130,44 @@ test('#3 check in → seat → ready → out: one key per step on the focused vi
   assert.deepEqual(s.errors, []);
 });
 
+test('#3 O never opens the plan on a visit (bug 1): Shift+O is today’s plan; O on a finished visit opens its checkout', async () => {
+  const { page } = s;
+  const a = await bookToday('Otto', '20:00');
+  await s.api('PATCH', `/appointments/${a.id}/status`, { status: 'in_chair' });
+  await page.goto(`${app.base}/schedule?date=${today}&view=day`);
+  await page.waitForSelector(card(a.id));
+  await page.focus(card(a.id));
+  // O on a seated visit: out, not the optimizer.
+  await page.keyboard.press('o');
+  await page.waitForSelector(`${card(a.id)}.status-completed:not(.pending)`);
+  assert.equal(await page.locator('.opt-panel').count(), 0, 'O did not open today’s plan');
+  assert.equal(await statusOf(a.id), 'completed');
+  // Shift+O opens (and closes) the plan, when the optimizer is on.
+  if (await page.locator('.opt-launch').count()) {
+    await page.keyboard.press('Shift+O');
+    await page.waitForSelector('.opt-panel');
+    await page.keyboard.press('Shift+O');
+    await page.waitForSelector('.opt-panel', { state: 'detached' });
+  }
+  // O again on the finished visit: its checkout, in one key.
+  await page.focus(card(a.id));
+  const r = await measure(page, async () => {
+    await page.keyboard.press('o');
+    await page.waitForURL(new RegExp(`/checkout/${a.id}$`));
+    await page.waitForSelector('h1:has-text("Check out")');
+  });
+  console.log(withinBudget('finished visit → checkout', r, { actions: 1, ms: 3000 }));
+  // ? lists Shift+O for the plan.
+  await page.goto(`${app.base}/schedule?date=${today}&view=day`);
+  await page.waitForSelector(card(a.id));
+  await page.keyboard.press('?');
+  await page.waitForSelector('.shortcuts');
+  const help = await page.textContent('.shortcuts');
+  assert.ok(help.includes('on a finished visit: open its checkout'), '? explains O on a finished visit');
+  await page.keyboard.press('Escape');
+  assert.deepEqual(s.errors, []);
+});
+
 test('#3 one click per step with the next-step button on the card, and from the drawer header', async () => {
   const { page } = s;
   const a = await bookToday('Clicky', '21:00');

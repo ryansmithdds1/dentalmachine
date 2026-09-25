@@ -54,8 +54,10 @@ export const PERMISSIONS = {
   dentist: ['patients:read', 'patients:write', 'schedule:read', 'schedule:write', 'clinical:read', 'clinical:write', 'clinical:sign', 'billing:read', 'reports:read'],
   hygienist: ['patients:read', 'patients:write', 'schedule:read', 'schedule:write', 'clinical:read', 'clinical:write', 'clinical:sign', 'billing:read'],
   assistant: ['patients:read', 'patients:write', 'schedule:read', 'schedule:write', 'clinical:read', 'clinical:write'],
-  front_desk: ['patients:read', 'patients:write', 'schedule:read', 'schedule:write', 'clinical:read', 'billing:read', 'billing:write'],
-  billing: ['patients:read', 'schedule:read', 'clinical:read', 'billing:read', 'billing:write', 'reports:read'],
+  // The front desk and billing file papers into charts (referral letters, IDs, EOBs, signed forms): documents:add,
+  // not clinical:write — they can't chart, write notes, or change or remove what's on the chart.
+  front_desk: ['patients:read', 'patients:write', 'schedule:read', 'schedule:write', 'clinical:read', 'billing:read', 'billing:write', 'documents:add'],
+  billing: ['patients:read', 'schedule:read', 'clinical:read', 'billing:read', 'billing:write', 'reports:read', 'documents:add'],
 };
 
 // Everything a role can be given. Settings, users and practice-wide admin stay with administrators.
@@ -63,6 +65,7 @@ export const PERMISSION_CATALOG = {
   'patients:read': 'See patients', 'patients:write': 'Add and edit patients',
   'schedule:read': 'See the schedule', 'schedule:write': 'Book and move appointments',
   'clinical:read': 'See charts, notes and x-rays', 'clinical:write': 'Chart, write notes, upload images', 'clinical:sign': 'Sign clinical notes',
+  'documents:add': 'Add scanned papers, photos and files to a chart (not change or remove them)',
   'billing:read': 'See ledgers and claims', 'billing:write': 'Take payments, adjust, send claims',
   'reports:read': 'See all practice reports', 'reports:own': 'See their own production',
   'timeclock:manage': 'See and fix everyone’s timesheets, export payroll',
@@ -148,6 +151,9 @@ export function authenticate(db, secret, { allowMfaSetup = false } = {}) {
 
 export const requirePermission = (permission) => (req, _res, next) =>
   can(req.user, permission) ? next() : next(new HttpError(403, `Missing permission: ${permission}`));
+// Any one of these will do (e.g. adding a document: clinical:write, or just documents:add).
+export const requireAnyPermission = (...permissions) => (req, _res, next) =>
+  permissions.some((p) => can(req.user, p)) ? next() : next(new HttpError(403, `Missing permission: ${permissions.join(' or ')}`));
 
 // Fixed-window limiter per client IP; shared across servers when Redis is configured.
 let limiterSeq = 0;

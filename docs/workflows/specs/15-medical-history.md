@@ -1,7 +1,8 @@
 # 15 · Review and update the medical history
 
 **Budget: 2 actions** for "reviewed today, no changes" (it takes 1: **R** on the chart). Changing one line takes
-**3** (click the line → type → Ctrl/⌘+Enter), or keyboard only **M** → Tab to the line → type → Ctrl/⌘+Enter.
+**3** (click the line → type → Ctrl/⌘+Enter), or keyboard only **3**: **A** (allergies) / **Shift+M** (medications) /
+**M** (alerts) → type → Ctrl/⌘+Enter. Blood pressure and pulse: **3** (**V** → type "122/78 68" → Enter).
 Tested by `e2e/workflows/14-15-images-medical.test.mjs`.
 
 ## Trigger and who does it
@@ -67,3 +68,11 @@ Staleness was a small grey note; nothing on the chart header said the history wa
 ## Not done here
 - The patient bar showing `medical_review_due` (`PatientBar.jsx` belongs to the shared foundations) and a
   "medical history due" action from the schedule drawer (`calendar/*`).
+
+## Phase 2 batch 1A
+- **A** opens the editor on Allergies and **Shift+M** on Medications (the line people change most), so there's no
+  Tab from the alerts line: 3 actions from the keyboard (A032).
+- **Vitals (A033):** **V** (or "Record vitals") opens one box with the cursor in it; the reading is typed the way
+  it's said — "122/78 68", "122/78", or "p 68" — and read back ("BP 122/78 mmHg · pulse 68 bpm") before Enter saves
+  it. Anything else is refused on screen before it's sent; the server's range checks are unchanged. Each reading is
+  its own record (who, when); a wrong one is corrected by recording again. `e2e/workflows/14-15-images-medical.test.mjs`.

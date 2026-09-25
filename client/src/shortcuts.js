@@ -57,8 +57,9 @@ export function useShortcuts(list) {
       if (plain && !s.inInputs && typingIn(e.target)) return;
       if (plain && document.querySelector('.modal, .palette')) return;
       e.preventDefault();
-      // The latest handler for this combo (it may close over new state).
-      (ref.current.find((x) => x.combo === s.combo)?.handler || s.handler)(e);
+      // The latest handler for this combo (it may close over new state) — the enabled one, when a screen gives
+      // the same key to different jobs for different people (R: refund, or ask a manager to).
+      (ref.current.find((x) => x.combo === s.combo && x.enabled !== false)?.handler || s.handler)(e);
     };
     window.addEventListener('keydown', onKey);
     return () => { window.removeEventListener('keydown', onKey); ids.forEach((id) => registry.delete(id)); if (ids.length) changed(); };
@@ -94,6 +95,13 @@ export const registeredHelp = () => [...helpRows.values()];
 
 export const registeredShortcuts = () => [...registry.values()];
 export const screenCommands = () => [...commands.values()].flatMap((f) => f());
+// A number that changes whenever a screen adds or removes commands (for the command bar, which is open while
+// they arrive).
+export function useCommandsVersion() {
+  const [n, tick] = useState(0);
+  useEffect(() => { const f = () => tick((x) => x + 1); listeners.add(f); return () => listeners.delete(f); }, []);
+  return n;
+}
 export function useShortcutList() {
   const [, tick] = useState(0);
   useEffect(() => { const f = () => tick((n) => n + 1); listeners.add(f); return () => listeners.delete(f); }, []);

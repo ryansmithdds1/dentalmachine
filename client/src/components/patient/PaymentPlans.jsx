@@ -25,7 +25,8 @@ export function PlanSummary({ plan }) {
 }
 
 // Payment plans for the patient's household (plans belong to the guarantor).
-export default function PaymentPlans({ patient, onChange }) {
+// suggestedTotal: what the patient owes after pending insurance (cents, from the ledger) — the new plan's total.
+export default function PaymentPlans({ patient, onChange, suggestedTotal = 0 }) {
   const { can } = useAuth();
   const { data: plans, reload } = useApi(`/patients/${patient.id}/payment-plans`);
   const { data: cards, reload: reloadCards } = useApi(`/patients/${patient.id}/payment-methods`);
@@ -101,16 +102,17 @@ export default function PaymentPlans({ patient, onChange }) {
       )}
       {creating && (
         <Modal title="New payment plan" onClose={() => setCreating(false)}>
-          <PlanForm patient={patient} onDone={() => { setCreating(false); reload(); onChange?.(); }} />
+          <PlanForm patient={patient} suggestedTotal={suggestedTotal} onDone={() => { setCreating(false); reload(); onChange?.(); }} />
         </Modal>
       )}
     </div>
   );
 }
 
-function PlanForm({ patient, onDone }) {
+function PlanForm({ patient, onDone, suggestedTotal = 0 }) {
   const today = new Date().toISOString().slice(0, 10);
-  const [form, setForm] = useState({ total: '', down_payment: '0', installments: 6, frequency: 'monthly', start_date: today, notes: '' });
+  // Starts on what the patient owes (after pending insurance); change it for part of the balance.
+  const [form, setForm] = useState({ total: suggestedTotal > 0 ? (suggestedTotal / 100).toFixed(2) : '', down_payment: '0', installments: 6, frequency: 'monthly', start_date: today, notes: '' });
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
   const financed = Math.max(0, Number(form.total || 0) - Number(form.down_payment || 0));
   const each = form.installments ? Math.ceil((financed * 100) / Number(form.installments)) / 100 : 0;
@@ -124,7 +126,7 @@ function PlanForm({ patient, onDone }) {
     <form onSubmit={(e) => { e.preventDefault(); submit(); }}>
       <ErrorBox error={error} />
       <div className="form-grid">
-        <label>Total ($)<input type="number" step="0.01" min="1" required value={form.total} onChange={set('total')} /></label>
+        <label>Total ($)<input type="number" step="0.01" min="1" required autoFocus value={form.total} onChange={set('total')} />{suggestedTotal > 0 && <span className="muted" style={{ fontSize: 12 }}>Their share of the balance after insurance</span>}</label>
         <label>Down payment ($)<input type="number" step="0.01" min="0" value={form.down_payment} onChange={set('down_payment')} /></label>
         <label>Installments<input type="number" min="1" max="120" required value={form.installments} onChange={set('installments')} /></label>
         <label>Frequency<select value={form.frequency} onChange={set('frequency')}><option value="monthly">Monthly</option><option value="biweekly">Every 2 weeks</option><option value="weekly">Weekly</option></select></label>

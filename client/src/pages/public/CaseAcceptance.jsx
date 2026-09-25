@@ -81,6 +81,8 @@ export default function CaseAcceptance() {
   const nameBox = useRef(null);
   const ready = !!plan && !plan.signed_at;
   useEffect(() => { if (ready && hand.back) nameBox.current?.focus({ preventScroll: true }); }, [ready, hand.back]);
+  // Handed over in the office: their name is already on the signing line (they can change it); they tick and sign.
+  useEffect(() => { if (hand.signerName) setName((n) => n || hand.signerName); }, [hand.signerName]);
   const { submit, busy, error } = useSubmit(async () => {
     try {
       const choice = option ? { option_key: option, quote_hash: quote.quote_hash, phases: phases || undefined, plan_id: alt || undefined } : null;

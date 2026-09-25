@@ -38,8 +38,10 @@ async function chairFor(db, pid, providerId, start, end) {
 
 // Suggested times for a patient's next visit (#16: book the next hygiene visit at checkout). Read-only: it
 // suggests, the booking itself goes through POST /appointments and its usual checks.
-// GET /patients/:id/next-slots?appointment_type_id=&provider_id=&from=YYYY-MM-DD&count=3
-// The first open time on each of the next `count` working days on or after `from` (never before now).
+// GET /patients/:id/next-slots?appointment_type_id=&provider_id=&from=YYYY-MM-DD&count=3&near=HH:MM
+// The first open time on each of the next `count` working days on or after `from` (never before now). With `near`
+// (the time of today's visit, A027), the open time closest to it on each day instead: people tend to keep the same
+// part of the day (before work, after school), so the first suggestion is usually the one they take.
 export default function nextSlotRoutes({ db }) {
   const r = Router();
   r.get('/patients/:id/next-slots', requirePermission('schedule:read'), async (req, res) => {
@@ -53,6 +55,10 @@ export default function nextSlotRoutes({ db }) {
     if (!providerId) throw new HttpError(400, 'Add a provider first: there is nobody to book with');
     if (req.query.from != null && !DATE.test(String(req.query.from))) throw new HttpError(400, 'from must be YYYY-MM-DD');
     const count = Math.min(10, Math.max(1, Number(req.query.count) || 3));
+    const near = req.query.near == null || req.query.near === '' ? null : String(req.query.near);
+    if (near != null && !/^([01]\d|2[0-3]):[0-5]\d$/.test(near)) throw new HttpError(400, 'near must be a time like 09:30');
+    const minutes = (t) => Number(t.slice(11, 13)) * 60 + Number(t.slice(14, 16));
+    const nearMin = near ? Number(near.slice(0, 2)) * 60 + Number(near.slice(3, 5)) : null;
     const duration = typeDuration(type, providerId) || 60;
     const now = (await practiceNow(db, pid)).slice(0, 16).replace('T', ' ');
     const today = now.slice(0, 10);
@@ -68,16 +74,18 @@ export default function nextSlotRoutes({ db }) {
     for (let i = 0; i < 120 && slots.length < count; i++) {
       const date = addDays(from, i);
       const open = await openSlots(db, pid, providerId, date, { duration, step: 10, after: date === today ? now : null, typeId: type?.id ?? null, locationId: req.location_id || null });
-      const start = open.find((s) => {
+      const free = open.filter((s) => {
         const end = addMinutes(s, duration);
         return !theirs.some((a) => a.start_time < end && a.end_time > s);
       });
+      // Closest to the preferred time; on a tie, the earlier one.
+      const start = nearMin == null ? free[0] : free.reduce((best, s) => (best == null || Math.abs(minutes(s) - nearMin) < Math.abs(minutes(best) - nearMin) ? s : best), null);
       if (!start) continue;
       const end = addMinutes(start, duration);
       slots.push({ start_time: start, end_time: end, operatory_id: await chairFor(db, pid, providerId, start, end) });
     }
     const provider = await db.get('SELECT id, name, type FROM providers WHERE id = ?', providerId);
-    res.json({ provider, appointment_type_id: type?.id ?? null, duration, from, slots });
+    res.json({ provider, appointment_type_id: type?.id ?? null, duration, from, near, slots });
   });
   return r;
 }

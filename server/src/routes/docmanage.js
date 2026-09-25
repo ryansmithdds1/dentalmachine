@@ -1,5 +1,5 @@
 import express, { Router } from 'express';
-import { requirePermission, HttpError, can, USER_PERMISSION_SQL } from '../auth.js';
+import { requirePermission, requireAnyPermission, HttpError, can, USER_PERMISSION_SQL } from '../auth.js';
 import { findOr404, insert, audit, recorded, isRealDate, practiceNow } from '../util.js';
 import { publish } from '../events.js';
 import { patientScope, restricted, canSeePatient } from '../officeaccess.js';
@@ -425,7 +425,7 @@ export default function docManageRoutes({ db, storage, config = {}, reader, scan
     return { source, color, format, dpi, duplex: flag(b.duplex) && source !== 'flatbed' && info.duplex !== false };
   };
   // "Scan now" for the active patient: the bridge on that workstation scans, makes one PDF (or JPGs) and files it here.
-  r.post('/patients/:id/scan', requirePermission('clinical:write'), async (req, res) => {
+  r.post('/patients/:id/scan', requireAnyPermission('clinical:write', 'documents:add'), async (req, res) => {
     const patient = await findOr404(db, 'patients', req.params.id, pid(req), 'Patient');
     const agent = await findOr404(db, 'bridge_agents', req.body?.agent_id, pid(req), 'Workstation');
     if (!agent.active) throw new HttpError(409, 'That workstation was removed');

@@ -13,7 +13,7 @@ import { useRemembered } from '../../prefs.js';
 import { useShortcut } from '../../shortcuts.js';
 import BalanceWhy from './BalanceWhy.jsx';
 import { useLastMethod, methodToPost } from './lastMethod.js';
-import { undoable } from '../../toast.js';
+import { undoable, toast } from '../../toast.js';
 import './moneyflows.css';
 import { LedgerLegend, LedgerRow, VisitView } from './LedgerViews.jsx';
 
@@ -170,7 +170,7 @@ export default function LedgerTab({ patient, onChange }) {
             )}
         </div>
       </div>
-      <PaymentPlans patient={patient} onChange={reload} />
+      <PaymentPlans patient={patient} onChange={reload} suggestedTotal={data.patient_portion} />
       {/* Billing autopilot (BL1–BL5): Set up payments, automatic-payment history, office fees and waivers. */}
       <BillingActivity patientId={patient.guarantor_id || patient.id} />
       <Financing patient={patient} canWrite={can('billing:write')} onChange={reload} open={financeOpen} onOpened={() => setFinanceOpen(false)} />
@@ -201,16 +201,26 @@ export default function LedgerTab({ patient, onChange }) {
   );
 }
 
-// Voiding keeps the original on the ledger and posts an equal and opposite entry today.
+// Voiding keeps the original on the ledger and posts an equal and opposite entry today. When this person can't
+// void it themselves (cash, or on a submitted deposit: cash controls), the form says so first and the reason
+// goes to a manager as a to-do instead.
 function VoidForm({ entry, onDone }) {
   const [reason, setReason] = useState('');
+  const manager = entry.void_needs_manager;
   const { submit, busy, error } = useSubmit(async () => {
-    await api.post(`/ledger/${entry.id}/void`, { reason });
+    if (manager) {
+      await api.post('/tasks', {
+        title: `Void ${label(entry.type).toLowerCase()} of ${money(Math.abs(entry.amount))} (${label(entry.method || 'other')}, ${fmtDate(entry.entry_date)}) — ${reason.trim()}`.slice(0, 300),
+        patient_id: entry.patient_id, due_date: new Date().toISOString().slice(0, 10),
+      });
+      toast('Sent to a manager: a to-do to void it, with your reason');
+    } else await api.post(`/ledger/${entry.id}/void`, { reason });
     onDone();
   });
   return (
     <form onSubmit={(e) => { e.preventDefault(); submit(); }}>
       <ErrorBox error={error} />
+      {manager && <div className="notice warn" role="note" data-testid="void-needs-manager"><strong>{manager}.</strong> Say why, and it goes to a manager to void.</div>}
       <p><strong>{entry.description}</strong> · {money(Math.abs(entry.amount))} on {fmtDate(entry.entry_date)}</p>
       <p className="muted" style={{ fontSize: 13 }}>
         The entry stays on the ledger marked void, and a reversing entry is posted today, so closed days don't change.
@@ -218,7 +228,7 @@ function VoidForm({ entry, onDone }) {
         {entry.type === 'payment' && /^(pi_|sbx_)/.test(entry.reference || '') ? " This doesn't return money to the card — use Refund credit for that." : ''}
       </p>
       <label>Reason<input autoFocus required value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Posted to the wrong patient" /></label>
-      <div className="form-actions"><button className="danger" disabled={busy || !reason.trim()}>Void entry</button></div>
+      <div className="form-actions"><button className="danger" disabled={busy || !reason.trim()}>{manager ? 'Ask a manager to void it' : 'Void entry'}</button></div>
     </form>
   );
 }

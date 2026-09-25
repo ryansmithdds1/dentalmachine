@@ -35,22 +35,19 @@ export default {
     setup: async (t) => ({ p: await newPatient(t, 'Vito') }),
     async run(t, { p }) {
       await overview(t, p);
-      await t.step('Click "Record vitals" under the medical history', async () => {
-        await t.click('button:has-text("Record vitals")');
-        await t.see('input[aria-label="Systolic"]');
-      });
-      await t.step('Click Systolic and type it, Tab, diastolic, Tab, pulse; press Enter', async () => {
-        await t.click('input[aria-label="Systolic"]');
-        await t.type('122');
-        await t.key('Tab');
-        await t.type('78');
-        await t.key('Tab');
-        await t.type('68');
-        await t.key('Enter');
-        await t.see('input[aria-label="Systolic"]', { state: 'detached' });
+      await t.step('Press V: one box opens under the medical history with the cursor in it', async () => {
+        await t.key('v');
+        await t.see('input[aria-label="Blood pressure and pulse"]');
       });
       const focus = await t.page.evaluate(() => document.activeElement?.getAttribute('aria-label'));
-      if (focus !== 'Systolic') t.flag('asks-known', 'Record vitals doesn’t put the cursor in the first box: one more click before typing');
+      if (focus !== 'Blood pressure and pulse') t.flag('asks-known', 'Record vitals doesn’t put the cursor in the box: one more click before typing');
+      await t.step('Type the reading as it’s said, "122/78 68" (it reads back BP 122/78 mmHg · pulse 68 bpm), and press Enter', async () => {
+        if (focus !== 'Blood pressure and pulse') await t.click('input[aria-label="Blood pressure and pulse"]');
+        await t.type('122/78 68');
+        await t.see('text=BP 122/78 mmHg · pulse 68 bpm');
+        await t.key('Enter');
+        await t.see('input[aria-label="Blood pressure and pulse"]', { state: 'detached' });
+      });
     },
   },
 

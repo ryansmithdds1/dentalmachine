@@ -30,6 +30,30 @@ const e164 = (phone) => `+1${phone.replace(/\D/g, '').slice(-10)}`;
 const freshPhone = () => `(512) 55${String(Math.floor(Math.random() * 10))}-${String(1000 + Math.floor(Math.random() * 8999))}`;
 
 export default {
+  A053: { // log an ordinary call on the chart
+    role: 'frontdesk',
+    async setup(t) {
+      const p = await newPatient(t, 'Callie');
+      await activate(t, p.id);
+      return { p };
+    },
+    async run(t, { p }) {
+      await t.open('/schedule', `.patient-bar:has-text("${p.last_name}")`);
+      await t.step('Press Alt+G: "Log a call" opens beside the screen — we called, spoke with them, just now, with the patient — the cursor in the note', async () => {
+        await t.key('Alt+g');
+        await t.focusIs('Call note');
+      });
+      await t.step('Type what was said and press Enter: it’s on the chart’s call history (Messages & forms → Calls)', async () => {
+        await t.type('Asked about Saturday hours; will call back');
+        await t.key('Enter');
+        await t.see('.logcall-panel', { state: 'detached' });
+      });
+      const calls = await t.api.get(`/patients/${p.id}/calls`);
+      if (!calls.some((c) => c.purpose === 'logged' && /Saturday/.test(c.summary || ''))) throw new Error('the call was not logged');
+      t.note('Right after the phone line logged a call with the patient, the same panel adds the note to that call instead of logging it twice.');
+    },
+  },
+
   A004: {
     role: 'frontdesk',
     async setup(t) {

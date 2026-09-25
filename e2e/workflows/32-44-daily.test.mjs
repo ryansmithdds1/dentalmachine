@@ -259,6 +259,17 @@ test('#44 clock in and out: 1 action each (I on Time clock); the menu’s button
     await page.waitForSelector('.tc-hero-status:has-text("Clocked in since")');
   });
   console.log(withinBudget('#44 clock in', inR, { actions: 1 }));
+  // L: lunch, and L again when back (A061) — one key each way.
+  const lunch = await measure(page, async () => {
+    await page.keyboard.press('l');
+    await page.waitForSelector('.tc-hero-status:has-text("On lunch since")');
+  });
+  console.log(withinBudget('#44 start lunch', lunch, { actions: 1 }));
+  const back = await measure(page, async () => {
+    await page.keyboard.press('l');
+    await page.waitForSelector('.tc-hero-status:has-text("Clocked in since")');
+  });
+  console.log(withinBudget('#44 back from lunch', back, { actions: 1 }));
   const outR = await measure(page, async () => {
     await page.keyboard.press('i');
     await page.waitForSelector('.tc-hero-status:has-text("clocked out")');

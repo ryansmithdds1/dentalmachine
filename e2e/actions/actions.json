@@ -237,7 +237,7 @@
   "area": "schedule",
   "band": "very frequent",
   "perDay": 30,
-  "route": "Schedule — O on the focused visit",
+  "route": "Schedule — O on the focused visit (Shift+O is today's plan)",
   "workflow": [
    3
   ],
@@ -294,7 +294,7 @@
   "area": "schedule",
   "band": "very frequent",
   "perDay": 30,
-  "route": "Follow-up lists → Unconfirmed (/followups?tab=unconfirmed) — C",
+  "route": "Schedule — C on the focused visit (Undo shows); the day's list: U, then C per row",
   "workflow": [
    13
   ],
@@ -312,7 +312,7 @@
   "area": "payments",
   "band": "frequent",
   "perDay": 28,
-  "route": "Checkout (/checkout/:id)",
+  "route": "Schedule — O on the finished visit → Checkout (/checkout/:id): Enter pays what's due, Enter books the next cleaning, Enter checks out",
   "workflow": [
    11
   ],
@@ -454,7 +454,7 @@
   "area": "payments",
   "band": "frequent",
   "perDay": 15,
-  "route": "Chart tab — type \"14 D2740\", the estimate shows",
+  "route": "Alt+E from any screen (the patient bar's Estimate) or the Chart tab — type \"14 D2740\", the estimate shows",
   "workflow": [
    18
   ],
@@ -490,7 +490,7 @@
   "area": "schedule",
   "band": "frequent",
   "perDay": 14,
-  "route": "Checkout — Book recall, Enter on the first suggestion",
+  "route": "Checkout — R (or it opens by itself when nothing is left to pay), Enter on the first suggestion",
   "workflow": [
    16
   ],
@@ -563,7 +563,7 @@
   "area": "imaging",
   "band": "frequent",
   "perDay": 12,
-  "route": "Documents & x-rays tab — drop files",
+  "route": "Documents & x-rays tab — U (file picker) or drop files",
   "workflow": [
    14
   ],
@@ -582,7 +582,7 @@
   "area": "clinical",
   "band": "frequent",
   "perDay": 10,
-  "route": "Chart overview — click the line (or M), type, Ctrl/⌘+Enter",
+  "route": "Chart overview — A (allergies) or Shift+M (medications), type, Ctrl/⌘+Enter; or click the line",
   "workflow": [
    15
   ],
@@ -601,10 +601,10 @@
   "area": "clinical",
   "band": "frequent",
   "perDay": 10,
-  "route": "Chart overview — Vitals",
+  "route": "Chart overview — V, type \"122/78 68\", Enter",
   "workflow": null,
-  "spec": null,
-  "e2e": null,
+  "spec": "docs/workflows/specs/15-medical-history.md",
+  "e2e": "e2e/workflows/14-15-images-medical.test.mjs",
   "target": 3
  },
  {
@@ -902,7 +902,7 @@
   "area": "recall",
   "band": "daily",
   "perDay": 5,
-  "route": "Follow-up lists → Recall — log the call",
+  "route": "Follow-up lists → Recall — one row per patient: Log call (L), Enter",
   "workflow": [
    37
   ],
@@ -938,12 +938,11 @@
   "area": "communication",
   "band": "daily",
   "perDay": 5,
-  "route": "MISSING",
+  "route": "Alt+G from any screen (active patient) or Messages & forms → Calls → Log a call: type the note, Enter",
   "workflow": null,
   "spec": "docs/workflows/specs/PH-phones.md",
-  "e2e": null,
-  "target": 3,
-  "note": "Phone-line calls are logged automatically (Calls page) and the follow-up lists have Log call, but there is no way to note an ordinary call on a patient's chart"
+  "e2e": "e2e/workflows/PH-phones.test.mjs",
+  "target": 3
  },
  {
   "id": "A054",
@@ -1174,7 +1173,7 @@
   "area": "insurance",
   "band": "daily",
   "perDay": 3,
-  "route": "Command bar \"claim …\" → claim (/claims/:id)",
+  "route": "Command bar \"#33\" or \"claim 33\" → claim (/claims/:id)",
   "workflow": null,
   "spec": null,
   "e2e": null,
@@ -2111,7 +2110,7 @@
   "area": "reports",
   "band": "weekly",
   "perDay": 0.2,
-  "route": "Reports → Day sheet, production & A/R",
+  "route": "Command bar \"A/R aging\" (Reports → Day sheet, production & A/R)",
   "workflow": [
    45
   ],
@@ -2304,7 +2303,8 @@
   "workflow": null,
   "spec": "docs/workflows/specs/MK-marketing.md",
   "e2e": null,
-  "target": 5
+  "target": 5,
+  "destructive": true
  },
  {
   "id": "A137",
@@ -2515,7 +2515,7 @@
   "area": "reports",
   "band": "monthly",
   "perDay": 0.05,
-  "route": "Reports → Hygiene",
+  "route": "Command bar \"hygiene report\" (Reports → Hygiene)",
   "workflow": null,
   "spec": null,
   "e2e": null,
@@ -2530,7 +2530,7 @@
   "area": "reports",
   "band": "monthly",
   "perDay": 0.05,
-  "route": "Reports → Treatment plans",
+  "route": "Command bar \"treatment plan acceptance\" (Reports → Treatment plans)",
   "workflow": null,
   "spec": null,
   "e2e": null,
@@ -2545,7 +2545,7 @@
   "area": "reports",
   "band": "monthly",
   "perDay": 0.05,
-  "route": "Reports → Referrals",
+  "route": "Command bar \"referrals report\" (Reports → Referrals)",
   "workflow": null,
   "spec": "docs/workflows/specs/RT-referrals.md",
   "e2e": null,

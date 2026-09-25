@@ -85,6 +85,8 @@ test('22 · "on this screen" hands the plan over without the birth date: once, o
   assert.equal(redeemed.status, 200, JSON.stringify(redeemed.data));
   assert.equal(redeemed.data.kind, 'plan');
   assert.equal(redeemed.data.back, `/patients/${patient.id}?tab=treatment`);
+  // The patient in the chair finds their name on the signing line (only on the device the office handed over).
+  assert.equal(redeemed.data.signer_name, 'Jane Doe');
   // Single use.
   assert.equal((await api.post('/signing-passes/redeem', { code: here.data.handoff })).status, 410);
 

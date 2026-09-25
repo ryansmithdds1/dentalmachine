@@ -255,13 +255,14 @@ export default function OptimizerPanel({ date, locationId = null, onClose, focus
   );
 }
 
-// The panel with its button and the O key, for any screen (the schedule mounts this one line).
+// The panel with its button and Shift+O, for any screen (the schedule mounts this one line). Plain O belongs to the
+// patient flow ("Out" on the focused visit, components/calendar/flow.js), so the plan takes Shift+O everywhere.
 export function OptimizerLauncher({ date, locationId = null, button = true }) {
   const { can } = useAuth() || {};
   const [open, setOpen] = useState(false);
   const [focusId, setFocusId] = useState(null);
   const opt = useOptimizer(date, locationId, { enabled: !!can?.('schedule:read') });
-  useShortcuts([{ combo: 'o', handler: () => setOpen((v) => !v), label: 'Open today’s plan (schedule optimizer)', section: 'Schedule', enabled: !!can?.('schedule:read') && !opt.missing }]);
+  useShortcuts([{ combo: 'shift+o', handler: () => setOpen((v) => !v), label: 'Open today’s plan (schedule optimizer)', section: 'Schedule', enabled: !!can?.('schedule:read') && !opt.missing }]);
   useEffect(() => {
     const on = (e) => { setFocusId(e.detail?.id ?? null); setOpen(true); };
     window.addEventListener('dm:optimizer', on);
@@ -272,7 +273,7 @@ export function OptimizerLauncher({ date, locationId = null, button = true }) {
   return (
     <>
       {button && (
-        <button className={`icon-btn wide opt-launch${open ? ' active' : ''}`} onClick={() => setOpen(!open)} title="Today’s plan (O)">
+        <button className={`icon-btn wide opt-launch${open ? ' active' : ''}`} onClick={() => setOpen(!open)} title="Today’s plan (Shift+O)">
           <Target size={16} /> Plan{moves ? <span className="opt-count">{moves}</span> : null}
         </button>
       )}

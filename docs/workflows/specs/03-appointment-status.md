@@ -20,8 +20,10 @@ With a visit focused on the grid (click it, Tab to it, or **F** = jump to the vi
 | Ready for the doctor (again to clear) | R | same, or the drawer's toggle |
 | Ready for checkout (again to clear) | Shift+R | drawer toggle |
 | Out — visit complete | O | same |
+| Open its checkout (a finished visit) | O again | drawer's Check out… |
 
-Keys are in the `?` list under "Patient flow". Focusing or opening a visit makes its patient the active patient.
+Keys are in the `?` list under "Patient flow". Today's plan (the schedule optimizer) is **Shift+O**, so O is never
+swallowed by the plan panel (bug 1, fixed in phase 2 batch 1A). Focusing or opening a visit makes its patient the active patient.
 
 ## What's automated / how it's safe
 - **Ready is a flag, not a status**: nullable `appointments.ready_at` / `ready_for` ('doctor' | 'checkout'),
@@ -51,3 +53,9 @@ Keys are in the `?` list under "Patient flow". Focusing or opening a visit makes
   `schedule:write`; 404 for another practice; stepping back clears times; undo is marked.
 - `e2e/workflows/02-03-schedule.test.mjs` (#3): I, S, R, O = 1 action each; Ctrl+Z puts the visit back in
   the chair (server state checked); card button and drawer header = 1 click per step.
+
+## Phase 2 batch 1A
+- **Bug 1 fixed:** O opened "Today's plan" instead of marking the focused visit out. The plan moved to Shift+O
+  (`OptimizerPanel.jsx`, `HuddlePlanCard.jsx`); O is always "Out" on the schedule. Tested by
+  `e2e/workflows/02-03-schedule.test.mjs` (#3, the O test re-enabled).
+- **O on a finished visit** opens its checkout (1 key), so the walk-out is O, Enter, Enter, Enter (11-complete-procedures.md).

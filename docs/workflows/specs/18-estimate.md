@@ -8,6 +8,10 @@ primary insurance (coverage %, deductible, maximums, frequencies, downgrades).
 called it.
 
 **Budget:** 2 actions (a digit starts the chart entry, type the rest: "14 D2740").
+**Front desk and billing (can't chart):** the same box is an estimate only — **Alt+E** from any screen (the patient
+bar's "Estimate") opens the chart with the cursor in it, "14 D2740" shows the fee and the insurance and patient
+shares, and Enter charts nothing ("Estimate only"). 2 actions, `e2e/workflows/18b-estimate-frontdesk.test.mjs`;
+the server already allowed the preview (`POST /charting/resolve`, clinical:read) and still refuses charting.
 
 **Redesign:**
 - **`POST /patients/:id/estimate`** (`insurance.js`) now also takes `items: [{ code, tooth, surfaces }]` for work

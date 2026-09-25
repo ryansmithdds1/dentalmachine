@@ -471,7 +471,9 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
     if (err?.code === '22P02' || /invalid input syntax for type (integer|bigint|numeric)/i.test(msg)) return res.status(404).json({ error: 'Not found' });
     if (/not[- ]null constraint/i.test(msg)) {
       const field = err.column || (msg.match(/column "([^"]+)"/)?.[1] ?? msg.split('.').pop());
-      return res.status(400).json({ error: `${field} is required` });
+      // Said in the form's words, not the database's ("Please fill in “Type”", not "type is required").
+      const words = String(field).replace(/_id$/, '').replace(/_/g, ' ').trim();
+      return res.status(400).json({ error: `Please fill in “${words.charAt(0).toUpperCase()}${words.slice(1)}”`, details: { missing: [field] } });
     }
     // Unexpected: logged with the request id (shown to the user so they can quote it) and reported.
     const where = { method: req.method, route: routeOf(req), request_id: req.id, ...(req.user ? { user_id: req.user.id, practice_id: req.user.practice_id } : {}) };

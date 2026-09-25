@@ -57,7 +57,7 @@ test('OPT the plan finds and prices the planned crown for today’s patient', as
   assert.match(prov.plan.headline, /move/);
 });
 
-test('OPT from the huddle: O opens the plan, Enter does the top move (≤ 2 actions); J/K move, D hides, Esc closes', async (t) => {
+test('OPT from the huddle: Shift+O opens the plan, Enter does the top move (≤ 2 actions); J/K move, D hides, Esc closes', async (t) => {
   if (!mounted) return t.skip('optimizer routes not mounted in app.js yet');
   const { page } = s;
   await page.goto(`${app.base}/`);
@@ -71,12 +71,12 @@ test('OPT from the huddle: O opens the plan, Enter does the top move (≤ 2 acti
   const top = [...before.opportunities.filter((o) => o.fits && o.in_plan), ...before.opportunities.filter((o) => o.fits && !o.in_plan), ...before.protect.filter((o) => o.fits)][0];
   assert.ok(top, 'there is something to do');
   const r = await measure(page, async () => {
-    await page.keyboard.press('o');
+    await page.keyboard.press('Shift+O');
     await page.waitForSelector('.opt-panel .opt-card.active');
     await page.keyboard.press('Enter');
     await page.waitForSelector('.toast');
   });
-  console.log(withinBudget('accept the top opportunity (O, Enter)', r, { actions: 2, ms: 6000 }));
+  console.log(withinBudget('accept the top opportunity (Shift+O, Enter)', r, { actions: 2, ms: 6000 }));
   const row = (await s.get(`/optimizer/today?date=${day}`));
   const state = [...row.done, ...row.working].find((x) => x.id === top.id);
   assert.ok(state, `the top move (${top.title}) is done or waiting on a reply`);

@@ -11,7 +11,8 @@ const MAX_BODY = 256 * 1024;
 const hash = (s) => createHash('sha256').update(s).digest('hex');
 // Sign-in, passwords, codes and anything that hands out a token never go through here: a stored fingerprint
 // of a password (even hashed) could be guessed offline, and a stored token could be replayed.
-const SENSITIVE_PATH = /\/(auth|sso)\/|\/verify$|\/login$|\/mfa\b|password|\/reset/i;
+// (A new staff login answers with its invitation link; a second one is refused by the unique email anyway.)
+const SENSITIVE_PATH = /\/(auth|sso)\/|\/verify$|\/login$|\/mfa\b|password|\/reset|\/users$/i;
 const SENSITIVE_KEY = /password|passcode|^code$|otp|token|secret|pin$/i;
 const hasSensitive = (body) => body && typeof body === 'object' && Object.keys(body).some((k) => SENSITIVE_KEY.test(k));
 // Staff and portal sessions (JWTs) are checked here only after the session itself has been validated.

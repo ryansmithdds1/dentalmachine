@@ -194,7 +194,8 @@ export default function ImagingStudio({ patient, docs, canEdit, initial, onClose
   const retakes = filledSlots.filter((i) => docById.get(current.slots[i])?.retake_of).length;
 
   return (
-    <div className="studio" role="dialog" aria-modal="true" aria-label="Imaging studio">
+    // A full view of the page area (the menu stays usable), so it's a region, not a modal dialog.
+    <div className="studio" role="region" aria-label="Imaging studio">
       <header className="studio-top">
         <button type="button" className="studio-icon" onClick={onClose} aria-label="Close imaging"><X size={18} /></button>
         <div className="studio-title">

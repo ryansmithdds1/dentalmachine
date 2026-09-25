@@ -106,6 +106,9 @@ test('#24 at checkout: B makes and sends the claim for today’s work — 1 acti
   }
   await page.goto(`${app.base}/checkout/${visit.id}`);
   await page.waitForSelector('button:has-text("claim to W3 Dental")');
+  // Nothing is owed here (insurance covers it), so checkout opens on booking the next visit; put the cursor in
+  // the payment amount ourselves — B must still bill from there.
+  await page.focus('[aria-label="Payment amount"]');
   await page.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === 'Payment amount');
   const r = await measure(page, async () => {
     await page.keyboard.press('b');

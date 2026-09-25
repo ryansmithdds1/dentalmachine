@@ -21,7 +21,7 @@ export default function OrthoTab({ patient, onChange }) {
         <h3 style={{ margin: 0 }}>Orthodontics</h3>
         {!active && can('billing:write') && <button className="primary" onClick={() => setStarting(true)}>+ Start treatment</button>}
       </div>
-      {!data.cases.length && <div className="card muted">No orthodontic treatment on file. Start treatment to set up the contract and monthly billing.</div>}
+      {!data.cases.length && <div className="card muted">No orthodontic treatment on file. {can('billing:write') ? 'Start treatment to set up the contract and monthly billing.' : 'Starting treatment sets up the contract and monthly billing, so it’s done by someone who handles billing (the front desk or billing team).'}</div>}
       {data.cases.map((c) => <OrthoCase key={c.id} c={c} appliances={data.appliances} onChange={() => { reload(); onChange?.(); }} />)}
       {starting && <StartForm patient={patient} appliances={data.appliances} onClose={() => setStarting(false)} onDone={() => { setStarting(false); reload(); onChange?.(); }} />}
     </div>

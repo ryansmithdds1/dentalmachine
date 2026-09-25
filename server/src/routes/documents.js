@@ -1,6 +1,6 @@
 import express, { Router } from 'express';
 import { autoAnalyze } from '../xrayai.js';
-import { requirePermission, HttpError } from '../auth.js';
+import { requirePermission, requireAnyPermission, HttpError, can } from '../auth.js';
 import { findOr404, insert, audit, validTooth, newToken, recorded, isRealDate } from '../util.js';
 import { dicomToImage } from '../dicomimage.js';
 import { makeThumbnail, imageSize } from '../thumbnails.js';
@@ -127,7 +127,7 @@ export default function documentRoutes({ db, storage, config = {} }) {
 
   r.post(
     '/patients/:id/documents',
-    requirePermission('clinical:write'),
+    requireAnyPermission('clinical:write', 'documents:add'),
     rawFor,
     async (req, res) => {
       const patient = await findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient');
@@ -341,7 +341,7 @@ export default function documentRoutes({ db, storage, config = {} }) {
   });
 
   // Scan to chart from a phone: a link (shown as a QR code) good for 15 minutes, for this patient only.
-  r.post('/patients/:id/upload-links', requirePermission('clinical:write'), async (req, res) => {
+  r.post('/patients/:id/upload-links', requireAnyPermission('clinical:write', 'documents:add'), async (req, res) => {
     const patient = await findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient');
     const category = CATEGORIES.includes(req.body?.category) ? req.body.category : 'document';
     const { token, hash } = newToken();
@@ -352,8 +352,10 @@ export default function documentRoutes({ db, storage, config = {} }) {
   });
 
   // Soft delete: the file is retained for record-keeping but hidden from the chart. Removing twice is harmless.
+  // Someone who can only add documents (documents:add) can take back their own upload for a few minutes — the
+  // Undo on "Added … to the chart" — but not remove anything else.
   r.delete('/documents/:did', async (req, res) => {
-    const doc = await loadDoc(db, req, req.params.did, { write: true, allowDeleted: true });
+    const doc = await loadDoc(db, req, req.params.did, { write: true, allowDeleted: true, ownUndo: true });
     if (doc.deleted_at) return res.json({ ok: true, already: true });
     await recorded(db, 'documents', doc.id, () => db.run("UPDATE documents SET deleted_at = datetime('now') WHERE id = ? AND deleted_at IS NULL", doc.id));
     await audit(db, req, 'document.delete', 'documents', doc.id, { patient_id: doc.patient_id, filename: doc.filename, category: doc.category });

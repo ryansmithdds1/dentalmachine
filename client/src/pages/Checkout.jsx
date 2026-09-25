@@ -31,6 +31,12 @@ export default function Checkout() {
   const [booking, setBooking] = useState(null);
   const [picking, setPicking] = useState(false);
   const [note, setNote] = useState(null);
+  // The walk-out is a chain of Enters (A017): the amount due is filled in and focused, Enter posts it; then the
+  // next hygiene visit's first suggestion is focused, Enter books it; then "Mark checked out" is focused, Enter
+  // finishes. Each step can be skipped (Esc, or Tab past it); nothing happens without a key or a click.
+  const [stage, setStage] = useState(null); // { name: 'pay' | 'recall' | 'finish', n }
+  const finishRef = useRef(null);
+  const go = (name) => setStage((s) => ({ name, n: (s?.n || 0) + 1 }));
   const act = async (fn, msg) => {
     setErr(null);
     try {
@@ -65,12 +71,40 @@ export default function Checkout() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [canBill]);
+  const recall = co?.recalls.find((r) => ['due', 'contacted'].includes(r.status));
+  const canBook = !!recall && can('schedule:write') && !co?.next_appointment;
+  const due = co ? co.due?.now ?? co.suggested_payment ?? 0 : 0;
+  const afterPay = () => go(canBook ? 'recall' : 'finish');
+  // Where the keyboard starts: the amount due, else the next visit, else Finish.
+  useEffect(() => {
+    if (co && !stage) go(can('billing:write') && due > 0 ? 'pay' : canBook ? 'recall' : 'finish');
+  }, [co]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (stage?.name === 'recall') setPicking(true);
+    if (stage?.name === 'finish') setTimeout(() => finishRef.current?.focus(), 0);
+  }, [stage]);
+  // R books the next hygiene visit (the first suggestion takes the focus, so it's R, Enter). In the amount box a
+  // letter means nothing, so R works from there too, like B.
+  const openRecall = () => canBook && setPicking(true);
+  useShortcut('r', openRecall, { label: 'Book the next hygiene visit (Enter takes the first time offered)', section: 'Check out', enabled: canBook && !picking });
+  const recallRef = useRef(openRecall);
+  recallRef.current = openRecall;
+  useEffect(() => {
+    if (!canBook) return undefined;
+    const onKey = (e) => {
+      if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || e.key.toLowerCase() !== 'r') return;
+      if (!e.target.matches?.('.checkout-steps input[type=number]') || document.querySelector('.modal, .palette')) return;
+      e.preventDefault();
+      recallRef.current();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [canBook]);
   if (loadErr) return <div className="error">{loadErr.message}</div>;
   if (!co) return <div className="empty">Loading…</div>;
   const a = co.appointment;
   const planned = co.procedures.filter((p) => p.status === 'planned');
   const est = Object.fromEntries((co.estimate?.items || []).map((i) => [i.procedure_id, i]));
-  const recall = co.recalls.find((r) => ['due', 'contacted'].includes(r.status));
   const patient = { id: a.patient_id, first_name: a.first_name, last_name: a.last_name };
 
   return (
@@ -127,14 +161,19 @@ export default function Checkout() {
           <h2><span className="step-num">2</span> Collect</h2>
           {/* Without billing access the server leaves the money out (estimate is null), so there is nothing to show. */}
           {co.estimate && (
+            // What's due now, from the ledger: today's share plus anything older, less what insurance is still
+            // expected to pay and what they've paid today (routes/frontdesk.js).
             <div className="checkout-money">
-              <div><span>Account balance</span><strong className={co.balance > 0 ? 'text-danger' : ''}>{money(co.balance)}</strong></div>
-              <div><span>Today&apos;s estimated patient portion</span><strong>{money(co.estimate.total_patient)}</strong></div>
-              <div><span>Paid today</span><strong>{money(co.paid_today)}</strong></div>
-              <div><span>Suggested now</span><strong>{money(co.suggested_payment)}</strong></div>
+              <div><span>Today&apos;s work — their share</span><strong>{money(co.due?.today_share ?? co.estimate.total_patient)}</strong></div>
+              {co.due?.earlier > 0 && <div><span>Earlier balance</span><strong className="text-danger">{money(co.due.earlier)}</strong></div>}
+              {co.paid_today > 0 && <div><span>Paid today</span><strong>{money(co.paid_today)}</strong></div>}
+              <div><span>Due now</span><strong className={due > 0 ? 'text-danger' : ''}>{money(due)}</strong></div>
+              <div className="muted"><span>Account balance</span><strong>{money(co.balance)}</strong>{co.due?.insurance_expected > 0 && <small> ({money(co.due.insurance_expected)} expected from insurance)</small>}</div>
             </div>
           )}
-          {can('billing:write') ? <CollectForm key={co.suggested_payment} patient={patient} patientId={a.patient_id} suggested={co.suggested_payment} onDone={(amt) => { setNote(`Payment of ${money(amt)} posted.`); reload(); }} /> : <p className="muted">Ask billing to take the payment.</p>}
+          {can('billing:write')
+            ? <CollectForm key={due} patient={patient} patientId={a.patient_id} suggested={due} autoFocus={stage?.name === 'pay'} onDone={(amt) => { setNote(`Payment of ${money(amt)} posted.`); reload(); afterPay(); }} />
+            : <p className="muted">Ask billing to take the payment.</p>}
         </section>
 
         <section className="card">
@@ -150,8 +189,8 @@ export default function Checkout() {
           )}
           {can('schedule:write') && recall && picking && (
             <NextVisitPicker
-              patientId={a.patient_id} recall={recall} onCancel={() => setPicking(false)}
-              onBooked={(appt, provider) => { setPicking(false); setNote(`Booked ${recall.type_name.toLowerCase()} for ${fmtDate(appt.start_time.slice(0, 10))} at ${fmtTime(appt.start_time)} with ${provider.name}.`); reload(); }}
+              patientId={a.patient_id} recall={recall} near={a.start_time.slice(11, 16)} onCancel={() => { setPicking(false); go('finish'); }}
+              onBooked={(appt, provider) => { setPicking(false); setNote(`Booked ${recall.type_name.toLowerCase()} for ${fmtDate(appt.start_time.slice(0, 10))} at ${fmtTime(appt.start_time)} with ${provider.name}.`); reload(); go('finish'); }}
               // Another time: the full form, starting from the suggestion (the type sets the length).
               onOther={(slot, provider) => {
                 setPicking(false);
@@ -162,7 +201,7 @@ export default function Checkout() {
           )}
           {can('schedule:write') && (
             <div className="form-actions" style={{ justifyContent: 'flex-start' }}>
-              {recall && !picking && <button className="primary" onClick={() => setPicking(true)}>Book {recall.type_name.toLowerCase()} recall</button>}
+              {recall && !picking && <button className="primary" onClick={() => setPicking(true)} title="R, then Enter for the first time offered">Book {recall.type_name.toLowerCase()} recall <kbd>R</kbd></button>}
               {co.unscheduled.length > 0 && <button onClick={() => setBooking({ date: practiceToday(practice?.timezone), procedure_ids: co.unscheduled.map((p) => p.id), reason: 'Treatment' })}>Book remaining treatment</button>}
               <button onClick={() => setBooking({ date: practiceToday(practice?.timezone) })}>Book another visit</button>
             </div>
@@ -172,7 +211,7 @@ export default function Checkout() {
         <section className="card">
           <h2><span className="step-num">4</span> Finish</h2>
           {a.checked_out_at ? <p><span className="badge ok">Checked out</span> at {fmtTime(a.checked_out_at)}</p> : (
-            <button className="primary" onClick={() => act(() => api.post(`/appointments/${a.id}/checkout`, {}), 'Checked out.')}>Mark checked out</button>
+            <button ref={finishRef} className="primary" onClick={() => act(() => api.post(`/appointments/${a.id}/checkout`, {}), 'Checked out.')}>Mark checked out</button>
           )}
           <button style={{ marginLeft: 8 }} onClick={() => window.open(`/appointments/${a.id}/walkout`, '_blank')}>Print walkout</button>
           {can('patients:write') && <button style={{ marginLeft: 8 }} title="Text (or email) a “how did we do?” link" onClick={() => requestReview(a.patient_id, { source: 'checkout', appointmentId: a.id, name: `${a.first_name} ${a.last_name}` })}>Ask for a review</button>}
@@ -188,9 +227,9 @@ export default function Checkout() {
   );
 }
 
-// Collect at checkout: the amount is ready to type (the suggested patient portion), the method is the one this
-// person used last, and Enter posts. The card reader opens in place, not as a second dialog.
-function CollectForm({ patient, patientId, suggested, onDone }) {
+// Collect at checkout: the amount is filled in with what's due now (today's share plus any earlier balance), the
+// method is the one this person used last, and Enter posts. The card reader opens in place, not as a second dialog.
+function CollectForm({ patient, patientId, suggested, autoFocus, onDone }) {
   const [lastMethod, rememberMethod] = useLastMethod(METHODS);
   const [form, setForm] = useState({ amount: suggested > 0 ? (suggested / 100).toFixed(2) : '', method: lastMethod, reference: '' });
   const picked = useRef(false);
@@ -199,6 +238,10 @@ function CollectForm({ patient, patientId, suggested, onDone }) {
   const [onReader, setOnReader] = useState(false);
   const { data: contact } = useApi(onReader ? `/patients/${patientId}` : null); // email and phone for the receipt
   const posting = useRef(false);
+  // The amount takes the keyboard when checkout starts on it (there's something to collect), selected so typing
+  // another amount replaces it.
+  const amountRef = useRef(null);
+  useEffect(() => { if (autoFocus) { amountRef.current?.focus(); amountRef.current?.select(); } }, [autoFocus]);
   const { submit, busy, error } = useSubmit(async () => {
     if (posting.current) return; // one post per press; the Idempotency-Key covers retries
     posting.current = true;
@@ -216,7 +259,7 @@ function CollectForm({ patient, patientId, suggested, onDone }) {
     <>
     <form className="inline" style={{ flexWrap: 'wrap', gap: 8, alignItems: 'flex-end' }} onSubmit={(e) => { e.preventDefault(); submit(); }}>
       <ErrorBox error={error} />
-      <label>Amount ($)<input type="number" step="0.01" min="0.01" required autoFocus onFocus={(e) => e.target.select()} aria-label="Payment amount" disabled={busy} value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} style={{ width: 120 }} /></label>
+      <label>Amount ($)<input ref={amountRef} type="number" step="0.01" min="0.01" required onFocus={(e) => e.target.select()} aria-label="Payment amount" disabled={busy} value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} style={{ width: 120 }} /></label>
       <label>Method<select value={form.method} disabled={busy} onChange={(e) => { picked.current = true; setForm({ ...form, method: e.target.value }); }}>{METHODS.map((m) => <option key={m} value={m}>{label(m)}</option>)}</select></label>
       <label>Reference<input value={form.reference} disabled={busy} onChange={(e) => setForm({ ...form, reference: e.target.value })} placeholder="last 4, check #" style={{ width: 140 }} /></label>
       <button className="primary" disabled={busy}>Post payment</button>

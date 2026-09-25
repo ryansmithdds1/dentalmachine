@@ -314,6 +314,41 @@ test('#13 "N unconfirmed" opens the list; C confirms a row (1 key each) with Und
   assert.deepEqual(s.errors, []);
 });
 
+test('#13 on the schedule: C on a focused unconfirmed visit confirms it (1 key) with Undo; U opens the day’s list; C elsewhere is the Chairs view', async () => {
+  const { page } = s;
+  const day = addDays(DAY, 8);
+  const a = await bookAt(await newPatient('Conny'), day, '13:00', 30);
+  const b = await bookAt(await newPatient('Dora'), day, '14:00', 30);
+  await openDay(day);
+  await page.focus(card(a.id));
+  const one = await measure(page, async () => {
+    await page.keyboard.press('c');
+    await page.waitForSelector(`${card(a.id)}.status-confirmed:not(.pending)`);
+  });
+  console.log(withinBudget('confirm the focused visit on the schedule', one, { actions: 1, ms: 2000 }));
+  await until(async () => (await s.get(`/appointments/${a.id}`)).status === 'confirmed', 'the confirmation');
+  assert.equal((await s.get(`/appointments/${a.id}`)).confirmed_via, 'phone');
+  await page.waitForSelector('.toast:has-text("Confirmed Conny")');
+  // Pressing C again on the now-confirmed visit doesn't confirm anything twice: it's the Chairs view again.
+  await page.keyboard.press('c');
+  await page.waitForTimeout(200);
+  const hist = (await s.get(`/appointments/${a.id}/history`)).filter((h) => h.action === 'appointment.status');
+  assert.equal(hist.length, 1, 'confirmed once');
+  // Undo (Ctrl/⌘+Z while the notice shows): unconfirmed again, on screen and on the server.
+  await page.keyboard.press(`${MOD}+z`);
+  await until(async () => (await s.get(`/appointments/${a.id}`)).status === 'scheduled', 'the undo');
+  await page.waitForSelector(`${card(a.id)}.status-scheduled`);
+  // U: the day's unconfirmed list, in one key.
+  const list = await measure(page, async () => {
+    await page.keyboard.press('u');
+    await page.waitForSelector('tr.kb-row');
+  });
+  console.log(withinBudget('open the unconfirmed list by key', list, { actions: 1, ms: 4000 }));
+  assert.match(page.url(), new RegExp(`tab=unconfirmed.*date=${day}`));
+  assert.equal(await page.locator(`tr[data-appt-id="${b.id}"]`).count(), 1);
+  assert.deepEqual(s.errors, []);
+});
+
 test('#19 cancel with a reason and rebook: X, a number, Enter (3 keys); no-show with its reason', async () => {
   const { page } = s;
   const types = await s.get('/appointment-types?active=true');

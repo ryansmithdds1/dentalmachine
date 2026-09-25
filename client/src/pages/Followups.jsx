@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../api.js';
 import { useApi } from '../hooks.js';
@@ -255,6 +255,8 @@ function Openings() {
   );
 }
 
+// Recall (A051, A037): one row per patient — the recalls they're due for (exam, cleaning, x-rays…) as chips — so one
+// call is logged once. J / K move, L logs the call right under the row (1–8 pick how it went, Enter saves), B books.
 function Recall() {
   const { can, practice } = useAuth();
   const today = practiceToday(practice?.timezone);
@@ -265,45 +267,89 @@ function Recall() {
   const [notice, setNotice] = useState(null);
   const [logFor, setLogFor] = useState(null);
   const [bookFor, setBookFor] = useState(null);
+  const [cur, setCur] = useState(0);
+  const people = useMemo(() => {
+    const by = new Map();
+    for (const r of recalls || []) {
+      if (!by.has(r.patient_id)) by.set(r.patient_id, { patient_id: r.patient_id, first_name: r.first_name, last_name: r.last_name, phone: r.phone, items: [] });
+      by.get(r.patient_id).items.push(r);
+    }
+    return [...by.values()].map((g) => ({
+      ...g,
+      ids: g.items.map((r) => r.id),
+      due: g.items.reduce((d, r) => (r.due_date < d ? r.due_date : d), g.items[0].due_date),
+      status: g.items.some((r) => r.status === 'due') ? 'due' : 'contacted',
+      last_contacted_at: g.items.map((r) => r.last_contacted_at).filter(Boolean).sort().at(-1) || null,
+    }));
+  }, [recalls]);
+  useEffect(() => { if (cur > 0 && cur >= people.length) setCur(Math.max(0, people.length - 1)); }, [people.length, cur]);
+  useEffect(() => { document.querySelector('.recall-list tr.kb-row')?.scrollIntoView?.({ block: 'nearest' }); }, [cur]);
+  const row = people[cur];
   const campaign = async () => {
     const r = await api.post('/recalls/campaign', { recall_ids: selected });
     setNotice(`Sent ${r.sent} recall reminder${r.sent === 1 ? '' : 's'}${r.skipped ? ` · ${r.skipped} skipped (no phone/email or opted out)` : ''}.`);
     setSelected([]);
     reload();
   };
+  const book = (g) => g && setBookFor({ patient: { id: g.patient_id, first_name: g.first_name, last_name: g.last_name }, date: g.due > today ? g.due : today });
+  const w = can('schedule:write');
+  const quiet = !logFor && !bookFor;
+  useShortcuts([
+    { combo: 'j', handler: () => setCur((i) => Math.min(i + 1, people.length - 1)), label: 'Next patient', section: 'Recall list', enabled: quiet },
+    { combo: 'k', handler: () => setCur((i) => Math.max(i - 1, 0)), label: 'Previous patient', section: 'Recall list', enabled: quiet },
+    { combo: 'l', handler: () => row && setLogFor(row), label: 'Log a call to the patient (1–8 how it went, Enter saves)', section: 'Recall list', enabled: quiet && can('patients:write') },
+    { combo: 'b', handler: () => book(row), label: 'Book the patient', section: 'Recall list', enabled: quiet && w },
+  ]);
+  const allIds = people.flatMap((g) => g.ids);
+  const picked = (g) => g.ids.every((id) => selected.includes(id));
   return (
     <>
       <div className="card inline" style={{ justifyContent: 'space-between', flexWrap: 'wrap', marginBottom: 12 }}>
         <select value={win} onChange={(e) => setWin(Number(e.target.value))} style={{ width: 'auto' }} aria-label="Due within">
           <option value={0}>Overdue only</option><option value={30}>Due within 30 days</option><option value={60}>Due within 60 days</option><option value={90}>Due within 90 days</option>
         </select>
-        {can('schedule:write') && (
+        {w && (
           <div className="inline">
-            <button onClick={() => setSelected(selected.length === (recalls || []).length ? [] : (recalls || []).map((r) => r.id))}>{selected.length && selected.length === recalls?.length ? 'Clear' : 'Select all'}</button>
-            <button className="primary" disabled={!selected.length} onClick={campaign}>Text/email {selected.length || ''} selected</button>
+            <button onClick={() => setSelected(selected.length === allIds.length ? [] : allIds)}>{selected.length && selected.length === allIds.length ? 'Clear' : 'Select all'}</button>
+            <button className="primary" disabled={!selected.length} onClick={campaign}>Text/email {people.filter(picked).length || ''} selected</button>
           </div>
         )}
       </div>
       {notice && <div className="public-notice ok" style={{ marginBottom: 12 }}>{notice}</div>}
+      {people.length > 0 && <div className="muted kb-hint"><kbd>J</kbd> <kbd>K</kbd> move · <kbd>L</kbd> log a call · <kbd>B</kbd> book</div>}
       <div className="card" style={{ padding: 0 }}>
         <div className="table-wrap">
-          <table>
-            <thead><tr><th /><th>Patient</th><th>Type</th><th>Due</th><th>Phone</th><th>Status</th><th /></tr></thead>
+          <table className="unconf-table recall-list">
+            <thead><tr><th aria-label="Select" /><th>Patient</th><th>Due for</th><th>Due</th><th>Phone</th><th>Status</th><th /></tr></thead>
             <tbody>
-              {recalls?.map((r) => (
-                <tr key={r.id}>
-                  <td><input type="checkbox" style={{ width: 'auto' }} aria-label={`Select ${r.first_name} ${r.last_name}`} checked={selected.includes(r.id)} onChange={(e) => setSelected(e.target.checked ? [...selected, r.id] : selected.filter((x) => x !== r.id))} /></td>
-                  <td><Link to={`/patients/${r.patient_id}`}>{r.first_name} {r.last_name}</Link></td>
-                  <td>{label(r.type)}</td>
-                  <td style={{ color: r.due_date < today ? 'var(--danger)' : undefined }}>{fmtDate(r.due_date)}{r.due_date < today ? ' · overdue' : ''}</td>
-                  <td>{r.phone ? <a href={`tel:${r.phone}`}>{r.phone}</a> : '—'}</td>
-                  <td><Badge value={r.status} />{r.last_contacted_at && <div className="muted" style={{ fontSize: 11 }}>contacted {fmtDate(r.last_contacted_at)}</div>}</td>
-                  <td style={{ whiteSpace: 'nowrap' }}>
-                    {can('patients:write') && <button className="small" onClick={() => setLogFor({ patient_id: r.patient_id, name: `${r.first_name} ${r.last_name}` })}>Log call</button>}{' '}
-                    {can('schedule:write') && <button className="small primary" onClick={() => setBookFor({ patient: { id: r.patient_id, first_name: r.first_name, last_name: r.last_name }, date: r.due_date > today ? r.due_date : today })}>Book</button>}{' '}
-                    {can('schedule:write') && <button className="small" title="Inactive — stop recalling this patient" onClick={() => api.put(`/recalls/${r.id}`, { status: 'inactive' }).then(reload)}>Remove</button>}
-                  </td>
-                </tr>
+              {people.map((g, i) => (
+                <Fragment key={g.patient_id}>
+                  <tr className={i === cur ? 'kb-row' : ''} aria-selected={i === cur} onClick={() => setCur(i)} data-patient-id={g.patient_id}>
+                    <td><input type="checkbox" style={{ width: 'auto' }} aria-label={`Select ${g.first_name} ${g.last_name}`} checked={picked(g)} onChange={(e) => setSelected(e.target.checked ? [...new Set([...selected, ...g.ids])] : selected.filter((x) => !g.ids.includes(x)))} /></td>
+                    <td><Link to={`/patients/${g.patient_id}`}>{g.first_name} {g.last_name}</Link></td>
+                    <td>
+                      <span className="recall-chips">
+                        {g.items.map((r) => (
+                          <span key={r.id} className="badge recall-chip" title={`${label(r.type)} due ${fmtDate(r.due_date)}`}>
+                            {label(r.type)}
+                            {w && <button type="button" className="recall-chip-x" aria-label={`Stop recalling ${g.first_name} for ${label(r.type)}`} title="Inactive — stop recalling this" onClick={(e) => { e.stopPropagation(); api.put(`/recalls/${r.id}`, { status: 'inactive' }).then(reload); }}>×</button>}
+                          </span>
+                        ))}
+                      </span>
+                    </td>
+                    <td style={{ color: g.due < today ? 'var(--danger)' : undefined }}>{fmtDate(g.due)}{g.due < today ? ' · overdue' : ''}</td>
+                    <td>{g.phone ? <a href={`tel:${g.phone}`}>{g.phone}</a> : '—'}</td>
+                    <td><Badge value={g.status} />{g.last_contacted_at && <div className="muted" style={{ fontSize: 11 }}>contacted {fmtDate(g.last_contacted_at)}</div>}</td>
+                    <td style={{ whiteSpace: 'nowrap' }}>
+                      {can('patients:write') && <button className="small" onClick={() => { setCur(i); setLogFor(g); }} title="L">Log call</button>}{' '}
+                      {w && <button className="small primary" onClick={() => { setCur(i); book(g); }} title="B">Book</button>}
+                    </td>
+                  </tr>
+                  {logFor?.patient_id === g.patient_id && (
+                    <LogCallRow colSpan={7} kind="recall" target={{ patient_id: g.patient_id, name: `${g.first_name} ${g.last_name}` }} extra={{ recall_ids: g.items.filter((r) => r.status === 'due').map((r) => r.id) }}
+                      onDone={() => { setLogFor(null); reload(); }} />
+                  )}
+                </Fragment>
               ))}
             </tbody>
           </table>
@@ -311,7 +357,6 @@ function Recall() {
           {recalls && <MoreRows shown={recalls.length} total={recalls.total} onMore={(n) => setLimit(limit + n)} />}
         </div>
       </div>
-      {logFor && <LogCall kind="recall" target={logFor} onDone={() => { setLogFor(null); reload(); }} />}
       {bookFor && <BookModal {...bookFor} onDone={() => { setBookFor(null); reload(); }} />}
     </>
   );
@@ -347,7 +392,8 @@ function CallList({ kind, rows, onChange }) {
             </thead>
             <tbody>
               {shown.map((r) => (
-                <tr key={`${r.patient_id}-${r.id || ''}`}>
+                <Fragment key={`${r.patient_id}-${r.id || ''}`}>
+                <tr>
                   <td><Link to={`/patients/${r.patient_id}`}><strong>{r.first_name} {r.last_name}</strong></Link><div className="muted">{r.phone ? <a href={`tel:${r.phone}`}>{r.phone}</a> : r.email || 'no phone'}</div></td>
                   {kind === 'unscheduled' ? (
                     <>
@@ -374,40 +420,62 @@ function CallList({ kind, rows, onChange }) {
                     )}
                   </td>
                 </tr>
+                {logFor?.patient_id === r.patient_id && (
+                  <LogCallRow colSpan={6} kind={kind} target={logFor} onDone={(outcome) => { setLogFor(null); if (outcome === 'declined') setHidden([...hidden, r.patient_id]); if (outcome) onChange?.(); }} />
+                )}
+                </Fragment>
               ))}
             </tbody>
           </table>
           {shown.length === 0 && <div className="empty">List is clear. 🎉</div>}
         </div>
       </div>
-      {logFor && <LogCall kind={kind} target={logFor} onDone={(outcome) => { setLogFor(null); if (outcome === 'declined') setHidden([...hidden, logFor.patient_id]); onChange?.(); }} />}
       {bookFor && <BookModal {...bookFor} onDone={(saved) => { setBookFor(null); if (saved) { setHidden([...hidden, bookFor.patient.id]); onChange?.(); } }} />}
     </>
   );
 }
 
-function LogCall({ kind, target, onDone }) {
+// Logging a call from a list (A051, A057): a row that opens right under the patient — not a dialog. How it went is
+// one key (1–8; "Left voicemail" is already picked), a note is optional, Enter saves, Esc closes. The team sees the
+// last contact on the list; the history of earlier calls is right there.
+function LogCallRow({ colSpan, kind, target, extra = {}, onDone }) {
   const [outcome, setOutcome] = useState('left_voicemail');
   const [note, setNote] = useState('');
+  const box = useRef(null);
   const { data: history } = useApi(`/patients/${target.patient_id}/followups`);
+  useEffect(() => { box.current?.querySelector('.logcall-save')?.focus(); }, []);
   const { submit, busy, error } = useSubmit(async () => {
-    await api.post(`/patients/${target.patient_id}/followups`, { kind, outcome, note });
+    await api.post(`/patients/${target.patient_id}/followups`, { kind, outcome, note, ...extra });
     onDone(outcome);
   });
+  const keys = (e) => {
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onDone(null); return; }
+    if (e.target.tagName === 'TEXTAREA') {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (!busy) submit(); }
+      return;
+    }
+    if (/^[1-8]$/.test(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); e.stopPropagation(); setOutcome(OUTCOMES[Number(e.key) - 1][0]); }
+  };
   return (
-    <Modal title={`Log contact — ${target.name}`} onClose={() => onDone(null)}>
-      <ErrorBox error={error} />
-      <div className="chips" style={{ marginBottom: 10 }}>
-        {OUTCOMES.map(([v, l]) => <button key={v} type="button" className={`chip${outcome === v ? ' active' : ''}`} onClick={() => setOutcome(v)}>{l}</button>)}
-      </div>
-      <textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note (optional)" />
-      <div className="form-actions"><button className="primary" disabled={busy} onClick={submit}>Save</button></div>
-      {history?.length > 0 && (
-        <div style={{ marginTop: 12 }}>
-          <h3>History</h3>
-          {history.map((f) => <div key={f.id} className="muted" style={{ fontSize: 12, padding: '3px 0' }}>{fmtDateTime(f.created_at)} · {label(f.kind)} · {outcomeLabel(f.outcome)}{f.note ? ` — ${f.note}` : ''} · {f.created_by_name}</div>)}
+    <tr className="logcall-row-inline">
+      <td colSpan={colSpan}>
+        <div ref={box} className="logcall-inline" role="group" aria-label={`Log contact — ${target.name}`} onKeyDown={keys}>
+          <ErrorBox error={error} />
+          <div className="chips" role="radiogroup" aria-label="How it went">
+            {OUTCOMES.map(([v, l], i) => <button key={v} type="button" role="radio" aria-checked={outcome === v} className={`chip${outcome === v ? ' active' : ''}`} onClick={() => setOutcome(v)}>{l} <kbd>{i + 1}</kbd></button>)}
+          </div>
+          <div className="inline" style={{ alignItems: 'flex-end', gap: 8 }}>
+            <textarea rows={1} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note (optional)" aria-label="Call note" style={{ flex: 1 }} />
+            <button type="button" className="primary logcall-save" disabled={busy} onClick={submit}>Save <kbd>Enter</kbd></button>
+            <button type="button" onClick={() => onDone(null)}>Cancel <kbd>Esc</kbd></button>
+          </div>
+          {history?.length > 0 && (
+            <div className="muted logcall-history">
+              {history.slice(0, 3).map((f) => <div key={f.id}>{fmtDateTime(f.created_at)} · {label(f.kind)} · {outcomeLabel(f.outcome)}{f.note ? ` — ${f.note}` : ''} · {f.created_by_name}</div>)}
+            </div>
+          )}
         </div>
-      )}
-    </Modal>
+      </td>
+    </tr>
   );
 }

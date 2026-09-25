@@ -45,7 +45,9 @@ const reqHm = (v, name) => {
 };
 const toLocal = (v, name) => {
   const s = String(v ?? '').replace('T', ' ').slice(0, 16);
-  if (!isLocal(s)) throw new HttpError(400, `${name} must be a real date and time (YYYY-MM-DD HH:MM)`);
+  // Plain words for the people who see it ("Clock-out isn't a real date and time"); the field name stays in details.
+  const what = { clock_in: 'Clock-in', clock_out: 'Clock-out' }[name] || name;
+  if (!isLocal(s)) throw new HttpError(400, `${what} isn’t a real date and time — pick the day and the time`, { field: name });
   return s;
 };
 const reasonOf = (body, what = 'Say why') => {

@@ -27,7 +27,7 @@ const openTreatment = async () => {
   await s.page.waitForSelector('h2:has-text("Treatment plans")');
 };
 
-test('F2/F3/F4 present the plan: teeth, phase cards, ways to pay side by side; the patient picks and signs in ≤ 4 actions', async () => {
+test('F2/F3/F4 present the plan: teeth, phase cards, ways to pay side by side; the patient picks and signs in ≤ 3 actions', async () => {
   const { page } = s;
   const plan = await newPlan('Restore my smile', [['D2740', '14', 1], ['D3330', '19', 1], ['D6010', '30', 2]]);
   assert.ok(plan.id, JSON.stringify(plan));
@@ -51,14 +51,14 @@ test('F2/F3/F4 present the plan: teeth, phase cards, ways to pay side by side; t
   assert.equal(await page.locator('.cp-detail').count(), 0);
 
   const patientSide = await measure(page, async () => {
-    await page.waitForFunction(() => document.activeElement?.getAttribute('autocomplete') === 'name');
-    await page.keyboard.type('Fina Options');
+    // Handed over in the office: the name is already on the signing line.
+    await page.waitForFunction(() => document.activeElement?.getAttribute('autocomplete') === 'name' && document.activeElement.value === 'Fina Options');
     await page.locator('.fin-card[data-kind="in_office"] .fin-card-main').click();
     await page.click('label.checkbox input[type=checkbox]');
     await page.click('button:has-text("Accept & sign")');
     await page.waitForSelector('h1:has-text("Thank you")');
   });
-  console.log(withinBudget('F pick a way to pay and sign (patient)', patientSide, { actions: 4 }));
+  console.log(withinBudget('F pick a way to pay and sign (patient)', patientSide, { actions: 3 }));
   await page.waitForSelector('.cp-done:has-text("How you’ll pay")');
   const agreements = await s.get(`/patients/${patient.id}/fin-agreements`);
   const a = agreements.find((x) => x.treatment_plan_id === plan.id);
@@ -152,17 +152,16 @@ test('F6 compare options for #19: "Show patient" opens the patient window, the s
   const second = made.plans[1].id;
   await panel.locator(`.cmp-col[data-plan="${second}"] button`).click();
   await win.waitForSelector(`.cmp-col.pointed[data-plan="${second}"]`);
-  // The patient taps option 2, then signs (type name, tick, accept).
+  // The patient taps option 2, then signs (their name is already on the signing line: tick, accept).
   const p = await measure(win, async () => {
     await win.locator(`.cmp-col[data-plan="${second}"] button:has-text("Choose this")`).click();
-    await win.waitForFunction(() => document.activeElement?.getAttribute('autocomplete') === 'name');
-    await win.keyboard.type('Fina Options');
+    await win.waitForFunction(() => document.activeElement?.getAttribute('autocomplete') === 'name' && document.activeElement.value === 'Fina Options');
     await win.click('label.checkbox input[type=checkbox]');
     await win.click('button:has-text("Accept & sign")');
     await win.waitForSelector('h1:has-text("Thank you")');
   });
-  console.log(withinBudget('F6 patient chooses and signs', p, { actions: 4 }));
-  assert.ok(p.actions >= 4, p.log.join(', '));
+  console.log(withinBudget('F6 patient chooses and signs', p, { actions: 3 }));
+  assert.ok(p.actions >= 3, p.log.join(', '));
   await panel.locator('.badge:has-text("Patient chose Option 2")').waitFor();
   const plans = await plansOf();
   assert.ok(plans.find((x) => x.id === second).signed_at, 'option 2 is signed');

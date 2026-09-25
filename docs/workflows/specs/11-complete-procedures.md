@@ -34,3 +34,17 @@ work already on a claim can't be un-completed until the claim is voided.
 in 2 actions, both charged once with a provider; Undo with a typed reason reverses the charge, no browser dialog.
 `server/test/moneyflows.test.js` — charges per procedure, a second complete is 409, un-complete needs billing
 access and a reason, and the charge is reversed, not deleted.
+
+## Checkout walk-out (A017, phase 2 batch 1A) — budget 4 actions, keyboard only
+From the schedule: **O** on the finished visit opens its checkout; the amount is filled in with **what's due now**
+and focused — **Enter** posts it; the next cleaning's first suggestion takes the focus — **Enter** books it; "Mark
+checked out" takes the focus — **Enter** finishes. Each step can be skipped (Esc / Tab).
+- **Due now** comes from the ledger (`SUM(amount)`, never a stored balance): balance − insurance still expected
+  (payers' estimates on open claims + PPO write-offs, and for today's finished work not on a claim yet its estimated
+  insurance share and write-off). The screen shows today's share, the earlier balance, what was paid today, due now,
+  and the account balance with what insurance is expected to pay (`GET /appointments/:id/checkout` → `due`).
+- The payment goes through `POST /patients/:id/payments` as before (Idempotency-Key, audited); a second Enter while
+  it posts does nothing.
+- Tested: `e2e/workflows/11-12-16-17-18-money.test.mjs` (walk-out: 4 keys, pays the older charge too, one payment,
+  checked out, next visit booked); `server/test/frontdesk-b1a.test.js` (due now with a pending claim, today's
+  unclaimed work, a payment today, and filing today's claim leaves it unchanged; no money without billing access).

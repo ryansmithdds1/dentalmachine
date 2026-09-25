@@ -64,7 +64,7 @@ export function LedgerRow({ e, showBalance, canWrite, focus, onFocus, onReceipt,
         <td className="num" style={{ whiteSpace: 'nowrap' }}>
           {actions}
           {e.type === 'payment' && e.amount < 0 && <button className="small" style={{ marginRight: 4 }} onClick={() => onReceipt(e)}>Receipt</button>}
-          {!e.voided_at && !e.reverses_id && !e.claim_id && <button className="small" title={e.type === 'charge' ? 'Void this charge and put the procedure back to planned' : 'Void this entry'} onClick={() => onVoid(e)}>Void</button>}
+          {!e.voided_at && !e.reverses_id && !e.claim_id && <button className="small" title={e.void_needs_manager ? `${e.void_needs_manager} — you can ask one to void it` : e.type === 'charge' ? 'Void this charge and put the procedure back to planned' : 'Void this entry'} onClick={() => onVoid(e)}>{e.void_needs_manager ? 'Void (manager)…' : 'Void'}</button>}
         </td>
       )}
     </tr>

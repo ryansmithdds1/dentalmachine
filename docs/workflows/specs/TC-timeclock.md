@@ -1,6 +1,6 @@
 # TC · Time clock, staff schedules and payroll (backlog TC1–TC5; replaces workflow 44)
 
-**Budgets.** Clock in or out: **1 action** (the big button on Time clock → My time, or **I**; on the shared
+**Budgets.** Clock in or out: **1 action** (the big button on Time clock → My time, or **I**; lunch and back: **1 each**, **L**; on the shared
 tablet: tap your name → type your PIN, which is the sign-in, not an extra step). Approve a pay period: **≤ 3**
 (Time clock → Pay period opens on the period that just ended → **Approve all ready**, or **Shift+A**). Export to
 payroll: **≤ 2** (Time clock → Export → one click on Gusto / ADP / Paychex / QuickBooks / CSV). Server rules are
@@ -135,3 +135,9 @@ shows the office's time, not its own.
   approval locks, unlock with reason, accrual once; every export format's file hours equal the approved hours and
   its hash is recorded; reconciliation catches a stale file; labor % of production; practice isolation;
   permission checks; AI needs approval; PIN hashing and lockout on the tablet.
+
+## Phase 2 batch 1A: "Add missed time" starts on a time that can be saved (scorecard bug 11)
+The new row used to start on today 8:00–5:00, which is refused until 5 PM ("Clock-out can't be in the future") and is
+rarely the day that was missed. It now starts on the last weekday before today, 8:00–5:00 with a 60-minute break, for
+the person the list is filtered to. A date that isn't real says so in plain words ("Clock-out isn't a real date and
+time — pick the day and the time") instead of "clock_out must be a real date and time (YYYY-MM-DD HH:MM)".

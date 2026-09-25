@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { requirePermission, HttpError } from '../auth.js';
 import { findOr404, audit, hashToken, recorded } from '../util.js';
-import { SEGMENTS, CAMPAIGN_VARS, segmentPatients, pickRecipients, campaignVars, finalBody, normalize, createCampaign, runCampaigns, cleanParams, validateBody } from '../campaigns.js';
+import { SEGMENTS, CAMPAIGN_VARS, segmentPatients, pickRecipients, campaignVars, finalBody, normalize, createCampaign, runCampaigns, cleanParams, validateBody, placeholdersIn, assertReadyToSend } from '../campaigns.js';
 import { recordOptOut } from '../messaging.js';
 
 // Campaigns: build a segment, preview who gets it, then send now or schedule it.
@@ -30,6 +30,8 @@ export default function campaignRoutes({ db, messenger, config }) {
       sms: recipients.filter((x) => x.channel === 'sms').length, email: recipients.filter((x) => x.channel === 'email').length,
       list: recipients.slice(0, 50).map((x) => ({ id: x.patient.id, first_name: x.patient.first_name, last_name: x.patient.last_name, channel: x.channel, to: x.to })),
       sample,
+      // Blanks still to fill in ("[date]"): the editor shows them and won't send until they're gone.
+      placeholders: placeholdersIn(b.body, b.subject),
     });
   });
 
@@ -63,6 +65,8 @@ export default function campaignRoutes({ db, messenger, config }) {
   r.put('/campaigns/:cid', requirePermission('patients:write'), async (req, res) => {
     const c = await draft(req);
     const row = normalize({ ...view(c), ...req.body });
+    // A scheduled campaign goes out on its own: it can't be changed back to having blanks in it.
+    if (c.status === 'scheduled') assertReadyToSend(row);
     await db.run(`UPDATE campaigns SET ${Object.keys(row).map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, ...Object.values(row), c.id);
     await audit(db, req, 'campaign.update', 'campaigns', c.id);
     res.json(view(await db.get('SELECT * FROM campaigns WHERE id = ?', c.id)));
@@ -71,6 +75,7 @@ export default function campaignRoutes({ db, messenger, config }) {
   // Send now, or at a set time. Outside 9am–8pm it waits for the morning.
   r.post('/campaigns/:cid/send', requirePermission('patients:write'), async (req, res) => {
     const c = await draft(req);
+    assertReadyToSend(c);
     const at = req.body?.send_at ? new Date(req.body.send_at) : new Date();
     if (Number.isNaN(at.getTime())) throw new HttpError(400, 'send_at must be a date and time');
     await db.run("UPDATE campaigns SET status = 'scheduled', send_at = ? WHERE id = ?", at.toISOString(), c.id);

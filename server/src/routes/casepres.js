@@ -153,7 +153,10 @@ export default function casePresentationRoutes({ db, messenger, config, erx, sec
       const plan = await db.get('SELECT id, patient_id FROM treatment_plans WHERE id = ? AND practice_id = ?', got.id, req.user.practice_id);
       if (!plan) throw new HttpError(404, 'Treatment plan not found');
       await audit(db, req, 'treatment_plan.handoff_opened', 'treatment_plans', plan.id, { patient_id: plan.patient_id, handed_over_by: got.user_id });
-      return res.json({ kind: 'plan', pass: signToken({ sub: plan.id, aud: 'tp-view' }, secret, ttl), back: `/patients/${plan.patient_id}?tab=treatment` });
+      // The patient is in the chair with the person who opened it: their name is filled in on the signing line
+      // (they still tick "I agree", can correct it, and sign).
+      const who = await db.get('SELECT first_name, last_name FROM patients WHERE id = ?', plan.patient_id);
+      return res.json({ kind: 'plan', pass: signToken({ sub: plan.id, aud: 'tp-view' }, secret, ttl), back: `/patients/${plan.patient_id}?tab=treatment`, signer_name: who ? `${who.first_name} ${who.last_name}` : null });
     }
     const f = await db.get('SELECT id, patient_id FROM form_requests WHERE id = ? AND practice_id = ?', got.id, req.user.practice_id);
     if (!f) throw new HttpError(404, 'Forms not found');

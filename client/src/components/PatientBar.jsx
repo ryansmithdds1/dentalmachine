@@ -1,5 +1,6 @@
 import { useLocation, useNavigate } from 'react-router-dom';
-import { AlertTriangle, CalendarPlus, CreditCard, FileText, MessageSquare, Star, Stethoscope, X, Wallet } from 'lucide-react';
+import { AlertTriangle, Calculator, CalendarPlus, CreditCard, FileText, MessageSquare, PhoneCall, Star, Stethoscope, X, Wallet } from 'lucide-react';
+import { openLogCall } from './phones/LogCall.jsx';
 import { requestReview } from '../reviewRequest.js';
 import { useApi } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
@@ -17,6 +18,11 @@ export const PATIENT_ACTIONS = [
   { key: 't', label: 'Text', icon: MessageSquare, to: (id) => `/messages?patient=${id}`, perm: 'patients:read' },
   { key: 'l', label: 'Ledger', icon: Wallet, to: (id) => `/patients/${id}?tab=ledger`, perm: 'billing:read' },
   { key: 'p', label: 'Pay', icon: CreditCard, to: (id) => `/patients/${id}?tab=ledger&pay=1`, perm: 'billing:write' },
+  // "How much will it cost?": the chart's typing box, focused — the fee and what insurance and the patient pay.
+  // Everyone who sees ledgers (front desk and billing get it without charting anything).
+  { key: 'e', label: 'Estimate', title: 'Estimate a treatment', icon: Calculator, to: (id) => `/patients/${id}?tab=chart&estimate=1`, perm: 'billing:read' },
+  // A053: note an ordinary call in a side panel, right where you are (type the note, Enter).
+  { key: 'g', label: 'Call', title: 'Log a call', icon: PhoneCall, run: (id) => openLogCall(id), perm: 'patients:write' },
   // Texts (or emails) the "how did we do?" link; throttled and opt-out aware on the server (docs/reviews.md).
   { key: 'r', label: 'Review', title: 'Ask for a review', icon: Star, run: (id) => requestReview(id, { source: 'patient_bar' }), perm: 'patients:write' },
 ];

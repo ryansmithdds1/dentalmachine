@@ -1,6 +1,6 @@
 // Payments and the ledger: checkout, taking payments, balances, estimates, adjustments, deposits, refunds, statements.
 /* global document */
-import { newPatient, book, activate, refs, cardSel, menu, uniq } from '../lib/fixtures.mjs';
+import { newPatient, book, activate, refs, cardSel, menu, uniq, insuredWithWork } from '../lib/fixtures.mjs';
 
 // Demo patients with history (so recalls are due) and no visit today; each script takes a different one.
 let used = 0;
@@ -66,20 +66,23 @@ export default {
   },
 
   A025: {
-    role: 'dentist', // the front desk's chart is view-only, so typing an estimate there does nothing (see the scorecard)
-    setup: async (t) => ({ p: await newPatient(t, 'Esti') }),
+    role: 'frontdesk', // the people who answer "how much will it cost?" (estimate-only: nothing is charted)
+    async setup(t) {
+      const w = await insuredWithWork(t, 'Esti', []);
+      await activate(t, w.p.id);
+      return w;
+    },
     async run(t, { p }) {
-      await t.open(`/patients/${p.id}?tab=chart`, '.odontogram2');
-      await t.step('Type 1 on the chart: the entry box opens', async () => {
-        await t.key('1');
-        await t.see('.chart-entry input');
+      await t.open('/schedule', `.patient-bar:has-text("${p.last_name}")`);
+      await t.step('Press Alt+E: the chart opens with the cursor in the estimate box', async () => {
+        await t.key('Alt+e');
+        await t.focusIs('Estimate by typing');
       });
-      await t.step('Type "4 D2740": the patient’s estimate shows before anything is charted', async () => {
-        await t.type('4 D2740');
+      await t.step('Type "14 D2740": the fee, the insurance share and the patient’s share show — nothing is charted', async () => {
+        await t.type('14 D2740');
         await t.see('.chart-entry .est:has-text("Est. patient $")');
       });
-      await t.key('Escape');
-      t.note('Esc closes the preview without charting anything.');
+      t.note('Front desk: estimate only — the box never charts (charting needs a clinical login).');
     },
   },
 
@@ -92,12 +95,17 @@ export default {
     },
     async run(t, { a }) {
       await t.open(`/checkout/${a.id}`, 'h1');
-      const book = t.page.locator('button:has-text("recall")').first();
-      await book.waitFor();
-      await t.step('Click "Book … recall": the next open times with their hygienist are offered, the first one focused', async () => {
-        await t.click(book);
+      await t.see('.next-visit-picker, button:has-text("recall")');
+      await t.wait(300); // with nothing left to pay the suggestions open by themselves
+      if (!(await t.page.locator('.next-visit-picker').count())) {
+        await t.step('Press R ("Book … recall"): the next open times with their hygienist, near the time of today’s visit, the first one focused', async () => {
+          await t.key('r');
+          await t.page.waitForFunction(() => document.activeElement?.closest('.slot-picks'));
+        });
+      } else {
+        t.note('Nothing to collect: checkout opened with the suggested times already showing, the first one focused.');
         await t.page.waitForFunction(() => document.activeElement?.closest('.slot-picks'));
-      });
+      }
       await t.step('Press Enter: booked', async () => {
         await t.key('Enter');
         await t.see('.public-notice:has-text("Booked")');
@@ -114,36 +122,36 @@ export default {
     },
     async run(t, { a }) {
       await t.open(`/schedule?date=${t.today}&view=day`, cardSel(a.id));
-      await t.step('Click the finished visit on the schedule: its panel opens', async () => {
-        await t.click(cardSel(a.id));
-        await t.see('.drawer');
-      });
-      await t.step('Click "Check out…": the checkout page opens with the payment amount focused', async () => {
-        await t.click('.drawer button:has-text("Check out")');
+      await t.page.focus(cardSel(a.id)); // the visit that just finished is in front of the front desk
+      await t.step('Press O on the finished visit: checkout opens with what’s due now (today’s share + any earlier balance) in the amount, focused', async () => {
+        await t.key('o');
         await t.page.waitForURL(/\/checkout\//);
-        await t.page.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === 'Payment amount');
+        await t.page.waitForFunction(() => ['Payment amount', 'Mark checked out'].includes(document.activeElement?.getAttribute('aria-label') || document.activeElement?.textContent) || document.activeElement?.closest('.slot-picks'));
       });
-      const amount = await t.page.inputValue('input[aria-label="Payment amount"]');
-      if (!amount || Number(amount) === 0) {
-        t.flag('asks-known', 'Checkout: "Suggested now $0.00" and an empty amount although the account has a balance — the person works out what to collect and types it');
-        await t.step('Type the amount', async () => { await t.type('25'); });
-      }
-      await t.step('Press Enter: payment posted', async () => {
-        await t.key('Enter');
-        await t.see('text=/Payment of \\$[\\d.,]+ posted/');
-      });
-      const book = t.page.locator('button:has-text("recall")').first();
-      if (await book.count()) {
-        await t.step('Click "Book … recall", Enter on the first suggestion: next visit booked', async () => {
-          await t.click(book);
+      const co = await t.api.get(`/appointments/${a.id}/checkout`);
+      const onAmount = await t.page.evaluate(() => document.activeElement?.getAttribute('aria-label') === 'Payment amount');
+      if (onAmount) {
+        const amount = await t.page.inputValue('input[aria-label="Payment amount"]');
+        if (!amount || Number(amount) === 0) {
+          t.flag('asks-known', 'Checkout: an empty amount although the account has a balance — the person works out what to collect and types it');
+          await t.step('Type the amount', async () => { await t.type('25'); });
+        } else t.note(`Filled in: $${amount} (due now ${(co.due.now / 100).toFixed(2)} = today ${(co.due.today_share / 100).toFixed(2)} + earlier ${(co.due.earlier / 100).toFixed(2)}${co.paid_today ? ` − paid ${(co.paid_today / 100).toFixed(2)}` : ''}).`);
+        await t.step('Press Enter: payment posted; the next cleaning’s first open time takes the focus', async () => {
+          await t.key('Enter');
+          await t.see('text=/Payment of \\$[\\d.,]+ posted/');
+        });
+      } else t.note('Nothing due: checkout started on the next visit.');
+      if (await t.page.evaluate(() => !!document.activeElement?.closest('.slot-picks')) || await t.page.locator('.next-visit-picker').count()) {
+        await t.step('Press Enter on the first suggestion: next cleaning booked with their hygienist; "Mark checked out" takes the focus', async () => {
           await t.page.waitForFunction(() => document.activeElement?.closest('.slot-picks'));
           await t.key('Enter');
           await t.see('.public-notice:has-text("Booked")');
         });
       }
-      await t.step('Click "Mark checked out"', async () => {
-        await t.click('button:has-text("Mark checked out")');
-        await t.page.waitForFunction(() => !/Mark checked out/.test(document.querySelector('main')?.textContent || '') || document.querySelector('.toast'));
+      await t.step('Press Enter: checked out', async () => {
+        await t.page.waitForFunction(() => document.activeElement?.textContent === 'Mark checked out');
+        await t.key('Enter');
+        await t.see('.badge:has-text("Checked out")');
       });
     },
   },
@@ -219,7 +227,7 @@ export default {
   },
 
   A110: {
-    role: 'admin', // refunds need a manager (deposits:manage); the billing role sees the R hint but R does nothing
+    role: 'admin', // refunds are a manager's job (deposits:manage, owner decision); billing's R asks a manager instead
     async setup(t) {
       const p = await newPatient(t, 'Rhea', { last_name: `Refundwell${uniq()}` });
       await t.as('admin').post(`/patients/${p.id}/payments`, { amount: 900000, method: 'check', reference: 'ROBOT-1' });

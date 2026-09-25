@@ -1,6 +1,8 @@
 # OPT1–OPT4 · Today's schedule optimizer
 
-**Budget: from the huddle or the schedule, see the plan in 1 action (O) and do the top move in 1 more (Enter).**
+**Budget: from the huddle or the schedule, see the plan in 1 action (Shift+O) and do the top move in 1 more (Enter).**
+Plain O is the patient flow's "Out" on the schedule (03-appointment-status.md), so the plan is Shift+O everywhere (it was O until
+phase 2 batch 1A: the plan's listener swallowed O and a focused visit stayed in the chair — scorecard bug 1).
 J / K (or ↓ ↑) move between cards, Enter does the card's action, D is "not today", Esc closes. Every action shows
 at once with an Undo toast (Ctrl/⌘Z); texts and reminders can't be unsent, so they have no undo.
 
@@ -46,7 +48,7 @@ periods).
   on the reply) → done, or declined / failed / undone; fee and collectible; who acted and whether a person or the
   assistant. $ captured per day and per person.
 - **Client** (`client/src/components/optimizer/`): `OptimizerPanel` (the side panel, and `OptimizerLauncher` — the
-  schedule's Plan button with the O key), `HuddlePlanCard` (the huddle), `OptimizerMarkers` (open time and pills on
+  schedule's Plan button with Shift+O), `HuddlePlanCard` (the huddle), `OptimizerMarkers` (open time and pills on
   the grid; a click opens the panel on that card), `useOptimizer` (one shared copy per day and office, re-fetched on
   the shared live event).
 - **AI note** (`server/src/ai/optimizerExplain.js`): optional, off until an administrator turns it on
@@ -88,5 +90,5 @@ fewest moves and never double-books (exact and greedy); the database's own check
 actions idempotent (two at once), undo, decline, text offer and its YES; $ hidden without billing access;
 permissions; practice and office isolation; the AI note (off by default, admin-only switch, sandbox, no PHI beyond
 first name + last initial); the assistant needs approval (once the HIGH_RISK line is in). Postgres too.
-`e2e/workflows/OPT-optimizer.test.mjs`: O then Enter from the huddle does the top move (≤ 2 actions); J/K, D, Esc;
+`e2e/workflows/OPT-optimizer.test.mjs`: Shift+O then Enter from the huddle does the top move (≤ 2 actions); J/K, D, Esc;
 the schedule's Plan button and gap markers.

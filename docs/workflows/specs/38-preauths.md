@@ -23,7 +23,9 @@ clearinghouse adapter. Without a clearinghouse connection the server answers 409
 (the old way, now only the fallback). The payer's acknowledgements come back through the clearinghouse mailbox.
 
 ## Safety
-- `billing:write`, practice-scoped (another practice's id is 404).
+- `billing:write`, practice-scoped (another practice's id is 404). The **Pre-authorize** button on a treatment plan
+  follows the same permission (it used to need clinical:write as well, so only administrators saw it): the billing
+  team pre-authorizes; clinical staff present and change the plan.
 - Sent once: the status moves to submitted before the file goes (a double click or retry answers "already sent");
   if the clearinghouse can't be reached it's put back, the call is logged in Connection activity, and a
   **Needs attention** item is raised (resolved by the next successful send). The error is 424 so the browser

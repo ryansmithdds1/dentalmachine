@@ -5,7 +5,7 @@ import { twilioSignature, textable } from './sms.js';
 import { requirePermission, HttpError } from '../auth.js';
 import { insert, practiceNow, audit, findOr404, recorded } from '../util.js';
 import { publish } from '../events.js';
-import { patientScope } from '../officeaccess.js';
+import { patientScope, canSeePatient } from '../officeaccess.js';
 import { practiceForNumber, patientForNumber, callerCard, isOpenNow, textBack, processRecording, summarizeCall, receptionistTurn } from '../phones.js';
 import { aiClient } from '../ai.js';
 import { phoneSettings, DEFAULT_DISCLOSURE, answerers, shiftIndex } from '../phonecoach.js';
@@ -309,5 +309,70 @@ export default function phoneRoutes({ db, storage }) {
     });
     res.status(201).json(await db.get('SELECT * FROM calls WHERE id = ?', id));
   });
+
+  // ---- Log a call on a patient's chart (A053) ----
+  // An ordinary call — on a cell phone, or one the phone line didn't see — noted in a few seconds: which way, how
+  // it went, who it was with and a short note. Defaults: now, the signed-in person, the patient. It lands in the
+  // chart's call history (Messages & forms → Calls) and the Calls page. When the phone line already logged a call
+  // with this patient in the last few minutes, the screen offers to add the note to that call (call_id) instead
+  // of logging the same conversation twice. Every change is audited; a double click or a retry logs it once.
+  r.get('/patients/:pid/calls/recent', requirePermission('patients:read'), async (req, res) => {
+    const patient = await findOr404(db, 'patients', req.params.pid, req.user.practice_id, 'Patient');
+    if (!(await canSeePatient(db, req.user, patient.id))) throw new HttpError(404, 'Patient not found');
+    const call = await db.get(
+      `SELECT id, direction, outcome, duration, summary, notes, created_at FROM calls
+       WHERE practice_id = ? AND patient_id = ? AND purpose != 'logged' AND created_at >= ? ORDER BY id DESC LIMIT 1`,
+      req.user.practice_id, patient.id, utcMinutesAgo(RECENT_CALL_MINUTES),
+    );
+    res.json({ call: call || null, window_minutes: RECENT_CALL_MINUTES });
+  });
+  r.post('/patients/:pid/calls', requirePermission('patients:write'), async (req, res) => {
+    const pid = req.user.practice_id;
+    const patient = await findOr404(db, 'patients', req.params.pid, pid, 'Patient');
+    if (!(await canSeePatient(db, req.user, patient.id))) throw new HttpError(404, 'Patient not found');
+    const b = req.body || {};
+    const note = String(b.note ?? '').trim().slice(0, 2000) || null;
+    // Add the note to the call the phone line already logged.
+    if (b.call_id != null) {
+      const call = await findOr404(db, 'calls', b.call_id, pid, 'Call');
+      if (call.patient_id && call.patient_id !== patient.id) throw new HttpError(409, 'That call was with someone else');
+      if (!note) throw new HttpError(400, 'Type the note to add to the call');
+      const line = `${note} — ${req.user.name}`;
+      // The same note sent again (a retry) is already there: nothing changes.
+      if (!String(call.notes || '').split('\n').includes(line)) {
+        const notes = [call.notes, line].filter(Boolean).join('\n').slice(0, 4000);
+        await recorded(db, 'calls', call.id, () => db.run('UPDATE calls SET notes = ?, patient_id = COALESCE(patient_id, ?), agent_id = COALESCE(agent_id, ?) WHERE id = ?', notes, patient.id, req.user.id, call.id));
+        await audit(db, req, 'call.note', 'calls', call.id, { patient_id: patient.id }, { before: { notes: call.notes }, after: { notes }, patientId: patient.id });
+      }
+      return res.json({ ...(await db.get('SELECT * FROM calls WHERE id = ?', call.id)), added_to: call.id });
+    }
+    const direction = b.direction ?? 'outbound';
+    if (!['inbound', 'outbound'].includes(direction)) throw new HttpError(400, 'direction must be inbound (they called) or outbound (we called)');
+    const outcome = b.outcome ?? 'spoke';
+    if (!LOG_OUTCOMES.includes(outcome)) throw new HttpError(400, `outcome must be one of: ${LOG_OUTCOMES.join(', ')}`);
+    const minutesAgo = b.minutes_ago == null || b.minutes_ago === '' ? 0 : Number(b.minutes_ago);
+    if (!Number.isInteger(minutesAgo) || minutesAgo < 0 || minutesAgo > 24 * 60) throw new HttpError(400, 'When must be within the last 24 hours');
+    const withName = String(b.with_name ?? '').trim().slice(0, 120) || `${patient.first_name} ${patient.last_name}`;
+    const at = utcMinutesAgo(minutesAgo);
+    const same = await db.get(
+      `SELECT id FROM calls WHERE practice_id = ? AND patient_id = ? AND purpose = 'logged' AND user_id = ? AND direction = ? AND outcome = ?
+         AND COALESCE(summary, '') = ? AND created_at >= ? ORDER BY id DESC LIMIT 1`,
+      pid, patient.id, req.user.id, direction, outcome, note || '', utcMinutesAgo(minutesAgo + 2),
+    );
+    if (same) return res.json({ ...(await db.get('SELECT * FROM calls WHERE id = ?', same.id)), duplicate: true });
+    const id = await insert(db, 'calls', {
+      practice_id: pid, patient_id: patient.id, location_id: req.location_id || null, direction, purpose: 'logged', status: 'completed', outcome,
+      from_number: direction === 'inbound' ? patient.phone || null : null, to_number: direction === 'outbound' ? patient.phone || null : null,
+      summary: note, caller_name: withName, user_id: req.user.id, agent_id: req.user.id, agent_source: 'logged', created_at: at, ended_at: at,
+    });
+    await audit(db, req, 'call.log', 'calls', id, { patient_id: patient.id, direction, outcome }, { after: { direction, outcome, with: withName, note, at }, patientId: patient.id });
+    res.status(201).json(await db.get('SELECT * FROM calls WHERE id = ?', id));
+  });
   return r;
 }
+
+// How a call logged by hand went (A053). The phone line's own outcomes (answered, missed, voicemail…) are separate.
+export const LOG_OUTCOMES = ['spoke', 'left_voicemail', 'no_answer', 'wrong_number'];
+// A call the phone line logged this recently is probably the one being noted.
+const RECENT_CALL_MINUTES = 15;
+const utcMinutesAgo = (min) => new Date(Date.now() - min * 60_000).toISOString().slice(0, 19).replace('T', ' ');

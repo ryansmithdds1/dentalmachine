@@ -2,6 +2,7 @@ import { HttpError } from './auth.js';
 import { insert, newToken, practiceNow, localNow } from './util.js';
 import { preferredChannel, sendMessage } from './messaging.js';
 import { renderTemplate } from './templates.js';
+import { raiseIssue } from './issues.js';
 
 // Marketing campaigns: one message to a segment of patients (reactivation, unscheduled treatment,
 // birthdays, holiday closures…). Recipients are fixed when sending starts, families sharing a phone or
@@ -106,6 +107,16 @@ export function validateBody(body, channel) {
   return text;
 }
 
+// Blanks left in a starter message for the office to fill in: "[date]", "[time]", "[your offer]". A campaign
+// can't be sent (or scheduled) while any are left — one went out to every patient with "[date]" in it.
+export const placeholdersIn = (...texts) => [...new Set(texts.flatMap((t) => [...String(t || '').matchAll(/\[[^\]\n]{1,40}\]|_{3,}/g)].map((m) => m[0])))];
+export function assertReadyToSend(c) {
+  const left = placeholdersIn(c.body, c.subject);
+  if (left.length) {
+    throw new HttpError(400, `The message still says ${left.map((x) => `“${x}”`).join(', ')} — replace ${left.length === 1 ? 'it' : 'them'} with the real details before sending`, { placeholders: left });
+  }
+}
+
 // Texts carry the opt-out words; emails a one-click unsubscribe link.
 export function finalBody(template, vars, channel, unsubscribeUrl) {
   const text = renderTemplate(template, vars);
@@ -130,6 +141,16 @@ export async function runCampaigns(db, messenger, { appUrl, campaignId = null, n
     const took = await db.run('UPDATE campaigns SET send_lock = ? WHERE id = ? AND (send_lock IS NULL OR send_lock < ?)', lock, c.id, now.toISOString());
     if (!took.changes) continue;
     try {
+      // Belt and braces (the send route checks too): a scheduled campaign with blanks left goes back to a
+      // draft and becomes a work item, instead of going out to everyone with "[date]" in it.
+      if (c.status === 'scheduled' && placeholdersIn(c.body, c.subject).length) {
+        await db.run("UPDATE campaigns SET status = 'draft' WHERE id = ?", c.id);
+        await raiseIssue(db, {
+          practiceId: c.practice_id, kind: 'message', key: `campaign-blanks:${c.id}`, title: `Campaign “${c.name}” wasn’t sent: fill in ${placeholdersIn(c.body, c.subject).join(', ')}`,
+          detail: 'It was put back to a draft. Open Campaigns, replace the blanks with the real details and send it again.', entity: 'campaigns', entityId: c.id,
+        });
+        continue;
+      }
       if (c.status === 'scheduled') {
         const { recipients } = pickRecipients(await segmentPatients(db, c.practice_id, c.segment, JSON.parse(c.params || '{}')), c.channel);
         await db.tx(async () => {

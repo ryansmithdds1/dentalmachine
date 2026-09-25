@@ -60,6 +60,9 @@ function Thumb({ doc, hit, onOpen }) {
 export default function DocumentsTab({ patient }) {
   const { can } = useAuth();
   const canWrite = can('clinical:write');
+  // Adding papers and photos to the chart (front desk, billing: documents:add) is separate from changing or
+  // removing what's there (clinical:write). Their Undo on the "Added" toast works for a few minutes.
+  const canAdd = canWrite || can('documents:add');
   const { data: docs, reload } = useApi(`/patients/${patient.id}/documents`);
   // Images captured through an imaging bridge (and scans, phone photos) appear without a refresh.
   useLiveEvents((e) => e.type === 'documents' && e.patient_id === patient.id && reload());
@@ -127,7 +130,7 @@ export default function DocumentsTab({ patient }) {
 
   // Paste a screenshot or copied image straight into the chart (not while typing in a box).
   useEffect(() => {
-    if (!canWrite) return undefined;
+    if (!canAdd) return undefined;
     const onPaste = (e) => {
       if (typingIn(e.target) || document.querySelector('.modal, .studio')) return;
       const files = [...(e.clipboardData?.files || [])];
@@ -141,11 +144,11 @@ export default function DocumentsTab({ patient }) {
   });
 
   const drop = {
-    onDragEnter: (e) => { if (canWrite && [...(e.dataTransfer?.types || [])].includes('Files')) { e.preventDefault(); setDragging(true); } },
-    onDragOver: (e) => { if (canWrite && [...(e.dataTransfer?.types || [])].includes('Files')) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; } },
+    onDragEnter: (e) => { if (canAdd && [...(e.dataTransfer?.types || [])].includes('Files')) { e.preventDefault(); setDragging(true); } },
+    onDragOver: (e) => { if (canAdd && [...(e.dataTransfer?.types || [])].includes('Files')) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; } },
     onDragLeave: (e) => { if (!e.currentTarget.contains(e.relatedTarget)) setDragging(false); },
     onDrop: (e) => {
-      if (!canWrite || !e.dataTransfer?.files?.length) return;
+      if (!canAdd || !e.dataTransfer?.files?.length) return;
       e.preventDefault();
       setDragging(false);
       upload([...e.dataTransfer.files]);
@@ -207,8 +210,8 @@ export default function DocumentsTab({ patient }) {
   };
   useShortcuts([
     { combo: 'x', handler: openLatestXrays, label: 'Open the latest x-rays (← → between images, Esc closes)', section: 'Documents & x-rays', enabled: !studio && !viewing },
-    { combo: 'u', handler: () => input.current?.click(), label: 'Add files (or drop / paste them anywhere here)', section: 'Documents & x-rays', enabled: canWrite && !studio && !viewing },
-    { combo: 's', handler: () => setScanOpen(true), label: 'Scan: this computer’s scanner, a phone, or a file', section: 'Documents & x-rays', enabled: canWrite && !studio && !viewing },
+    { combo: 'u', handler: () => input.current?.click(), label: 'Add files (or drop / paste them anywhere here)', section: 'Documents & x-rays', enabled: canAdd && !studio && !viewing },
+    { combo: 's', handler: () => setScanOpen(true), label: 'Scan: this computer’s scanner, a phone, or a file', section: 'Documents & x-rays', enabled: canAdd && !studio && !viewing },
     { combo: 'f', handler: () => document.getElementById(`docsearch-${patient.id}`)?.focus(), label: 'Search this chart’s documents (the words inside too)', section: 'Documents & x-rays', enabled: !studio && !viewing },
   ]);
 
@@ -245,7 +248,7 @@ export default function DocumentsTab({ patient }) {
       {dragging && <div className="docs-drop-hint" aria-hidden>Drop to add to {who}’s chart</div>}
       <ImagingBar patient={patient} canCapture={canWrite} onStudio={setStudio} />
       <Mounts patient={patient} docs={docs} canEdit={canWrite} onStudio={setStudio} onLatest={openLatestXrays} />
-      {canWrite && (
+      {canAdd && (
         <div className="card docs-add">
           <div className="inline" style={{ flexWrap: 'wrap', gap: 12, alignItems: 'end' }}>
             <label>Type
@@ -255,6 +258,7 @@ export default function DocumentsTab({ patient }) {
               </select>
             </label>
             <label>Tooth (optional)<input value={tooth} onChange={(e) => setTooth(e.target.value)} style={{ width: 90 }} placeholder="e.g. 19" /></label>
+            <button type="button" className="docs-add-files" disabled={uploading} onClick={() => input.current?.click()} title="Choose files from this computer (U)"><Upload size={14} aria-hidden /> Add files <kbd>U</kbd></button>
             <label>
               Files (PDF, pictures, Word/Excel, audio, video, DICOM, 3D scans · CBCT zip up to 1 GB)
               <input ref={input} type="file" multiple accept={ACCEPT} disabled={uploading} onChange={(e) => upload([...e.target.files])} />
@@ -288,7 +292,7 @@ export default function DocumentsTab({ patient }) {
               {folders.map((f) => <option key={f} value={f}>{f}</option>)}
             </select>
           )}
-          {canWrite && (
+          {canAdd && (
             <span className="scan-anchor">
               <button className="primary scan-trigger" onClick={() => setScanOpen((o) => !o)} aria-haspopup="menu" aria-expanded={scanOpen} title="Scan or add a document (S)"><ScanLine size={15} aria-hidden /> Scan <kbd>S</kbd></button>
               <ScanMenu patient={patient} open={scanOpen} setOpen={setScanOpen} onPhone={() => setPhone(true)} onUpload={() => input.current?.click()} onScanned={afterScan} />
@@ -296,7 +300,7 @@ export default function DocumentsTab({ patient }) {
           )}
         </div>
         {found && insideOnly > 0 && <div className="docs-found">{insideOnly} found by the words inside {insideOnly === 1 ? 'it' : 'them'}</div>}
-        {docs && !shown.length && <div className="empty">{docs.length ? 'Nothing matches.' : `No documents yet. ${canWrite ? 'Scan (S), drop files here or paste an image to add them.' : ''}`}</div>}
+        {docs && !shown.length && <div className="empty">{docs.length ? 'Nothing matches.' : `No documents yet. ${canAdd ? 'Scan (S), drop files here or paste an image to add them.' : ''}`}</div>}
         <datalist id="doc-folders">{folders.map((f) => <option key={f} value={f} />)}</datalist>
         <div className="doc-grid">{shown.map((d) => <Thumb key={d.id} doc={d} hit={found?.byId.get(d.id)} onOpen={() => open(d)} />)}</div>
       </div>

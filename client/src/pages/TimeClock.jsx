@@ -99,7 +99,12 @@ function MyTime() {
   }, [reload]);
   const primary = me ? (me.clocked_in ? ['/timeclock/out'] : ['/timeclock/in']) : null;
   const blocked = me && !me.clocked_in && me.window?.blocked;
-  useShortcuts([{ combo: 'i', handler: () => primary && !busy && !blocked && act(primary[0]), label: me?.clocked_in ? 'Clock out' : 'Clock in', section: 'Time clock', enabled: !!me }]);
+  // L starts lunch, and (on lunch or a break) L again is "I'm back" — one key each way, like I for in and out (A061).
+  const lunchKey = () => { if (busy || !me?.clocked_in) return; if (me.on_break) act('/timeclock/break/end'); else act('/timeclock/break/start', { kind: 'lunch' }); };
+  useShortcuts([
+    { combo: 'i', handler: () => primary && !busy && !blocked && act(primary[0]), label: me?.clocked_in ? 'Clock out' : 'Clock in', section: 'Time clock', enabled: !!me },
+    { combo: 'l', handler: lunchKey, label: me?.on_break ? 'Back from lunch / break' : 'Start lunch (L again when you’re back)', section: 'Time clock', enabled: !!me?.clocked_in },
+  ]);
   if (error) return <ErrorBox error={error} />;
   if (!me) return <div className="card">Loading…</div>;
   const state = me.on_break ? 'break' : me.clocked_in ? 'in' : 'out';
@@ -126,9 +131,9 @@ function MyTime() {
           <div className="tc-break-row">
             {state === 'in' && <>
               <button disabled={busy} onClick={() => act('/timeclock/break/start', { kind: 'break' })}><Coffee size={16} aria-hidden /> Start break</button>
-              <button disabled={busy} onClick={() => act('/timeclock/break/start', { kind: 'lunch' })}><UtensilsCrossed size={16} aria-hidden /> Start lunch</button>
+              <button disabled={busy} onClick={() => act('/timeclock/break/start', { kind: 'lunch' })} aria-keyshortcuts="l"><UtensilsCrossed size={16} aria-hidden /> Start lunch <kbd>L</kbd></button>
             </>}
-            {state === 'break' && <button className="primary" disabled={busy} onClick={() => act('/timeclock/break/end')}><Play size={16} aria-hidden /> I’m back</button>}
+            {state === 'break' && <button className="primary" disabled={busy} onClick={() => act('/timeclock/break/end')} aria-keyshortcuts="l"><Play size={16} aria-hidden /> I’m back <kbd>L</kbd></button>}
           </div>
         )}
         <ErrorBox error={err} />
@@ -390,7 +395,7 @@ function Corrections({ initialUser }) {
       <table className="compact-table tc-table">
         <thead><tr><th>Person</th><th>Day</th><th>In</th><th>Out</th><th className="num">Break</th><th className="num">Worked</th><th>Flags</th><th /></tr></thead>
         <tbody>
-          {adding && <PunchRow staff={staff || []} today={today} onCancel={() => setAdding(false)} onDone={() => { setAdding(false); refresh(); }} />}
+          {adding && <PunchRow staff={staff || []} today={today} who={who} onCancel={() => setAdding(false)} onDone={() => { setAdding(false); refresh(); }} />}
           {data.punches.map((p) => (editing === p.id
             ? <PunchRow key={p.id} punch={p} onCancel={() => setEditing(null)} onDone={() => { setEditing(null); refresh(); }} />
             : (
@@ -425,10 +430,18 @@ function Corrections({ initialUser }) {
   );
 }
 
-function PunchRow({ punch, staff, today, onCancel, onDone }) {
+// A missed punch is almost always from an earlier day, and a time later today can't be saved yet ("can't be in
+// the future"): new rows start on the last weekday before today, 8:00–5:00, for the person the list is showing.
+const lastWorkday = (today) => {
+  let d = shiftDate(today, -1);
+  while ([0, 6].includes(new Date(`${d}T12:00:00Z`).getUTCDay())) d = shiftDate(d, -1);
+  return d;
+};
+function PunchRow({ punch, staff, today, who, onCancel, onDone }) {
+  const day = lastWorkday(today);
   const [f, setF] = useState(punch
     ? { clock_in: toInput(punch.clock_in), clock_out: toInput(punch.clock_out), break_minutes: punch.break_minutes ?? 0, reason: '' }
-    : { user_id: staff.find((s) => s.active)?.user_id || '', clock_in: `${today}T08:00`, clock_out: `${today}T17:00`, break_minutes: 60, reason: '' });
+    : { user_id: who || staff.find((s) => s.active)?.user_id || '', clock_in: `${day}T08:00`, clock_out: `${day}T17:00`, break_minutes: 60, reason: '' });
   const [err, setErr] = useState(null);
   const [removing, setRemoving] = useState(false);
   const save = async (e) => {

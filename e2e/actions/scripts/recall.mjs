@@ -1,4 +1,5 @@
 // Recall and follow-up lists: calling patients who are due, unscheduled treatment, broken appointments.
+/* global document */
 import { newPatient, uniq } from '../lib/fixtures.mjs';
 
 const monthsAgo = (d, n) => { const x = new Date(`${d}T00:00:00Z`); x.setUTCMonth(x.getUTCMonth() - n); return x.toISOString().slice(0, 10); };
@@ -42,16 +43,17 @@ export default {
     async run(t, { p }) {
       await t.open('/followups?tab=recall', 'main table');
       const row = rowOf(t, p);
-      await t.step('Click "Log call" on their row: a dialog with the outcomes, "Left voicemail" already picked', async () => {
-        await t.click(row.locator('button:has-text("Log call")'));
-        await t.see('.modal');
-      });
-      await t.step('Click Save: logged for the whole team to see', async () => {
-        await t.click('.modal button:has-text("Save")');
-        await t.see('.modal', { state: 'detached' });
-      });
       const same = await t.page.locator('main tr', { hasText: `${p.first_name} ${p.last_name}` }).count();
       if (same > 1) t.flag('layout', `The recall list shows the same patient on ${same} rows (one per recall type: exam, cleaning, x-rays); a call has to be logged per row`);
+      await t.step('Recall: one row per patient, what they’re due for as chips. Click "Log call" on their row: it opens under the row, "Left voicemail" picked, Save focused', async () => {
+        await t.click(row.locator('button:has-text("Log call")'));
+        await t.page.waitForFunction(() => document.activeElement?.classList.contains('logcall-save'));
+      });
+      await t.step('Press Enter: logged for the whole team, and all their recalls are marked contacted', async () => {
+        await t.key('Enter');
+        await t.see('.logcall-inline', { state: 'detached' });
+      });
+      t.note('From the keyboard: J/K to their row, L, Enter; 1–8 pick another outcome.');
     },
   },
 
@@ -67,14 +69,15 @@ export default {
       await t.open('/followups?tab=unscheduled', 'main table');
       const row = rowOf(t, p);
       if (!(await row.count())) throw new Error('the patient is not on the unscheduled list');
-      await t.step('Follow-up → Unscheduled treatment: click "Log call" on their row', async () => {
+      await t.step('Follow-up → Unscheduled treatment: click "Log call" on their row (it opens under the row)', async () => {
         await t.click(row.locator('button:has-text("Log call")'));
-        await t.see('.modal');
+        await t.page.waitForFunction(() => document.activeElement?.classList.contains('logcall-save'));
       });
-      await t.step('Pick "Spoke — will call back" and click Save', async () => {
-        await t.click('.modal button:has-text("will call back")');
-        await t.click('.modal button:has-text("Save")');
-        await t.see('.modal', { state: 'detached' });
+      await t.step('Press 5 ("Spoke — will call back") and Enter: saved', async () => {
+        await t.key('5');
+        await t.see('.logcall-inline .chip.active:has-text("will call back")');
+        await t.key('Enter');
+        await t.see('.logcall-inline', { state: 'detached' });
       });
     },
   },

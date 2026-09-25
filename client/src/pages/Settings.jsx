@@ -11,6 +11,7 @@ import { useApi, useLookup, invalidateLookup } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
 import { money, fmtDate, fmtDateTime, fmtUtcDateTime, label, toCents, fromCents } from '../format.js';
 import { ErrorBox, Modal, useSubmit } from '../components/ui.jsx';
+import { toast } from '../toast.js';
 import { CustomFieldsSettings, DuplicateCharts } from '../components/Switching.jsx';
 import ImportData from '../components/ImportData.jsx';
 import Backups from '../components/Backups.jsx';
@@ -34,10 +35,22 @@ import ChartShortcuts from '../components/settings/ChartShortcuts.jsx';
 const ROLES = ['admin', 'dentist', 'hygienist', 'assistant', 'front_desk', 'billing'];
 const CATEGORIES = ['diagnostic', 'preventive', 'restorative', 'endodontics', 'periodontics', 'prosthodontics', 'oral_surgery', 'orthodontics', 'implants', 'adjunctive'];
 
-// Field specs: [name, label, type, options]
+// CDT codes by their first digits: D0 diagnostic … D9 adjunctive (D60–D61 are implant services).
+const codeCategory = (code) => {
+  const c = String(code || '').trim().toUpperCase();
+  if (!/^D\d/.test(c)) return '';
+  if (/^D6[01]/.test(c)) return 'implants';
+  return ['diagnostic', 'preventive', 'restorative', 'endodontics', 'periodontics', 'prosthodontics', 'prosthodontics', 'oral_surgery', 'orthodontics', 'adjunctive'][Number(c[1])];
+};
+
+// Field specs: [name, label, type, options]; `required` fields are marked and checked before saving (in plain
+// words); `guess(form)` fills fields the person hasn't touched from what they typed (smart defaults).
 const RESOURCES = {
   providers: {
     title: 'Providers', singular: 'provider', path: '/providers', columns: ['name', 'type', 'npi', 'color', 'working_hours'],
+    required: ['name', 'type'],
+    // "Dr. Robin Lee, DDS" is a dentist, "Sam Okafor, RDH" a hygienist — until the Type is picked by hand.
+    guess: (f) => ({ type: /\b(RDH|RDHAP|hygienist)\b/i.test(f.name) ? 'hygienist' : /\b(MS|MSD|endodontist|orthodontist|periodontist|oral surgeon|OMS|prosthodontist)\b/i.test(f.name) ? 'specialist' : /\b(DDS|DMD|BDS|dentist)\b/i.test(f.name) ? 'dentist' : '' }),
     fields: [['name', 'Name', 'text'], ['type', 'Type', 'select', ['dentist', 'hygienist', 'specialist']], ['npi', 'NPI (10 digits)', 'text'], ['license_number', 'License #', 'text'], ['dea_number', 'DEA # (controlled substances)', 'text'], ['erx_user_id', 'e-Rx user ID (DoseSpot)', 'text'], ['color', 'Schedule color', 'color'], ['fee_schedule_id', 'Own fees (office fee schedule)', 'feeschedule'], ['video_room_url', 'Video room link (Doxy.me, Zoom…; blank = a new private room each visit)', 'text'], ['daily_goal', 'Daily production goal ($, blank = none)', 'money'], ['active', 'Active', 'checkbox'], ['working_hours', 'Working hours', 'hours']],
   },
   locations: {
@@ -46,23 +59,27 @@ const RESOURCES = {
     fields: [['name', 'Name', 'text'], ['phone', 'Phone', 'text'], ['address', 'Address', 'text'], ['city', 'City', 'text'], ['state', 'State', 'text'], ['zip', 'ZIP', 'text'], ['npi', 'Office NPI (if billed separately)', 'text'], ['fee_schedule_id', 'Fees (office fee schedule)', 'feeschedule'], ['sort', 'Display order', 'number'], ['active', 'Active', 'checkbox'],
       ['office_hours', 'Opening hours', 'hours', { note: 'Outside these hours the office is shaded on the calendar and online booking won’t offer times there.', same: 'Same as the practice’s office hours', alt: false }]],
   },
-  operatories: { title: 'Operatories', singular: 'operatory', path: '/operatories', columns: ['name', 'location_id', 'sort', 'is_hygiene'], fields: [['name', 'Name', 'text'], ['location_id', 'Office', 'location'], ['sort', 'Display order', 'number'], ['default_provider_id', 'Usually works here', 'provider'], ['is_hygiene', 'Hygiene chair', 'checkbox'], ['active', 'Active', 'checkbox']] },
+  operatories: { title: 'Operatories', singular: 'operatory', path: '/operatories', columns: ['name', 'location_id', 'sort', 'is_hygiene'], required: ['name'], fields: [['name', 'Name', 'text'], ['location_id', 'Office', 'location'], ['sort', 'Display order', 'number'], ['default_provider_id', 'Usually works here', 'provider'], ['is_hygiene', 'Hygiene chair', 'checkbox'], ['active', 'Active', 'checkbox']] },
   codes: {
     title: 'Fee schedule', singular: 'procedure code', path: '/procedure-codes', columns: ['code', 'description', 'category', 'fee'],
-    fields: [['code', 'Code', 'text'], ['description', 'Description', 'text'], ['category', 'Category', 'select', CATEGORIES], ['fee', 'Fee ($)', 'money'], ['area', 'Charted by (blank = automatic)', 'select', ['tooth', 'quadrant', 'arch', 'mouth']], ['time_units', 'Time units (10 min each)', 'number'], ['requires_tooth', 'Requires tooth', 'checkbox'], ['requires_surface', 'Requires surfaces', 'checkbox'], ['active', 'Active', 'checkbox']],
+    required: ['code', 'description', 'category'],
+    // The CDT code says its category (D2… restorative, D7… oral surgery) — until it's picked by hand.
+    guess: (f) => ({ category: codeCategory(f.code) }),
+    fields: [['code', 'Code', 'text'], ['description', 'Description', 'text'], ['fee', 'Fee ($)', 'money'], ['category', 'Category', 'select', CATEGORIES], ['area', 'Charted by (blank = automatic)', 'select', ['tooth', 'quadrant', 'arch', 'mouth']], ['time_units', 'Time units (10 min each)', 'number'], ['requires_tooth', 'Requires tooth', 'checkbox'], ['requires_surface', 'Requires surfaces', 'checkbox'], ['active', 'Active', 'checkbox']],
   },
   types: {
     title: 'Appointment types', singular: 'appointment type', path: '/appointment-types', columns: ['name', 'duration', 'color', 'procedure_codes', 'online_bookable'],
+    required: ['name', 'duration'],
     fields: [['name', 'Name', 'text'], ['name_es', 'Name in Spanish (online booking)', 'text'], ['duration', 'Length (minutes)', 'number'], ['color', 'Calendar color', 'color'], ['procedure_codes', 'Procedures added when booked (e.g. D0120, D1110)', 'codes'],
       ['provider_type', 'Usually booked with', 'select', ['dentist', 'hygienist', 'specialist']], ['online_bookable', 'Patients can book online', 'checkbox'], ['is_video', 'Always a video visit', 'checkbox'], ['deposit', 'Deposit to book online ($, needs Stripe)', 'money'], ['sort', 'Sort order', 'number'], ['active', 'Active', 'checkbox'],
       ['pattern', 'Time pattern', 'pattern'], ['provider_durations', 'Length for each provider (blank = the usual length)', 'durations']],
   },
   referrals: {
-    title: 'Referral contacts', singular: 'referral contact', path: '/referral-contacts', columns: ['name', 'practice_name', 'specialty', 'phone', 'referred_in', 'referred_out'], writePerm: 'patients:write',
+    title: 'Referral contacts', singular: 'referral contact', path: '/referral-contacts', columns: ['name', 'practice_name', 'specialty', 'phone', 'referred_in', 'referred_out'], writePerm: 'patients:write', required: ['name'],
     fields: [['name', 'Name', 'text'], ['practice_name', 'Practice', 'text'], ['specialty', 'Specialty', 'text'], ['phone', 'Phone', 'text'], ['fax', 'Fax', 'text'], ['email', 'Email', 'email'], ['address', 'Address', 'text'], ['npi', 'NPI', 'text'], ['notes', 'Notes', 'text'], ['active', 'Active', 'checkbox']],
   },
   carriers: {
-    title: 'Insurance carriers', singular: 'insurance carrier', path: '/carriers', columns: ['name', 'payer_id', 'phone'], writePerm: 'billing:write',
+    title: 'Insurance carriers', singular: 'insurance carrier', path: '/carriers', columns: ['name', 'payer_id', 'phone'], writePerm: 'billing:write', required: ['name'],
     fields: [['name', 'Name', 'text'], ['payer_id', 'Payer ID', 'text'], ['phone', 'Phone', 'text'], ['address', 'Claims address', 'text'], ['timely_filing_days', 'Filing limit (days, blank = 365)', 'number'], ['active', 'Active', 'checkbox']],
   },
 };
@@ -276,7 +293,7 @@ function TemplateForm({ tpl, onDone }) {
     <form onSubmit={(e) => { e.preventDefault(); submit(); }}>
       <ErrorBox error={error} />
       <div className="form-grid">
-        <label>Name<input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
+        <label>Name<input required autoFocus={!tpl.id} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
         <label>For codes (prefixes OK, e.g. D23 D27)<input value={form.codes} onChange={(e) => setForm({ ...form, codes: e.target.value })} /></label>
         <label className="full">Template<textarea required rows={10} value={form.body} onChange={(e) => setForm({ ...form, body: e.target.value })} /></label>
         <label className="checkbox"><input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} /> Active</label>
@@ -595,7 +612,7 @@ function Users() {
         </tbody>
       </table>
       {modal && (
-        <Modal title={modal.user ? `Edit ${modal.user.name}` : 'New user'} onClose={() => setModal(null)}>
+        <Modal title={modal.user ? `Edit ${modal.user.name}` : 'Invite someone to the team'} onClose={() => { setModal(null); if (!modal.user) reload(); }}>
           <UserForm user={modal.user} roles={roles || []} perms={perms} onDone={() => { setModal(null); reload(); }} />
         </Modal>
       )}
@@ -665,22 +682,39 @@ function UserForm({ user, roles = [], perms, onDone }) {
   // Each permission: from the role, added just for this person, or taken away from them.
   const state = (p) => (form.permissions_add.includes(p) ? 'add' : form.permissions_remove.includes(p) ? 'remove' : 'role');
   const setState = (p, v) => setForm({ ...form, permissions_add: form.permissions_add.filter((x) => x !== p).concat(v === 'add' ? [p] : []), permissions_remove: form.permissions_remove.filter((x) => x !== p).concat(v === 'remove' ? [p] : []) });
+  // A new person gets an email with a link to choose their own password: nobody makes one up or passes it on.
+  // When the email can't go (no email service set up), the link is shown here to give them.
+  const [invited, setInvited] = useState(null);
   const { submit, busy, error } = useSubmit(async () => {
     const body = { ...form, custom_role_id: form.custom_role_id ? Number(form.custom_role_id) : null };
     if (!body.password) delete body.password;
-    if (user) await api.put(`/users/${user.id}`, body);
-    // A new person picks their own password at their first sign-in.
-    else await api.post('/users', { ...body, must_change_password: true });
-    onDone();
+    if (user) { await api.put(`/users/${user.id}`, body); onDone(); return; }
+    delete body.password;
+    const made = await api.post('/users', { ...body, invite: true });
+    if (made.invite_emailed) { toast(`Invitation emailed to ${made.email} — the link to choose a password works for ${made.invite_days} days`); onDone(); } else setInvited(made);
   });
+  if (invited) {
+    return (
+      <div className="invite-sent">
+        <p><strong>{invited.name}</strong> can sign in once they choose a password. Email isn’t set up here, so give them this link (it works once, for {invited.invite_days} days):</p>
+        <div className="inline" style={{ gap: 8 }}>
+          <input readOnly aria-label="Invitation link" value={invited.invite_link} onFocus={(e) => e.target.select()} style={{ flex: 1 }} />
+          <button type="button" onClick={() => navigator.clipboard?.writeText(invited.invite_link).then(() => toast('Link copied'))}>Copy</button>
+        </div>
+        <div className="form-actions"><button className="primary" autoFocus onClick={onDone}>Done</button></div>
+      </div>
+    );
+  }
   return (
     <form onSubmit={(e) => { e.preventDefault(); submit(); }}>
       <ErrorBox error={error} />
       <div className="form-grid">
-        <label>Name<input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
+        <label>Name<input required autoFocus={!user} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
         <label>Email<input type="email" required disabled={!!user} value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></label>
         <label>Role<select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>{ROLES.map((r) => <option key={r} value={r}>{label(r)}</option>)}</select></label>
-        <label>{user ? 'Reset password (optional)' : 'Temporary password'}<input type="password" minLength={10} required={!user} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></label>
+        {user
+          ? <label>Reset password (optional)<input type="password" minLength={10} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></label>
+          : <p className="muted full" style={{ fontSize: 13, margin: 0 }}>They’ll get an email with a link to choose their own password.</p>}
         {user && <label className="checkbox"><input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} /> Active</label>}
         {user?.mfa_enabled ? <label className="checkbox"><input type="checkbox" checked={!!form.reset_mfa} onChange={(e) => setForm({ ...form, reset_mfa: e.target.checked })} /> Reset 2FA (lost phone)</label> : null}
         {form.role !== 'admin' && roles.length > 0 && (
@@ -723,7 +757,7 @@ function UserForm({ user, roles = [], perms, onDone }) {
           </table>
         </details>
       )}
-      <div className="form-actions"><button className="primary" disabled={busy}>Save</button></div>
+      <div className="form-actions"><button className="primary" disabled={busy}>{user ? 'Save' : 'Send invitation'}</button></div>
     </form>
   );
 }
@@ -804,7 +838,11 @@ function ResourceForm({ spec, row, onDone }) {
     if (type === 'durations') return [name, row[name] ? JSON.parse(row[name]) : {}];
     return [name, row[name] ?? ''];
   })));
+  const [touched] = useState(() => new Set());
+  const required = new Set(spec.required || []);
   const { submit, busy, error } = useSubmit(async () => {
+    const missing = spec.fields.filter(([name, , type]) => required.has(name) && type !== 'checkbox' && String(form[name] ?? '').trim() === '');
+    if (missing.length) throw new Error(`Please fill in ${missing.map(([, text]) => `“${text.replace(/\s*\(.*\)$/, '')}”`).join(', ')}`);
     const body = Object.fromEntries(spec.fields.map(([name, , type]) => [name,
       type === 'money' ? toCents(form[name] || 0)
         : type === 'codes' ? String(form[name] || '').split(/[\s,]+/).filter(Boolean)
@@ -818,8 +856,15 @@ function ResourceForm({ spec, row, onDone }) {
     <form onSubmit={(e) => { e.preventDefault(); submit(); }}>
       <ErrorBox error={error} />
       <div className="form-grid">
-        {spec.fields.map(([name, text, type, options]) => {
-          const set = (v) => setForm({ ...form, [name]: v });
+        {spec.fields.map(([name, text0, type, options]) => {
+          const text = required.has(name) ? <>{text0} <span className="req" aria-hidden title="Needed">*</span></> : text0;
+          const set = (v) => {
+            touched.add(name);
+            const next = { ...form, [name]: v };
+            // New records only: fill what the person hasn't set from what they just typed.
+            if (!row.id && spec.guess) for (const [k, g] of Object.entries(spec.guess(next))) if (!touched.has(k) && g) next[k] = g;
+            setForm(next);
+          };
           if (type === 'checkbox') return <label key={name} className="checkbox"><input type="checkbox" checked={form[name]} onChange={(e) => set(e.target.checked)} /> {text}</label>;
           if (type === 'hours') return (
             <div key={name} className="full">
@@ -854,8 +899,8 @@ function ResourceForm({ spec, row, onDone }) {
           if (type === 'feeschedule') return <label key={name}>{text}<select value={form[name] || ''} onChange={(e) => set(e.target.value ? Number(e.target.value) : null)}><option value="">Standard fees</option>{officeSchedules.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}</select></label>;
           if (type === 'location') return locationList.length ? <label key={name}>{text}<select value={form[name] || ''} onChange={(e) => set(e.target.value ? Number(e.target.value) : null)}><option value="">—</option>{locationList.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</select></label> : null;
           if (type === 'provider') return <label key={name}>{text}<select value={form[name] || ''} onChange={(e) => set(e.target.value ? Number(e.target.value) : null)}><option value="">—</option>{providerList.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>;
-          if (type === 'select') return <label key={name}>{text}<select value={form[name]} onChange={(e) => set(e.target.value)}><option value="">—</option>{options.map((o) => <option key={o} value={o}>{label(o)}</option>)}</select></label>;
-          return <label key={name} className={type === 'codes' ? 'full' : ''}>{text}<input type={type === 'money' || type === 'number' ? 'number' : type === 'codes' ? 'text' : type} step={type === 'money' ? '0.01' : undefined} value={form[name]} onChange={(e) => set(e.target.value)} /></label>;
+          if (type === 'select') return <label key={name}>{text}<select required={required.has(name)} value={form[name]} onChange={(e) => set(e.target.value)}><option value="">—</option>{options.map((o) => <option key={o} value={o}>{label(o)}</option>)}</select></label>;
+          return <label key={name} className={type === 'codes' ? 'full' : ''}>{text}<input autoFocus={!row.id && name === spec.fields[0][0]} required={required.has(name)} type={type === 'money' || type === 'number' ? 'number' : type === 'codes' ? 'text' : type} step={type === 'money' ? '0.01' : undefined} value={form[name]} onChange={(e) => set(e.target.value)} /></label>;
         })}
       </div>
       <div className="form-actions"><button className="primary" disabled={busy}>Save</button></div>

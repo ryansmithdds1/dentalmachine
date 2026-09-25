@@ -20,14 +20,31 @@ export default function RefundQueue() {
   const [panel, setPanel] = useState(false);
   const rows = data || [];
   const cur = rows[Math.min(at, rows.length - 1)] || null;
-  // Refunds need a manager (deposits:manage) or admin, like the server.
+  // Refunds need a manager (deposits:manage) or admin, like the server (the owner's decision: money going out
+  // is a manager's call). Billing staff without it get R = "ask a manager": a to-do with the patient and amount,
+  // so the key they're shown does what it says instead of nothing.
   const w = can('billing:write') && can('deposits:manage');
+  const ask = can('billing:write') && !w;
+  const [asked, setAsked] = useState(() => new Set());
+  const askManager = async (row) => {
+    if (!row) return;
+    if (asked.has(row.patient_id)) { toast(`A manager has already been asked to refund ${row.first_name} ${row.last_name}`); return; }
+    setAsked((s) => new Set(s).add(row.patient_id));
+    try {
+      await api.post('/tasks', { title: `Refund ${money(row.credit)} credit to ${row.first_name} ${row.last_name} (${row.card_payment ? 'back to their card' : 'check or cash'}) — refunds need a manager`, patient_id: row.patient_id, due_date: new Date().toISOString().slice(0, 10) });
+      toast(`Asked a manager: a to-do to refund ${money(row.credit)} to ${row.first_name} ${row.last_name}`);
+    } catch (e) {
+      setAsked((s) => { const n = new Set(s); n.delete(row.patient_id); return n; });
+      toast(e.message || 'Couldn’t send it to a manager', { tone: 'error' });
+    }
+  };
   const move = (d) => setAt((i) => Math.max(0, Math.min(rows.length - 1, i + d)));
   useShortcuts([
     { combo: 'j', handler: () => move(1), label: 'Next account', section: 'Credits & refunds' },
     { combo: 'k', handler: () => move(-1), label: 'Previous account', section: 'Credits & refunds' },
     { combo: 'r', handler: () => setPanel(true), label: 'Refund the selected credit', section: 'Credits & refunds', enabled: w && !!cur },
     { combo: 'enter', handler: () => setPanel(true), label: 'Refund the selected credit', section: 'Credits & refunds', enabled: w && !!cur && !panel },
+    { combo: 'r', handler: () => askManager(cur), label: 'Ask a manager to refund the selected credit', section: 'Credits & refunds', enabled: ask && !!cur },
     { combo: 'escape', handler: () => setPanel(false), label: 'Close the refund panel', section: 'Credits & refunds', enabled: panel, inInputs: true },
   ]);
   if (!data) return <div className="empty">Loading…</div>;
@@ -37,7 +54,9 @@ export default function RefundQueue() {
       <div className="card inline" style={{ justifyContent: 'space-between', flexWrap: 'wrap', marginBottom: 12 }}>
         <div><strong>{rows.length}</strong> account{rows.length === 1 ? '' : 's'} in credit · <strong>{money(total)}</strong> the office owes patients</div>
         <div className="inline">
-          <span className="muted" style={{ fontSize: 12 }}><kbd>J</kbd>/<kbd>K</kbd> move · <kbd>R</kbd> refund</span>
+          <span className="muted" style={{ fontSize: 12 }} data-testid="refund-keys">
+            <kbd>J</kbd>/<kbd>K</kbd> move{w ? <> · <kbd>R</kbd> refund</> : ask ? <> · <kbd>R</kbd> ask a manager to refund (refunds are done by a manager)</> : ' · refunds are done by a manager'}
+          </span>
           <button className="small" disabled={!rows.length} onClick={() => downloadCsv('credit-balances', rows, [['Patient', (r) => `${r.first_name} ${r.last_name}`], ['Phone', (r) => r.phone || ''], ['Last credit', (r) => r.last_credit || ''], ['Credit', (r) => dollars(r.credit)]])}>⬇ CSV</button>
         </div>
       </div>
@@ -52,7 +71,10 @@ export default function RefundQueue() {
                   <td>{fmtDate(r.last_credit)}</td>
                   <td>{r.card_payment ? `The card used ${fmtDate(r.card_payment.entry_date)}` : 'Check or cash from the office'}</td>
                   <td className="num"><strong>{money(r.credit)}</strong></td>
-                  <td className="no-print">{w && <button className="small" onClick={(e) => { e.stopPropagation(); setAt(i); setPanel(true); }}>Refund…</button>}</td>
+                  <td className="no-print">
+                    {w && <button className="small" onClick={(e) => { e.stopPropagation(); setAt(i); setPanel(true); }}>Refund…</button>}
+                    {ask && <button className="small" disabled={asked.has(r.patient_id)} title="Refunds are done by a manager: this gives them a to-do with the patient and amount" onClick={(e) => { e.stopPropagation(); setAt(i); askManager(r); }}>{asked.has(r.patient_id) ? 'Manager asked' : 'Ask a manager'}</button>}
+                  </td>
                 </tr>
               ))}
             </tbody>

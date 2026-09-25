@@ -97,3 +97,39 @@ test('RF4: the recall board — find the patient, one key marks them contacted',
   assert.equal(rows[0].recall_status, 'contacted');
   assert.deepEqual(s.errors, []);
 });
+
+test('A051 recall list: one row per patient (exam, cleaning, x-rays as chips); L then Enter logs the call for all of them, inline (2 keys)', async () => {
+  const { page } = s;
+  const p = await s.post('/patients', { first_name: `Vera${tag}`, last_name: 'Aacall', dob: '1979-02-02', phone: '(512) 555-0176' });
+  for (const [code, date] of [['D1110', monthsAgo(today, 8)], ['D0120', monthsAgo(today, 8)], ['D0274', monthsAgo(today, 14)]]) {
+    const r = await s.post(`/patients/${p.id}/outside-procedures`, { code, date, office_name: 'Previous dentist' });
+    assert.ok(r.id, JSON.stringify(r));
+  }
+  await page.goto(`${app.base}/followups?tab=recall`);
+  await page.waitForSelector('table.recall-list');
+  const rows = page.locator('table.recall-list tbody tr', { hasText: `Vera${tag}` });
+  await rows.first().waitFor();
+  assert.equal(await rows.count(), 1, 'one row for the patient');
+  assert.ok(await rows.first().locator('.recall-chip').count() >= 2, 'their recalls as chips');
+  await rows.first().click({ position: { x: 5, y: 5 } }); // the keyboard is on their row
+  const r = await measure(page, async () => {
+    await page.keyboard.press('l');
+    await page.waitForFunction(() => document.activeElement?.classList.contains('logcall-save'));
+    await page.keyboard.press('Enter');
+    await page.waitForSelector('.logcall-inline', { state: 'detached' });
+  });
+  console.log(withinBudget('log a recall call (left voicemail)', r, { actions: 2, ms: 4000 }));
+  const log = await s.get(`/patients/${p.id}/followups`);
+  assert.deepEqual([log.length, log[0].kind, log[0].outcome], [1, 'recall', 'left_voicemail']);
+  const recalls = (await s.get(`/recalls?status=due,contacted&limit=500`));
+  const mine = (recalls.rows || recalls).filter((x) => x.patient_id === p.id);
+  assert.ok(mine.length >= 2 && mine.every((x) => x.status === 'contacted'), 'every recall of theirs is marked contacted');
+  // 3 picks another outcome from the keyboard.
+  await page.keyboard.press('l');
+  await page.waitForSelector('.logcall-inline');
+  await page.keyboard.press('3');
+  await page.waitForSelector('.logcall-inline .chip.active:has-text("Emailed")');
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('.logcall-inline', { state: 'detached' });
+  assert.deepEqual(s.errors, []);
+});

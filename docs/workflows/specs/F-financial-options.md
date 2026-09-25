@@ -1,7 +1,7 @@
 # F · Treatment plans with financial options (backlog F1–F5)
 
-**Budgets:** present 2 staff actions (as #22) · patient picks a way to pay **and** signs in **≤ 4** (type name → tap
-an option → tick → Accept & sign) · desk records a choice in **3** (`F` → Enter → Accept for <name>) · name a phase
+**Budgets:** present 2 staff actions (as #22) · patient picks a way to pay **and** signs in **≤ 3** (tap
+an option → tick → Accept & sign; handed over in the office, their name is already on the signing line) · desk records a choice in **3** (`F` → Enter → Accept for <name>) · name a phase
 in **3** (click the name → type → Enter) · drag work to another phase in **1** drag (Undo with Ctrl/⌘Z).
 Tested by `e2e/workflows/F-financial-options.test.mjs`; money by `server/test/finoptions.test.js`.
 Signing without choosing a way to pay still takes 3 (#22 unchanged).
@@ -75,8 +75,8 @@ Money routes call `requireHuman()`; the assistant gets 428 without on-screen app
 reverse_discount|cancel|print`, `fin_options.settings`, `treatment_plan.phase|phase_order`.
 
 ## F6 · Compare 2–3 options for one problem, on the patient's screen
-**Budget:** staff 1 action (**Show patient**); patient taps an option, then signs as usual (choose + name + tick +
-Accept). Tested by the F6 case in `e2e/workflows/F-financial-options.test.mjs` and `server/test/treatmentoptions.test.js`.
+**Budget:** staff 1 action (**Show patient**); patient taps an option, then signs as usual (choose + tick + Accept; the
+name is already on the signing line on the office's screen). Tested by the F6 case in `e2e/workflows/F-financial-options.test.mjs` and `server/test/treatmentoptions.test.js`.
 - **One call makes the options** (used by the voice/typed entry engine, `routes/treatmentoptions.js`):
   `POST /patients/:id/treatment-options` (clinical:write)
   `{ name?: "Tooth #19", key?: "<caller's idempotency key>", options: [{ label?: "Option 1", name?, items: [{ code: "D7140", tooth: "19", surfaces?, area? }] }] }`

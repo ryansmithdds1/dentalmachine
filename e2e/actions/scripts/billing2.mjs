@@ -1,5 +1,6 @@
 // More insurance and money actions: secondary policies, paper EOBs, claim corrections and voids, payment links,
 // voiding a payment, payment plans, memberships, collections.
+/* global document */
 import { newPatient, insuredWithWork, refs } from '../lib/fixtures.mjs';
 
 async function sentClaim(t, first, code = 'D1110', carrierName) {
@@ -58,27 +59,29 @@ export default {
         await t.click('button:has-text("Post an insurance check")');
         await t.see('.modal, form');
       });
-      await t.step('Pick the carrier: their open claims are listed', async () => {
+      await t.step('Pick the carrier: their open claims are listed, and the cursor moves to the check number', async () => {
         await t.page.locator('label:has-text("Carrier") select').selectOption({ label: carrier.name });
-        await t.wait(600);
+        await t.page.waitForFunction(() => document.activeElement?.closest('label')?.textContent?.startsWith('Check / EFT #'));
+        await t.see(`tr:has-text("#${claim.id}")`);
       });
-      await t.step('Type the check number and amount', async () => {
-        await t.click('label:has-text("Check / EFT #") input');
+      const amount = String(((claim.estimated_amount || Math.round(claim.total_fee * 0.8)) / 100).toFixed(2));
+      await t.step('Type the check number, Enter; type the check amount: it is matched to the claim it pays (paid as expected)', async () => {
         await t.type('88123');
-        await t.click('label:has-text("Check amount") input');
-        await t.type(String((claim.total_fee * 0.8 / 100).toFixed(2)));
+        await t.key('Enter');
+        await t.type(amount);
+        await t.page.waitForFunction((id) => [...document.querySelectorAll('tr')].some((tr) => tr.textContent.includes(`#${id}`) && tr.querySelector('input[aria-label="Paid"]')?.value), claim.id);
       });
-      const row = t.page.locator('tr', { hasText: `#${claim.id}` }).first();
-      if (await row.count()) {
-        await t.step('On the claim’s line type what the payer paid (write-off worked out)', async () => {
-          const paid = row.locator('input').first();
-          await t.click(paid);
-          await t.type(String((claim.total_fee * 0.8 / 100).toFixed(2)));
+      if (!(await t.page.locator('.badge.ok:has-text("balanced")').count())) {
+        const row = t.page.locator('tr', { hasText: `#${claim.id}` }).first();
+        t.flag('asks-known', 'The check amount wasn’t matched to the claim: its paid amount is typed by hand');
+        await t.step('On the claim’s line type what the payer paid', async () => {
+          await t.click(row.locator('input').first());
+          await t.type(amount);
         });
-      } else t.note('The claim wasn’t listed under the check; posted as an unapplied check.');
-      await t.step('Click Post', async () => {
-        await t.click(t.page.locator('button.primary:has-text("Post"), button.primary:has-text("Save")').last());
-        await t.wait(800);
+      }
+      await t.step('Press Enter: posted to the claim (audited; a check posted twice is caught)', async () => {
+        await t.key('Enter');
+        await t.see('.modal', { state: 'detached' });
       });
     },
   },

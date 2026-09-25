@@ -1,5 +1,5 @@
 // Images: opening x-rays, adding pictures and documents.
-/* global document, sessionStorage, DataTransfer, DragEvent, File */
+/* global document, sessionStorage, btoa, Buffer */
 import { newPatient } from '../lib/fixtures.mjs';
 
 // A picture made in the browser and uploaded as the patient's x-ray (set-up only).
@@ -15,21 +15,21 @@ const upload = (t, pid, name) => t.page.evaluate(async ([p, n]) => {
   return res.json();
 }, [pid, name]);
 
-// Files dragged in from the desktop (one drag = one action).
-const dropFiles = (t) => t.page.evaluate(async () => {
+// Two pictures as a camera and a scanner would save them (a photo and a greyscale x-ray), made in the browser.
+const pictures = async (t) => (await t.page.evaluate(async () => {
   const pic = async (grey, type) => {
     const c = document.createElement('canvas');
     c.width = 120; c.height = 90;
     const ctx = c.getContext('2d');
     for (let x = 0; x < 120; x += 10) { ctx.fillStyle = grey ? `rgb(${x * 2},${x * 2},${x * 2})` : `hsl(${x * 3},70%,50%)`; ctx.fillRect(x, 0, 10, 90); }
-    return new Promise((r) => c.toBlob(r, type, 0.9));
+    const blob = await new Promise((r) => c.toBlob(r, type, 0.9));
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    let bin = '';
+    for (const b of bytes) bin += String.fromCharCode(b);
+    return btoa(bin);
   };
-  const dt = new DataTransfer();
-  dt.items.add(new File([await pic(false, 'image/jpeg')], 'IMG_2041.jpg', { type: 'image/jpeg' }));
-  dt.items.add(new File([await pic(true, 'image/png')], 'scan-0412.png', { type: 'image/png' }));
-  const zone = document.querySelector('[data-testid=documents-drop]');
-  for (const type of ['dragenter', 'dragover', 'drop']) zone.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt }));
-});
+  return [await pic(false, 'image/jpeg'), await pic(true, 'image/png')];
+})).map((b64, i) => ({ name: i ? 'scan-0412.png' : 'IMG_2041.jpg', mimeType: i ? 'image/png' : 'image/jpeg', buffer: Buffer.from(b64, 'base64') }));
 
 export default {
   A007: {
@@ -63,11 +63,14 @@ export default {
     setup: async (t) => ({ p: await newPatient(t, 'Dropped') }),
     async run(t, { p }) {
       await t.open(`/patients/${p.id}?tab=documents`, '[data-testid=documents-drop]');
-      await t.step('Drag two pictures from the desktop onto the page: added, each filed as photo or x-ray from the file itself', async () => {
-        await dropFiles(t);
-        t.extraClicks = (t.extraClicks || 0) + 1; // the drag is one mouse action
+      // The keyboard way (a top-20 job): U opens the file picker, where the files are chosen by typing their
+      // names and Enter. Dragging them onto the page (one mouse action) does the same.
+      await t.step('Press U and choose the two pictures in the file picker: added, each filed as photo or x-ray from the file itself', async () => {
+        const files = await pictures(t);
+        await t.pickFile(() => t.key('u'), files, { keyboard: true });
         await t.page.waitForFunction(() => document.querySelectorAll('.doc-tile').length === 2);
       });
+      t.note('Or drag them from the desktop onto the page (one mouse action), or paste an image (Ctrl+V).');
     },
   },
 };

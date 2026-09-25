@@ -18,3 +18,4 @@
 .med-conditions legend { font-size: 13px; color: var(--muted); padding: 0 4px; }
 .med-editor .form-actions kbd { margin-left: 4px; }
 .med-due-chip { background: var(--warn-soft); color: var(--warn); border: 0; cursor: pointer; }
+.med-key { margin-left: 6px; font-size: 10px; opacity: .7; }

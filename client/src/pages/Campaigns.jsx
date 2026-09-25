@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import Surveys from '../components/Surveys.jsx';
 import { api } from '../api.js';
@@ -16,6 +16,12 @@ const STARTERS = {
   birthdays: 'Happy birthday, {first_name}! 🎉 Everyone at {practice} hopes you have a wonderful day.',
   no_insurance: 'Hi {first_name}, no dental insurance? {practice} has a membership plan with cleanings, exams and x-rays included and a discount on everything else. Call {phone} to join.',
 };
+
+const SEG_NAMES = { all_active: 'Office news', reactivation: 'Reactivation', unscheduled_treatment: 'Unscheduled treatment', recall_due: 'Recall', birthdays: 'Birthdays', no_insurance: 'Membership plan' };
+// A name the office can keep ("Reactivation · October 2026"); it's only for them.
+const autoName = (segment) => `${SEG_NAMES[segment] || 'Campaign'} · ${new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}`;
+// Blanks in a starter left for the office to fill in: "[date]" (the server checks the same before sending).
+const blanksIn = (...texts) => [...new Set(texts.flatMap((t) => String(t || '').match(/\[[^\]\n]{1,40}\]|_{3,}/g) || []))];
 
 // Campaigns and patient surveys.
 export default function Campaigns() {
@@ -47,7 +53,7 @@ function CampaignList() {
           <h1>Campaigns</h1>
           <div className="muted">Text or email a group of patients at once — reactivation, unscheduled treatment, birthdays, office news. Opted-out patients are skipped, families get one message, and nothing goes out outside 9am–8pm.</div>
         </div>
-        {can('patients:write') && <button className="primary" onClick={() => setEditing({ name: '', segment: 'reactivation', params: { months: 18 }, channel: 'auto', subject: '', body: STARTERS.reactivation })}>+ New campaign</button>}
+        {can('patients:write') && <button className="primary" onClick={() => setEditing({ name: autoName('reactivation'), segment: 'reactivation', params: { months: 18 }, channel: 'auto', subject: '', body: STARTERS.reactivation })}>+ New campaign</button>}
       </div>
       <div className="card" style={{ padding: 0 }}>
         {!list ? <div className="empty">Loading…</div> : list.length === 0 ? <div className="empty">No campaigns yet.</div> : (
@@ -87,13 +93,26 @@ function Editor({ campaign, onClose, onDone }) {
   }, [c.segment, JSON.stringify(c.params), c.channel, c.body]); // eslint-disable-line react-hooks/exhaustive-deps
   const save = async () => (c.id ? api.put(`/campaigns/${c.id}`, c) : api.post('/campaigns', c));
   const draft = useSubmit(async () => { await save(); onDone(); });
+  // Sending can't be taken back: the button says how many get it, and one step on this screen confirms it.
+  const [confirming, setConfirming] = useState(false);
+  const yes = useRef(null);
+  const body = useRef(null);
+  const blanks = blanksIn(c.body, c.channel !== 'sms' ? c.subject : '');
+  useEffect(() => { setConfirming(false); }, [c.body, c.subject, c.segment, JSON.stringify(c.params), c.channel, when]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (confirming) yes.current?.focus(); }, [confirming]);
   const send = useSubmit(async () => {
     const saved = await save();
-    const n = preview?.recipients ?? 0;
-    if (!window.confirm(when ? `Schedule this for ${n} recipients?` : `Send this to ${n} recipients now?`)) return;
     await api.post(`/campaigns/${saved.id}/send`, when ? { send_at: new Date(when).toISOString() } : {});
     onDone();
   });
+  // Selects the first blank in the message so typing replaces it.
+  const fillIn = (blank) => {
+    const el = body.current;
+    const at = (c.body || '').indexOf(blank);
+    if (!el || at < 0) return;
+    el.focus();
+    el.setSelectionRange(at, at + blank.length);
+  };
   if (!meta) return null;
   const seg = meta.segments[c.segment];
   return (
@@ -105,7 +124,7 @@ function Editor({ campaign, onClose, onDone }) {
             <label className="full">Name (for you)<input value={c.name} onChange={(e) => set({ name: e.target.value })} placeholder="e.g. Spring reactivation" /></label>
             <label className="full">
               Who
-              <select value={c.segment} onChange={(e) => { const s = e.target.value; set({ segment: s, params: Object.fromEntries(meta.segments[s].params.map((p) => [p.key, p.default ?? ''])), body: c.body && Object.values(STARTERS).includes(c.body) ? STARTERS[s] : c.body || STARTERS[s] }); }}>
+              <select value={c.segment} onChange={(e) => { const s = e.target.value; set({ segment: s, ...(!c.name || c.name === autoName(c.segment) ? { name: autoName(s) } : {}), params: Object.fromEntries(meta.segments[s].params.map((p) => [p.key, p.default ?? ''])), body: c.body && Object.values(STARTERS).includes(c.body) ? STARTERS[s] : c.body || STARTERS[s] }); }}>
                 {Object.entries(meta.segments).map(([k, s]) => <option key={k} value={k}>{s.label}</option>)}
               </select>
               <span className="muted" style={{ fontSize: 12 }}>{seg.help}</span>
@@ -124,7 +143,12 @@ function Editor({ campaign, onClose, onDone }) {
             {c.channel !== 'sms' && <label>Email subject<input value={c.subject || ''} onChange={(e) => set({ subject: e.target.value })} placeholder="From your practice" /></label>}
             <label className="full">
               Message
-              <textarea rows={5} value={c.body} onChange={(e) => set({ body: e.target.value })} />
+              <textarea ref={body} rows={5} value={c.body} onChange={(e) => set({ body: e.target.value })} aria-invalid={blanks.length > 0 || undefined} />
+              {blanks.length > 0 && (
+                <span className="campaign-blanks" role="alert">
+                  Fill in {blanks.map((b) => <button key={b} type="button" className="small" onClick={() => fillIn(b)} title="Select it in the message so you can type over it">{b}</button>)} before sending — it would go out to every patient as it is.
+                </span>
+              )}
               <span className="muted" style={{ fontSize: 12 }}>Merge fields: {meta.vars.map((v) => `{${v}}`).join(' ')} · don’t include health details in marketing messages.</span>
             </label>
             <label className="full">Send at (leave empty to send now)<input type="datetime-local" value={when} onChange={(e) => setWhen(e.target.value)} /></label>
@@ -140,7 +164,12 @@ function Editor({ campaign, onClose, onDone }) {
                 {preview.duplicates > 0 && ` · ${preview.duplicates} share a phone or email with someone else`}
                 {preview.unreachable > 0 && ` · ${preview.unreachable} can't be reached or opted out`}
               </div>
-              {preview.sample && <div className="sms-preview" style={{ marginTop: 10, whiteSpace: 'pre-wrap' }}>{preview.sample}</div>}
+              {preview.sample && (
+                <>
+                  <h3 style={{ marginTop: 12 }}>What {preview.list[0]?.first_name || 'a patient'} will get</h3>
+                  <div className="sms-preview" data-testid="campaign-sample" style={{ whiteSpace: 'pre-wrap' }}>{preview.sample}</div>
+                </>
+              )}
               <div style={{ marginTop: 10, maxHeight: 220, overflow: 'auto', fontSize: 13 }}>
                 {preview.list.map((r) => <div key={`${r.id}${r.channel}`}>{r.first_name} {r.last_name} <span className="muted">· {r.channel === 'sms' ? 'text' : 'email'}</span></div>)}
                 {preview.recipients > preview.list.length && <div className="muted">…and {preview.recipients - preview.list.length} more</div>}
@@ -149,11 +178,23 @@ function Editor({ campaign, onClose, onDone }) {
           )}
         </div>
       </div>
-      <div className="form-actions">
-        <button type="button" onClick={onClose}>Cancel</button>
-        <button type="button" disabled={draft.busy || !c.name} onClick={draft.submit}>Save draft</button>
-        <button className="primary" disabled={send.busy || !c.name || !preview?.recipients} onClick={send.submit}>{when ? 'Schedule' : 'Send now'}</button>
-      </div>
+      {confirming ? (
+        <div className="form-actions campaign-confirm" role="group" aria-label="Send the campaign">
+          <span style={{ marginRight: 'auto' }}>
+            {when ? 'At that time this ' : 'This '}{[preview.sms && `texts ${preview.sms}`, preview.email && `emails ${preview.email}`].filter(Boolean).join(' and ')} {preview.recipients === 1 ? 'patient' : 'patients'} the message above. Sent messages can’t be taken back.
+          </span>
+          <button type="button" onClick={() => setConfirming(false)}>Not yet</button>
+          <button ref={yes} className="primary" disabled={send.busy} onClick={send.submit}>{when ? `Schedule ${preview.recipients} messages` : `Yes, send ${preview.recipients} ${preview.recipients === 1 ? 'message' : 'messages'}`}</button>
+        </div>
+      ) : (
+        <div className="form-actions">
+          <button type="button" onClick={onClose}>Cancel</button>
+          <button type="button" disabled={draft.busy || !c.name} onClick={draft.submit}>Save draft</button>
+          <button className="primary" disabled={!c.name || !preview?.recipients || blanks.length > 0} title={blanks.length ? `Fill in ${blanks.join(', ')} first` : ''} onClick={() => setConfirming(true)}>
+            {!preview?.recipients ? (when ? 'Schedule' : 'Send now') : `${when ? 'Schedule for' : 'Send to'} ${preview.recipients} ${preview.recipients === 1 ? 'patient' : 'patients'}${when ? '' : ' now'}…`}
+          </button>
+        </div>
+      )}
     </Modal>
   );
 }

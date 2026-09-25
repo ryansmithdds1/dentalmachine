@@ -253,11 +253,18 @@ export function robot({ page, ctx, base, api, action, outDir, today }) {
     const el = document.activeElement;
     return el?.getAttribute('aria-label') === l || (el?.textContent || '').trim() === l;
   }, label);
-  // Choosing a file in the file picker: a person clicks it, so it counts as a click.
-  t.pickFile = async (trigger, file) => {
-    const [chooser] = await Promise.all([page.waitForEvent('filechooser'), trigger()]);
+  // Choosing a file in the file picker: a person clicks it, so it counts as a click — or, when the picker was
+  // opened from the keyboard ({ keyboard: true }), one key: the system's file dialog takes the name typed and Enter.
+  t.pickFile = async (trigger, file, { keyboard = false } = {}) => {
+    // Listening for the picker is switched on in the browser before the trigger (a picker opened a moment too early
+    // would go unseen and the robot would wait for nothing).
+    const chooserP = page.waitForEvent('filechooser');
+    await page.waitForTimeout(100);
+    await trigger();
+    const chooser = await chooserP;
     await chooser.setFiles(file);
-    t.extraClicks = (t.extraClicks || 0) + 1;
+    if (keyboard) t.extraKeys = (t.extraKeys || 0) + 1;
+    else t.extraClicks = (t.extraClicks || 0) + 1;
   };
   // What a reviewer noticed: kind is one of asks-known, dead-end, wording, layout, bug, slow, missing, note.
   t.flag = (kind, text) => t.flags.push({ kind, text });
@@ -293,7 +300,7 @@ export function robot({ page, ctx, base, api, action, outDir, today }) {
     const prefilled = forms.filter(([, f]) => f).length;
     const result = {
       id: action.id, name: action.name, role: t.role, status: error ? (error.blocked ? 'blocked' : 'failed') : 'measured', error: error ? String(error.message || error).split('\n').slice(0, 3).join(' ') : undefined,
-      clicks: (c.clicks || 0) + (t.extraClicks || 0), keys: c.keys || 0, fields: c.fields || 0, textChars: c.textChars || 0, commands: c.cmd || 0,
+      clicks: (c.clicks || 0) + (t.extraClicks || 0), keys: (c.keys || 0) + (t.extraKeys || 0), fields: c.fields || 0, textChars: c.textChars || 0, commands: c.cmd || 0,
       screens: Math.max(0, t.screens.length - 1), route: t.screens,
       modals: c.modals || 0, maxModals: c.maxModals || 0, confirms: (c.confirms || 0), dialogs: t.dialogs,
       formFields: { shown, prefilled, touched: [...touched], untouchedBlank: forms.filter(([n, f]) => !f && !touched.has(n)).length },

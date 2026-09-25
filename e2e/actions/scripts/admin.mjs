@@ -1,5 +1,6 @@
 // Settings and set-up: carriers, providers, chairs, visit types, codes, users, templates, fees, security, backups.
 // A manager gets there the way most do: Settings at the bottom of the menu, then the section.
+/* global document */
 import { MOD, uniq } from '../lib/fixtures.mjs';
 
 // Settings (menu) → the section in the list on the left.
@@ -20,13 +21,18 @@ async function addRecord(t, what, fields) {
   });
   await t.step(`Fill in ${fields.map(([l]) => l).join(', ')}`, async () => {
     for (const [label, text] of fields) {
-      await t.click(`.modal label:has-text("${label}") input, .settings-body form label:has-text("${label}") input`);
-      await t.key(`${MOD}+a`);
+      const box = t.page.locator(`.modal label:has-text("${label}") input, .settings-body form label:has-text("${label}") input`).first();
+      // The first box has the cursor when the form opens: just type.
+      if (!(await box.evaluate((el) => el === document.activeElement))) {
+        await t.click(box);
+        await t.key(`${MOD}+a`);
+      }
       await t.type(text);
     }
   });
-  await t.step('Click Save', async () => {
-    await t.click('.modal button.primary, .settings-body form button.primary');
+  await t.step('Press Enter (or click Save)', async () => {
+    if (await t.page.evaluate(() => !!document.activeElement?.closest('.modal form, .settings-body form') && document.activeElement.tagName === 'INPUT')) await t.key('Enter');
+    else await t.click('.modal button.primary, .settings-body form button.primary');
     await t.see('.modal', { state: 'detached' });
   });
 }
@@ -47,13 +53,17 @@ export default {
         await t.click('.settings-body button:has-text("Add")');
         await t.see('.modal');
       });
-      await t.step('Type the name; pick the Type (required, not marked — "DDS" in the name isn’t used)', async () => {
-        await t.click('.modal label:has-text("Name") input');
+      await t.step('Type the name ("…, DDS": the Type follows — Dentist); the cursor is already in Name', async () => {
+        if (!(await t.page.locator('.modal label:has-text("Name") input').first().evaluate((el) => el === document.activeElement))) await t.click('.modal label:has-text("Name") input');
         await t.type(`Dr. Robin ${uniq()}, DDS`);
-        await t.page.locator('.modal label:has-text("Type") select').selectOption('dentist');
+        const type = t.page.locator('.modal label:has-text("Type") select');
+        if ((await type.inputValue()) !== 'dentist') {
+          t.flag('asks-known', 'Add provider doesn’t use the "DDS" typed in the name: the Type is picked by hand');
+          await type.selectOption('dentist');
+        }
       });
-      await t.step('Click Save', async () => {
-        await t.click('.modal button.primary');
+      await t.step('Press Enter: saved', async () => {
+        await t.key('Enter');
         await t.see('.modal', { state: 'detached' });
       });
     },
@@ -80,15 +90,20 @@ export default {
         await t.click('.settings-body button:has-text("Add")');
         await t.see('.modal');
       });
-      await t.step('Type the code, description and fee; pick the category (required, though not marked)', async () => {
-        for (const [label, text] of [['Code', `D9${String(Date.now()).slice(-3)}`], ['Description', 'Robot test procedure'], ['Fee', '95']]) {
-          await t.click(`.modal label:has-text("${label}") input`);
+      await t.step('Type the code, Tab, the description, Tab, the fee (the category follows the code: D9… = adjunctive)', async () => {
+        const fields = [['Code', `D9${String(Date.now()).slice(-3)}`], ['Description', 'Robot test procedure'], ['Fee', '95']];
+        for (const [i, [label, text]] of fields.entries()) {
+          const box = t.page.locator(`.modal label:has-text("${label}") input`).first();
+          if (!(await box.evaluate((el) => el === document.activeElement))) {
+            if (i) await t.key('Tab'); else await t.click(box);
+          }
           await t.type(text);
         }
-        await t.page.locator('.modal label:has-text("Category") select').selectOption({ index: 1 });
+        const cat = t.page.locator('.modal label:has-text("Category") select');
+        if (!(await cat.inputValue())) { t.flag('asks-known', 'The category isn’t taken from the code (D9… is adjunctive)'); await cat.selectOption({ index: 1 }); }
       });
-      await t.step('Click Save', async () => {
-        await t.click('.modal button.primary');
+      await t.step('Press Enter: saved', async () => {
+        await t.key('Enter');
         await t.see('.modal', { state: 'detached' });
       });
     },
@@ -102,10 +117,10 @@ export default {
         await t.click('button:has-text("Invite user")');
         await t.see('.modal');
       });
-      await t.step('Type their name and email; pick the role', async () => {
-        await t.click('.modal label:has-text("Name") input');
+      await t.step('Type their name, Tab, their email; pick the role (front desk to start with)', async () => {
+        if (!(await t.page.locator('.modal label:has-text("Name") input').first().evaluate((el) => el === document.activeElement))) await t.click('.modal label:has-text("Name") input');
         await t.type('Riley Assistant');
-        await t.click('.modal label:has-text("Email") input');
+        await t.key('Tab');
         await t.type(`riley.${uniq()}@example.com`);
         const role = t.page.locator('.modal label:has-text("Role") select').first();
         if (await role.count()) await role.selectOption({ index: 1 });
@@ -117,10 +132,17 @@ export default {
           await t.type('Temp-pass-2026!');
         });
       }
-      await t.step('Click Save', async () => {
+      await t.step('Click "Send invitation": they get an email with a link to choose their own password', async () => {
         await t.click('.modal button.primary');
-        await t.see('.modal', { state: 'detached' });
+        await t.page.waitForFunction(() => !document.querySelector('.modal') || document.querySelector('.invite-sent'));
       });
+      if (await t.page.locator('.invite-sent').count()) {
+        t.note('No email service in this office: the link is shown to pass on.');
+        await t.step('Press Enter (Done): the link to give them is on screen', async () => {
+          await t.key('Enter');
+          await t.see('.modal', { state: 'detached' });
+        });
+      }
     },
   },
 

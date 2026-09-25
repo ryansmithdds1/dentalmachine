@@ -202,7 +202,7 @@ export default function InsuranceTab({ patient, onChange }) {
       )}
       {modal && !modal.plan && (
         <Modal title={modal.policy ? 'Edit policy' : modal.card ? 'Check the card and save' : 'Add insurance policy'} wide onClose={() => setModal(null)}>
-          <PolicyForm patient={patient} policy={modal.policy} card={modal.card} onDone={() => { setModal(null); refresh(); }} />
+          <PolicyForm patient={patient} policy={modal.policy} card={modal.card} taken={active.filter((p) => p.id !== modal.policy?.id).map((p) => p.priority)} onDone={() => { setModal(null); refresh(); }} />
         </Modal>
       )}
     </>
@@ -226,7 +226,9 @@ async function afterCardSave({ patient, card, policyId, can }) {
   } else toast('Policy saved');
 }
 
-function PolicyForm({ patient, policy, card = null, onDone }) {
+// taken: the priorities of the patient's other active policies — a new one starts on the next free one
+// (Secondary when they already have a primary).
+function PolicyForm({ patient, policy, card = null, onDone, taken = [] }) {
   const { can } = useAuth();
   const carriers = useLookup('/carriers');
   const fromCard = card?.proposed || {};
@@ -234,7 +236,7 @@ function PolicyForm({ patient, policy, card = null, onDone }) {
     carrier_id: policy?.carrier_id || card?.carrier?.id || (card?.new_carrier && can('billing:write') ? 'new' : ''),
     new_carrier_name: card?.new_carrier?.name || '',
     new_carrier_payer_id: card?.new_carrier?.payer_id || '',
-    priority: policy?.priority || 'primary',
+    priority: policy?.priority || (taken.includes('primary') && !taken.includes('secondary') ? 'secondary' : 'primary'),
     subscriber_name: policy?.subscriber_name || fromCard.subscriber_name || `${patient.first_name} ${patient.last_name}`,
     subscriber_id: policy?.subscriber_id || fromCard.subscriber_id || '',
     subscriber_dob: policy?.subscriber_dob || fromCard.subscriber_dob || patient.dob || '',

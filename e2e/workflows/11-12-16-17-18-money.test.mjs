@@ -129,18 +129,18 @@ test('#17 why this balance: Alt+L — 1 action, by visit, adds up', async () => 
   assert.equal(await page.locator('.why-balance a[href$="/statement"]').count(), 1);
 });
 
-test('#16 book the next hygiene visit at checkout: click, Enter — 2 actions, first open slot with the hygienist', async () => {
+test('#16 book the next hygiene visit at checkout: R, Enter — 2 actions (just Enter when nothing is left to pay), near the time of today’s visit', async () => {
   const { page } = s;
   await page.goto(`${app.base}/checkout/${visit.id}`);
-  const book = page.locator('button:has-text("recall")').first();
-  await book.waitFor();
+  await page.waitForSelector('.next-visit-picker, button:has-text("recall")');
+  await page.waitForTimeout(300); // with nothing to pay the suggestions open by themselves
   const co = await s.get(`/appointments/${visit.id}/checkout`);
   const recall = co.recalls.find((x) => ['due', 'contacted'].includes(x.status));
-  const q = new URLSearchParams({ from: recall.due_date, count: '3', ...(recall.appointment_type_id ? { appointment_type_id: String(recall.appointment_type_id) } : {}) });
+  const q = new URLSearchParams({ from: recall.due_date, count: '3', near: visit.start_time.slice(11, 16), ...(recall.appointment_type_id ? { appointment_type_id: String(recall.appointment_type_id) } : {}) });
   const suggested = await s.get(`/patients/${patient.id}/next-slots?${q}`);
   assert.equal(suggested.provider.type, 'hygienist');
   const r = await measure(page, async () => {
-    await book.click();
+    if (!(await page.locator('.next-visit-picker').count())) await page.keyboard.press('r');
     await page.waitForFunction(() => document.activeElement?.closest('.slot-picks'));
     await page.keyboard.press('Enter');
     await page.waitForSelector('.public-notice:has-text("Booked")');
@@ -150,5 +150,50 @@ test('#16 book the next hygiene visit at checkout: click, Enter — 2 actions, f
   assert.ok(next, 'booked at the first suggestion');
   assert.equal(next.provider_id, suggested.provider.id, 'with the hygienist');
   assert.ok(next.start_time.slice(0, 10) >= recall.due_date || next.start_time.slice(0, 10) >= visit.start_time.slice(0, 10), 'not before the recall is due');
+  // Next: "Mark checked out" has the keyboard.
+  if (!co.appointment.checked_out_at) await page.waitForFunction(() => document.activeElement?.textContent === 'Mark checked out');
+  assert.deepEqual(s.errors, [], 'no dialogs or page errors');
+});
+
+test('#11/#12/#16 the whole walk-out from the schedule: O, Enter (pays what’s due: today plus the older balance), Enter (next cleaning), Enter (checked out) — 4 keys', async () => {
+  const { page } = s;
+  const dentist = (await s.get('/providers')).find((p) => p.type === 'dentist');
+  const practiceDay = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago' }).format(new Date());
+  const p = await s.post('/patients', { first_name: 'Walker', last_name: 'Outtest', dob: '1979-05-06', phone: '(512) 555-0163' });
+  // An older charge nobody paid (no insurance), and this morning's visit with its work done.
+  const old = await s.post(`/patients/${p.id}/procedures`, { code: 'D2392', tooth: '30', surfaces: 'MO', provider_id: dentist.id, complete: true });
+  const v = await s.post('/appointments', { patient_id: p.id, provider_id: dentist.id, start_time: `${practiceDay} 05:00`, end_time: `${practiceDay} 05:30`, reason: 'Exam and cleaning', override_blockout: true, notify: false });
+  assert.ok(v.id, JSON.stringify(v));
+  const work = [];
+  for (const code of ['D0120', 'D1110']) work.push(await s.post(`/patients/${p.id}/procedures`, { code, appointment_id: v.id, provider_id: dentist.id, complete: true }));
+  await s.api('PATCH', `/appointments/${v.id}/status`, { status: 'completed' });
+  const owed = old.fee + work.reduce((t, x) => t + x.fee, 0);
+  const co = await s.get(`/appointments/${v.id}/checkout`);
+  assert.equal(co.due.now, owed, 'due now: today’s work plus the older charge');
+  assert.equal(co.due.earlier, old.fee);
+
+  await page.goto(`${app.base}/schedule?date=${practiceDay}&view=day`);
+  await page.waitForSelector(`.cal [data-appt-id="${v.id}"]`);
+  await page.focus(`.cal [data-appt-id="${v.id}"]`);
+  const r = await measure(page, async () => {
+    await page.keyboard.press('o');
+    await page.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === 'Payment amount');
+    await page.keyboard.press('Enter');
+    await page.waitForSelector('text=/Payment of \\$[\\d.,]+ posted/');
+    await page.waitForFunction(() => document.activeElement?.closest('.slot-picks'));
+    await page.keyboard.press('Enter');
+    await page.waitForSelector('.public-notice:has-text("Booked")');
+    await page.waitForFunction(() => document.activeElement?.textContent === 'Mark checked out');
+    await page.keyboard.press('Enter');
+    await page.waitForSelector('.badge:has-text("Checked out")');
+  });
+  console.log(withinBudget('walk-out: pay, next cleaning, checked out', r, { actions: 4, ms: 8000 }));
+  assert.equal(r.clicks, 0, 'keyboard only');
+  const ledger = await s.get(`/patients/${p.id}/ledger`);
+  assert.equal(ledger.balance, 0, 'paid what was due, once');
+  assert.equal(ledger.entries.filter((e) => e.type === 'payment').length, 1);
+  const after = await s.get(`/appointments/${v.id}`);
+  assert.ok(after.checked_out_at);
+  assert.ok((await s.get(`/patients/${p.id}`)).upcoming_appointments.length, 'the next visit is booked');
   assert.deepEqual(s.errors, [], 'no dialogs or page errors');
 });

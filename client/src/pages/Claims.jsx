@@ -565,6 +565,28 @@ function InsuranceChecks() {
   );
 }
 
+// Which open claims a check pays, from its amount alone: the one claim whose expected payment is the check, or
+// the only set of claims whose expected payments add up to it (small lists only). Null when it isn't clear —
+// then the person fills in the lines (a click on "Expected" copies it).
+function matchCheck(amount, claims) {
+  const want = Math.round(amount);
+  const exp = claims.map((c) => ({ id: c.id, cents: Math.max(0, (c.estimated_amount || 0) - (c.paid_amount || 0)) })).filter((c) => c.cents > 0);
+  if (!want) return null;
+  // The carrier's only open claim: the check is for it.
+  if (claims.length === 1) return [{ id: claims[0].id, cents: want }];
+  if (!exp.length) return null;
+  if (exp.length > 16) { const one = exp.filter((c) => c.cents === want); return one.length === 1 ? one : null; }
+  let found = null;
+  for (let mask = 1; mask < (1 << exp.length); mask++) {
+    let sum = 0;
+    for (let i = 0; i < exp.length; i++) if (mask & (1 << i)) sum += exp[i].cents;
+    if (sum !== want) continue;
+    if (found) return null; // two different ways to make the amount: the person decides
+    found = exp.filter((_, i) => mask & (1 << i));
+  }
+  return found;
+}
+
 function CheckForm({ onDone }) {
   const carriers = useLookup('/carriers');
   const [head, setHead] = useState({ carrier_id: '', check_number: '', check_date: new Date().toLocaleDateString('en-CA'), amount: '', method: 'check' });
@@ -574,6 +596,10 @@ function CheckForm({ onDone }) {
   const [err, setErr] = useState(null);
   const [busy, setBusy] = useState(false);
   const [eob, setEob] = useState(null);
+  const checkNo = useRef(null);
+  const amountBox = useRef(null);
+  // Claims filled in from the check amount (not typed by the person): refilled when the amount changes.
+  const [auto, setAuto] = useState(null);
   const row = (id) => rows[id] || { paid: '', write_off: '', final: true, lines: {} };
   const d = (c) => (c == null ? '' : (c / 100).toFixed(2));
   // A paper EOB read by AI fills the check in: header, then each claim it matched, line by line.
@@ -590,7 +616,16 @@ function CheckForm({ onDone }) {
     setRows(next);
     setLineMode(byLine);
   };
-  const setRow = (id, patch) => setRows({ ...rows, [id]: { ...row(id), ...patch } });
+  const setRow = (id, patch) => { setAuto(null); setRows({ ...rows, [id]: { ...row(id), ...patch } }); };
+  // The check amount picks the claims it pays (expected payment each), unless the person has filled lines in.
+  useEffect(() => {
+    if (!open || eob) return;
+    const typed = Object.keys(rows).some((id) => !auto?.includes(Number(id)) && (rows[id].paid !== '' || rows[id].write_off !== ''));
+    if (typed) return;
+    const m = matchCheck(toCents(head.amount || 0), open);
+    setRows(m ? Object.fromEntries(m.map((x) => [x.id, { paid: (x.cents / 100).toFixed(2), write_off: '', final: true, lines: {} }])) : {});
+    setAuto(m ? m.map((x) => x.id) : null);
+  }, [head.amount, open]); // eslint-disable-line react-hooks/exhaustive-deps
   const chosen = (open || []).filter((c) => row(c.id).paid !== '' || row(c.id).write_off !== '');
   const total = chosen.reduce((s, c) => s + toCents(row(c.id).paid || 0), 0);
   const diff = toCents(head.amount || 0) - total;
@@ -651,10 +686,11 @@ function CheckForm({ onDone }) {
         </div>
       )}
       <div className="form-grid">
-        <label>Carrier<select value={head.carrier_id} onChange={(e) => { setHead({ ...head, carrier_id: e.target.value }); setRows({}); }}><option value="">Select…</option>{carriers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
-        <label>Check / EFT #<input value={head.check_number} onChange={(e) => setHead({ ...head, check_number: e.target.value })} /></label>
+        <label>Carrier<select autoFocus value={head.carrier_id} onChange={(e) => { setHead({ ...head, carrier_id: e.target.value }); setRows({}); setAuto(null); if (e.target.value) setTimeout(() => checkNo.current?.focus(), 0); }}><option value="">Select…</option>{carriers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
+        {/* Check #, then the amount (Enter moves on): the amount picks the claims it pays; Enter posts when it balances. */}
+        <label>Check / EFT #<input ref={checkNo} value={head.check_number} onChange={(e) => setHead({ ...head, check_number: e.target.value })} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); amountBox.current?.focus(); } }} /></label>
+        <label>Check amount ($)<input ref={amountBox} type="number" step="0.01" value={head.amount} onChange={(e) => setHead({ ...head, amount: e.target.value })} onKeyDown={(e) => { if (e.key === 'Enter' && !busy && chosen.length && diff === 0) { e.preventDefault(); submit(); } }} /></label>
         <label>Date<input type="date" value={head.check_date} onChange={(e) => setHead({ ...head, check_date: e.target.value })} /></label>
-        <label>Check amount ($)<input type="number" step="0.01" value={head.amount} onChange={(e) => setHead({ ...head, amount: e.target.value })} /></label>
         <label>How<select value={head.method} onChange={(e) => setHead({ ...head, method: e.target.value })}><option value="check">Paper check</option><option value="eft">EFT</option></select></label>
       </div>
       {head.carrier_id && (
@@ -667,7 +703,7 @@ function CheckForm({ onDone }) {
                   <td>#{c.id}</td>
                   <td>{c.first_name} {c.last_name}</td>
                   <td className="num">{money(c.total_fee)}</td>
-                  <td className="num">{money(c.estimated_amount - c.paid_amount)}</td>
+                  <td className="num"><button type="button" className="link small" title="Paid what was expected: copy it to Paid" onClick={() => setRow(c.id, { paid: d(Math.max(0, c.estimated_amount - c.paid_amount)) })}>{money(c.estimated_amount - c.paid_amount)}</button></td>
                   <td><input type="number" step="0.01" style={{ width: 100 }} aria-label="Paid" value={row(c.id).paid} readOnly={!!lineMode[c.id]} onChange={(e) => setRow(c.id, { paid: e.target.value })} /></td>
                   <td><input type="number" step="0.01" style={{ width: 100 }} aria-label="Write-off" value={row(c.id).write_off} readOnly={!!lineMode[c.id]} onChange={(e) => setRow(c.id, { write_off: e.target.value })} /></td>
                   <td><input type="checkbox" aria-label="Final payment" checked={row(c.id).final} onChange={(e) => setRow(c.id, { final: e.target.checked })} /></td>
@@ -689,6 +725,7 @@ function CheckForm({ onDone }) {
         </table>
       )}
       {open?.length === 0 && <div className="muted" style={{ marginTop: 10 }}>No open claims for this carrier.</div>}
+      {auto?.length > 0 && <div className="muted check-matched" style={{ marginTop: 8, fontSize: 13 }}>Matched to {auto.map((id) => `#${id}`).join(', ')} by the expected payment — check the lines against the EOB, then post (Enter).</div>}
       <div className="form-actions" style={{ justifyContent: 'space-between' }}>
         <span className={diff === 0 ? 'badge ok' : 'badge warn'}>{chosen.length} claim{chosen.length === 1 ? '' : 's'} · {money(total)} posted · {diff === 0 ? 'balanced' : `${money(Math.abs(diff))} ${diff > 0 ? 'left to post' : 'over the check'}`}</span>
         <button className="primary" disabled={busy || !chosen.length || diff !== 0} onClick={submit}>Post check</button>

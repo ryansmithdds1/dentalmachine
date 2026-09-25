@@ -423,7 +423,11 @@ export default function clinicalRoutes({ db }) {
        WHERE n.patient_id = ? AND n.practice_id = ? ORDER BY n.created_at DESC, n.id DESC`,
       patient.id, req.user.practice_id,
     );
+    // Who may sign each unsigned note (the same rule as POST /notes/:nid/sign), so the chart only offers Sign
+    // to someone who can — and says who can when it's someone else.
+    const signers = await signRules(req);
     for (const n of notes) {
+      if (!n.signed) { n.sign_blocker = signers.blocker(n); n.can_sign = !n.sign_blocker; }
       n.signature = n.signed ? `Electronically signed by ${n.signer_provider_name || n.signed_by_name || 'staff'}${n.signer_license ? ` · License ${n.signer_license}` : ''}${n.signer_npi ? ` · NPI ${n.signer_npi}` : ''}` : null;
     }
     // Addenda are shown under the note they amend, oldest first.
@@ -490,16 +494,29 @@ export default function clinicalRoutes({ db }) {
     res.json(await db.get('SELECT * FROM clinical_notes WHERE id = ?', existing.id));
   });
 
+  // A note written for a provider is signed by that provider (when they have a login); an assistant or another
+  // dentist can't sign it for them. Otherwise the author, an administrator or any provider can. Returns
+  // { blocker(note) } → null when this person may sign it, or why not (plain words).
+  async function signRules(req) {
+    const providers = await db.all('SELECT id, name, user_id FROM providers WHERE practice_id = ?', req.user.practice_id);
+    const byId = new Map(providers.map((p) => [p.id, p]));
+    const isProvider = providers.some((p) => p.user_id === req.user.id);
+    return {
+      blocker(note) {
+        if (!can(req.user, 'clinical:sign')) return 'Signing notes needs a dentist’s or hygienist’s login';
+        const provider = note.provider_id ? byId.get(note.provider_id) : null;
+        if (provider?.user_id && provider.user_id !== req.user.id) return `Only ${provider.name} can sign this note`;
+        if (!provider?.user_id && note.author_id !== req.user.id && req.user.role !== 'admin' && !isProvider) return 'Only the author or a provider can sign this note';
+        return null;
+      },
+    };
+  }
+
   r.post('/notes/:nid/sign', requirePermission('clinical:sign'), async (req, res) => {
     const existing = await findOr404(db, 'clinical_notes', req.params.nid, req.user.practice_id, 'Note');
     if (existing.signed) throw new HttpError(409, 'Note already signed');
-    // A note written for a provider is signed by that provider (when they have a login); an assistant
-    // or another dentist can't sign it for them.
-    const provider = existing.provider_id ? await db.get('SELECT name, user_id FROM providers WHERE id = ?', existing.provider_id) : null;
-    if (provider?.user_id && provider.user_id !== req.user.id) throw new HttpError(403, `Only ${provider.name} can sign this note`);
-    if (!provider?.user_id && existing.author_id !== req.user.id && req.user.role !== 'admin' && !(await db.get('SELECT 1 AS ok FROM providers WHERE user_id = ? AND practice_id = ?', req.user.id, req.user.practice_id))) {
-      throw new HttpError(403, 'Only the author or a provider can sign this note');
-    }
+    const blocker = (await signRules(req)).blocker(existing);
+    if (blocker) throw new HttpError(403, blocker);
     const signed = await recorded(db, 'clinical_notes', existing.id, () => db.run("UPDATE clinical_notes SET signed = 1, signed_at = datetime('now'), signed_by = ? WHERE id = ? AND signed = 0", req.user.id, existing.id));
     if (!signed.changes) throw new HttpError(409, 'Note already signed');
     await audit(db, req, 'note.sign', 'clinical_notes', existing.id);

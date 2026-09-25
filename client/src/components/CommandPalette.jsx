@@ -4,7 +4,7 @@ import { api } from '../api.js';
 import { age } from '../format.js';
 import { useAuth } from '../auth.jsx';
 import { useActivePatient } from '../activePatient.jsx';
-import { screenCommands } from '../shortcuts.js';
+import { screenCommands, useCommandsVersion } from '../shortcuts.js';
 import { PATIENT_ACTIONS } from './PatientBar.jsx';
 import { requestReview } from '../reviewRequest.js';
 
@@ -20,6 +20,8 @@ const PAGES = [
   ['Online reviews (Google)', '/reputation'], ['Phones', '/phones'], ['Treatment follow-up', '/recall?type=treatment'], ['Insurance verification (Billing tab)', '/claims?tab=verification'],
   ['Lab check-in', '/lab-checkin'], ['Checklists', '/checklists'], ['Documents', '/documents'], ['Intranet', '/intranet'], ['Capacity', '/capacity'],
   ['Business', '/business'], ['Marketing results', '/marketing'], ['Ask your data', '/ask'], ['Group', '/group'],
+  // Report tabs people look for by name (they were Reports → a tab → a button).
+  ['A/R aging (who owes what)', '/reports?tab=ops&view=aging'], ['Treatment plan acceptance', '/reports?tab=plans'], ['Hygiene report', '/reports?tab=hygiene'], ['Referrals report (where new patients come from)', '/reports?tab=referrals'],
 ];
 
 // Things to do for a patient; typing the verb first ("book jane", "note doe", "perio 555-0100") shows just that.
@@ -38,6 +40,10 @@ const ACTIONS = [
 ];
 const doOrGo = (a, p) => (a.run ? { run: () => a.run(p) } : { to: a.to(p) });
 const QUICK = [['New patient', '/patients?new=1', '➕'], ['New appointment', '/schedule?book=new', '📅']];
+// For comparing what was typed with a row's name: case, curly quotes and extra spaces don't matter.
+const norm = (s) => String(s || '').toLowerCase().replace(/[’‘`]/g, "'").replace(/\s+/g, ' ').trim();
+// "#33", "claim 33", "claim #33": the person means a claim (a bare "33" may be a chart number).
+const CLAIM_Q = /^(claim\s*#?|#)\s*\d+$/i;
 const nameOf = (p) => `${p.first_name}${p.preferred_name ? ` "${p.preferred_name}"` : ''} ${p.last_name}`;
 const subOf = (p) => [p.dob && `${age(p.dob)}y · ${p.dob}`, p.phone].filter(Boolean).join(' · ');
 
@@ -81,6 +87,7 @@ export default function CommandPalette() {
   useEffect(() => {
     if (open) {
       pointer.current = null;
+      shown.current = { q: null, keys: [] };
       setQ('');
       setIdx(0);
     }
@@ -94,7 +101,12 @@ export default function CommandPalette() {
   }, [term]);
   const active = recent.find((r) => r.id === patientId) || (patientId ? { id: patientId, first_name: 'the active', last_name: 'patient' } : null);
 
-  const items = useMemo(() => {
+  // Screens add commands while the bar is open (documents found by their words): re-read them when they do.
+  const cmdTick = useCommandsVersion();
+  // What has been shown for the current words, in order: rows never move once shown (a person who pauses
+  // before Enter opens what they saw first); anything that arrives later is added below.
+  const shown = useRef({ q: null, keys: [] });
+  const ranked = useMemo(() => {
     const ql = q.toLowerCase().trim();
     const hit = (label) => !ql || label.toLowerCase().includes(ql);
     const patient = (p) => ({ key: `p${p.id}`, label: nameOf(p), sub: subOf(p), alert: p.medical_alerts, to: `/patients/${p.id}`, icon: '🧑', patient: p });
@@ -116,20 +128,50 @@ export default function CommandPalette() {
       ]
       : [];
     // Screens can register many commands (every report, every link): show a few until the person types.
-    const screen = screenCommands().filter((c) => hit(c.label)).slice(0, ql ? 40 : 8).map((c) => ({ key: `s${c.id}`, label: c.label, sub: c.hint || 'This screen', run: c.run, icon: '⚡' }));
-    return [
-      ...res.patients.map(patient),
-      // The best match's common actions, right under it.
-      ...(top ? ACTIONS.slice(0, 5).map((a) => ({ key: `a${a.label}${top.id}`, label: `${a.label} ${top.first_name} ${top.last_name}`, sub: 'Action', ...doOrGo(a, top), icon: a.icon, patient: top })) : []),
-      ...res.claims.map((c) => ({ key: `c${c.id}`, label: `Claim #${c.id}`, sub: `${c.first_name} ${c.last_name} · ${c.status}`, to: `/claims/${c.id}`, icon: '🧾' })),
-      ...activeActions,
+    // Rows that arrive late (documents found by the words inside them) are marked `last` and always go at the
+    // bottom, so they never push down what the person is about to open.
+    const cmds = screenCommands().filter((c) => hit(c.label)).map((c) => ({ key: `s${c.id}`, label: c.label, sub: c.hint || 'This screen', run: c.run, icon: c.icon || '⚡', last: !!c.last }));
+    const screen = cmds.filter((c) => !c.last).slice(0, ql ? 40 : 8);
+    const late = ql ? cmds.filter((c) => c.last).slice(0, 8) : [];
+    const claims = res.claims.map((c) => ({ key: `c${c.id}`, label: `Claim #${c.id}`, sub: `${c.first_name} ${c.last_name} · ${c.status}`, to: `/claims/${c.id}`, icon: '🧾' }));
+    const digits = /^\d+$/.test(ql) ? ql : null;
+    // Best matches first: a claim asked for by number ("#33", "claim 33"), a patient whose chart number is
+    // exactly what was typed, and any screen or action whose name is exactly what was typed ("day sheet").
+    const chartNo = digits ? res.patients.filter((p) => String(p.id) === digits) : [];
+    const claimFirst = CLAIM_Q.test(ql) || (digits && !chartNo.length);
+    const rest = [
       ...screen,
       ...(!ql ? recent.filter((r) => r.id !== patientId).slice(0, 5).map((p) => ({ ...patient(p), key: `r${p.id}`, sub: `Recent · ${subOf(p)}` })) : []),
       ...QUICK.filter(([l]) => hit(l)).map(([l, to, icon]) => ({ key: to, label: l, sub: 'Action', to, icon })),
       // Keyed by label: two entries can open the same screen ("Time clock", "Clock in or out").
       ...pages(ql ? 6 : 10),
     ];
-  }, [res, q, action, active, recent, patientId, can, clear, pick]);
+    const exact = ql ? [...activeActions, ...rest].filter((it) => norm(it.label) === norm(ql)) : [];
+    const list = [
+      ...exact,
+      ...(claimFirst ? claims : []),
+      ...chartNo.map(patient),
+      ...res.patients.filter((p) => !chartNo.includes(p)).map(patient),
+      // The best match's common actions, right under it.
+      ...(top ? ACTIONS.slice(0, 5).map((a) => ({ key: `a${a.label}${top.id}`, label: `${a.label} ${top.first_name} ${top.last_name}`, sub: 'Action', ...doOrGo(a, top), icon: a.icon, patient: top })) : []),
+      ...(claimFirst ? [] : claims),
+      ...activeActions,
+      ...rest,
+      ...late,
+    ];
+    const seen = new Set();
+    return list.filter((it) => !seen.has(it.key) && seen.add(it.key));
+  }, [res, q, action, active, recent, patientId, can, clear, pick, cmdTick]); // eslint-disable-line react-hooks/exhaustive-deps
+  const items = useMemo(() => {
+    const prev = shown.current;
+    if (prev.q !== q) { shown.current = { q, keys: ranked.map((it) => it.key) }; return ranked; }
+    const byKey = new Map(ranked.map((it) => [it.key, it]));
+    const kept = prev.keys.filter((k) => byKey.has(k));
+    const keptSet = new Set(kept);
+    const out = [...kept.map((k) => byKey.get(k)), ...ranked.filter((it) => !keptSet.has(it.key))];
+    shown.current = { q, keys: out.map((it) => it.key) };
+    return out;
+  }, [ranked, q]);
 
   if (!open) return null;
   const go = (it) => {

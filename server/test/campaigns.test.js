@@ -85,3 +85,41 @@ test('cancelling a scheduled campaign stops it', async () => {
   assert.equal((await api.post(`/campaigns/${c.id}/cancel`)).data.status, 'cancelled');
   assert.equal(await runCampaigns(h.db, h.messenger, { appUrl: 'x', campaignId: c.id, now: new Date('2099-01-01T16:00:00Z') }), 0);
 });
+
+test('a campaign with a blank left in it ("[date]") cannot be sent or scheduled, and one already scheduled goes back to a draft', async () => {
+  const { api } = await setup();
+  const body = 'Hi {first_name}, {practice} will be closed on [date]. Call {phone}.';
+  const p = (await api.post('/campaigns/preview', { segment: 'all_active', channel: 'auto', body })).data;
+  assert.deepEqual(p.placeholders, ['[date]']);
+  assert.match(p.sample, /\[date\]/, 'the preview shows the real message, blank included');
+  // A draft can keep the blank while the office works on it…
+  const c = (await api.post('/campaigns', { name: 'Closed', segment: 'all_active', channel: 'auto', body })).data;
+  assert.equal(c.status, 'draft');
+  const before = h.sent.length;
+  // …but it can't be sent, now or later, and nothing goes out.
+  const now = await api.post(`/campaigns/${c.id}/send`, {});
+  assert.equal(now.status, 400);
+  assert.match(now.data.error, /still says “\[date\]” — replace it with the real details/);
+  assert.deepEqual(now.data.details.placeholders, ['[date]']);
+  assert.equal((await api.post(`/campaigns/${c.id}/send`, { send_at: new Date(Date.now() + 3600_000).toISOString() })).status, 400);
+  assert.equal((await api.get(`/campaigns/${c.id}`)).data.status, 'draft');
+  assert.equal(h.sent.length, before);
+  // Blank underscores too, and in an email subject.
+  assert.deepEqual((await api.post('/campaigns/preview', { segment: 'all_active', channel: 'email', subject: 'Closed on ____', body: 'Hi {first_name}' })).data.placeholders, ['____']);
+  // Filled in: it goes.
+  assert.equal((await api.put(`/campaigns/${c.id}`, { body: body.replace('[date]', 'Monday, Nov 11') })).status, 200);
+  const later = new Date(Date.now() + 60_000).toISOString();
+  assert.equal((await api.post(`/campaigns/${c.id}/send`, { send_at: later })).status, 200);
+  // A scheduled campaign can't be edited back to having a blank in it.
+  assert.equal((await api.put(`/campaigns/${c.id}`, { body })).status, 400);
+  // One scheduled with a blank some other way (from before this check) is caught when it starts: back to a
+  // draft, and a Needs attention item says why — nothing sent.
+  await h.db.run('UPDATE campaigns SET body = ? WHERE id = ?', body, c.id);
+  const tomorrow = new Date(Date.now() + 86400_000).toISOString().slice(0, 10);
+  assert.equal(await runCampaigns(h.db, h.messenger, { appUrl: 'https://app.example.com', campaignId: c.id, now: new Date(`${tomorrow}T15:00:00Z`) }), 0);
+  assert.equal((await api.get(`/campaigns/${c.id}`)).data.status, 'draft');
+  assert.equal(h.sent.length, before);
+  const issue = await h.db.get("SELECT * FROM issues WHERE dedupe_key = ?", `campaign-blanks:${c.id}`);
+  assert.ok(issue, 'a work item in Needs attention');
+  assert.match(issue.title, /wasn’t sent: fill in \[date\]/);
+});

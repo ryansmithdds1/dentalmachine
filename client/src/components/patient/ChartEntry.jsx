@@ -23,7 +23,9 @@ import './treatmententry.css';
 const toothWord = (t) => (/^[A-T]S?$/.test(String(t)) ? `#${t}` : String(t));
 const SAY_ENTER = /[\s,.]*(chart it|enter|go ahead|that's it|save it)[.!]?$/i;
 
-export default function ChartEntry({ patient, tooth, onDone, setup, lookups, chart, request }) {
+// estimateOnly: for people who can't chart (front desk, billing) — the same box and preview give the fee and the
+// insurance estimate; Enter does nothing to the chart.
+export default function ChartEntry({ patient, tooth, onDone, setup, lookups, chart, request, estimateOnly = false, autoFocus = null }) {
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
@@ -87,8 +89,11 @@ export default function ChartEntry({ patient, tooth, onDone, setup, lookups, cha
     return out;
   };
 
+  useEffect(() => { if (autoFocus) input.current?.focus(); }, [autoFocus]);
+
   const submit = async ({ source = 'typing' } = {}) => {
     const words = text;
+    if (estimateOnly) return;
     if (busy || parsed.error || (!parsed.items?.length && !parsed.options) || (current && !current.ok)) return;
     setBusy(true);
     setErr(null);
@@ -148,7 +153,7 @@ export default function ChartEntry({ patient, tooth, onDone, setup, lookups, cha
   }, [request?.n]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Speak instead of typing: each phrase replaces the box; "…, chart it" (or "enter") charts it.
-  const { data: hearing } = useApi(can('clinical:write') ? '/dictation' : null);
+  const { data: hearing } = useApi(can('clinical:write') && !estimateOnly ? '/dictation' : null);
   const mic = useDictation((said) => {
     const go = SAY_ENTER.test(said);
     setText(said.replace(SAY_ENTER, '').trim());
@@ -167,23 +172,25 @@ export default function ChartEntry({ patient, tooth, onDone, setup, lookups, cha
   };
 
   return (
-    <form className="chart-entry no-print" onSubmit={(e) => { e.preventDefault(); submit(); }}>
+    <form className={`chart-entry no-print${estimateOnly ? ' estimate-only' : ''}`} onSubmit={(e) => { e.preventDefault(); submit(); }}>
       <Keyboard size={18} className="muted" aria-hidden />
       <input
         ref={input} value={text} onChange={(e) => { setText(e.target.value); setErr(null); }} readOnly={busy}
-        aria-label="Chart by typing" autoComplete="off" spellCheck={false}
-        placeholder={tooth ? `#${tooth}: MO caries · D2740 · crb bu · crown plan · missing…  (Enter to chart)` : 'Type to chart: 30 MO caries · 14 crb bu · np · srp · 2-4 sealant plan  (press E)'}
+        aria-label={estimateOnly ? 'Estimate by typing' : 'Chart by typing'} autoComplete="off" spellCheck={false}
+        placeholder={estimateOnly ? 'Price and estimate: type the tooth and treatment, e.g. 14 D2740 or 14 crown (charts nothing)' : tooth ? `#${tooth}: MO caries · D2740 · crb bu · crown plan · missing…  (Enter to chart)` : 'Type to chart: 30 MO caries · 14 crb bu · np · srp · 2-4 sealant plan  (press E)'}
         onKeyDown={(e) => {
           if (e.key === 'Escape') { setText(''); e.currentTarget.blur(); }
           if (e.key === 'ArrowUp' && history.current.length) { e.preventDefault(); setText(history.current[Math.min(back.current, history.current.length - 1)]); back.current = Math.min(back.current + 1, history.current.length - 1); }
         }}
       />
-      {mic.supported && (
+      {mic.supported && !estimateOnly && (
         <button type="button" className={`small te-mic${mic.listening ? ' live' : ''}`} onClick={() => mic.toggle()} title={mic.listening ? 'Stop listening' : 'Add treatment by voice: “crown bundle on 14 with buildup, chart it”'} aria-label={mic.listening ? 'Stop listening' : 'Add treatment by voice'}>
           {mic.listening ? <><span className="te-rec" aria-hidden /> Listening… tap to stop</> : <><Mic size={14} aria-hidden /> Say treatment</>}
         </button>
       )}
-      <button className="small primary" disabled={busy || !!parsed.error || (!parsed.items?.length && !parsed.options) || (current && !current.ok)}>{parsed.options ? 'Compare' : 'Chart'}</button>
+      {estimateOnly
+        ? <span className="muted te-estimate-only" title="Charting needs a clinical login (dentist, hygienist or assistant)">Estimate only</span>
+        : <button className="small primary" disabled={busy || !!parsed.error || (!parsed.items?.length && !parsed.options) || (current && !current.ok)}>{parsed.options ? 'Compare' : 'Chart'}</button>}
       {(text.trim() || err || mic.interim || mic.listening) && (
         <div className="preview" role="status">
           {mic.listening && !mic.interim && !text.trim() && <span className="muted">Say the tooth and the treatment, e.g. “14 crown with buildup” or “30 MO composite”. Say “chart it” to add it, or tap Chart.</span>}
@@ -204,7 +211,7 @@ export default function ChartEntry({ patient, tooth, onDone, setup, lookups, cha
                 <>
                   {(current?.items || parsed.items).map((it, i) => (
                     <span key={i} className={`chip${it.error ? ' bad' : ''}${it.phase ? ' phased' : ''}`} title={[it.description, it.error, it.bundle && `from ${it.bundle}`].filter(Boolean).join(' · ')}>
-                      {it.phase ? <small>P{it.phase}</small> : null}{describe(it)}{it.fee != null ? <small> {money(it.fee)}</small> : null}
+                      {it.phase ? <small>P{it.phase}</small> : null}{estimateOnly ? describe(it).replace(/\s+planned$/, '') : describe(it)}{it.fee != null ? <small> {money(it.fee)}</small> : null}
                     </span>
                   ))}
                   {(current?.bundles || parsed.bundles || []).flatMap((b, bi) => b.options.map((o) => (

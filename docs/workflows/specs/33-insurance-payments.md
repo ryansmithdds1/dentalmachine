@@ -8,7 +8,12 @@ daily test.
 ## Measured path
 - ERA: nothing — clean remittances post as the automation; only exceptions reach the worklist (J/K, one key each).
 - Paper EOB: Insurance autopilot → Paper EOB → photo or file (1) → **Looks right — post** (Enter).
-- Manual check (Billing → Insurance payments): carrier, check #, amount, then paid / write-off per claim.
+- Manual check (Billing → Insurance payments): **Post an insurance check** → carrier (the cursor then waits in
+  Check #) → type the number, **Enter** → type the amount: it is matched to the claim(s) it pays by their expected
+  payment (the carrier's only open claim, or the one set of claims that adds up to it) and those lines are filled
+  in → **Enter** posts once it balances. **Budget: 6** (was 8) (`e2e/workflows/A-eob-autopilot.test.mjs`, "33 manual
+  check"). When the amount matches more than one way, or nothing, the lines are left to the person; a click on a
+  claim's Expected copies it to Paid. The same check posted twice is still caught (inline, not a confirm box).
 
 ## Defaults
 Paid and write-off per claim come from the ERA or the EOB read; the check date is today; the carrier is the one the

@@ -17,7 +17,7 @@ there isn't.
 
 | Signal | What exactly counts |
 |---|---|
-| **Clicks** | Every mouse press. A drag (moving a visit, dropping files) is one click. Choosing a file in the file picker is one click. Resting the mouse on something is free. |
+| **Clicks** | Every mouse press. A drag (moving a visit, dropping files) is one click. Choosing a file in the file picker is one click (one key when the picker was opened from the keyboard, e.g. U on Documents: the system's file dialog takes the typed name and Enter). Resting the mouse on something is free. |
 | **Keys** | Every key press that isn’t a letter typed into a text box: Enter, Tab, Esc, arrows, shortcuts (I, Alt+P, Ctrl/⌘K…). A command typed as words — “new patient” in the command bar, MERGE in a confirmation box — counts as **one** key. |
 | **Fields** | Every box the person had to type **information** into: a name, an amount, a note, a reference number, a search for the patient. One per box, however long the text: that information is part of the job, so the typing itself isn’t held against the software. (The number of characters is recorded as `textChars` but not scored.) |
 | **Actions** | Clicks + keys + fields. This is the number the workflow budgets in `specs/` use. |

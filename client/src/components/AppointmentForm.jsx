@@ -67,6 +67,9 @@ export default function AppointmentForm({ appointment, defaults = {}, patient: i
   const [override, setOverride] = useState(null);
   const [repeat, setRepeat] = useState({ rule: '', count: 6, end: 'count', until: '' });
   const [scope, setScope] = useState('this');
+  // A new booking shows only what decides the visit (who, what, when, with whom, where); reason, notes, repeat,
+  // video, ASAP and "let the patient know" (on) sit under "More options" so the form fits a laptop screen (A020).
+  const [more, setMore] = useState(!!appointment);
   // Fields the person set themselves keep their value; the rest follow the suggestion.
   const [touched, setTouched] = useState({});
   const touch = (k) => setTouched((t) => (t[k] ? t : { ...t, [k]: true }));
@@ -314,42 +317,51 @@ export default function AppointmentForm({ appointment, defaults = {}, patient: i
             </select>
           </label>
         )}
-        <label className="full">Reason<input value={form.reason} onChange={set('reason')} placeholder="e.g. Recall exam & cleaning" /></label>
-        <label className="full">Notes<textarea rows={2} value={form.notes} onChange={set('notes')} /></label>
-        <label className="checkbox full"><input type="checkbox" checked={form.video} onChange={(e) => setForm({ ...form, video: e.target.checked })} /> Video visit (the patient gets a link to join)</label>
-        <label className="checkbox full"><input type="checkbox" checked={form.asap} onChange={(e) => setForm({ ...form, asap: e.target.checked })} /> Add to ASAP list (patient wants an earlier opening)</label>
-        <label className="checkbox full"><input type="checkbox" checked={form.notify} onChange={(e) => setForm({ ...form, notify: e.target.checked })} /> Let the patient know {appointment ? 'if the time changes' : 'it’s booked'} (text or email, with the confirm link)</label>
-        {!appointment && (
-          <div className="full repeat-row">
-            <label>
-              Repeat
-              <select value={repeat.rule} onChange={(e) => setRepeat({ ...repeat, rule: e.target.value })}>
-                {REPEATS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
-              </select>
-            </label>
-            {repeat.rule && (
+        {!more && (
+          <button type="button" className="link full book-more" onClick={() => setMore(true)} aria-expanded={false}>
+            More options <span className="muted">— {[form.reason ? `reason: ${form.reason}` : 'reason', 'notes', 'repeat', 'video', 'ASAP', form.notify ? 'the patient is told it’s booked' : 'the patient isn’t told'].join(' · ')}</span>
+          </button>
+        )}
+        {more && (
+          <>
+          <label className="full">Reason<input value={form.reason} onChange={set('reason')} placeholder="e.g. Recall exam & cleaning" /></label>
+          <label className="full">Notes<textarea rows={2} value={form.notes} onChange={set('notes')} /></label>
+          <label className="checkbox full"><input type="checkbox" checked={form.video} onChange={(e) => setForm({ ...form, video: e.target.checked })} /> Video visit (the patient gets a link to join)</label>
+          <label className="checkbox full"><input type="checkbox" checked={form.asap} onChange={(e) => setForm({ ...form, asap: e.target.checked })} /> Add to ASAP list (patient wants an earlier opening)</label>
+          <label className="checkbox full"><input type="checkbox" checked={form.notify} onChange={(e) => setForm({ ...form, notify: e.target.checked })} /> Let the patient know {appointment ? 'if the time changes' : 'it’s booked'} (text or email, with the confirm link)</label>
+          {!appointment && (
+            <div className="full repeat-row">
               <label>
-                Ends
-                <select value={repeat.end} onChange={(e) => setRepeat({ ...repeat, end: e.target.value })}>
-                  <option value="count">After a number of visits</option>
-                  <option value="until">On a date</option>
+                Repeat
+                <select value={repeat.rule} onChange={(e) => setRepeat({ ...repeat, rule: e.target.value })}>
+                  {REPEATS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
                 </select>
               </label>
-            )}
-            {repeat.rule && repeat.end === 'count' && (
-              <label>
-                Number of visits
-                <input type="number" min={2} max={52} value={repeat.count} onChange={(e) => setRepeat({ ...repeat, count: e.target.value })} />
-              </label>
-            )}
-            {repeat.rule && repeat.end === 'until' && (
-              <label>
-                Last visit by
-                <input type="date" required min={form.date} value={repeat.until} onChange={(e) => setRepeat({ ...repeat, until: e.target.value })} />
-              </label>
-            )}
-            {repeat.rule && <span className="muted repeat-hint">Times that are taken are skipped and listed after booking.</span>}
-          </div>
+              {repeat.rule && (
+                <label>
+                  Ends
+                  <select value={repeat.end} onChange={(e) => setRepeat({ ...repeat, end: e.target.value })}>
+                    <option value="count">After a number of visits</option>
+                    <option value="until">On a date</option>
+                  </select>
+                </label>
+              )}
+              {repeat.rule && repeat.end === 'count' && (
+                <label>
+                  Number of visits
+                  <input type="number" min={2} max={52} value={repeat.count} onChange={(e) => setRepeat({ ...repeat, count: e.target.value })} />
+                </label>
+              )}
+              {repeat.rule && repeat.end === 'until' && (
+                <label>
+                  Last visit by
+                  <input type="date" required min={form.date} value={repeat.until} onChange={(e) => setRepeat({ ...repeat, until: e.target.value })} />
+                </label>
+              )}
+              {repeat.rule && <span className="muted repeat-hint">Times that are taken are skipped and listed after booking.</span>}
+            </div>
+          )}
+          </>
         )}
         {appointment?.series_id && (
           <div className="full seg-choice">
@@ -362,7 +374,7 @@ export default function AppointmentForm({ appointment, defaults = {}, patient: i
         )}
       </div>
 
-      <div style={{ marginTop: 10 }}>
+      {more && <div style={{ marginTop: 10 }}>
         <button type="button" className="small" onClick={findSlots} disabled={!form.provider_id || !form.date}>Find open times</button>
         {slots && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
@@ -372,7 +384,7 @@ export default function AppointmentForm({ appointment, defaults = {}, patient: i
             ))}
           </div>
         )}
-      </div>
+      </div>}
 
       {!appointment && planned.length > 0 && (
         <div style={{ marginTop: 14 }}>

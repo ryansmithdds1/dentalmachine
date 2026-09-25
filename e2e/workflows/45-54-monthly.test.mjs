@@ -122,6 +122,89 @@ test('#48 refund a credit balance from the queue: R, Enter — and it is audited
   noErrors();
 });
 
+test('#48 billing without a manager’s rights: the hint says R asks a manager, and R does it (a to-do), never nothing', async () => {
+  const bill = await signIn(browser, app.base, { email: 'billing@demo.dentalmachine.app' });
+  const p = await s.post('/patients', { first_name: 'Rory', last_name: 'Askamanager', dob: '1979-08-08' });
+  await s.post(`/patients/${p.id}/payments`, { amount: 12300, method: 'check', reference: 'E2E-2' });
+  const { page } = bill;
+  await page.goto(`${app.base}/claims?tab=refunds`);
+  await page.waitForSelector('tr.wl-row');
+  const hint = await page.locator('[data-testid=refund-keys]').innerText();
+  assert.match(hint, /R ask a manager to refund/);
+  assert.doesNotMatch(hint, /R refund$/);
+  const rows = page.locator('tr.wl-row');
+  const idx = await rows.evaluateAll((els) => els.findIndex((e) => e.textContent.includes('Askamanager')));
+  for (let i = 0; i < idx; i++) await page.keyboard.press('j');
+  await page.waitForSelector('tr.wl-row.current:has-text("Askamanager")');
+  await page.keyboard.press('r');
+  await page.waitForSelector('.toast:has-text("Asked a manager: a to-do to refund $123.00 to Rory Askamanager")');
+  const tasks = await s.get(`/tasks?patient_id=${p.id}`);
+  const list = Array.isArray(tasks) ? tasks : tasks.rows || [];
+  assert.ok(list.some((t) => /Refund \$123\.00 credit to Rory Askamanager/.test(t.title)), JSON.stringify(list));
+  // No refund went out: the credit is still there for a manager.
+  assert.equal((await s.get('/billing/credit-balances')).some((x) => x.patient_id === p.id), true);
+  // A second R doesn't make a second to-do.
+  await page.keyboard.press('r');
+  await page.waitForSelector('.toast:has-text("already been asked")');
+  assert.deepEqual(bill.errors, []);
+  await bill.ctx.close();
+});
+
+test('voiding cash: the front desk is told up front that it needs a manager, and the reason goes to one', async () => {
+  const desk = await signIn(browser, app.base, { email: 'frontdesk@demo.dentalmachine.app' });
+  const p = await s.post('/patients', { first_name: 'Cash', last_name: 'Voidwell', dob: '1979-09-09' });
+  await s.post(`/patients/${p.id}/payments`, { amount: 4500, method: 'cash' });
+  const { page } = desk;
+  await page.goto(`${app.base}/patients/${p.id}?tab=ledger`);
+  await page.locator('button:has-text("Void (manager)")').first().click();
+  // Said before any typing, not after.
+  await page.waitForSelector('[data-testid=void-needs-manager]:has-text("needs a manager")');
+  await page.keyboard.type('Posted to the wrong patient');
+  await page.click('.modal button:has-text("Ask a manager to void it")');
+  await page.waitForSelector('.toast:has-text("Sent to a manager")');
+  const tasks = await s.get(`/tasks?patient_id=${p.id}`);
+  const list = Array.isArray(tasks) ? tasks : tasks.rows || [];
+  assert.ok(list.some((t) => /Void payment of \$45\.00 .*Posted to the wrong patient/.test(t.title)), JSON.stringify(list));
+  const ledger = await s.get(`/patients/${p.id}/ledger`);
+  assert.equal(ledger.entries.filter((e) => e.voided_at).length, 0, 'nothing voided by the front desk');
+  assert.deepEqual(desk.errors, []);
+  await desk.ctx.close();
+});
+
+test('campaigns: a blank left in the message ("[date]") blocks sending; the preview is a real message; the send step says how many', async () => {
+  const { page } = s;
+  await page.goto(`${app.base}/campaigns`);
+  await page.click('button:has-text("New campaign")');
+  const modal = page.locator('.modal');
+  await modal.locator('label:has-text("Name") input').waitFor();
+  assert.ok(await modal.locator('label:has-text("Name") input').inputValue(), 'named for them');
+  await modal.locator('label:has-text("Who") select').selectOption('all_active');
+  await modal.locator('.campaign-blanks button:has-text("[date]")').waitFor();
+  const send = modal.locator('.form-actions button.primary');
+  await page.waitForFunction(() => /Send to \d+ patients? now/.test(document.querySelector('.modal .form-actions button.primary')?.textContent || ''));
+  assert.equal(await send.isDisabled(), true, 'can’t send with "[date]" in it');
+  // The preview is the message a patient gets, blank included.
+  assert.match(await modal.locator('[data-testid=campaign-sample]').innerText(), /\[date\]/);
+  // Click the blank: it is selected in the message, typing replaces it.
+  await modal.locator('.campaign-blanks button:has-text("[date]")').click();
+  await page.keyboard.type('Monday, November 11');
+  await modal.locator('.campaign-blanks').waitFor({ state: 'detached' });
+  assert.match(await modal.locator('textarea').inputValue(), /closed on Monday, November 11\./);
+  await page.waitForFunction(() => !document.querySelector('.modal .form-actions button.primary')?.disabled);
+  const n = Number((await send.innerText()).match(/Send to (\d+)/)[1]);
+  assert.ok(n > 0);
+  // One step on this screen (not a browser box) says who gets it; Esc-free "Not yet" goes back.
+  await send.click();
+  const confirm = modal.locator('.campaign-confirm');
+  await confirm.waitFor();
+  assert.match(await confirm.innerText(), /texts \d+|emails \d+/);
+  assert.match(await confirm.innerText(), /can’t be taken back/);
+  await confirm.locator('button:has-text("Not yet")').click();
+  await confirm.waitFor({ state: 'detached' });
+  await page.keyboard.press('Escape');
+  noErrors();
+});
+
 test('#49 production & income from anywhere: 3 actions to the report, 1 to the entries behind a number', async () => {
   const { page } = s;
   await page.goto(`${app.base}/schedule`);

@@ -14,8 +14,10 @@ first (`GET /billing/credit-balances`, ledger sums — never stored).
   "Are you sure?" box. A mistake is corrected with a new ledger entry.
 - `POST /patients/:id/refunds` (unchanged rules: never more than the credit; card refunds through the processor).
   The audit now records the method, card or not, and the **balance before and after**.
-- **Permission (for the owner to decide):** refunding needs only `billing:write`, the same as posting a payment.
-  CLAUDE.md lists refunds among the sensitive actions that need the stronger permission. Not changed here.
+- **Permission (owner decision):** refunds need a manager (`deposits:manage`) or an administrator, on the server
+  and on this screen. Billing staff without it see "R ask a manager to refund": R (or the row's **Ask a manager**)
+  makes a to-do with the patient, amount and where it goes back to — once per account — and no money moves.
+  (e2e: `45-54-monthly`, "#48 billing without a manager's rights".)
 
 ## Background
 The month-end packet (#54) shows the credit total and links to this queue.

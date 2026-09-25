@@ -62,3 +62,5 @@ button.stat-pill.unconfirmed-link:hover { text-decoration: underline; }
 :root[data-theme='dark'] .drawer-facts .cal-elig.warn { background: rgba(251, 191, 36, 0.16); color: var(--warn); }
 :root[data-theme='dark'] .drawer-facts .cal-elig.bad { background: rgba(251, 146, 60, 0.16); color: var(--danger); }
 @media (max-width: 760px) { .drawer-jump { min-height: 48px; } }
+.book-more { text-align: left; justify-self: start; font-size: 13px; }
+.book-more .muted { font-weight: 400; }

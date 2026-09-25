@@ -3,7 +3,8 @@
 **Budgets:** seeing a patient's recall status on the chart **0 actions** (it's on the patient page). Booking their
 hygiene visit with the due bitewings / exam / fluoride attached **≤ 3 actions** — measured **2** (**Alt+B** →
 **Book appointment**; the due items come ticked). Marking a recall contacted from the board **≤ 3** (type the name,
-click the list, **C**). Tested by `e2e/workflows/RF-recall.test.mjs`; server rules by `server/test/recallfreq.test.js`.
+click the list, **C**). Logging a recall call on Follow-up → Recall **≤ 2** (Log call or **L** on the patient's row,
+**Enter**; one row per patient, so one call covers exam, cleaning and x-rays). Tested by `e2e/workflows/RF-recall.test.mjs`; server rules by `server/test/recallfreq.test.js`.
 
 ## Who and where
 - **Everyone** sees the Recall panel on the patient page (`RecallPanel`), and the booking form's "Also due" list.
@@ -87,3 +88,12 @@ never changed behind its back.
 `POST /outside-procedures/:id/void {reason}` · `POST /recalls/:id/contacted` · `GET /recall-board` ·
 `GET /recall-board/export.csv` · `GET /recall-board/duplicates` · `POST /recall-board/duplicates/merge` ·
 `GET|PUT /recall-settings` · `PUT /recall-types/:id/rules`.
+
+## Recall list, one row per patient (A051, phase 2 batch 1A)
+Follow-up → Recall lists each patient once, with the recalls they're due for as chips (× stops recalling one of them).
+J / K move, **L** (or Log call) opens the call log right under the row — not a dialog — with "Left voicemail" picked
+and Save focused: Enter saves, 1–8 pick another outcome, Esc closes. **B** books. The call is one follow-up entry and
+marks every recall of theirs that was still due as contacted (`POST /patients/:id/followups` with `kind: 'recall'`,
+optional `recall_ids`; a note or a wrong number doesn't count as contact; audited with the recalls it covered). The
+unscheduled-treatment and broken-appointment lists log calls the same inline way. Tests: `e2e/workflows/RF-recall.test.mjs`
+(A051: 2 keys), `server/test/frontdesk-b1a.test.js`.

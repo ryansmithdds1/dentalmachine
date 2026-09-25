@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import { api } from '../../api.js';
 import { useApi, useLookup } from '../../hooks.js';
 import { useAuth } from '../../auth.jsx';
@@ -40,6 +40,13 @@ export default function ChartTab({ patient, onChange }) {
   const [picked, setPicked] = useState(() => new Set());
   const [undoFor, setUndoFor] = useState(null);
   const write = can('clinical:write') && !asOf;
+  // People who answer "how much will it cost?" but don't chart (front desk, billing): the same typing box gives
+  // the price and the insurance estimate, and charts nothing.
+  const estimateOnly = !write && !asOf && can('billing:read');
+  const [params] = useSearchParams();
+  const loc = useLocation();
+  // ?estimate=1 (Alt+E, "Estimate" on the patient bar): the cursor goes straight into the box, every time.
+  const focusEntry = params.get('estimate') === '1' ? loc.key : null;
   const todays = useTodaysWork(patient, data?.procedures, practice?.timezone);
   // The office's and this person's bundles, quick buttons and aliases (Settings → Clinical → Chart shortcuts & bundles).
   const { data: setup } = useApi(can('clinical:read') ? '/chart-shortcuts' : null);
@@ -116,7 +123,7 @@ export default function ChartTab({ patient, onChange }) {
             <Link className="te-edit muted" to="/settings?tab=chartshortcuts" title="Change the buttons, bundles and aliases"><Settings2 size={13} aria-hidden /> Customize</Link>
           </div>
         )}
-        {write && !asOf && <ChartEntry patient={patient} tooth={tooth} onDone={refresh} setup={setup} lookups={lookups} chart={data} request={entryRequest} />}
+        {(write || estimateOnly) && !asOf && <ChartEntry patient={patient} tooth={tooth} onDone={refresh} setup={setup} lookups={lookups} chart={data} request={write ? entryRequest : null} estimateOnly={!write} autoFocus={focusEntry} />}
         <ChartStats conditions={data.conditions} procedures={data.procedures} />
         <Odontogram conditions={data.conditions} procedures={data.procedures} selected={tooth} onSelect={pickTooth} dentition={dentition} />
       </div>
@@ -128,7 +135,7 @@ export default function ChartTab({ patient, onChange }) {
           if (res?.completed) setModal({ kind: 'note', ids: [res.completed.id], provider: res.completed.provider_id });
         }} />
       ) : (
-        <div className="card"><h2>{tooth ? `Tooth #${tooth}` : 'Chart'}</h2><p className="muted">{asOf ? 'Past charts are read-only.' : 'View only.'}</p></div>
+        <div className="card"><h2>{tooth ? `Tooth #${tooth}` : 'Chart'}</h2><p className="muted">{asOf ? 'Past charts are read-only.' : estimateOnly ? 'View only. For a price, type the tooth and treatment in the box on the left (e.g. 14 D2740 or 14 crown): it shows the fee and what insurance and the patient pay, and charts nothing.' : 'View only.'}</p></div>
       )}
       </div>
 

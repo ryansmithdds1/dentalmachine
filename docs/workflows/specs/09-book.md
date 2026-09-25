@@ -38,6 +38,11 @@ and whatever they change keeps its value (the rest follows the next suggestion):
 - The form says what it filled in and why ("Next opening: Tue Sep 29 9:10 AM with Dr. Lee in Op 2 (Jane's
   dentist · Dr. Lee's usual chair)"). Book is disabled until that arrives, then has the focus.
 - Status is hidden on new bookings (always "scheduled").
+- **Shorter form (phase 2 batch 1A, A020):** a new booking shows only what decides the visit — patient, the suggestion,
+  type, date, time, length, provider, chair. Reason, notes, video, ASAP, "let the patient know" (on) and repeat sit under
+  one "More options" line that says what they're set to; editing an existing visit shows everything. The form still
+  opens in a dialog (the booking tests and the schedule rely on it); moving it into the visit side panel is left for a
+  later batch.
 
 ## Edge cases
 - No opening in the next 60 days: the form says so and leaves the time as it was.

@@ -81,7 +81,7 @@ test('#21 all unplanned work onto a new plan: 1 action', async () => {
   assert.equal((await plansOf()).length, 2);
 });
 
-test('#22 present on this screen: 2 staff + 3 patient, no birth date, same tab, and back to the chart', async () => {
+test('#22 present on this screen: 2 staff + 2 patient (their name is already on the signing line), no birth date, same tab, and back to the chart', async () => {
   const { page } = s;
   await openTreatment();
   const plan = (await plansOf()).find((p) => p.procedures.some((x) => x.code === 'D3330'));
@@ -98,13 +98,12 @@ test('#22 present on this screen: 2 staff + 3 patient, no birth date, same tab, 
   assert.doesNotMatch(page.url(), /here=/, 'the one-time code is gone from the address bar');
 
   const patientSide = await measure(page, async () => {
-    await page.waitForFunction(() => document.activeElement?.getAttribute('autocomplete') === 'name');
-    await page.keyboard.type('Tess Planwright');
+    await page.waitForFunction(() => document.activeElement?.getAttribute('autocomplete') === 'name' && document.activeElement.value === 'Tess Planwright');
     await page.click('label.checkbox input[type=checkbox]');
     await page.click('button:has-text("Accept & sign")');
     await page.waitForSelector('h1:has-text("Thank you")');
   });
-  console.log(withinBudget('#22 accept and sign (patient)', patientSide, { actions: 3 }));
+  console.log(withinBudget('#22 accept and sign (patient)', patientSide, { actions: 2 }));
   await page.click('a:has-text("back to the chart")');
   await page.waitForURL(new RegExp(`/patients/${patient.id}\\?tab=treatment`));
   await page.waitForSelector('.badge:has-text("Signed by Tess Planwright")');

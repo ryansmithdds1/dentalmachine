@@ -75,9 +75,63 @@ test('X opens the newest x-ray set on its first image and → goes to the next, 
     await page.waitForFunction((was) => document.querySelector('.studio-viewer-head strong')?.textContent !== was, first);
   });
   console.log(withinBudget('open the latest x-rays and go to the next', r, { actions: 2, ms: 6000 }));
+  // A full view of the page area, not a modal dialog: the menu stays on screen and usable.
+  assert.equal(await page.locator('[aria-modal="true"], .modal').count(), 0, 'no modal dialog');
+  assert.ok(await page.locator('.sidebar').isVisible(), 'the menu is still there');
+  const box = await page.locator('.studio').boundingBox();
+  const rail = await page.locator('.sidebar').boundingBox();
+  assert.ok(box.x >= rail.x + rail.width - 1, `the viewer starts right of the menu (${box.x} vs ${rail.x + rail.width})`);
   await page.keyboard.press('Escape');
   await page.waitForSelector('.studio', { state: 'detached' });
   assert.deepEqual(s.errors, [], 'no dialogs or page errors');
+});
+
+test('U opens the file picker (the keyboard way to add pictures, beside drag-and-drop): 2 actions', async () => {
+  const { page } = s;
+  const p = await newPatient('Keyed');
+  await page.goto(`${app.base}/patients/${p.id}?tab=documents`);
+  await page.waitForSelector('[data-testid=documents-drop] .empty');
+  await quiet(page);
+  assert.equal(await page.locator('button.docs-add-files:has-text("Add files")').count(), 1, 'a visible button says so, with its key');
+  const pic = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
+  const r = await measure(page, async () => {
+    const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.keyboard.press('u')]);
+    await chooser.setFiles({ name: 'intraoral-1.png', mimeType: 'image/png', buffer: pic });
+    await page.waitForFunction(() => document.querySelectorAll('.doc-tile').length === 1);
+  });
+  r.actions += 1; r.log.push('choose the file (type its name, Enter)');
+  console.log(withinBudget('add a picture with the keyboard (U, pick the file)', r, { actions: 2, ms: 8000 }));
+  assert.deepEqual(s.errors, []);
+});
+
+test('the front desk adds a scanned paper to a chart (S / U / drop), and cannot remove what clinical staff filed', async () => {
+  const desk = await signIn(browser, app.base, { email: 'frontdesk@demo.dentalmachine.app' });
+  await trackActions(desk.page);
+  const p = await newPatient('Papers');
+  const clinical = await uploadImage(p.id, 'bw-clinical.png');
+  await desk.page.goto(`${app.base}/patients/${p.id}?tab=documents`);
+  await desk.page.waitForSelector('[data-testid=documents-drop] .doc-tile');
+  await quiet(desk.page);
+  // The same ways in as everyone: the Scan button (S) and Add files (U).
+  assert.equal(await desk.page.locator('button.scan-trigger').count(), 1, 'Scan is offered to the front desk');
+  const pdf = Buffer.from('%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n');
+  const [chooser] = await Promise.all([desk.page.waitForEvent('filechooser'), desk.page.keyboard.press('u')]);
+  await chooser.setFiles({ name: 'Referral Dr Smith.pdf', mimeType: 'application/pdf', buffer: pdf });
+  await desk.page.waitForSelector('.doc-tile:has-text("Referral Dr Smith.pdf")');
+  await desk.page.waitForSelector('.toast:has-text("Added Referral Dr Smith.pdf")');
+  // What clinical staff filed has no Remove for them (and the server refuses it in words).
+  await desk.page.click(`.doc-tile:has-text("bw-clinical.png")`);
+  await desk.page.waitForSelector('.modal .image-viewer');
+  assert.equal(await desk.page.locator('.modal button:has-text("Remove")').count(), 0);
+  await desk.page.keyboard.press('Escape');
+  const refused = await desk.page.evaluate(async (id) => {
+    const res = await fetch(`/api/documents/${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${sessionStorage.getItem('dm_token')}` } });
+    return { status: res.status, body: await res.json() };
+  }, clinical.id);
+  assert.equal(refused.status, 403);
+  assert.match(refused.body.error, /changing or removing them needs a clinical login/);
+  assert.deepEqual(desk.errors.filter((e) => !/403/.test(e)), []);
+  await desk.ctx.close();
 });
 
 test('without a mount, X opens the newest x-ray in the viewer and ← → step through the x-rays', async () => {
@@ -168,17 +222,15 @@ test('medical history: "reviewed today, no changes" in 1 key; one line changed i
   assert.equal(after1.allergies, 'Latex');
   assert.ok(after1.medical_reviewed_at);
 
-  // Keyboard only: M opens the same editor on the alerts; Tab to medications, type, save.
+  // Keyboard only: Shift+M opens the same editor straight on the medications (A opens it on the allergies), type, save.
   const keys = await measure(page, async () => {
-    await page.keyboard.press('m');
-    await page.waitForFunction(() => document.activeElement?.name === 'medical_alerts');
-    await page.keyboard.press('Tab');
-    await page.keyboard.press('Tab');
+    await page.keyboard.press('Shift+M');
+    await page.waitForFunction(() => document.activeElement?.name === 'medications');
     await page.keyboard.type('Metformin 500mg');
     await page.keyboard.press(`${MOD}+Enter`);
     await page.waitForSelector('.med-kv .med-value:has-text("Metformin 500mg")');
   });
-  console.log(withinBudget('add a medication by keyboard', keys, { actions: 5 }));
+  console.log(withinBudget('add a medication by keyboard', keys, { actions: 3 }));
   // Undo puts the old value back (the saved change and the undo are both in the audit trail).
   await page.waitForSelector('.toast:has-text("Medical history saved")');
   await page.keyboard.press(`${MOD}+z`);
@@ -186,6 +238,44 @@ test('medical history: "reviewed today, no changes" in 1 key; one line changed i
   const after2 = await s.get(`/patients/${p.id}`);
   assert.equal(after2.medications, null);
   assert.equal(after2.allergies, 'Latex');
+  // A: straight to the allergies line, the cursor after what's there.
+  await page.waitForSelector('.med-kv');
+  const allergy = await measure(page, async () => {
+    await page.keyboard.press('a');
+    await page.waitForFunction(() => document.activeElement?.name === 'allergies');
+    await page.keyboard.type(', penicillin');
+    await page.keyboard.press(`${MOD}+Enter`);
+    await page.waitForSelector('.med-kv .med-value:has-text("Latex, penicillin")');
+  });
+  console.log(withinBudget('add an allergy by keyboard', allergy, { actions: 3 }));
+  assert.equal((await s.get(`/patients/${p.id}`)).allergies, 'Latex, penicillin');
+  assert.deepEqual(s.errors, [], 'no dialogs or page errors');
+});
+
+test('vitals: V, type "122/78 68", Enter — 3 actions, the cursor starts in the box; nonsense is refused on screen', async () => {
+  const { page } = s;
+  const p = await newPatient('Vitalia');
+  await page.goto(`${app.base}/patients/${p.id}`);
+  await page.waitForSelector('#medical-history');
+  await quiet(page);
+  const r = await measure(page, async () => {
+    await page.keyboard.press('v');
+    await page.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === 'Blood pressure and pulse');
+    await page.keyboard.type('122/78 68');
+    await page.waitForSelector('text=BP 122/78 mmHg · pulse 68 bpm');
+    await page.keyboard.press('Enter');
+    await page.waitForSelector('input[aria-label="Blood pressure and pulse"]', { state: 'detached' });
+  });
+  console.log(withinBudget('record blood pressure and pulse', r, { actions: 3 }));
+  const [v] = await s.get(`/patients/${p.id}/vitals`);
+  assert.deepEqual([v.bp_systolic, v.bp_diastolic, v.pulse], [122, 78, 68]);
+  // Something that isn't a reading: nothing is saved, the box says what it wants.
+  await page.keyboard.press('v');
+  await page.keyboard.type('high');
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('text=Type the blood pressure and pulse like 122/78 68');
+  await page.keyboard.press('Escape');
+  assert.equal((await s.get(`/patients/${p.id}/vitals`)).length, 1);
   assert.deepEqual(s.errors, [], 'no dialogs or page errors');
 });
 

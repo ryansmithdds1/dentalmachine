@@ -19,6 +19,7 @@ import ChatBadge from './components/chat/ChatBadge.jsx';
 import UrgentBanner from './components/chat/UrgentBanner.jsx';
 import Assistant from './components/assistant/Assistant.jsx';
 import CallPop from './components/CallPop.jsx';
+import { LogCallHost } from './components/phones/LogCall.jsx';
 import KeyboardHelp from './components/KeyboardHelp.jsx';
 import IdleLogout from './components/IdleLogout.jsx';
 import { Suspense, lazy, useEffect, useState } from 'react';
@@ -378,6 +379,7 @@ function Shell() {
       <Toasts />
       <Assistant />
       <CallPop />
+      <LogCallHost />
       <ChatPanel />
       <IdleLogout />
       <Rail

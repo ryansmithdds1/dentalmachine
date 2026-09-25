@@ -16,6 +16,8 @@ Client: `components/phones/*` (NextOpenings in CallPop, NoBookReason, CallCoach,
   `e2e/workflows/PH-phones.test.mjs` measures both.
 - Why they didn't book: **1 click** (the AI's suggestion is pre-marked; any other reason is one click too).
 - Acknowledge an upset-caller alert: **1 click** (optional note).
+- **Log an ordinary call on the chart (A053): ≤ 3 actions** — Alt+G from any screen with the patient active, type
+  the note, Enter. Measured in `e2e/workflows/PH-phones.test.mjs`.
 
 ## What's automated
 - **PH1** Every inbound call is linked to the patient by number (this practice, never archived charts); a number a
@@ -60,3 +62,19 @@ Client: `components/phones/*` (NextOpenings in CallPop, NoBookReason, CallCoach,
 - A slot taken meanwhile: booking answers 409 with the reason, the list refreshes. Double click: the same visit.
 - Live transcription webhook: signed; must name the call's own CallSid.
 - Scoring failure → Needs attention (`call-score:<id>`), resolved by a later success.
+
+## Log a call on the chart (A053, phase 2 batch 1A)
+A call the phone line didn't see (a cell phone, a call back from home) is noted where the rest of the calls are: the
+`calls` log (`purpose = 'logged'`), shown in the chart's call history (Messages & forms → Calls) and on the Calls page.
+- **Where:** Alt+G (patient bar "Call") opens a side panel on any screen; the command bar has "Log a call — name";
+  the chart's Calls card has "Log a call" inline. No dialog.
+- **Defaults:** now (or 5 min … 2 hours ago), the signed-in person, the patient ("With" can be e.g. their mother),
+  the direction this person used last, "Spoke with them". The cursor starts in the note: type, Enter.
+- **No duplicates:** when the phone line logged a call with the patient in the last 15 minutes
+  (`GET /patients/:id/calls/recent`), the panel offers to add the note to that call (the default) instead of logging
+  the same conversation again. Adding the same note twice changes nothing; logging the same call twice within two
+  minutes returns the first (plus the app's Idempotency-Key).
+- **Server:** `POST /patients/:id/calls` (`patients:write`, the patient must be in this practice and visible to the
+  user): direction inbound/outbound, outcome spoke / left_voicemail / no_answer / wrong_number, minutes_ago 0–1440,
+  with_name, note ≤ 2000; or `call_id` + note to add to the phone line's call (409 if that call was with someone else).
+  Audited as `call.log` / `call.note` with before/after and the patient. `server/test/frontdesk-b1a.test.js`.

@@ -181,7 +181,7 @@ export default {
   },
 
   A081: {
-    role: 'admin', // the Pre-authorize button needs clinical:write and billing:write: only the office manager has both
+    role: 'billing', // Pre-authorize follows billing:write (the same permission the server asks for)
     async setup(t) {
       const { dentist } = await refs(t);
       const w = await insuredWithWork(t, 'Pria', []);
@@ -242,12 +242,12 @@ export default {
     setup: (t) => sentClaim(t, 'Stat', 'D0150'),
     async run(t, { claim }) {
       await t.open('/schedule', '.cal-col-head');
-      await t.step('Press Ctrl/⌘K and type the claim number', async () => {
+      await t.step('Press Ctrl/⌘K and type the claim number as it is written ("#33"; "claim 33" works too)', async () => {
         await t.key(`${MOD}+k`);
-        await t.type(String(claim.id));
+        await t.type(`#${claim.id}`);
         await t.see(`.palette-item:has-text("Claim #${claim.id}")`);
       });
-      await t.step('Move to "Claim #…" and press Enter: the claim with its status and history', async () => {
+      await t.step('Press Enter on "Claim #…" (first): the claim with its status and history', async () => {
         await pick(t, `Claim #${claim.id}`);
         await t.key('Enter');
         await t.page.waitForURL(new RegExp(`/claims/${claim.id}`));

@@ -359,6 +359,46 @@ test('NAV the old insurance addresses open their Billing tabs, query string kept
   assert.deepEqual(s.errors, []);
 });
 
+test('NAV command bar: what is shown first stays first for a person who pauses before Enter (bug 2, A067)', async () => {
+  const s = people.billing;
+  const { page } = s;
+  await page.goto(`${app.base}/schedule`);
+  await page.locator('.cal-col-head').first().waitFor();
+  const rows = () => page.locator('.palette-item').evaluateAll((els) => els.map((e) => e.innerText.replace(/\s+/g, ' ').trim()));
+  const open = async (words) => {
+    await page.keyboard.press('Control+k');
+    await page.locator('.palette input').waitFor();
+    await page.keyboard.type(words);
+    // A person reads the list before pressing Enter: every late answer (patients, documents) has arrived by now.
+    await page.waitForTimeout(1500);
+    return rows();
+  };
+  // Pages typed by name: that page is first, and no empty "Search all documents … 0 found" row ever appears.
+  for (const [words, url] of [['day sheet', /\/reports\?tab=ops$/], ['new patient', /\/patients\?new=1$/], ['month-end close', null]]) {
+    await page.goto(`${app.base}/schedule`);
+    await page.locator('.cal-col-head').first().waitFor();
+    const list = await open(words);
+    assert.match(list[0], new RegExp(words, 'i'), `"${words}": first row is ${list[0]}`);
+    assert.ok(!list.some((r) => /Search all documents/.test(r) && /\b0 found/.test(r)), `"${words}": no empty document search (${list.join(' | ')})`);
+    if (!url) { await page.keyboard.press('Escape'); continue; }
+    await page.keyboard.press('Enter');
+    await page.waitForURL(url);
+  }
+  // A claim by number: "#N" and "claim N" put the claim first, whatever patients' phone numbers contain.
+  const claims = await s.get('/claims');
+  const claim = (Array.isArray(claims) ? claims : claims.rows || [])[0];
+  assert.ok(claim?.id, 'the demo office has a claim');
+  for (const words of [`#${claim.id}`, `claim ${claim.id}`]) {
+    await page.goto(`${app.base}/schedule`);
+    await page.locator('.cal-col-head').first().waitFor();
+    const list = await open(words);
+    assert.match(list[0], new RegExp(`Claim #${claim.id}\\b`), `"${words}": ${list.slice(0, 3).join(' | ')}`);
+    await page.keyboard.press('Enter');
+    await page.waitForURL(new RegExp(`/claims/${claim.id}$`));
+  }
+  assert.deepEqual(s.errors, []);
+});
+
 test('NAV every page in the menu is in the command bar', async () => {
   const { page } = people.admin;
   await page.goto(`${app.base}/`);

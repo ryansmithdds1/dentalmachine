@@ -23,12 +23,21 @@ export const OFFICE_READ = 'officedocs:read';
 export const OFFICE_WRITE = 'officedocs:write';
 
 // The document, if this person may open (or change) it; 404 otherwise, as if it didn't exist.
-export async function loadDoc(db, req, id, { write = false, allowDeleted = false } = {}) {
+// How long someone with only documents:add can take back (Undo) a file they just added.
+export const OWN_UNDO_MINUTES = 15;
+export async function loadDoc(db, req, id, { write = false, allowDeleted = false, ownUndo = false } = {}) {
   const doc = await findOr404(db, 'documents', id, req.user.practice_id, 'Document');
   if (doc.deleted_at && !allowDeleted) throw new HttpError(404, 'Document not found');
   if (doc.patient_id != null) {
     const need = write ? 'clinical:write' : 'clinical:read';
-    if (!can(req.user, need)) throw new HttpError(403, `Missing permission: ${need}`);
+    const added = doc.created_at instanceof Date ? doc.created_at.getTime()
+      : Date.parse(`${String(doc.created_at).replace(' ', 'T')}${/Z|[+-]\d\d:?\d\d$/.test(String(doc.created_at)) ? '' : 'Z'}`);
+    const justAdded = ownUndo && can(req.user, 'documents:add') && doc.uploaded_by === req.user.id && added > Date.now() - OWN_UNDO_MINUTES * 60_000;
+    if (!can(req.user, need) && !justAdded) {
+      throw new HttpError(403, write && can(req.user, 'documents:add')
+        ? 'You can add documents to a chart; changing or removing them needs a clinical login (a dentist, hygienist or assistant)'
+        : `Missing permission: ${need}`);
+    }
     if (!(await canSeePatient(db, req.user, doc.patient_id))) throw new HttpError(404, 'Document not found');
     return doc;
   }

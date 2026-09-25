@@ -17,9 +17,12 @@ export function pick(body, fields) {
   return out;
 }
 
+// A field's name in words staff understand: "category" → "Category", "carrier_id" → "Carrier".
+export const fieldWords = (f) => { const w = String(f).replace(/_id$/, '').replace(/_/g, ' ').trim(); return w.charAt(0).toUpperCase() + w.slice(1); };
+
 export function requireFields(obj, fields) {
   const missing = fields.filter((f) => obj[f] === undefined || obj[f] === null);
-  if (missing.length) throw new HttpError(400, `Missing required fields: ${missing.join(', ')}`);
+  if (missing.length) throw new HttpError(400, `Please fill in ${missing.map((f) => `“${fieldWords(f)}”`).join(', ')}`, { missing });
 }
 
 export function requireOneOf(value, allowed, name) {

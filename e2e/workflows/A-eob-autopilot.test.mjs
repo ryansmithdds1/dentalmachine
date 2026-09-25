@@ -121,3 +121,47 @@ test('A1: settings show the 30-day preview and turn auto-posting on in one click
   console.log(withinBudget('A1 turn on auto-posting', r, { actions: 1, ms: 5000 }));
   assert.equal((await s.get('/eob-autopilot/settings')).autopost, true);
 });
+
+test('33 manual check: carrier, check # Enter, amount — matched to the claim it pays — Enter posts (budget 6)', async () => {
+  const { page } = s;
+  const provider = await s.post('/providers', { name: 'Dr. Check Lee, DDS', type: 'dentist', npi: '1987654322' });
+  const carrier = await s.post('/carriers', { name: `Paper Check Mutual ${Date.now() % 10000}`, payer_id: '77001' });
+  const pat = await s.post('/patients', { first_name: 'Chet', last_name: 'Paperwell', dob: '1981-03-04', phone: '(512) 555-0131' });
+  const policy = await s.post(`/patients/${pat.id}/insurance`, { carrier_id: carrier.id, priority: 'primary', subscriber_name: 'Chet Paperwell', subscriber_id: 'PC1', annual_max: 150000, deductible: 0, pct_basic: 80, pct_preventive: 100 });
+  const a = await claimFor(pat, policy, provider, 'D1110');
+  const b = await claimFor(pat, policy, provider, 'D2392');
+  assert.ok(a.estimated_amount > 0 && b.estimated_amount > 0 && a.estimated_amount !== b.estimated_amount, JSON.stringify([a.estimated_amount, b.estimated_amount]));
+  await page.goto(`${app.base}/claims?tab=checks`);
+  await page.waitForSelector('button:has-text("Post an insurance check")');
+  const r = await measure(page, async () => {
+    await page.click('button:has-text("Post an insurance check")');
+    await page.waitForSelector('.modal label:has-text("Carrier") select');
+    await page.locator('.modal label:has-text("Carrier") select').selectOption(String(carrier.id));
+    await page.waitForFunction(() => document.activeElement?.closest('label')?.textContent?.startsWith('Check / EFT #'));
+    await page.keyboard.type('55001');
+    await page.keyboard.press('Enter');
+    // The check pays only the cleaning: its amount picks that claim, paid as expected.
+    await page.keyboard.type(d(b.estimated_amount));
+    await page.waitForSelector('.modal .badge.ok:has-text("balanced")');
+    await page.waitForSelector('.modal .check-matched');
+    await page.keyboard.press('Enter');
+    await page.waitForSelector('.modal', { state: 'detached' });
+  });
+  // Budget 6 with the carrier pick (a select the counter doesn't see): open, number, Enter, amount, Enter = 5 here.
+  console.log(withinBudget('33 manual insurance check', r, { actions: 5 }));
+  const [ca, cb] = [await s.get(`/claims/${a.id}`), await s.get(`/claims/${b.id}`)];
+  assert.equal(cb.paid_amount, b.estimated_amount, 'the matched claim is paid');
+  assert.equal(ca.paid_amount || 0, 0, 'the other claim is left alone');
+  // Posting the same check again is caught (idempotent money): the form says so instead of posting twice.
+  await page.click('button:has-text("Post an insurance check")');
+  await page.locator('.modal label:has-text("Carrier") select').selectOption(String(carrier.id));
+  await page.keyboard.type('55001');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type(d(b.estimated_amount)); // the same check (number, amount, payer) typed in again
+  await page.waitForSelector('.modal .badge.ok:has-text("balanced")');
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('.modal [role=alert]:has-text("already posted")');
+  await page.keyboard.press('Escape');
+  assert.equal((await s.get(`/claims/${a.id}`)).paid_amount || 0, 0);
+  assert.deepEqual(s.errors.filter((e) => !/409/.test(e)), []);
+});

@@ -1,8 +1,12 @@
 # 14 · View and attach x-rays and intraoral photos
 
 **Budget: 2 actions** to see the newest x-rays and move to the next image (X → →), with the patient's
-Documents & x-rays tab open; **2 actions** to attach files (drop them: 1, nothing else needed).
-Tested by `e2e/workflows/14-15-images-medical.test.mjs`.
+Documents & x-rays tab open; **2 actions** to attach files (drop them: 1, nothing else needed — or, from the
+keyboard, **U** and choose them in the file picker: 2). Tested by `e2e/workflows/14-15-images-medical.test.mjs`.
+The viewer is a full view of the page area, not a dialog: the menu stays on the left, Esc or ✕ goes back.
+The front desk and billing add papers and photos too (`documents:add`: Scan/S, Add files/U, drop, paste) and can
+take back their own upload with the toast's Undo for 15 minutes; changing or removing what's filed stays with
+clinical staff (`clinical:write`), and the server says so in words.
 
 ## Trigger and who does it
 The dentist or hygienist looks at radiographs during an exam or while treatment planning; an assistant or the

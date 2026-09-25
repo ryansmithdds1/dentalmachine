@@ -6,11 +6,11 @@ const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR
 const PDF = Buffer.from('%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF');
 
 export default {
-  A107: { // fix a missed punch (yesterday's)
+  A107: { // fix a missed punch (the last workday's)
     role: 'admin',
     async run(t) {
       await t.open('/timeclock?tab=fix', 'button:has-text("Add missed time")');
-      await t.step('Time clock → Corrections: click "Add missed time" (a row for today 8:00–5:00, 60 min break)', async () => {
+      await t.step('Time clock → Corrections: click "Add missed time" (a row for the last workday, 8:00–5:00, 60 min break)', async () => {
         await t.click('button:has-text("Add missed time")');
         await t.see('input[type="datetime-local"]');
       });
@@ -20,14 +20,17 @@ export default {
         await sel.selectOption({ index: Math.max(0, opts.findIndex((o) => /Jordan/.test(o))) });
       });
       const y = addDays(t.today, -1);
-      const typed = `${y.slice(5, 7)}${y.slice(8, 10)}${y.slice(0, 4)}`;
-      await t.step('It was yesterday: change the date in "In" and in "Out"', async () => {
-        for (const i of [0, 1]) {
-          await t.click(t.page.locator('input[type="datetime-local"]').nth(i), { position: { x: 12, y: 12 } });
-          await t.type(typed);
-        }
-      });
-      t.flag('asks-known', 'Add missed time starts on today 8:00–5:00; today’s times are refused until 5 PM ("Clock-out can’t be in the future") and most missed punches are from an earlier day, so both dates are retyped');
+      const shown = await t.page.locator('input[type="datetime-local"]').first().inputValue();
+      if (shown.startsWith(t.today)) {
+        t.flag('asks-known', 'Add missed time starts on today 8:00–5:00; today’s times are refused until 5 PM ("Clock-out can’t be in the future") and most missed punches are from an earlier day, so both dates are retyped');
+        const typed = `${y.slice(5, 7)}${y.slice(8, 10)}${y.slice(0, 4)}`;
+        await t.step('It was yesterday: change the date in "In" and in "Out"', async () => {
+          for (const i of [0, 1]) {
+            await t.click(t.page.locator('input[type="datetime-local"]').nth(i), { position: { x: 12, y: 12 } });
+            await t.type(typed);
+          }
+        });
+      } else t.note(`The row started on ${shown.slice(0, 10)} (the last workday), 8:00–5:00: nothing to retype for a missed day.`);
       await t.step('Type why and click Save: saved beside the original, both kept on record', async () => {
         await t.click('input[placeholder="e.g. forgot to clock out"]');
         await t.type('Forgot to clock in');
@@ -137,7 +140,7 @@ export default {
   },
 
   A069: { // scan a paper document
-    role: 'admin', // the front desk can't add documents at all (upload needs clinical:write): see the scorecard
+    role: 'frontdesk', // front desk and billing can add documents to a chart (documents:add), not change or remove them
     setup: async (t) => ({ p: await newPatient(t, 'Scanny') }),
     async run(t, { p }) {
       await t.open(`/patients/${p.id}?tab=documents`, '[data-testid=documents-drop]');

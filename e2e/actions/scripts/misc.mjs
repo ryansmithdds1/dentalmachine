@@ -97,25 +97,41 @@ export default {
     role: 'admin',
     async run(t) {
       await t.open('/campaigns', 'button:has-text("New campaign")');
-      await t.step('Campaigns: click "+ New campaign"', async () => {
+      await t.step('Campaigns: click "+ New campaign" (it is already named, e.g. "Reactivation · October 2026")', async () => {
         await t.click('button:has-text("New campaign")');
         await t.see('textarea, .modal');
       });
       const name = t.page.locator('label:has-text("Name") input').first();
-      if (await name.count()) await t.step('Type a name for it', async () => { await t.click(name); await t.type('Fall cleaning reminder'); });
+      if (await name.count() && !(await name.inputValue())) await t.step('Type a name for it', async () => { await t.click(name); await t.type('Fall cleaning reminder'); });
       await t.step('Pick who gets it ("office news": everyone who accepts messages); the message is already written', async () => {
         const who = t.page.locator('.modal label:has-text("Who") select');
         const opts = await who.locator('option').allTextContents();
         await who.selectOption({ index: Math.max(0, opts.findIndex((o) => /news|everyone|all patients/i.test(o))) });
         await t.wait(600);
       });
-      await t.step('Click "Send now": a browser box asks to send to N patients', async () => {
-        const send = t.page.locator('.modal button:has-text("Send now")');
+      const blank = t.page.locator('.modal .campaign-blanks button').first();
+      if (await blank.count()) {
+        await t.step('The message still says "[date]": click it under the message (it is selected) and type the date', async () => {
+          await t.click(blank);
+          await t.type('Monday, November 11');
+          await t.see('.modal .campaign-blanks', { state: 'detached' });
+        });
+      }
+      await t.step('Click "Send to N patients now…": it says who gets it (N by text, N by email)', async () => {
+        const send = t.page.locator('.modal button:has-text("Send")').last();
         const text = await t.page.inputValue('.modal textarea');
         if (/\[[a-z ]+\]/i.test(text)) t.flag('bug', `The template goes out with an unfilled placeholder ("${text.match(/\[[a-z ]+\]/i)[0]}") — nothing stops a campaign being sent to every patient with it`);
-        if (await send.isDisabled()) { t.note('Nobody in that audience in the demo office: saved as a draft instead.'); await t.click('.modal button:has-text("Save draft")'); } else await t.click(send);
-        await t.wait(1500);
+        await t.wait(500); // the audience count follows the message
+        if (await send.isDisabled()) { t.note('Nobody in that audience in the demo office: saved as a draft instead.'); await t.click('.modal button:has-text("Save draft")'); return; }
+        await t.click(send);
+        await t.see('.campaign-confirm');
       });
+      if (await t.page.locator('.campaign-confirm').count()) {
+        await t.step('Press Enter on "Yes, send N messages": sent (it can\'t be taken back, so this one step confirms it)', async () => {
+          await t.key('Enter');
+          await t.see('.modal', { state: 'detached' });
+        });
+      }
     },
   },
 

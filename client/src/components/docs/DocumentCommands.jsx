@@ -45,17 +45,21 @@ export default function DocumentCommands() {
     if (office) list.push({ id: 'docs-office', label: 'Office documents (contracts, licences, policies)', hint: 'Go to page', run: () => nav('/documents') });
     if (can?.('clinical:write')) list.push({ id: 'docs-inbox', label: 'Scan inbox (scans to file)', hint: 'Documents', run: () => nav('/documents?tab=inbox') });
     list.push({ id: 'docs-review', label: 'Documents to review', hint: 'Documents', run: () => nav('/documents?tab=review') });
-    if (hits.q && hits.q === q) {
-      // Labels carry what was typed, so the command bar keeps them while it filters.
+    if (hits.q && hits.q === q && hits.rows.length) {
+      // Labels carry what was typed, so the command bar keeps them while it filters. They arrive after the
+      // command bar's own results, so they are `last`: listed at the bottom, never above what was already shown
+      // (and "Search all documents" only when something was found).
       for (const d of hits.rows) {
         list.push({
           id: `doc-hit-${d.id}`,
           label: `“${hits.q}” in ${d.filename}${d.patient_name ? ` · ${d.patient_name}` : ' · office'}`,
           hint: d.snippet ? d.snippet.slice(0, 90) : 'Document',
+          icon: '📄',
+          last: true,
           run: () => nav(d.link),
         });
       }
-      list.push({ id: 'doc-search-all', label: `Search all documents for “${hits.q}”`, hint: `${hits.rows.length} found`, run: () => nav(`/documents?tab=search&q=${encodeURIComponent(hits.q)}`) });
+      list.push({ id: 'doc-search-all', label: `Search all documents for “${hits.q}”`, hint: `${hits.rows.length} found`, icon: '📄', last: true, run: () => nav(`/documents?tab=search&q=${encodeURIComponent(hits.q)}`) });
     }
     return list;
   }, [user, can, hits, q, nav]);

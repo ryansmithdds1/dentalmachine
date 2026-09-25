@@ -66,7 +66,9 @@ function Operational() {
   const [prov, setProv] = useState('');
   const at = `${office ? `&location_id=${office}` : ''}${prov ? `&provider_id=${prov}` : ''}`;
   // Only the part being looked at is loaded.
-  const [view, setView] = useState('sheet');
+  // ?view=aging (the command bar's "A/R aging") opens that part directly.
+  const [viewParam] = useSearchParams();
+  const [view, setView] = useState(() => (['sheet', 'production', 'aging'].includes(viewParam.get('view')) ? viewParam.get('view') : 'sheet'));
   const { data: prod } = useApi(view === 'production' ? `/reports/production?from=${from}&to=${to}${at}` : null);
   const [agingGroup, setAgingGroup] = useState('patient');
   const [asOf, setAsOf] = useState('');

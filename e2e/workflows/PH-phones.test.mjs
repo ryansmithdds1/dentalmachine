@@ -105,3 +105,47 @@ test('PH6 without live transcription: the quick filter row — Fri, AM — then 
   assert.ok(call.appointment_id, 'booked on the call');
   assert.deepEqual(s.errors, [], 'no page errors or dialogs');
 });
+
+// A053: log an ordinary call on the chart from any screen — Alt+G (the active patient), type the note, Enter.
+test('A053 log a call: Alt+G, note, Enter (3 actions) from any screen; right after a phone-line call the note goes onto that call', async () => {
+  const { page } = s;
+  const p = await s.post('/patients', { first_name: 'Callie', last_name: 'Logtest', dob: '1983-07-08', phone: '(512) 555-0193' });
+  await page.goto(`${app.base}/patients/${p.id}`); // they're the active patient now
+  await page.waitForSelector('h1');
+  await page.goto(`${app.base}/schedule`);
+  await page.waitForSelector(`.patient-bar:has-text("Logtest")`);
+  const r = await measure(page, async () => {
+    await page.keyboard.press('Alt+g');
+    await page.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === 'Call note');
+    await page.keyboard.type('Asked about Saturday hours');
+    await page.keyboard.press('Enter');
+    await page.waitForSelector('.logcall-panel', { state: 'detached' });
+  });
+  console.log(withinBudget('A053 log a call', r, { actions: 3, ms: 4000 }));
+  let calls = await s.get(`/patients/${p.id}/calls`);
+  assert.equal(calls.length, 1);
+  assert.deepEqual([calls[0].purpose, calls[0].outcome, calls[0].summary], ['logged', 'spoke', 'Asked about Saturday hours']);
+  // It's in the chart's call history (Messages & forms → Calls).
+  await page.goto(`${app.base}/patients/${p.id}?tab=comms`);
+  await page.waitForSelector('.call-note:has-text("Asked about Saturday hours")');
+
+  // Right after the phone line logged a call with this patient, the panel offers to add the note to that call.
+  const who = callers[1];
+  await ring(who.phone);
+  let recent;
+  for (let i = 0; i < 50 && !(recent = await s.get(`/patients/${who.id}/calls/recent`)).call; i++) await page.waitForTimeout(100);
+  assert.ok(recent.call, 'the phone line logged a call with them a moment ago');
+  const before = (await s.get(`/patients/${who.id}/calls`)).length;
+  await page.goto(`${app.base}/patients/${who.id}?tab=comms`);
+  await page.waitForSelector('h1');
+  await page.keyboard.press('Alt+g');
+  await page.waitForSelector('.logcall-recent');
+  await page.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === 'Call note');
+  await page.keyboard.type('Wants a reminder the day before');
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('.logcall-panel', { state: 'detached' });
+  calls = await s.get(`/patients/${who.id}/calls`);
+  assert.equal(calls.length, before, 'no second call for the same conversation');
+  assert.match(calls.find((c) => c.id === recent.call.id).notes, /Wants a reminder the day before/);
+  assert.deepEqual(s.errors, [], 'no page errors or dialogs');
+});
