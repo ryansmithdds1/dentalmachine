@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { refuseTraining } from '../training.js';
 import { requirePermission, HttpError } from '../auth.js';
 import { findOr404, audit, recorded, publicPractice } from '../util.js';
 import { build837D } from '../x12.js';
@@ -21,6 +22,7 @@ export default function dailyRoutes({ db, config = {}, clearinghouse: ch }) {
       // Asked twice (a double click, a retry): the first send stands; say so rather than send it again.
       return res.json({ preauth: pa, already_sent: true });
     }
+    await refuseTraining(db, pa.patient_id, 'sending a pre-authorization to the payer');
     if (!ch?.batch) throw new HttpError(409, 'No clearinghouse connection is set up — download the 837 file and upload it instead', { download: true, mode: ch?.mode || 'manual' });
     const procedureIds = JSON.parse(pa.procedure_ids || '[]').map(Number).filter(Number.isInteger);
     if (!procedureIds.length) throw new HttpError(400, 'This pre-authorization has no procedures');

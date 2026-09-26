@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { refuseTraining } from './training.js';
 import { HttpError } from './auth.js';
 import { raiseIssue, resolveIssue } from './issues.js';
 import { insert, audit, practiceNow } from './util.js';
@@ -86,6 +87,8 @@ export async function analyzeDocument(db, doc, { readFor = 'manual', req = null 
   if (!d?.xrayAi?.enabled) throw new HttpError(503, 'AI x-ray reading is not set up on this server');
   if (doc.category !== 'xray' || !/^image\//.test(doc.mime)) throw new HttpError(400, 'Only x-ray images can be read');
   const engine = d.xrayAi;
+  // The training patient's images never go to an outside reader (training.js); the built-in sandbox reads them here.
+  if (engine.mode !== 'sandbox') await refuseTraining(db, doc.patient_id, 'sending an x-ray to the AI reader');
   const data = await d.storage.read(doc.storage_key, !!doc.encrypted);
   const started = Date.now();
   const ref = randomUUID();

@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { refuseTraining } from '../training.js';
 import { requirePermission, HttpError } from '../auth.js';
 import { isManager } from '../deposits.js';
 import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, toCents, practiceNow, publicPractice } from '../util.js';
@@ -214,6 +215,7 @@ export default function billingRoutes({ db, payments = { enabled: false }, confi
       if (amount > -original.amount - refunded) throw new HttpError(400, `Only $${((-original.amount - refunded) / 100).toFixed(2)} of that payment is left to refund`);
       method = original.method;
       if (['credit_card', 'debit_card'].includes(original.method) && payments.refund && /^(pi_|sbx_)/.test(original.reference || '')) {
+        await refuseTraining(db, patient.id, 'refunding to a card');
         const out = await payments.refund({ reference: original.reference, amount, idempotencyKey: `refund-${original.id}-${refunded}-${amount}` });
         reference = out.reference;
       }

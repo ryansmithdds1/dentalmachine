@@ -201,8 +201,8 @@ export default function frontDeskRoutes({ db, messenger }) {
     const appts = await db.all(
       `SELECT a.*, p.first_name, p.last_name, p.dob, p.phone, p.medical_alerts, p.allergies, p.office_alert, p.created_at AS patient_since,
          p.guarantor_id, p.medical_reviewed_at, pv.name AS provider_name, pv.color AS provider_color, t.name AS type_name, t.color AS type_color,
-         (SELECT COALESCE(SUM(fee),0) FROM procedures x WHERE x.appointment_id = a.id AND x.status != 'cancelled') AS production
-       FROM appointments a JOIN patients p ON p.id = a.patient_id JOIN providers pv ON pv.id = a.provider_id
+         (SELECT COALESCE(SUM(fee),0) FROM real_procedures x WHERE x.appointment_id = a.id AND x.status != 'cancelled') AS production
+       FROM real_appointments a JOIN real_patients p ON p.id = a.patient_id JOIN providers pv ON pv.id = a.provider_id
        LEFT JOIN appointment_types t ON t.id = a.appointment_type_id
        WHERE a.practice_id = ? AND a.start_time >= ? AND a.start_time < ? AND a.status NOT IN ('cancelled','no_show')${appointmentScope(req.user).sql}
        ORDER BY a.start_time`, pid, `${date} 00:00`, `${date} 24:00`, ...appointmentScope(req.user).args,
@@ -215,23 +215,23 @@ export default function frontDeskRoutes({ db, messenger }) {
     const IN = (list) => (list.length ? list.map(() => '?').join(',') : 'NULL');
     const byPatient = async (sql, list = ids) => (list.length ? db.all(sql.replace('%IN%', IN(list)), ...list) : []);
     const first = (rows, key) => rows.reduce((m, r) => (m.has(r[key]) ? m : m.set(r[key], r)), new Map());
-    const balances = new Map((await byPatient('SELECT patient_id, COALESCE(SUM(amount),0) AS n FROM ledger_entries WHERE patient_id IN (%IN%) GROUP BY patient_id')).map((r) => [r.patient_id, r.n]));
+    const balances = new Map((await byPatient('SELECT patient_id, COALESCE(SUM(amount),0) AS n FROM real_ledger_entries ledger_entries WHERE patient_id IN (%IN%) GROUP BY patient_id')).map((r) => [r.patient_id, r.n]));
     const families = new Map((await byPatient(
-      'SELECT COALESCE(p.guarantor_id, p.id) AS g, COALESCE(SUM(l.amount),0) AS n FROM ledger_entries l JOIN patients p ON p.id = l.patient_id WHERE COALESCE(p.guarantor_id, p.id) IN (%IN%) GROUP BY COALESCE(p.guarantor_id, p.id)', heads,
+      'SELECT COALESCE(p.guarantor_id, p.id) AS g, COALESCE(SUM(l.amount),0) AS n FROM real_ledger_entries l JOIN real_patients p ON p.id = l.patient_id WHERE COALESCE(p.guarantor_id, p.id) IN (%IN%) GROUP BY COALESCE(p.guarantor_id, p.id)', heads,
     )).map((r) => [r.g, r.n]));
-    const unscheduledBy = new Map((await byPatient("SELECT patient_id, COUNT(*) AS n, COALESCE(SUM(fee),0) AS amount FROM procedures WHERE patient_id IN (%IN%) AND status = 'planned' AND appointment_id IS NULL GROUP BY patient_id")).map((r) => [r.patient_id, r]));
-    const recalls = first(await byPatient("SELECT patient_id, due_date, type FROM recalls WHERE patient_id IN (%IN%) AND status IN ('due','contacted') ORDER BY patient_id, due_date"), 'patient_id');
+    const unscheduledBy = new Map((await byPatient("SELECT patient_id, COUNT(*) AS n, COALESCE(SUM(fee),0) AS amount FROM real_procedures procedures WHERE patient_id IN (%IN%) AND status = 'planned' AND appointment_id IS NULL GROUP BY patient_id")).map((r) => [r.patient_id, r]));
+    const recalls = first(await byPatient("SELECT patient_id, due_date, type FROM real_recalls recalls WHERE patient_id IN (%IN%) AND status IN ('due','contacted') ORDER BY patient_id, due_date"), 'patient_id');
     // Same choice as primaryPolicy: the active primary, else the secondary.
     const policies = first(await byPatient(
-      `SELECT pi.*, c.name AS carrier_name FROM patient_insurance pi JOIN insurance_carriers c ON c.id = pi.carrier_id
+      `SELECT pi.*, c.name AS carrier_name FROM real_patient_insurance pi JOIN insurance_carriers c ON c.id = pi.carrier_id
        WHERE pi.patient_id IN (%IN%) AND pi.active = 1 ORDER BY pi.patient_id, CASE pi.priority WHEN 'primary' THEN 0 ELSE 1 END, pi.id`,
     ), 'patient_id');
     const policyIds = [...policies.values()].map((x) => x.id);
-    const eligibility = first(await byPatient('SELECT patient_insurance_id, status, created_at FROM eligibility_checks WHERE patient_insurance_id IN (%IN%) ORDER BY patient_insurance_id, id DESC', policyIds), 'patient_insurance_id');
+    const eligibility = first(await byPatient('SELECT patient_insurance_id, status, created_at FROM real_eligibility_checks eligibility_checks WHERE patient_insurance_id IN (%IN%) ORDER BY patient_insurance_id, id DESC', policyIds), 'patient_insurance_id');
     const forms = new Map((await byPatient("SELECT patient_id, COUNT(*) AS n FROM form_requests WHERE patient_id IN (%IN%) AND status = 'pending' GROUP BY patient_id")).map((r) => [r.patient_id, r.n]));
-    const labsBy = (await byPatient("SELECT patient_id, description, status, due_date FROM lab_cases WHERE patient_id IN (%IN%) AND status IN ('sent','returned_for_adjustment')"))
+    const labsBy = (await byPatient("SELECT patient_id, description, status, due_date FROM real_lab_cases lab_cases WHERE patient_id IN (%IN%) AND status IN ('sent','returned_for_adjustment')"))
       .reduce((m, r) => m.set(r.patient_id, [...(m.get(r.patient_id) || []), { description: r.description, status: r.status, due_date: r.due_date }]), new Map());
-    const seenBefore = new Set((await byPatient("SELECT DISTINCT patient_id FROM procedures WHERE patient_id IN (%IN%) AND status = 'completed'")).map((r) => r.patient_id));
+    const seenBefore = new Set((await byPatient("SELECT DISTINCT patient_id FROM real_procedures procedures WHERE patient_id IN (%IN%) AND status = 'completed'")).map((r) => r.patient_id));
     const rows = appts.map((a) => {
       const balance = balances.get(a.patient_id) || 0;
       const familyBalance = families.get(a.guarantor_id || a.patient_id) || 0;
@@ -322,10 +322,10 @@ export default function frontDeskRoutes({ db, messenger }) {
       `SELECT p.id AS patient_id, p.first_name, p.last_name, p.phone, p.email, COUNT(pr.id) AS procedures, SUM(pr.fee) AS amount,
          MIN(COALESCE(tp.accepted_at, tp.created_at)) AS planned_since, MAX(CASE WHEN tp.status = 'accepted' THEN 1 ELSE 0 END) AS accepted,
          GROUP_CONCAT(pr.code || COALESCE(' #' || pr.tooth, ''), ', ') AS summary
-       FROM procedures pr JOIN patients p ON p.id = pr.patient_id LEFT JOIN treatment_plans tp ON tp.id = pr.treatment_plan_id
+       FROM real_procedures pr JOIN patients p ON p.id = pr.patient_id LEFT JOIN real_treatment_plans tp ON tp.id = pr.treatment_plan_id
        WHERE pr.practice_id = ? AND pr.status = 'planned' AND pr.appointment_id IS NULL AND p.status = 'active'
          AND (tp.id IS NULL OR tp.status IN ('proposed','accepted'))
-         AND NOT EXISTS (SELECT 1 FROM appointments a WHERE a.patient_id = p.id AND a.start_time > ? AND a.status NOT IN ('cancelled','no_show','completed'))
+         AND NOT EXISTS (SELECT 1 FROM real_appointments a WHERE a.patient_id = p.id AND a.start_time > ? AND a.status NOT IN ('cancelled','no_show','completed'))
        GROUP BY p.id ORDER BY accepted DESC, amount DESC`, pid, await practiceNow(db, pid),
     )), async (x) => ({
       ...x,
@@ -342,11 +342,11 @@ export default function frontDeskRoutes({ db, messenger }) {
     const rows = await mapSeq((await db.all(
       `SELECT a.id, a.patient_id, a.start_time, a.end_time, a.status, a.reason, a.broken_reason, a.broken_note, a.appointment_type_id, a.provider_id,
          p.first_name, p.last_name, p.phone, p.email, pv.name AS provider_name,
-         (SELECT COALESCE(SUM(fee),0) FROM procedures x WHERE x.patient_id = a.patient_id AND x.status = 'planned') AS planned_amount
-       FROM appointments a JOIN patients p ON p.id = a.patient_id JOIN providers pv ON pv.id = a.provider_id
+         (SELECT COALESCE(SUM(fee),0) FROM real_procedures x WHERE x.patient_id = a.patient_id AND x.status = 'planned') AS planned_amount
+       FROM real_appointments a JOIN real_patients p ON p.id = a.patient_id JOIN providers pv ON pv.id = a.provider_id
        WHERE a.practice_id = ? AND a.status IN ('no_show','cancelled') AND a.start_time >= ? AND p.status = 'active'
-         AND NOT EXISTS (SELECT 1 FROM appointments b WHERE b.patient_id = a.patient_id AND b.start_time > ? AND b.status NOT IN ('cancelled','no_show','completed'))
-         AND a.id = (SELECT MAX(c.id) FROM appointments c WHERE c.patient_id = a.patient_id AND c.status IN ('no_show','cancelled'))
+         AND NOT EXISTS (SELECT 1 FROM real_appointments b WHERE b.patient_id = a.patient_id AND b.start_time > ? AND b.status NOT IN ('cancelled','no_show','completed'))
+         AND a.id = (SELECT MAX(c.id) FROM real_appointments c WHERE c.patient_id = a.patient_id AND c.status IN ('no_show','cancelled'))
        ORDER BY a.start_time DESC`, pid, `${since} 00:00`, now,
     )), async (x) => ({
       ...x,
@@ -371,7 +371,7 @@ export default function frontDeskRoutes({ db, messenger }) {
       `SELECT a.id, a.patient_id, a.start_time, a.end_time, a.reason, a.confirmed_via, a.reminder_sent_at, a.location_id, pv.name AS provider_name,
          p.first_name, p.last_name, p.preferred_name, p.phone, p.email, p.preferred_contact, p.language, p.dob, p.guarantor_id, p.practice_id,
          p.sms_opt_in, p.email_opt_in, p.sms_bad_at, p.sms_bad_reason, p.email_bad_at, p.email_bad_reason
-       FROM appointments a JOIN patients p ON p.id = a.patient_id JOIN providers pv ON pv.id = a.provider_id
+       FROM real_appointments a JOIN real_patients p ON p.id = a.patient_id JOIN providers pv ON pv.id = a.provider_id
        WHERE a.practice_id = ? AND a.status = 'scheduled' AND a.start_time >= ? AND a.start_time <= ?${scope.sql} ORDER BY a.start_time, a.id`,
       pid, from, until, ...scope.args,
     );
@@ -379,12 +379,12 @@ export default function frontDeskRoutes({ db, messenger }) {
       const to = await recipientFor(db, { ...a, id: a.patient_id });
       const reach = preferredChannel(to);
       const messages = await db.all(
-        `SELECT id, channel, kind, status, delivery, error, created_at FROM messages
+        `SELECT id, channel, kind, status, delivery, error, created_at FROM real_messages messages
          WHERE practice_id = ? AND (id IN (SELECT message_id FROM confirm_links WHERE appointment_id = ?) OR (appointment_id = ? AND direction = 'outbound'))
          ORDER BY id DESC LIMIT 6`, pid, a.id, a.id,
       );
       const reply = await db.get(
-        `SELECT body, created_at FROM messages WHERE practice_id = ? AND direction = 'inbound' AND patient_id IN (?, ?) AND created_at > ? ORDER BY id DESC LIMIT 1`,
+        `SELECT body, created_at FROM real_messages messages WHERE practice_id = ? AND direction = 'inbound' AND patient_id IN (?, ?) AND created_at > ? ORDER BY id DESC LIMIT 1`,
         pid, a.patient_id, to.id, new Date(Date.now() - 14 * 86400_000).toISOString().replace('T', ' ').slice(0, 19),
       );
       return {
@@ -439,7 +439,7 @@ export default function frontDeskRoutes({ db, messenger }) {
     const rows = await db.all(
       `SELECT o.id, o.start_time, o.end_time, o.status, o.offered, o.sent_at, o.filled_at, pv.name AS provider_name,
          c.first_name AS cancelled_first, c.last_name AS cancelled_last, f.first_name AS filled_first, f.last_name AS filled_last, f.id AS filled_patient_id
-       FROM fill_offers o JOIN providers pv ON pv.id = o.provider_id LEFT JOIN patients c ON c.id = o.cancelled_patient_id LEFT JOIN patients f ON f.id = o.filled_patient_id
+       FROM fill_offers o JOIN providers pv ON pv.id = o.provider_id LEFT JOIN real_patients c ON c.id = o.cancelled_patient_id LEFT JOIN real_patients f ON f.id = o.filled_patient_id
        WHERE o.practice_id = ? AND o.created_at > ? ORDER BY o.id DESC LIMIT 100`, req.user.practice_id, new Date(Date.now() - 30 * 86400_000).toISOString().replace('T', ' ').slice(0, 19),
     );
     res.json(rows);
@@ -453,7 +453,7 @@ export default function frontDeskRoutes({ db, messenger }) {
     const to = /^\d{4}-\d{2}-\d{2}$/.test(req.query.to || '') ? req.query.to : now.slice(0, 10);
     const from = /^\d{4}-\d{2}-\d{2}$/.test(req.query.from || '') ? req.query.from : addDays(to, -30);
     const visits = await db.all(
-      `SELECT status, confirmed_at, confirmed_via FROM appointments WHERE practice_id = ? AND start_time >= ? AND start_time <= ? AND start_time <= ?`,
+      `SELECT status, confirmed_at, confirmed_via FROM real_appointments appointments WHERE practice_id = ? AND start_time >= ? AND start_time <= ? AND start_time <= ?`,
       pid, `${from} 00:00`, `${to} 23:59`, now,
     );
     const came = ['checked_in', 'in_chair', 'completed', 'confirmed'];
@@ -466,7 +466,7 @@ export default function frontDeskRoutes({ db, messenger }) {
     const byVia = {};
     for (const v of held.filter(wasConfirmed)) byVia[v.confirmed_via || 'other'] = (byVia[v.confirmed_via || 'other'] || 0) + 1;
     const sent = await db.all(
-      `SELECT channel, status, delivery FROM messages WHERE practice_id = ? AND direction = 'outbound' AND kind IN ('reminder','booking_confirmation')
+      `SELECT channel, status, delivery FROM real_messages messages WHERE practice_id = ? AND direction = 'outbound' AND kind IN ('reminder','booking_confirmation')
        AND created_at >= ? AND created_at < ?`, pid, `${from} 00:00:00`, `${addDays(to, 1)} 00:00:00`,
     );
     const count = (f) => sent.filter(f).length;

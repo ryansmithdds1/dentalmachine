@@ -322,7 +322,7 @@ export default {
         await t.key('Enter');
         await t.see('.drawer');
       });
-      const link = t.page.locator('.drawer a:has-text("Route slip"), .drawer button:has-text("Route slip"), .drawer a:has-text("slip"), .drawer button:has-text("Print")').first();
+      const link = t.page.locator('.drawer a:has-text("Route slip"), .drawer button:has-text("Route slip"), .drawer a:not(.drawer-name):has-text("slip"), .drawer button:has-text("Print")').first();
       if (!(await link.count())) {
         t.flag('dead-end', 'The visit panel has no route slip / walkout button: the address /appointments/:id/route-slip has to be known');
         await t.step('Open the route slip by its address', async () => {

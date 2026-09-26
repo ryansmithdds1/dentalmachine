@@ -122,7 +122,7 @@ export async function practiceProfile(db, pid, s, today) {
   // Payer mix: the insurance share of the last 12 months' payments received (the ledger; credits are negative).
   const pay = await db.get(
     `SELECT COALESCE(SUM(CASE WHEN type = 'insurance_payment' THEN -amount ELSE 0 END), 0) AS ins, COALESCE(SUM(-amount), 0) AS total
-     FROM ledger_entries WHERE practice_id = ? AND type IN ('payment','insurance_payment') AND voided_at IS NULL AND reverses_id IS NULL AND entry_date >= ? AND entry_date <= ?`,
+     FROM real_ledger_entries ledger_entries WHERE practice_id = ? AND type IN ('payment','insurance_payment') AND voided_at IS NULL AND reverses_id IS NULL AND entry_date >= ? AND entry_date <= ?`,
     pid, addMonths(today, -12), today,
   );
   const insurancePct = Number(pay.total) > 0 ? (Number(pay.ins) / Number(pay.total)) * 100 : null;
@@ -165,14 +165,14 @@ export async function computeAggregates(db, pid, { month, today, shareLabor = fa
   const minutes = new Map();
   for (const a of await db.all(
     `SELECT a.provider_id, a.start_time, a.end_time, a.pattern, t.pattern AS type_pattern, pv.type AS provider_type
-     FROM appointments a JOIN providers pv ON pv.id = a.provider_id LEFT JOIN appointment_types t ON t.id = a.appointment_type_id
+     FROM real_appointments a JOIN providers pv ON pv.id = a.provider_id LEFT JOIN appointment_types t ON t.id = a.appointment_type_id
      WHERE a.practice_id = ? AND a.status = 'completed' AND a.start_time >= ? AND a.start_time < ?`, pid, `${from} 00:00`, `${addDays(to, 1)} 00:00`,
   )) {
     const m = visitMinutes({ start_time: a.start_time, end_time: a.end_time, pattern: a.pattern || a.type_pattern, provider_type: a.provider_type });
     minutes.set(a.provider_id, (minutes.get(a.provider_id) || 0) + m.provider);
   }
   const hygieneMix = await db.all(
-    `SELECT provider_id, code, COUNT(*) AS n FROM procedures WHERE practice_id = ? AND status = 'completed' AND completed_at >= ? AND completed_at < ?
+    `SELECT provider_id, code, COUNT(*) AS n FROM real_procedures procedures WHERE practice_id = ? AND status = 'completed' AND completed_at >= ? AND completed_at < ?
        AND code IN (${[...PERIO_CODES, ...PROPHY_CODES].map(() => '?').join(',')}) GROUP BY provider_id, code`,
     pid, from, addDays(to, 1), ...PERIO_CODES, ...PROPHY_CODES,
   );

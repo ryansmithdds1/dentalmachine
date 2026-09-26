@@ -60,11 +60,11 @@ export const recallCadence = {
     const from = ranges.map((w) => w.from).sort()[0];
     const to = ranges.map((w) => w.to).sort().at(-1);
     const rows = await db.all(
-      `SELECT r.id, r.patient_id, r.type, r.due_date, p.location_id FROM recalls r
-         JOIN patients p ON p.id = r.patient_id
+      `SELECT r.id, r.patient_id, r.type, r.due_date, p.location_id FROM real_recalls r
+         JOIN real_patients p ON p.id = r.patient_id
          JOIN recall_types rt ON rt.practice_id = r.practice_id AND rt.key = r.type AND rt.active = 1 AND rt.bundle = 0
        WHERE r.practice_id = ? AND r.status IN ('due','contacted') AND p.status = 'active' AND r.due_date >= ? AND r.due_date <= ?
-         AND NOT EXISTS (SELECT 1 FROM appointments a WHERE a.patient_id = r.patient_id AND a.status IN ${ACTIVE_VISIT} AND a.start_time >= ?)
+         AND NOT EXISTS (SELECT 1 FROM real_appointments a WHERE a.patient_id = r.patient_id AND a.status IN ${ACTIVE_VISIT} AND a.start_time >= ?)
        ORDER BY r.due_date, r.id`,
       practice.id, from, to, `${today} 00:00`,
     );

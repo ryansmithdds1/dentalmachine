@@ -81,8 +81,8 @@ export async function queueRows(db, user, group, practices, { queues = Object.ke
     const claims = await db.all(
       `SELECT c.id, c.practice_id, c.patient_id, c.status, c.total_fee, c.estimated_amount, c.paid_amount, c.submitted_at, c.created_at, c.ch_updated_at,
          c.denial_reason, c.follow_up_date, p.first_name, p.last_name, ic.name AS carrier
-       FROM claims c JOIN patients p ON p.id = c.patient_id AND p.practice_id = c.practice_id
-       LEFT JOIN patient_insurance pi ON pi.id = c.patient_insurance_id LEFT JOIN insurance_carriers ic ON ic.id = pi.carrier_id
+       FROM real_claims c JOIN real_patients p ON p.id = c.patient_id AND p.practice_id = c.practice_id
+       LEFT JOIN real_patient_insurance pi ON pi.id = c.patient_insurance_id LEFT JOIN insurance_carriers ic ON ic.id = pi.carrier_id
        WHERE c.practice_id IN (${list(ids)}) AND c.status IN ('draft','submitted','partially_paid','denied')`, ...ids,
     );
     for (const c of claims) {
@@ -120,7 +120,7 @@ export async function queueRows(db, user, group, practices, { queues = Object.ke
     // Lines matched to a claim but held for review name the patient (only if the claim is the same practice's).
     const claimIds = [...new Set(lines.map((l) => Number(l.d.claim_id)).filter(Number.isInteger))];
     const claimPatients = new Map(claimIds.length ? (await db.all(
-      `SELECT c.id, c.practice_id, c.patient_id, p.first_name, p.last_name FROM claims c JOIN patients p ON p.id = c.patient_id AND p.practice_id = c.practice_id
+      `SELECT c.id, c.practice_id, c.patient_id, p.first_name, p.last_name FROM real_claims c JOIN real_patients p ON p.id = c.patient_id AND p.practice_id = c.practice_id
        WHERE c.id IN (${list(claimIds)}) AND c.practice_id IN (${list(ids)})`, ...claimIds, ...ids,
     )).map((c) => [c.id, c]) : []);
     for (const { e, d, i } of lines) {
@@ -139,12 +139,12 @@ export async function queueRows(db, user, group, practices, { queues = Object.ke
   if (want.has('credits')) {
     // Balances come from the ledger (SUM of every entry — voids and their reversals cancel out), never stored.
     const credits = await db.all(
-      `SELECT l.practice_id, l.patient_id, SUM(l.amount) AS balance, MAX(l.entry_date) AS last_date FROM ledger_entries l
+      `SELECT l.practice_id, l.patient_id, SUM(l.amount) AS balance, MAX(l.entry_date) AS last_date FROM real_ledger_entries l
        WHERE l.practice_id IN (${list(ids)}) GROUP BY l.practice_id, l.patient_id HAVING SUM(l.amount) < 0`, ...ids,
     );
     const pids = credits.map((c) => c.patient_id);
     const people = new Map(pids.length ? (await db.all(
-      `SELECT id, practice_id, first_name, last_name FROM patients WHERE id IN (${list(pids)}) AND practice_id IN (${list(ids)})`, ...pids, ...ids,
+      `SELECT id, practice_id, first_name, last_name FROM real_patients patients WHERE id IN (${list(pids)}) AND practice_id IN (${list(ids)})`, ...pids, ...ids,
     )).map((p) => [`${p.practice_id}|${p.id}`, p]) : []);
     for (const c of credits) {
       const p = people.get(`${c.practice_id}|${c.patient_id}`);
@@ -237,20 +237,20 @@ export async function lookupPatients(db, user, group, { words, dob, phone }, { l
     args.push(`%${phone}%`, `%${phone}%`, `%${phone}%`);
   }
   const found = await db.all(
-    `SELECT p.id, p.practice_id, p.first_name, p.last_name, p.preferred_name, p.dob, p.phone, p.status FROM patients p
+    `SELECT p.id, p.practice_id, p.first_name, p.last_name, p.preferred_name, p.dob, p.phone, p.status FROM real_patients p
      WHERE p.practice_id IN (${list(ids)}) AND p.status != 'archived' AND ${conds.join(' AND ')}
      ORDER BY p.last_name, p.first_name, p.id LIMIT ?`, ...ids, ...args, limit,
   );
   if (!found.length) return [];
   const pids = found.map((p) => p.id);
   const bal = new Map((await db.all(
-    `SELECT patient_id, SUM(amount) AS balance FROM ledger_entries WHERE practice_id IN (${list(ids)}) AND patient_id IN (${list(pids)}) GROUP BY patient_id`, ...ids, ...pids,
+    `SELECT patient_id, SUM(amount) AS balance FROM real_ledger_entries ledger_entries WHERE practice_id IN (${list(ids)}) AND patient_id IN (${list(pids)}) GROUP BY patient_id`, ...ids, ...pids,
   )).map((b) => [b.patient_id, Number(b.balance)]));
   const claims = new Map((await db.all(
-    `SELECT patient_id, COUNT(*) AS n FROM claims WHERE practice_id IN (${list(ids)}) AND patient_id IN (${list(pids)}) AND status IN ('draft','submitted','partially_paid','denied') GROUP BY patient_id`, ...ids, ...pids,
+    `SELECT patient_id, COUNT(*) AS n FROM real_claims claims WHERE practice_id IN (${list(ids)}) AND patient_id IN (${list(pids)}) AND status IN ('draft','submitted','partially_paid','denied') GROUP BY patient_id`, ...ids, ...pids,
   )).map((c) => [c.patient_id, Number(c.n)]));
   const visits = new Map((await db.all(
-    `SELECT patient_id, MAX(start_time) AS last_visit FROM appointments WHERE practice_id IN (${list(ids)}) AND patient_id IN (${list(pids)}) AND status = 'completed' GROUP BY patient_id`, ...ids, ...pids,
+    `SELECT patient_id, MAX(start_time) AS last_visit FROM real_appointments appointments WHERE practice_id IN (${list(ids)}) AND patient_id IN (${list(pids)}) AND status = 'completed' GROUP BY patient_id`, ...ids, ...pids,
   )).map((v) => [v.patient_id, v.last_visit]));
   return found.map((p) => ({
     practice_id: p.practice_id, practice: names.get(p.practice_id), patient_id: p.id, name: `${p.first_name}${p.preferred_name ? ` “${p.preferred_name}”` : ''} ${p.last_name}`,
@@ -273,9 +273,9 @@ export function reportRange(q, today) {
 // (booked by the day of the visit) — the same rule as the practice's own KPI screen (routes/growth.js).
 async function hygieneReappointment(db, pid, from, to) {
   const r = await db.get(
-    `SELECT COUNT(*) AS visits, SUM(CASE WHEN EXISTS (SELECT 1 FROM appointments b WHERE b.patient_id = a.patient_id AND b.practice_id = a.practice_id AND b.start_time > a.start_time
+    `SELECT COUNT(*) AS visits, SUM(CASE WHEN EXISTS (SELECT 1 FROM real_appointments b WHERE b.patient_id = a.patient_id AND b.practice_id = a.practice_id AND b.start_time > a.start_time
          AND b.status NOT IN ('cancelled','no_show') AND substr(b.created_at, 1, 10) <= substr(a.start_time, 1, 10)) THEN 1 ELSE 0 END) AS reappointed
-     FROM appointments a JOIN providers pv ON pv.id = a.provider_id
+     FROM real_appointments a JOIN providers pv ON pv.id = a.provider_id
      WHERE a.practice_id = ? AND pv.type = 'hygienist' AND a.status = 'completed' AND a.start_time >= ? AND a.start_time < ?`,
     pid, `${from} 00:00`, `${to} 24:00`,
   );

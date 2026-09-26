@@ -19,7 +19,7 @@ const HISTORY_ROWS = `SELECT pi.carrier_id AS carrier_id, pr.code AS code, c.cre
     CASE WHEN c.status = 'denied' OR EXISTS (SELECT 1 FROM claim_events e WHERE e.claim_id = c.id AND e.status = 'denied')
       OR (ci.paid_amount = 0 AND ci.estimated_amount > 0) THEN 1 ELSE 0 END AS denied,
     CASE WHEN c.status = 'denied' OR EXISTS (SELECT 1 FROM claim_events e WHERE e.claim_id = c.id AND e.status = 'denied') THEN 1 ELSE 0 END AS whole
-  FROM claim_items ci JOIN claims c ON c.id = ci.claim_id JOIN procedures pr ON pr.id = ci.procedure_id JOIN patient_insurance pi ON pi.id = c.patient_insurance_id
+  FROM claim_items ci JOIN real_claims c ON c.id = ci.claim_id JOIN real_procedures pr ON pr.id = ci.procedure_id JOIN real_patient_insurance pi ON pi.id = c.patient_insurance_id
   WHERE c.practice_id = ? AND c.status IN ('paid','partially_paid','denied') AND c.primary_claim_id IS NULL AND c.created_at >= ? AND c.created_at < ?`;
 
 // rows: { carrier_id, code, narrative, n, denied, whole } (grouped) → rates by payer × code (× narrative), code,

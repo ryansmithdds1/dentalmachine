@@ -202,7 +202,11 @@ export default {
       const list = await admin.get('/patients?limit=40');
       for (const p of (list.rows || list).slice(10)) {
         const st = await admin.get(`/patients/${p.id}/recall-status`).catch(() => null);
-        if ((st?.items || st || []).length) return { p };
+        if ((st?.items || st || []).length) {
+          // The walkthrough's patient (npm run tours): this chart becomes the training patient's.
+          t.subjects?.push({ kind: 'patient', id: p.id, first: p.first_name, last: p.last_name, dob: p.dob, phone: p.phone, email: p.email });
+          return { p };
+        }
       }
       throw new Error('no demo patient with recalls');
     },

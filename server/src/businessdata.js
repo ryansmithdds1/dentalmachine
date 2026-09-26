@@ -215,13 +215,13 @@ export async function visitsWithMargins(db, user, { from, to, locationId = null,
   const appts = await db.all(
     `SELECT a.id, a.patient_id, a.provider_id, a.operatory_id, a.location_id, a.start_time, a.end_time, a.status, a.pattern, a.appointment_type_id, a.asap,
        pv.type AS provider_type, pv.name AS provider_name, pv.color AS provider_color, t.name AS type_name, t.pattern AS type_pattern, o.name AS operatory_name
-     FROM appointments a JOIN providers pv ON pv.id = a.provider_id LEFT JOIN appointment_types t ON t.id = a.appointment_type_id LEFT JOIN operatories o ON o.id = a.operatory_id
+     FROM real_appointments a JOIN providers pv ON pv.id = a.provider_id LEFT JOIN appointment_types t ON t.id = a.appointment_type_id LEFT JOIN operatories o ON o.id = a.operatory_id
      WHERE ${where} ORDER BY a.start_time, a.id`, ...args,
   );
   if (!appts.length) return [];
   const procs = await db.all(
     `SELECT x.id, x.appointment_id, x.patient_id, x.code, x.description, x.category, x.fee, x.status, x.completed_at, x.tooth, x.surfaces, x.area, x.provider_id
-     FROM procedures x JOIN appointments a ON a.id = x.appointment_id WHERE ${where} AND x.status != 'cancelled' ORDER BY x.id`, ...args,
+     FROM real_procedures x JOIN real_appointments a ON a.id = x.appointment_id WHERE ${where} AND x.status != 'cancelled' ORDER BY x.id`, ...args,
   );
   const byAppt = new Map();
   for (const x of procs) byAppt.set(x.appointment_id, [...(byAppt.get(x.appointment_id) || []), x]);
@@ -285,7 +285,7 @@ async function labCasesFor(db, pid, procIds, apptIds) {
     const a = apptIds.slice(i, i + 400);
     if (!p.length && !a.length) continue;
     const cond = [p.length ? `procedure_id IN (${p.map(() => '?').join(',')})` : null, a.length ? `(procedure_id IS NULL AND appointment_id IN (${a.map(() => '?').join(',')}))` : null].filter(Boolean).join(' OR ');
-    rows.push(...await db.all(`SELECT id, procedure_id, appointment_id, cost FROM lab_cases WHERE practice_id = ? AND status != 'cancelled' AND cost IS NOT NULL AND (${cond}) ORDER BY id`, pid, ...p, ...a));
+    rows.push(...await db.all(`SELECT id, procedure_id, appointment_id, cost FROM real_lab_cases lab_cases WHERE practice_id = ? AND status != 'cancelled' AND cost IS NOT NULL AND (${cond}) ORDER BY id`, pid, ...p, ...a));
   }
   return {
     forVisit(apptId, list) {
@@ -310,7 +310,7 @@ async function claimItemsFor(db, procIds) {
     const ids = procIds.slice(i, i + 400);
     for (const r of await db.all(
       `SELECT ci.procedure_id, ci.write_off, ci.adjusted_amount, ci.paid_amount, ci.estimated_amount, c.status, pi.carrier_id, ic.name AS carrier_name
-       FROM claim_items ci JOIN claims c ON c.id = ci.claim_id JOIN patient_insurance pi ON pi.id = c.patient_insurance_id JOIN insurance_carriers ic ON ic.id = pi.carrier_id
+       FROM claim_items ci JOIN real_claims c ON c.id = ci.claim_id JOIN real_patient_insurance pi ON pi.id = c.patient_insurance_id JOIN insurance_carriers ic ON ic.id = pi.carrier_id
        WHERE ci.procedure_id IN (${ids.map(() => '?').join(',')}) AND c.status <> 'void' AND c.primary_claim_id IS NULL ORDER BY ci.id`, ...ids,
     )) out.set(r.procedure_id, r);
   }
@@ -455,8 +455,8 @@ export async function staffDay(db, user, { date, locationId = null, nowMs = Date
   const dayStart = bounds.length ? Math.max(0, Math.floor(Math.min(...bounds) / 30) * 30) : 7 * 60;
   const dayEnd = bounds.length ? Math.min(1440, Math.ceil(Math.max(...bounds) / 30) * 30) : 18 * 60;
   const timeline = staffTimeline({ people, visits: tv, now: nowMin, dayStart, dayEnd, idleGap: s.idle_gap_minutes || 20 });
-  const asapCount = Number((await db.get("SELECT COUNT(*) AS n FROM appointments WHERE practice_id = ? AND asap = 1 AND status IN ('scheduled','confirmed') AND start_time > ?", pid, `${date} 23:59`))?.n || 0)
-    + Number((await db.get("SELECT COUNT(*) AS n FROM waitlist WHERE practice_id = ? AND status = 'waiting'", pid))?.n || 0);
+  const asapCount = Number((await db.get("SELECT COUNT(*) AS n FROM real_appointments appointments WHERE practice_id = ? AND asap = 1 AND status IN ('scheduled','confirmed') AND start_time > ?", pid, `${date} 23:59`))?.n || 0)
+    + Number((await db.get("SELECT COUNT(*) AS n FROM real_waitlist waitlist WHERE practice_id = ? AND status = 'waiting'", pid))?.n || 0);
 
   const rows = timeline.map((t) => {
     const p = people.find((x) => x.user_id === t.user_id);
@@ -528,8 +528,8 @@ async function loadDayVisits(db, user, { date, locationId }) {
   const scope = appointmentScope(user);
   const rows = await db.all(
     `SELECT a.id, a.provider_id, a.operatory_id, a.start_time, a.end_time, a.status, a.pattern, t.pattern AS type_pattern, pv.type AS provider_type,
-       (SELECT COALESCE(SUM(x.fee), 0) FROM procedures x WHERE x.appointment_id = a.id AND x.status != 'cancelled') AS production
-     FROM appointments a JOIN providers pv ON pv.id = a.provider_id LEFT JOIN appointment_types t ON t.id = a.appointment_type_id
+       (SELECT COALESCE(SUM(x.fee), 0) FROM real_procedures x WHERE x.appointment_id = a.id AND x.status != 'cancelled') AS production
+     FROM real_appointments a JOIN providers pv ON pv.id = a.provider_id LEFT JOIN appointment_types t ON t.id = a.appointment_type_id
      WHERE a.practice_id = ? AND a.start_time >= ? AND a.start_time < ?${locationId ? ' AND a.location_id = ?' : ''}${scope.sql}`,
     user.practice_id, `${date} 00:00`, `${addDays(date, 1)} 00:00`, ...(locationId ? [locationId] : []), ...scope.args,
   );
@@ -715,8 +715,8 @@ export async function trendRows(db, user, { metric, from, to, locationId = null,
     const scope = appointmentScope(user);
     return (await db.all(
       `SELECT a.id AS appointment_id, substr(a.start_time, 1, 10) AS date, a.start_time, a.status, pv.name AS provider_name,
-         (SELECT COALESCE(SUM(x.fee), 0) FROM procedures x WHERE x.appointment_id = a.id AND x.status != 'cancelled') AS production
-       FROM appointments a JOIN providers pv ON pv.id = a.provider_id WHERE a.practice_id = ? AND a.start_time >= ? AND a.start_time < ? AND a.status = 'completed'${locationId ? ' AND a.location_id = ?' : ''}${scope.sql}
+         (SELECT COALESCE(SUM(x.fee), 0) FROM real_procedures x WHERE x.appointment_id = a.id AND x.status != 'cancelled') AS production
+       FROM real_appointments a JOIN providers pv ON pv.id = a.provider_id WHERE a.practice_id = ? AND a.start_time >= ? AND a.start_time < ? AND a.status = 'completed'${locationId ? ' AND a.location_id = ?' : ''}${scope.sql}
        ORDER BY a.start_time`, pid, `${from} 00:00`, `${addDays(to, 1)} 00:00`, ...(locationId ? [locationId] : []), ...scope.args,
     )).map((r) => ({ ...r, production: Number(r.production) || 0 }));
   }
@@ -751,7 +751,7 @@ export async function completedWork(db, user, { from, to, locationId = null, set
     `SELECT pr.id, pr.patient_id, pr.appointment_id, pr.code, pr.description, pr.category, pr.fee, substr(pr.completed_at, 1, 10) AS dos,
        COALESCE(pr.provider_id, a.provider_id) AS provider_id, a.start_time, a.end_time, a.pattern, a.appointment_type_id, t.name AS type_name, t.pattern AS type_pattern,
        pv.type AS provider_type, pv.name AS provider_name, apv.type AS appt_provider_type
-     FROM procedures pr LEFT JOIN appointments a ON a.id = pr.appointment_id LEFT JOIN appointment_types t ON t.id = a.appointment_type_id
+     FROM real_procedures pr LEFT JOIN real_appointments a ON a.id = pr.appointment_id LEFT JOIN appointment_types t ON t.id = a.appointment_type_id
      LEFT JOIN providers pv ON pv.id = COALESCE(pr.provider_id, a.provider_id) LEFT JOIN providers apv ON apv.id = a.provider_id
      WHERE pr.practice_id = ? AND pr.status = 'completed' AND pr.completed_at >= ? AND pr.completed_at < ?${locationId ? ' AND pr.location_id = ?' : ''}${scope.sql.replace(/\ba\./g, 'a.')}
      ORDER BY pr.completed_at, pr.id`,
@@ -937,7 +937,7 @@ export async function whatIf(db, user, { from, to, kind, code = null, pctBp = 0,
 // ---- PM1: suggested costs ----
 export async function suggestions(db, pid, today) {
   const from = addDays(today, -365);
-  const counts = Object.fromEntries((await db.all("SELECT category, COUNT(*) AS n FROM procedures WHERE practice_id = ? AND status = 'completed' AND completed_at >= ? GROUP BY category", pid, from)).map((r) => [r.category, Number(r.n)]));
+  const counts = Object.fromEntries((await db.all("SELECT category, COUNT(*) AS n FROM real_procedures procedures WHERE practice_id = ? AND status = 'completed' AND completed_at >= ? GROUP BY category", pid, from)).map((r) => [r.category, Number(r.n)]));
   let spend = 0;
   try {
     const fin = await financeOverview(db, pid, { months: 12, today });
@@ -947,7 +947,7 @@ export async function suggestions(db, pid, today) {
   }
   const base = suggestSupplies(counts, spend);
   const labByCode = await db.all(
-    `SELECT pr.code, COUNT(*) AS n, ROUND(AVG(lc.cost)) AS avg_cost FROM lab_cases lc JOIN procedures pr ON pr.id = lc.procedure_id
+    `SELECT pr.code, COUNT(*) AS n, ROUND(AVG(lc.cost)) AS avg_cost FROM real_lab_cases lc JOIN real_procedures pr ON pr.id = lc.procedure_id
      WHERE lc.practice_id = ? AND lc.cost IS NOT NULL AND lc.status != 'cancelled' AND lc.created_at >= ? GROUP BY pr.code`, pid, from,
   );
   return {
@@ -973,11 +973,11 @@ export async function examCounts(db, user, { from, to, locationId = null }) {
   const codes = Object.keys(FALLBACK_EXAM_CODES);
   const scope = appointmentScope(user);
   const rows = await db.all(
-    `SELECT x.patient_id, substr(a.start_time, 1, 10) AS date, x.code FROM procedures x JOIN appointments a ON a.id = x.appointment_id
+    `SELECT x.patient_id, substr(a.start_time, 1, 10) AS date, x.code FROM real_procedures x JOIN real_appointments a ON a.id = x.appointment_id
      WHERE a.practice_id = ? AND a.start_time >= ? AND a.start_time < ? AND a.status NOT IN ('cancelled','no_show') AND x.status != 'cancelled'
        AND x.code IN (${codes.map(() => '?').join(',')})${locationId ? ' AND a.location_id = ?' : ''}${scope.sql}
      UNION ALL
-     SELECT x.patient_id, substr(x.completed_at, 1, 10) AS date, x.code FROM procedures x
+     SELECT x.patient_id, substr(x.completed_at, 1, 10) AS date, x.code FROM real_procedures x
      WHERE x.practice_id = ? AND x.appointment_id IS NULL AND x.status = 'completed' AND x.completed_at >= ? AND x.completed_at < ?
        AND x.code IN (${codes.map(() => '?').join(',')})${locationId ? ' AND x.location_id = ?' : ''}`,
     pid, `${from} 00:00`, `${addDays(to, 1)} 00:00`, ...codes, ...(locationId ? [locationId] : []), ...scope.args,

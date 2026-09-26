@@ -88,6 +88,8 @@ export const PERMISSION_CATALOG = {
   // records (OSHA), so recording and seeing them is its own permission.
   'compliance:manage': 'See the whole complaint and incident log, the HIPAA disclosure log and their reports',
   'compliance:exposures': 'Record and see staff exposure (sharps) incidents — confidential employee medical records',
+  // Guided walkthroughs (routes/training.js): everyone sees their own training; managers assign it and see the team's.
+  'training:manage': 'Assign training walkthroughs to the team and see everyone’s training progress',
 };
 
 // A person's permissions: their custom role's (or their built-in role's), plus or minus any set just for them.

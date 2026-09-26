@@ -41,7 +41,7 @@ export default function reportRoutes({ db }) {
     const pid = req.user.practice_id;
     const { from, to, today } = await range(req, db);
     const appts = await db.all(
-      `SELECT a.status, COUNT(*) AS n FROM appointments a WHERE a.practice_id = ? AND a.start_time >= ? AND a.start_time < ? GROUP BY a.status`,
+      `SELECT a.status, COUNT(*) AS n FROM real_appointments a WHERE a.practice_id = ? AND a.start_time >= ? AND a.start_time < ? GROUP BY a.status`,
       pid, `${today} 00:00`, `${today} 24:00`,
     );
     const byStatus = Object.fromEntries(appts.map((a) => [a.status, a.n]));
@@ -50,23 +50,23 @@ export default function reportRoutes({ db }) {
       appointments_today: appts.filter((a) => !['cancelled', 'no_show'].includes(a.status)).reduce((s, a) => s + a.n, 0),
       appointments_by_status: byStatus,
       recalls_due: (await db.get(
-        `SELECT COUNT(*) AS n FROM recalls r JOIN patients p ON p.id = r.patient_id
+        `SELECT COUNT(*) AS n FROM real_recalls r JOIN real_patients p ON p.id = r.patient_id
          WHERE r.practice_id = ? AND r.due_date <= ? AND r.status IN ('due','contacted') AND p.status = 'active'`, pid, today,
       )).n,
-      active_patients: (await db.get("SELECT COUNT(*) AS n FROM patients WHERE practice_id = ? AND status = 'active'", pid)).n,
+      active_patients: (await db.get("SELECT COUNT(*) AS n FROM real_patients patients WHERE practice_id = ? AND status = 'active'", pid)).n,
     };
     // Practice-wide money: for people who may see reports (a permission, not a job title), across every office.
     if (can(req.user, 'reports:read') && !restricted(req.user)) {
       Object.assign(out, {
         period: { from, to },
-        production: (await db.get("SELECT COALESCE(SUM(amount),0) AS n FROM ledger_entries WHERE practice_id = ? AND type = 'charge' AND retail_sale_id IS NULL AND entry_date BETWEEN ? AND ?", pid, from, to)).n,
-        collections: -(await db.get("SELECT COALESCE(SUM(amount),0) AS n FROM ledger_entries WHERE practice_id = ? AND type IN ('payment','insurance_payment') AND entry_date BETWEEN ? AND ?", pid, from, to)).n,
-        adjustments: (await db.get("SELECT COALESCE(SUM(amount),0) AS n FROM ledger_entries WHERE practice_id = ? AND type = 'adjustment' AND retail_sale_id IS NULL AND gift_certificate_id IS NULL AND entry_date BETWEEN ? AND ?", pid, from, to)).n,
-        accounts_receivable: (await db.get('SELECT COALESCE(SUM(amount),0) AS n FROM ledger_entries WHERE practice_id = ?', pid)).n,
-        outstanding_claims: await db.get("SELECT COUNT(*) AS n, COALESCE(SUM(estimated_amount),0) AS amount FROM claims WHERE practice_id = ? AND status = 'submitted'", pid),
-        new_patients: (await db.get('SELECT COUNT(*) AS n FROM patients WHERE practice_id = ? AND created_at >= ? AND created_at < ?', pid, ...(await utcRange(db, pid, from, to)))).n,
+        production: (await db.get("SELECT COALESCE(SUM(amount),0) AS n FROM real_ledger_entries ledger_entries WHERE practice_id = ? AND type = 'charge' AND retail_sale_id IS NULL AND entry_date BETWEEN ? AND ?", pid, from, to)).n,
+        collections: -(await db.get("SELECT COALESCE(SUM(amount),0) AS n FROM real_ledger_entries ledger_entries WHERE practice_id = ? AND type IN ('payment','insurance_payment') AND entry_date BETWEEN ? AND ?", pid, from, to)).n,
+        adjustments: (await db.get("SELECT COALESCE(SUM(amount),0) AS n FROM real_ledger_entries ledger_entries WHERE practice_id = ? AND type = 'adjustment' AND retail_sale_id IS NULL AND gift_certificate_id IS NULL AND entry_date BETWEEN ? AND ?", pid, from, to)).n,
+        accounts_receivable: (await db.get('SELECT COALESCE(SUM(amount),0) AS n FROM real_ledger_entries ledger_entries WHERE practice_id = ?', pid)).n,
+        outstanding_claims: await db.get("SELECT COUNT(*) AS n, COALESCE(SUM(estimated_amount),0) AS amount FROM real_claims claims WHERE practice_id = ? AND status = 'submitted'", pid),
+        new_patients: (await db.get('SELECT COUNT(*) AS n FROM real_patients patients WHERE practice_id = ? AND created_at >= ? AND created_at < ?', pid, ...(await utcRange(db, pid, from, to)))).n,
         unscheduled_treatment: await db.get(
-          `SELECT COUNT(*) AS n, COALESCE(SUM(pr.fee),0) AS amount FROM procedures pr JOIN treatment_plans tp ON tp.id = pr.treatment_plan_id
+          `SELECT COUNT(*) AS n, COALESCE(SUM(pr.fee),0) AS amount FROM real_procedures pr JOIN real_treatment_plans tp ON tp.id = pr.treatment_plan_id
            WHERE pr.practice_id = ? AND pr.status = 'planned' AND pr.appointment_id IS NULL AND tp.status IN ('proposed','accepted')`, pid,
         ),
       });
@@ -82,7 +82,7 @@ export default function reportRoutes({ db }) {
     const providers = await db.all('SELECT id, name FROM providers WHERE practice_id = ? AND user_id = ?', pid, req.user.id);
     const today = (await practiceNow(db, pid)).slice(0, 10);
     const sum = async (from) => (providers.length ? (await db.get(
-      `SELECT COALESCE(SUM(amount), 0) AS n FROM ledger_entries WHERE practice_id = ? AND type = 'charge' AND retail_sale_id IS NULL AND voided_at IS NULL AND reverses_id IS NULL
+      `SELECT COALESCE(SUM(amount), 0) AS n FROM real_ledger_entries ledger_entries WHERE practice_id = ? AND type = 'charge' AND retail_sale_id IS NULL AND voided_at IS NULL AND reverses_id IS NULL
          AND provider_id IN (${providers.map(() => '?').join(',')}) AND entry_date BETWEEN ? AND ?`, pid, ...providers.map((p) => p.id), from, today,
     )).n : 0);
     res.json({ providers, today: await sum(today), month: await sum(`${today.slice(0, 7)}-01`), year: await sum(`${today.slice(0, 4)}-01-01`) });
@@ -100,19 +100,19 @@ export default function reportRoutes({ db }) {
     const hygienists = await db.all(`SELECT id, name FROM providers WHERE practice_id = ? AND type = 'hygienist'${only('id')} ORDER BY name`, pid);
     const byHyg = await db.all(
       `SELECT pr.provider_id, COALESCE(SUM(pr.fee), 0) AS production, COUNT(*) AS procedures
-       FROM procedures pr JOIN providers pv ON pv.id = pr.provider_id
+       FROM real_procedures pr JOIN providers pv ON pv.id = pr.provider_id
        WHERE pr.practice_id = ? AND pv.type = 'hygienist' AND pr.status = 'completed' AND pr.completed_at >= ? AND pr.completed_at < ?${only('pr.provider_id')}
        GROUP BY pr.provider_id`, pid, f, t,
     );
     const visits = await db.all(
-      `SELECT a.provider_id, COUNT(*) AS visits, SUM(CASE WHEN EXISTS (SELECT 1 FROM appointments b WHERE b.patient_id = a.patient_id AND b.start_time > a.start_time
+      `SELECT a.provider_id, COUNT(*) AS visits, SUM(CASE WHEN EXISTS (SELECT 1 FROM real_appointments b WHERE b.patient_id = a.patient_id AND b.start_time > a.start_time
            AND b.status NOT IN ('cancelled','no_show') AND substr(b.created_at, 1, 10) <= substr(a.start_time, 1, 10)) THEN 1 ELSE 0 END) AS reappointed
-       FROM appointments a JOIN providers pv ON pv.id = a.provider_id
+       FROM real_appointments a JOIN providers pv ON pv.id = a.provider_id
        WHERE a.practice_id = ? AND pv.type = 'hygienist' AND a.status = 'completed' AND a.start_time >= ? AND a.start_time < ?
        GROUP BY a.provider_id`, pid, `${from} 00:00`, `${to} 24:00`,
     );
     const codes = await db.all(
-      `SELECT code, COUNT(*) AS n FROM procedures WHERE practice_id = ? AND status = 'completed' AND completed_at >= ? AND completed_at < ?
+      `SELECT code, COUNT(*) AS n FROM real_procedures procedures WHERE practice_id = ? AND status = 'completed' AND completed_at >= ? AND completed_at < ?
          AND code IN (${[...PERIO, ...PROPHY].map(() => '?').join(',')})${only('provider_id')} GROUP BY code`, pid, f, t, ...PERIO, ...PROPHY,
     );
     const perio = codes.filter((c) => PERIO.includes(c.code)).reduce((s, c) => s + c.n, 0);
@@ -121,9 +121,9 @@ export default function reportRoutes({ db }) {
     // booked (a visit still to come), or still waiting.
     const recall = await db.get(
       `SELECT COUNT(*) AS due,
-         SUM(CASE WHEN EXISTS (SELECT 1 FROM appointments a WHERE a.patient_id = r.patient_id AND a.status = 'completed' AND a.start_time >= ${db.dialect === 'postgres' ? "to_char(r.due_date::date - 60, 'YYYY-MM-DD')" : "date(r.due_date, '-60 days')"}) THEN 1 ELSE 0 END) AS seen,
-         SUM(CASE WHEN EXISTS (SELECT 1 FROM appointments a WHERE a.patient_id = r.patient_id AND a.status IN ('scheduled','confirmed') AND a.start_time >= ?) THEN 1 ELSE 0 END) AS booked
-       FROM (SELECT x.patient_id, MIN(x.due_date) AS due_date FROM recalls x JOIN patients p ON p.id = x.patient_id
+         SUM(CASE WHEN EXISTS (SELECT 1 FROM real_appointments a WHERE a.patient_id = r.patient_id AND a.status = 'completed' AND a.start_time >= ${db.dialect === 'postgres' ? "to_char(r.due_date::date - 60, 'YYYY-MM-DD')" : "date(r.due_date, '-60 days')"}) THEN 1 ELSE 0 END) AS seen,
+         SUM(CASE WHEN EXISTS (SELECT 1 FROM real_appointments a WHERE a.patient_id = r.patient_id AND a.status IN ('scheduled','confirmed') AND a.start_time >= ?) THEN 1 ELSE 0 END) AS booked
+       FROM (SELECT x.patient_id, MIN(x.due_date) AS due_date FROM real_recalls x JOIN real_patients p ON p.id = x.patient_id
              WHERE x.practice_id = ? AND x.status != 'inactive' AND p.status = 'active' AND x.due_date BETWEEN ? AND ? GROUP BY x.patient_id) r`,
       `${(await practiceNow(db, pid)).slice(0, 10)} 00:00`, pid, from, to,
     );
@@ -153,7 +153,7 @@ export default function reportRoutes({ db }) {
          COALESCE(SUM(CASE WHEN pr.status = 'planned' AND pr.appointment_id IS NOT NULL THEN pr.fee ELSE 0 END), 0) AS scheduled,
          COALESCE(SUM(CASE WHEN pr.status = 'completed' THEN pr.fee ELSE 0 END), 0) AS completed,
          COUNT(DISTINCT CASE WHEN tp.status IN ('accepted','completed') OR tp.signed_at IS NOT NULL THEN tp.id END) AS accepted_plans
-       FROM treatment_plans tp JOIN procedures pr ON pr.treatment_plan_id = tp.id LEFT JOIN providers pv ON pv.id = pr.provider_id
+       FROM real_treatment_plans tp JOIN real_procedures pr ON pr.treatment_plan_id = tp.id LEFT JOIN providers pv ON pv.id = pr.provider_id
        WHERE tp.practice_id = ? AND COALESCE(tp.presented_at, tp.created_at) >= ? AND COALESCE(tp.presented_at, tp.created_at) < ? AND pr.status != 'cancelled'${Number(req.query.provider_id) ? ` AND pr.provider_id = ${Number(req.query.provider_id)}` : ''}
        GROUP BY pr.provider_id, pv.name ORDER BY SUM(pr.fee) DESC`, pid, f, t,
     );
@@ -172,25 +172,25 @@ export default function reportRoutes({ db }) {
     res.json({
       from, to,
       by_provider: await db.all(
-        `SELECT pv.id, pv.name, COUNT(*) AS procedures, SUM(l.amount) AS production FROM ledger_entries l
+        `SELECT pv.id, pv.name, COUNT(*) AS procedures, SUM(l.amount) AS production FROM real_ledger_entries l
          JOIN providers pv ON pv.id = l.provider_id WHERE l.practice_id = ? AND l.type = 'charge' AND l.retail_sale_id IS NULL AND l.entry_date BETWEEN ? AND ?${loc.sql}
          GROUP BY pv.id ORDER BY production DESC`, pid, from, to, ...loc.args,
       ),
       by_category: await db.all(
-        `SELECT pr.category, COUNT(*) AS procedures, SUM(l.amount) AS production FROM ledger_entries l
-         JOIN procedures pr ON pr.id = l.procedure_id WHERE l.practice_id = ? AND l.type = 'charge' AND l.entry_date BETWEEN ? AND ?${loc.sql}
+        `SELECT pr.category, COUNT(*) AS procedures, SUM(l.amount) AS production FROM real_ledger_entries l
+         JOIN real_procedures pr ON pr.id = l.procedure_id WHERE l.practice_id = ? AND l.type = 'charge' AND l.entry_date BETWEEN ? AND ?${loc.sql}
          GROUP BY pr.category ORDER BY production DESC`, pid, from, to, ...loc.args,
       ),
       by_day: await db.all(
         `SELECT entry_date AS day,
            SUM(CASE WHEN type = 'charge' AND retail_sale_id IS NULL THEN amount ELSE 0 END) AS production,
            -SUM(CASE WHEN type IN ('payment','insurance_payment') THEN amount ELSE 0 END) AS collections
-         FROM ledger_entries l WHERE practice_id = ? AND entry_date BETWEEN ? AND ?${loc.sql} GROUP BY entry_date ORDER BY entry_date`, pid, from, to, ...loc.args,
+         FROM real_ledger_entries l WHERE practice_id = ? AND entry_date BETWEEN ? AND ?${loc.sql} GROUP BY entry_date ORDER BY entry_date`, pid, from, to, ...loc.args,
       ),
       // From the same ledger charges as the rest of the report (voided work nets out).
       top_procedures: await db.all(
         `SELECT pr.code, MIN(pr.description) AS description, SUM(CASE WHEN l.amount > 0 THEN 1 ELSE -1 END) AS count, SUM(l.amount) AS production
-         FROM ledger_entries l JOIN procedures pr ON pr.id = l.procedure_id
+         FROM real_ledger_entries l JOIN real_procedures pr ON pr.id = l.procedure_id
          WHERE l.practice_id = ? AND l.type = 'charge' AND l.retail_sale_id IS NULL AND l.entry_date BETWEEN ? AND ?${loc.sql}
          GROUP BY pr.code HAVING SUM(l.amount) > 0 ORDER BY SUM(l.amount) DESC LIMIT 10`, pid, from, to, ...loc.args,
       ),
@@ -200,7 +200,7 @@ export default function reportRoutes({ db }) {
            SUM(CASE WHEN l.type = 'charge' AND l.retail_sale_id IS NULL THEN l.amount ELSE 0 END) AS production,
            -SUM(CASE WHEN l.type = 'payment' THEN l.amount ELSE 0 END) AS patient_collections,
            SUM(CASE WHEN l.type = 'adjustment' AND l.retail_sale_id IS NULL AND l.gift_certificate_id IS NULL THEN l.amount ELSE 0 END) AS adjustments
-         FROM ledger_entries l LEFT JOIN locations lo ON lo.id = l.location_id
+         FROM real_ledger_entries l LEFT JOIN locations lo ON lo.id = l.location_id
          WHERE l.practice_id = ? AND l.entry_date BETWEEN ? AND ? GROUP BY l.location_id, lo.name ORDER BY 3 DESC`, pid, from, to,
       ) : null,
     });
@@ -227,7 +227,7 @@ export default function reportRoutes({ db }) {
     // Payments for products and gift certificates sold are collections too, but for nobody's dental work: their own row.
     const retail = { id: null, kind: 'retail', name: 'Retail & gift certificates', production: 0, adjustments: 0, patient_collections: 0, insurance_collections: 0 };
     for (const r of await db.all(
-      `SELECT provider_id, SUM(amount) AS n FROM ledger_entries WHERE practice_id = ? AND type = 'charge' AND retail_sale_id IS NULL AND entry_date BETWEEN ? AND ?${atLocation(req).sql} GROUP BY provider_id`, pid, from, to, ...atLocation(req).args,
+      `SELECT provider_id, SUM(amount) AS n FROM real_ledger_entries ledger_entries WHERE practice_id = ? AND type = 'charge' AND retail_sale_id IS NULL AND entry_date BETWEEN ? AND ?${atLocation(req).sql} GROUP BY provider_id`, pid, from, to, ...atLocation(req).args,
     )) (rows.get(r.provider_id) || unassigned).production += r.n;
     for (const a of await allocationsForRange(db, pid, from, to)) {
       const row = a.retail ? retail : (a.provider_id && rows.get(a.provider_id)) || unassigned;
@@ -248,7 +248,7 @@ export default function reportRoutes({ db }) {
       from, to,
       rows: await db.all(
         `SELECT COALESCE(adjustment_type, CASE WHEN claim_id IS NOT NULL THEN 'Insurance write-off' ELSE 'Other' END) AS type,
-           COUNT(*) AS count, SUM(amount) AS amount FROM ledger_entries
+           COUNT(*) AS count, SUM(amount) AS amount FROM real_ledger_entries ledger_entries
          WHERE practice_id = ? AND type = 'adjustment' AND retail_sale_id IS NULL AND gift_certificate_id IS NULL AND entry_date BETWEEN ? AND ?${atLocation(req).sql} GROUP BY 1 ORDER BY SUM(amount)`, pid, from, to, ...atLocation(req).args,
       ),
     });
@@ -261,7 +261,7 @@ export default function reportRoutes({ db }) {
     if (!DATE.test(date)) throw new HttpError(400, 'date must be YYYY-MM-DD');
     const entries = await db.all(
       `SELECT l.*, p.first_name, p.last_name, pv.name AS provider_name, u.name AS created_by_name
-       FROM ledger_entries l JOIN patients p ON p.id = l.patient_id LEFT JOIN providers pv ON pv.id = l.provider_id
+       FROM real_ledger_entries l JOIN real_patients p ON p.id = l.patient_id LEFT JOIN providers pv ON pv.id = l.provider_id
        LEFT JOIN users u ON u.id = l.created_by WHERE l.practice_id = ? AND l.entry_date = ?${atLocation(req, 'l.').sql} ORDER BY l.type, l.id`, pid, date, ...atLocation(req, 'l.').args,
     );
     const sum = (fn) => entries.filter(fn).reduce((s, e) => s + e.amount, 0);
@@ -272,7 +272,7 @@ export default function reportRoutes({ db }) {
       byMethod[key] = (byMethod[key] || 0) - e.amount;
     }
     const appts = await db.all(
-      `SELECT status, COUNT(*) AS n FROM appointments WHERE practice_id = ? AND start_time >= ? AND start_time < ?${atLocation(req).sql} GROUP BY status`,
+      `SELECT status, COUNT(*) AS n FROM real_appointments appointments WHERE practice_id = ? AND start_time >= ? AND start_time < ?${atLocation(req).sql} GROUP BY status`,
       pid, `${date} 00:00`, `${date} 24:00`, ...atLocation(req).args,
     );
     // ?format=csv: the day's lines as a spreadsheet (the "export day sheet" command, and the page's CSV). An export

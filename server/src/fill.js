@@ -1,4 +1,5 @@
 import { insert, localNow, friendlyDateTime, recorded } from './util.js';
+import { isTrainingPatient, NOT_TRAINING } from './training.js';
 import { raiseIssue, resolveIssue, failed } from './issues.js';
 import { sendMessage, withinSendHours, recipientFor } from './messaging.js';
 import { templatesFor, renderTemplate, patientLang, fixedText } from './templates.js';
@@ -29,9 +30,9 @@ async function candidates(db, offer, exceptPatient) {
   const minutes = minutesBetween(offer.start_time, offer.end_time);
   const asap = (await db.all(
     `SELECT a.id, a.patient_id, a.start_time, a.end_time FROM appointments a WHERE a.practice_id = ? AND a.asap = 1 AND a.status IN ('scheduled','confirmed')
-     AND a.start_time > ? AND a.provider_id = ? AND a.patient_id != ? ORDER BY a.created_at, a.id`, offer.practice_id, offer.end_time, offer.provider_id, exceptPatient,
+     AND a.start_time > ? AND a.provider_id = ? AND a.patient_id != ? AND ${NOT_TRAINING('a.patient_id')} ORDER BY a.created_at, a.id`, offer.practice_id, offer.end_time, offer.provider_id, exceptPatient,
   )).filter((a) => minutesBetween(a.start_time, a.end_time) <= minutes).map((a) => ({ source: 'asap', ref_id: a.id, patient_id: a.patient_id }));
-  const waiting = (await db.all("SELECT * FROM waitlist WHERE practice_id = ? AND status = 'waiting' AND patient_id != ? ORDER BY created_at, id", offer.practice_id, exceptPatient))
+  const waiting = (await db.all(`SELECT * FROM waitlist WHERE practice_id = ? AND status = 'waiting' AND patient_id != ? AND ${NOT_TRAINING()} ORDER BY created_at, id`, offer.practice_id, exceptPatient))
     .filter((w) => fits(w, offer.start_time, minutes, offer.provider_id)).map((w) => ({ source: 'waitlist', ref_id: w.id, patient_id: w.patient_id }));
   const seen = new Set();
   return [...asap, ...waiting].filter((c) => !seen.has(c.patient_id) && seen.add(c.patient_id));
@@ -54,6 +55,8 @@ export function openSlotLater(db, appointmentId) {
 export async function openSlot(db, messenger, appointmentId, { now = new Date() } = {}) {
   const a = await db.get('SELECT a.*, p.timezone, p.auto_fill, p.send_from, p.send_until FROM appointments a JOIN practices p ON p.id = a.practice_id WHERE a.id = ?', appointmentId);
   if (!a || !a.auto_fill) return null;
+  // A training visit (training.js) was never a real time in the chair: nobody is offered it.
+  if (await isTrainingPatient(db, a.patient_id)) return null;
   const local = localNow(a.timezone, now);
   if (minutesBetween(local, a.start_time) < MIN_LEAD_MIN) return null;
   if (await db.get("SELECT id FROM fill_offers WHERE source_appointment_id = ? AND status IN ('open','queued')", a.id)) return null;

@@ -222,7 +222,7 @@ async function capture(db, pid, { full = false } = {}) {
   const cb = await cursor(db, pid, 'booking_requests');
   const bookings = await db.all(
     `SELECT br.id, br.patient_id, br.new_patient, br.created_at, br.source AS br_source, ob.id AS ob_id, ob.source, ob.utm_source, ob.utm_medium, ob.utm_campaign, ob.referrer_host, ob.promo_code, ob.referral_code
-     FROM booking_requests br LEFT JOIN online_bookings ob ON ob.id = br.online_booking_id
+     FROM real_booking_requests br LEFT JOIN online_bookings ob ON ob.id = br.online_booking_id
      WHERE br.practice_id = ? AND br.id > ? AND (br.online_booking_id IS NOT NULL OR br.ip IS NOT NULL OR br.source IS NOT NULL) ORDER BY br.id LIMIT 5000`, pid, full ? 0 : cb.last_id,
   );
   for (const b of bookings) {
@@ -238,7 +238,7 @@ async function capture(db, pid, { full = false } = {}) {
   // rings three times is one lead: only their first call from that number counts.
   const cc = await cursor(db, pid, 'calls');
   const calls = await db.all(
-    `SELECT id, patient_id, from_number, to_number, source, new_caller, created_at FROM calls
+    `SELECT id, patient_id, from_number, to_number, source, new_caller, created_at FROM real_calls calls
      WHERE practice_id = ? AND direction = 'inbound' AND id > ? ORDER BY id LIMIT 5000`, pid, full ? 0 : cc.last_id,
   );
   for (const c of calls) {
@@ -246,7 +246,7 @@ async function capture(db, pid, { full = false } = {}) {
     if (r.method === 'call' && !Number(c.new_caller)) continue;
     if (r.line && !r.source_id) r.source_id = (await sourceForLine(db, pid, catalog, r.line))?.id ?? null;
     const repeat = Number(c.new_caller) && c.from_number
-      ? await db.get("SELECT id FROM calls WHERE practice_id = ? AND direction = 'inbound' AND from_number = ? AND id < ? LIMIT 1", pid, c.from_number, c.id) : null;
+      ? await db.get("SELECT id FROM real_calls calls WHERE practice_id = ? AND direction = 'inbound' AND from_number = ? AND id < ? LIMIT 1", pid, c.from_number, c.id) : null;
     note(c.patient_id, await addTouch(db, pid, { key: `call:${c.id}`, patient_id: c.patient_id, source_id: r.source_id, campaign_id: r.campaign_id, method: r.method, detail: r.detail, lead: Number(c.new_caller) === 1 && !repeat, lead_kind: 'call', entity: 'calls', entity_id: c.id, occurred_at: c.created_at }));
   }
   if (calls.length) await moveCursor(db, pid, 'calls', calls.at(-1).id);
@@ -258,7 +258,7 @@ async function capture(db, pid, { full = false } = {}) {
   const cp = await cursor(db, pid, 'patients');
   const recent = new Date(Date.now() - 3 * 86400_000).toISOString().slice(0, 19).replace('T', ' ');
   const pts = await db.all(
-    `SELECT p.id, p.referral_source, p.referred_by_id, p.created_at, rc.name AS doctor FROM patients p LEFT JOIN referral_contacts rc ON rc.id = p.referred_by_id
+    `SELECT p.id, p.referral_source, p.referred_by_id, p.created_at, rc.name AS doctor FROM real_patients p LEFT JOIN referral_contacts rc ON rc.id = p.referred_by_id
      WHERE p.practice_id = ? AND (p.id > ? OR p.created_at >= ?) AND p.merged_into_id IS NULL AND (p.referral_source IS NOT NULL OR p.referred_by_id IS NOT NULL) ORDER BY p.id LIMIT 20000`,
     pid, full ? 0 : cp.last_id, full ? '0000' : recent,
   );
@@ -279,13 +279,13 @@ async function capture(db, pid, { full = false } = {}) {
       note(p.id, await addTouch(db, pid, { key: `doctor:${p.id}`, patient_id: p.id, source_id: s?.id ?? null, method: 'referral', detail: p.doctor ? `Referred by ${p.doctor}` : null, entity: 'referral_contacts', entity_id: p.referred_by_id, occurred_at: p.created_at }));
     }
   }
-  const newest = await db.get('SELECT MAX(id) AS id FROM patients WHERE practice_id = ?', pid);
+  const newest = await db.get('SELECT MAX(id) AS id FROM real_patients patients WHERE practice_id = ?', pid);
   if (newest?.id) await moveCursor(db, pid, 'patients', Number(newest.id));
 
   // Patient-to-patient referrals (the journeys' referral list).
   await ensureJourneySchema(db);
   const sp = channelSource(catalog, 'referral_patient');
-  for (const j of await db.all('SELECT r.id, r.referred_patient_id, r.referrer_patient_id, r.created_at, p.created_at AS joined FROM journey_referrals r JOIN patients p ON p.id = r.referred_patient_id WHERE r.practice_id = ?', pid)) {
+  for (const j of await db.all('SELECT r.id, r.referred_patient_id, r.referrer_patient_id, r.created_at, p.created_at AS joined FROM journey_referrals r JOIN real_patients p ON p.id = r.referred_patient_id WHERE r.practice_id = ?', pid)) {
     const at = j.joined && j.joined < j.created_at ? j.joined : j.created_at;
     note(j.referred_patient_id, await addTouch(db, pid, { key: `friend:${j.referred_patient_id}`, patient_id: j.referred_patient_id, source_id: sp?.id ?? null, method: 'referral', detail: 'Referred by a patient', entity: 'patients', entity_id: j.referrer_patient_id, occurred_at: at }));
   }
@@ -293,7 +293,7 @@ async function capture(db, pid, { full = false } = {}) {
   // Leads whose chart was linked later (a call attached to a patient, a request accepted).
   for (const t of await db.all(
     `SELECT t.id, t.touch_key, COALESCE(br.patient_id, c.patient_id) AS pt FROM marketing_touches t
-     LEFT JOIN booking_requests br ON t.entity = 'booking_requests' AND br.id = t.entity_id LEFT JOIN calls c ON t.entity = 'calls' AND c.id = t.entity_id
+     LEFT JOIN real_booking_requests br ON t.entity = 'booking_requests' AND br.id = t.entity_id LEFT JOIN real_calls c ON t.entity = 'calls' AND c.id = t.entity_id
      WHERE t.practice_id = ? AND t.patient_id IS NULL AND (br.patient_id IS NOT NULL OR c.patient_id IS NOT NULL)`, pid,
   )) {
     await db.run('UPDATE marketing_touches SET patient_id = ? WHERE id = ? AND patient_id IS NULL', t.pt, t.id);
@@ -314,9 +314,9 @@ async function linkPatientReferral(db, pid, referrer, referred) {
 
 // A patient's first visit, the metrics.js new-patient rule: earliest completed visit or completed procedure's charge.
 const FIRST_VISITS = `SELECT x.patient_id, MIN(x.d) AS first_visit FROM (
-    SELECT a.patient_id, substr(a.start_time, 1, 10) AS d FROM appointments a WHERE a.practice_id = ? AND a.status = 'completed'
+    SELECT a.patient_id, substr(a.start_time, 1, 10) AS d FROM real_appointments a WHERE a.practice_id = ? AND a.status = 'completed'
     UNION ALL
-    SELECT l.patient_id, l.entry_date AS d FROM ledger_entries l WHERE l.practice_id = ? AND l.type = 'charge' AND l.procedure_id IS NOT NULL AND ${LIVE()}
+    SELECT l.patient_id, l.entry_date AS d FROM real_ledger_entries l WHERE l.practice_id = ? AND l.type = 'charge' AND l.procedure_id IS NOT NULL AND ${LIVE()}
   ) x GROUP BY x.patient_id`;
 
 async function firstVisitOf(db, pid, patientId) {
@@ -360,7 +360,7 @@ async function backfill(db, pid) {
   const tz = await tzOf(db, pid);
   const since = new Date(Date.now() - 400 * 86400_000).toISOString().slice(0, 19).replace('T', ' ');
   const orphans = await db.all(
-    `SELECT p.id, p.first_name, p.last_name, p.dob, p.phone, p.created_at FROM patients p
+    `SELECT p.id, p.first_name, p.last_name, p.dob, p.phone, p.created_at FROM real_patients p
      WHERE p.practice_id = ? AND p.merged_into_id IS NULL AND p.marketing_pinned = 0 AND p.created_at >= ?
        AND NOT EXISTS (SELECT 1 FROM marketing_touches t WHERE t.patient_id = p.id AND t.source_id IS NOT NULL)`, pid, since,
   );
@@ -368,13 +368,13 @@ async function backfill(db, pid) {
   for (const p of orphans) {
     const digits = tail10(p.phone);
     const reqs = await db.all(
-      `SELECT id, phone, dob FROM booking_requests WHERE practice_id = ? AND patient_id IS NULL AND lower(first_name) = lower(?) AND lower(last_name) = lower(?) ORDER BY id`,
+      `SELECT id, phone, dob FROM real_booking_requests booking_requests WHERE practice_id = ? AND patient_id IS NULL AND lower(first_name) = lower(?) AND lower(last_name) = lower(?) ORDER BY id`,
       pid, p.first_name, p.last_name,
     );
     const req = reqs.find((b) => (p.dob && b.dob === p.dob) || (digits.length === 10 && tail10(b.phone) === digits));
     let key = req ? `booking:${req.id}` : null;
     if (!key && digits.length === 10) {
-      const calls = await db.all("SELECT id, from_number, created_at FROM calls WHERE practice_id = ? AND direction = 'inbound' AND patient_id IS NULL AND from_number LIKE ? ORDER BY id", pid, `%${digits.slice(-4)}`);
+      const calls = await db.all("SELECT id, from_number, created_at FROM real_calls calls WHERE practice_id = ? AND direction = 'inbound' AND patient_id IS NULL AND from_number LIKE ? ORDER BY id", pid, `%${digits.slice(-4)}`);
       const call = calls.find((c) => tail10(c.from_number) === digits && localDate(tz, c.created_at) <= addDays(localDate(tz, p.created_at), 1));
       if (call) key = `call:${call.id}`;
     }
@@ -578,7 +578,7 @@ async function cohort(db, pid, user, o) {
   const col = o.model === 'last' ? 'marketing_last_touch_id' : 'marketing_first_touch_id';
   return db.all(
     `SELECT f.patient_id, f.first_visit, p.first_name, p.last_name, p.created_at, t.id AS touch_id, t.source_id, t.campaign_id, t.method, s.name AS source_name, s.channel, c.name AS campaign_name
-     FROM (${FIRST_VISITS}) f JOIN patients p ON p.id = f.patient_id
+     FROM (${FIRST_VISITS}) f JOIN real_patients p ON p.id = f.patient_id
      LEFT JOIN marketing_touches t ON t.id = p.${col} LEFT JOIN marketing_sources s ON s.id = t.source_id LEFT JOIN marketing_campaigns c ON c.id = t.campaign_id
      WHERE f.first_visit >= ? AND f.first_visit <= ? AND p.merged_into_id IS NULL${scope.sql} ORDER BY f.first_visit, p.last_name, p.id`,
     pid, pid, o.from, o.to, ...scope.args,
@@ -594,7 +594,7 @@ async function moneyFor(db, pid, patients, today) {
   for (const id of ids) out.set(id, { production: {}, collections: {}, monthly: [], matured: {} });
   await chunks(ids, async (chunk) => {
     const rows = await db.all(
-      `SELECT l.patient_id, l.type, l.amount, l.entry_date FROM ledger_entries l
+      `SELECT l.patient_id, l.type, l.amount, l.entry_date FROM real_ledger_entries l
        WHERE l.practice_id = ? AND l.patient_id IN (${IN(chunk)}) AND l.type IN ('charge','payment','insurance_payment','refund') AND ${LIVE()}`, pid, ...chunk,
     );
     for (const r of rows) {
@@ -624,7 +624,7 @@ async function acceptedFor(db, pid, ids) {
   const out = new Map();
   await chunks(ids, async (chunk) => {
     for (const r of await db.all(
-      `SELECT pr.patient_id, SUM(pr.fee) AS n FROM procedures pr JOIN treatment_plans tp ON tp.id = pr.treatment_plan_id
+      `SELECT pr.patient_id, SUM(pr.fee) AS n FROM real_procedures pr JOIN real_treatment_plans tp ON tp.id = pr.treatment_plan_id
        WHERE pr.practice_id = ? AND pr.patient_id IN (${IN(chunk)}) AND pr.status != 'cancelled' AND tp.status IN ('accepted','completed') GROUP BY pr.patient_id`, pid, ...chunk,
     )) out.set(r.patient_id, num(r.n));
   });
@@ -679,7 +679,7 @@ export async function marketingReport(db, user, query = {}) {
   const scope = o.locationId ? { sql: ' AND p.location_id = ?', args: [o.locationId] } : patientScope(user, 'p');
   const leadRows = await db.all(
     `SELECT t.id, t.lead_kind, t.source_id, t.campaign_id, t.occurred_at, s.channel FROM marketing_touches t
-     LEFT JOIN marketing_sources s ON s.id = t.source_id LEFT JOIN patients p ON p.id = t.patient_id
+     LEFT JOIN marketing_sources s ON s.id = t.source_id LEFT JOIN real_patients p ON p.id = t.patient_id
      WHERE t.practice_id = ? AND t.lead = 1 AND t.occurred_at >= ? AND t.occurred_at < ?${scope.sql ? ` AND (t.patient_id IS NOT NULL${scope.sql})` : ''}`,
     pid, fu, tu, ...scope.args,
   );
@@ -694,9 +694,9 @@ export async function marketingReport(db, user, query = {}) {
   const col = o.model === 'last' ? 'marketing_last_touch_id' : 'marketing_first_touch_id';
   const shows = await db.all(
     `SELECT p.id, p.created_at, t.source_id, t.campaign_id, s.channel,
-       (SELECT COUNT(*) FROM appointments a WHERE a.patient_id = p.id AND a.start_time <= ?) AS booked,
-       (SELECT COUNT(*) FROM appointments a WHERE a.patient_id = p.id AND a.status = 'completed') AS showed
-     FROM patients p LEFT JOIN marketing_touches t ON t.id = p.${col} LEFT JOIN marketing_sources s ON s.id = t.source_id
+       (SELECT COUNT(*) FROM real_appointments a WHERE a.patient_id = p.id AND a.start_time <= ?) AS booked,
+       (SELECT COUNT(*) FROM real_appointments a WHERE a.patient_id = p.id AND a.status = 'completed') AS showed
+     FROM real_patients p LEFT JOIN marketing_touches t ON t.id = p.${col} LEFT JOIN marketing_sources s ON s.id = t.source_id
      WHERE p.practice_id = ? AND p.merged_into_id IS NULL AND p.created_at >= ? AND p.created_at < ?${scope.sql}`,
     `${today} 23:59`, pid, fu, tu, ...scope.args,
   );

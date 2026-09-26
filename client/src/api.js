@@ -36,6 +36,11 @@ export const setLocationId = (id) => {
   }
 };
 const locationHeader = () => (getLocationId() ? { 'X-Location-Id': getLocationId() } : {});
+// While a guided walkthrough runs on the training patient (components/tours), anything it creates — a new patient
+// made in the tour — is practice data too (server: training.js).
+let practiceMode = false;
+export const setPracticeMode = (on) => { practiceMode = !!on; };
+const practiceHeader = () => (practiceMode ? { 'X-Practice-Mode': '1' } : {});
 
 export class ApiError extends Error {
   constructor(status, message, details, requestId) {
@@ -76,7 +81,7 @@ async function request(method, path, body, extraHeaders = {}) {
   try {
     res = await fetch(`/api${path}`, {
       method,
-      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...locationHeader(), ...extraHeaders },
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...locationHeader(), ...practiceHeader(), ...extraHeaders },
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
   } catch {

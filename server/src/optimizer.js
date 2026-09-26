@@ -627,7 +627,7 @@ export async function loadDay(db, user, { date, locationId = null, withFinder = 
   const provRows = await db.all('SELECT * FROM providers WHERE practice_id = ? AND active = 1 ORDER BY id', pid);
   const scope = appointmentScope(user, 'a');
   const apptRows = await db.all(
-    `SELECT a.*, p.first_name, p.last_name, p.preferred_name, p.guarantor_id, p.dob FROM appointments a JOIN patients p ON p.id = a.patient_id
+    `SELECT a.*, p.first_name, p.last_name, p.preferred_name, p.guarantor_id, p.dob FROM real_appointments a JOIN real_patients p ON p.id = a.patient_id
      WHERE a.practice_id = ? AND a.start_time >= ? AND a.start_time < ?${scope.sql} ORDER BY a.start_time, a.id`, pid, `${date} 00:00`, `${date} 24:00`, ...scope.args,
   );
   const here = (a) => !locationId || a.location_id === locationId || (a.location_id == null);
@@ -635,7 +635,7 @@ export async function loadDay(db, user, { date, locationId = null, withFinder = 
   const codes = new Map((await db.all('SELECT * FROM procedure_codes WHERE practice_id = ?', pid)).map((c) => [c.code, c]));
   const minutesOf = (p) => procMinutes({ code: p.code, category: p.category ?? codes.get(p.code)?.category, time_units: codes.get(p.code)?.time_units });
   const visitIds = ids(apptRows);
-  const procRows = visitIds.length ? await db.all(`SELECT id, appointment_id, code, fee, category, tooth FROM procedures WHERE appointment_id IN (${IN(visitIds)}) AND status != 'cancelled'`, ...visitIds) : [];
+  const procRows = visitIds.length ? await db.all(`SELECT id, appointment_id, code, fee, category, tooth FROM real_procedures procedures WHERE appointment_id IN (${IN(visitIds)}) AND status != 'cancelled'`, ...visitIds) : [];
 
   // Providers working today (here): hours, today's goal and what's booked.
   const providers = [];
@@ -677,7 +677,7 @@ export async function loadDay(db, user, { date, locationId = null, withFinder = 
   });
   // Visits this person can't see (another office) still take the provider's time.
   const hidden = scope.sql ? await db.all(
-    `SELECT a.id, a.provider_id, a.operatory_id, a.patient_id, a.start_time, a.end_time FROM appointments a WHERE a.practice_id = ? AND a.start_time >= ? AND a.start_time < ? AND a.status NOT IN ('cancelled','no_show')${visitIds.length ? ` AND a.id NOT IN (${IN(visitIds)})` : ''}`,
+    `SELECT a.id, a.provider_id, a.operatory_id, a.patient_id, a.start_time, a.end_time FROM real_appointments a WHERE a.practice_id = ? AND a.start_time >= ? AND a.start_time < ? AND a.status NOT IN ('cancelled','no_show')${visitIds.length ? ` AND a.id NOT IN (${IN(visitIds)})` : ''}`,
     pid, `${date} 00:00`, `${date} 24:00`, ...visitIds,
   ) : [];
   const busy = hidden.map((a) => ({ id: a.id, provider_id: a.provider_id, operatory_id: a.operatory_id, patient_id: a.patient_id, s: toMin(a.start_time), e: toMin(a.end_time), status: 'scheduled' }));
@@ -708,8 +708,8 @@ export async function loadDay(db, user, { date, locationId = null, withFinder = 
   const provType = new Map(provRows.map((p) => [p.id, p.type]));
   const policyCache = new Map();
   const openTx = async (patientIds) => (patientIds.length ? db.all(
-    `SELECT x.id, x.patient_id, x.code, x.description, x.tooth, x.area, x.fee, x.category, x.provider_id FROM procedures x
-     LEFT JOIN appointments a ON a.id = x.appointment_id LEFT JOIN treatment_plans tp ON tp.id = x.treatment_plan_id
+    `SELECT x.id, x.patient_id, x.code, x.description, x.tooth, x.area, x.fee, x.category, x.provider_id FROM real_procedures x
+     LEFT JOIN real_appointments a ON a.id = x.appointment_id LEFT JOIN real_treatment_plans tp ON tp.id = x.treatment_plan_id
      WHERE x.practice_id = ? AND x.patient_id IN (${IN(patientIds)}) AND x.status = 'planned'
        AND (x.appointment_id IS NULL OR a.status IN ('cancelled','no_show')) AND (tp.id IS NULL OR tp.status != 'rejected') ORDER BY x.patient_id, x.id`, pid, ...patientIds,
   ) : []);
@@ -762,20 +762,20 @@ export async function loadDay(db, user, { date, locationId = null, withFinder = 
     };
   };
   const hasFuture = async (patientIds) => new Set(patientIds.length ? (await db.all(
-    `SELECT DISTINCT patient_id FROM appointments WHERE practice_id = ? AND patient_id IN (${IN(patientIds)}) AND start_time >= ? AND status NOT IN ('cancelled','no_show','completed')`, pid, ...patientIds, `${addDays(date, 1)} 00:00`,
+    `SELECT DISTINCT patient_id FROM real_appointments appointments WHERE practice_id = ? AND patient_id IN (${IN(patientIds)}) AND start_time >= ? AND status NOT IN ('cancelled','no_show','completed')`, pid, ...patientIds, `${addDays(date, 1)} 00:00`,
   )).map((r) => r.patient_id) : []);
 
   // Households of today's patients.
   const heads = ids(liveVisits.map((v) => ({ id: v.patient.guarantor_id || v.patient.id })));
   const ps = patientScope(user, 'p');
   const members = heads.length ? (await db.all(
-    `SELECT p.* FROM patients p WHERE p.practice_id = ? AND p.status = 'active' AND (p.guarantor_id IN (${IN(heads)}) OR p.id IN (${IN(heads)}))${ps.sql}`, pid, ...heads, ...heads, ...ps.args,
+    `SELECT p.* FROM real_patients p WHERE p.practice_id = ? AND p.status = 'active' AND (p.guarantor_id IN (${IN(heads)}) OR p.id IN (${IN(heads)}))${ps.sql}`, pid, ...heads, ...heads, ...ps.args,
   )).filter((m) => !todayPts.includes(m.id)) : [];
   const family = [];
   if (members.length) {
     const mids = ids(members);
     const future = await hasFuture(mids);
-    const recalls = await db.all(`SELECT * FROM recalls WHERE practice_id = ? AND patient_id IN (${IN(mids)}) AND status IN ('due','contacted') AND due_date <= ? ORDER BY due_date`, pid, ...mids, date);
+    const recalls = await db.all(`SELECT * FROM real_recalls recalls WHERE practice_id = ? AND patient_id IN (${IN(mids)}) AND status IN ('due','contacted') AND due_date <= ? ORDER BY due_date`, pid, ...mids, date);
     const tx = await priced(await openTx(mids));
     for (const m of members) {
       const r = future.has(m.id) ? null : recalls.find((x) => x.patient_id === m.id && visitRecall(x));
@@ -788,11 +788,11 @@ export async function loadDay(db, user, { date, locationId = null, withFinder = 
   // The ASAP list (booked later, want sooner), the waitlist and recall-due patients.
   const loc = locationId ? ' AND (a.location_id = ? OR a.location_id IS NULL)' : '';
   const asapRows = await db.all(
-    `SELECT a.*, p.first_name, p.last_name, p.preferred_name, pv.type AS provider_type FROM appointments a JOIN patients p ON p.id = a.patient_id JOIN providers pv ON pv.id = a.provider_id
+    `SELECT a.*, p.first_name, p.last_name, p.preferred_name, pv.type AS provider_type FROM real_appointments a JOIN real_patients p ON p.id = a.patient_id JOIN providers pv ON pv.id = a.provider_id
      WHERE a.practice_id = ? AND a.asap = 1 AND a.status IN ('scheduled','confirmed') AND a.start_time >= ?${loc}${scope.sql} ORDER BY a.created_at, a.id LIMIT 50`,
     pid, `${addDays(date, 1)} 00:00`, ...(locationId ? [locationId] : []), ...scope.args,
   );
-  const asapProcs = asapRows.length ? await db.all(`SELECT id, appointment_id, patient_id, code, fee, category, tooth FROM procedures WHERE appointment_id IN (${IN(ids(asapRows))}) AND status != 'cancelled'`, ...ids(asapRows)) : [];
+  const asapProcs = asapRows.length ? await db.all(`SELECT id, appointment_id, patient_id, code, fee, category, tooth FROM real_procedures procedures WHERE appointment_id IN (${IN(ids(asapRows))}) AND status != 'cancelled'`, ...ids(asapRows)) : [];
   const asap = [];
   for (const a of asapRows) {
     const mine = asapProcs.filter((x) => x.appointment_id === a.id);
@@ -803,7 +803,7 @@ export async function loadDay(db, user, { date, locationId = null, withFinder = 
     });
   }
   const wl = await db.all(
-    `SELECT w.*, p.first_name, p.last_name, p.preferred_name FROM waitlist w JOIN patients p ON p.id = w.patient_id WHERE w.practice_id = ? AND w.status = 'waiting' AND p.status = 'active'${ps.sql} ORDER BY w.created_at, w.id LIMIT 50`,
+    `SELECT w.*, p.first_name, p.last_name, p.preferred_name FROM real_waitlist w JOIN real_patients p ON p.id = w.patient_id WHERE w.practice_id = ? AND w.status = 'waiting' AND p.status = 'active'${ps.sql} ORDER BY w.created_at, w.id LIMIT 50`,
     pid, ...ps.args,
   );
   const wlTx = await priced(await openTx(ids(wl, 'patient_id')));
@@ -822,7 +822,7 @@ export async function loadDay(db, user, { date, locationId = null, withFinder = 
   const hygieneOpen = providers.some((p) => p.kind === 'hygiene');
   if (hygieneOpen) {
     const rows = await db.all(
-      `SELECT r.*, p.first_name, p.last_name, p.preferred_name, p.dob, p.practice_id AS ppid FROM recalls r JOIN patients p ON p.id = r.patient_id
+      `SELECT r.*, p.first_name, p.last_name, p.preferred_name, p.dob, p.practice_id AS ppid FROM real_recalls r JOIN real_patients p ON p.id = r.patient_id
        WHERE r.practice_id = ? AND r.status IN ('due','contacted') AND r.due_date <= ? AND p.status = 'active'${locationId ? ' AND (p.location_id = ? OR p.location_id IS NULL)' : ''}${ps.sql}
        ORDER BY r.due_date DESC, r.id LIMIT 60`, pid, date, ...(locationId ? [locationId] : []), ...ps.args,
     );

@@ -802,7 +802,7 @@ export async function loadCapacityInputs(db, practiceId, { locationId = null, no
     practiceId, `${today} 00:00`, `${to} 24:00`,
   );
   const appointments = await db.all(
-    `SELECT id, provider_id, location_id, start_time, end_time, appointment_type_id, asap, status FROM appointments
+    `SELECT id, provider_id, location_id, start_time, end_time, appointment_type_id, asap, status FROM real_appointments appointments
      WHERE practice_id = ? AND status NOT IN ('cancelled','no_show') AND start_time >= ? AND start_time < ?`,
     practiceId, `${from} 00:00`, `${to} 24:00`,
   );
@@ -811,7 +811,7 @@ export async function loadCapacityInputs(db, practiceId, { locationId = null, no
   const twoDaysAgo = new Date(nowDate.getTime() - 48 * 3600_000).toISOString().slice(0, 19).replace('T', ' ');
   const pending = await db.all(
     `SELECT r.provider_id, r.requested_start, r.duration, r.reason, r.new_patient, r.created_at, r.location_id, r.deposit_status, r.hold_until, pv.type AS provider_type
-     FROM booking_requests r LEFT JOIN providers pv ON pv.id = r.provider_id WHERE r.practice_id = ? AND r.status = 'pending'`, practiceId,
+     FROM real_booking_requests r LEFT JOIN providers pv ON pv.id = r.provider_id WHERE r.practice_id = ? AND r.status = 'pending'`, practiceId,
   );
   const holds = pending.filter((r) => r.provider_id && r.requested_start >= `${today} 00:00`
     && (r.deposit_status === 'paid' || (r.hold_until && r.hold_until > utcNow) || (r.deposit_status == null && r.created_at > twoDaysAgo)))
@@ -849,17 +849,17 @@ export async function loadCapacityInputs(db, practiceId, { locationId = null, no
   const types = await db.all('SELECT id, name, duration, provider_type, procedure_codes, provider_durations, active FROM appointment_types WHERE practice_id = ?', practiceId);
   const rtypes = await recallTypes(db, practiceId);
   const recalls = await db.all(
-    `SELECT r.patient_id, r.type, r.due_date, p.location_id FROM recalls r JOIN patients p ON p.id = r.patient_id
+    `SELECT r.patient_id, r.type, r.due_date, p.location_id FROM real_recalls r JOIN real_patients p ON p.id = r.patient_id
      WHERE r.practice_id = ? AND r.status IN ('due','contacted') AND r.appointment_id IS NULL AND p.status = 'active' AND r.due_date >= ? AND r.due_date <= ?`,
     practiceId, addDays(today, -365), addDays(today, WINDOWS.w8 - 1),
   );
   const planned = await db.all(
     `SELECT x.patient_id, x.category, x.location_id, p.location_id AS home_location_id, pv.type AS provider_type, pc.time_units
-     FROM procedures x JOIN patients p ON p.id = x.patient_id LEFT JOIN providers pv ON pv.id = x.provider_id LEFT JOIN procedure_codes pc ON pc.id = x.code_id
+     FROM real_procedures x JOIN real_patients p ON p.id = x.patient_id LEFT JOIN providers pv ON pv.id = x.provider_id LEFT JOIN procedure_codes pc ON pc.id = x.code_id
      WHERE x.practice_id = ? AND x.status = 'planned' AND x.appointment_id IS NULL AND p.status = 'active'`, practiceId,
   );
   const waitlist = await db.all(
-    `SELECT w.reason, w.duration, p.location_id, pv.type AS provider_type FROM waitlist w JOIN patients p ON p.id = w.patient_id LEFT JOIN providers pv ON pv.id = w.provider_id
+    `SELECT w.reason, w.duration, p.location_id, pv.type AS provider_type FROM real_waitlist w JOIN real_patients p ON p.id = w.patient_id LEFT JOIN providers pv ON pv.id = w.provider_id
      WHERE w.practice_id = ? AND w.status = 'waiting'`, practiceId,
   );
   return {

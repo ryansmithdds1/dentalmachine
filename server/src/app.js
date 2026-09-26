@@ -147,6 +147,8 @@ import { createPayments } from './payments.js';
 import { createMailer } from './mail.js';
 import { createErrorReporter, requestLogger, routeOf, log } from './monitoring.js';
 import { officeAccess } from './officeaccess.js';
+import trainingRoutes from './routes/training.js';
+import { guardAdapter, guardMessenger } from './training.js';
 
 // Runtime configuration, from the environment unless overridden (tests pass their own).
 const listOf = (v) => String(v || '').split(',').map((s) => s.trim()).filter(Boolean);
@@ -223,6 +225,16 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   gbp ??= createGoogleBusiness({ config, fetchImpl });
   mailer ??= overrides.mailer || createMailer({ fetchImpl });
   clearinghouse ??= createClearinghouse({ db, fetchImpl, config: { ...clearinghouseConfig(), ...(config.ediMode === 'sandbox' && !process.env.CLEARINGHOUSE ? { mode: 'sandbox' } : {}) } });
+  // The training patient never leaves the office (training.js): every adapter that sends something about a patient
+  // refuses anything carrying it, whichever route or job called it.
+  messenger = guardMessenger(db, messenger);
+  payments = guardAdapter(db, payments, 'Card payments', ['ensureCustomer', 'cardSetupUrl', 'refund', 'checkout', 'charge', { terminal: ['start'] }]);
+  clearinghouse = guardAdapter(db, clearinghouse, 'Clearinghouse', [{ batch: ['submit'], realtime: ['eligibility', 'claimStatus'] }]);
+  erx = guardAdapter(db, erx, 'e-Prescribing', ['transmit'], { sync: ['ssoUrl'] });
+  pdmp = guardAdapter(db, pdmp, 'PDMP', ['query']);
+  mailer = guardAdapter(db, mailer, 'Mail', ['sendLetter']);
+  qbo = guardAdapter(db, qbo, 'QuickBooks', ['createDeposit']);
+  attachmentSender &&= guardAdapter(db, attachmentSender, 'Claim attachments', ['send']);
   startWebhooks(db, fetchImpl);
   const reporter = overrides.reporter || createErrorReporter({ dsn: config.sentryDsn, fetchImpl });
   const app = express();
@@ -333,6 +345,8 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
       locationId: req.location_id ?? null,
       // A reason typed for a change ("why?") travels with it into the audit log.
       reason: typeof req.body?.change_reason === 'string' ? req.body.change_reason.trim().slice(0, 500) || null : null,
+      // A guided walkthrough on the training patient: whatever it creates is practice data too (training.js).
+      practiceMode: req.get('X-Practice-Mode') === '1',
     });
     next();
   });
@@ -345,6 +359,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
     next();
   });
   api.use(prefsRoutes({ db }));
+  api.use(trainingRoutes({ db, storage }));
   api.use(offlineRoutes({ db, secret, app: () => app }));
   api.use(patientRoutes({ db }));
   // Before scheduleRoutes: /schedule/production?date= is answered here (?from= requests pass through to schedule.js).
@@ -400,7 +415,7 @@ export function createApp({ db, secret, config: overrides = {}, fetchImpl = glob
   api.use(reputationRoutes({ db, config, secret, gbp }));
   api.use(reviewFunnelRoutes({ db, messenger, config }));
   api.use(onboardingRoutes({ db, messenger, payments }));
-  api.use(attachmentRoutes({ db, storage, sender: attachmentSender ?? createAttachmentSender(attachmentConfig(process.env, config.ediMode), fetchImpl) }));
+  api.use(attachmentRoutes({ db, storage, sender: attachmentSender ?? guardAdapter(db, createAttachmentSender(attachmentConfig(process.env, config.ediMode), fetchImpl), 'Claim attachments', ['send']) }));
   // Cash voids, refunds and same-day discounts need a manager: checked before billing handles them.
   api.use(cashGuardRoutes({ db }));
   api.use(billingRoutes({ db, payments, config, messenger }));

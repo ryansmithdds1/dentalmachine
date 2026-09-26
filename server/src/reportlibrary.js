@@ -56,7 +56,7 @@ async function ledgerByType(ctx, from, to) {
   const w = ctx.office('l.location_id');
   return ctx.db.all(
     `SELECT l.type, COALESCE(l.method, '') AS method, SUM(CASE WHEN ${LIVE} THEN 1 ELSE 0 END) AS n, SUM(l.amount) AS amount
-     FROM ledger_entries l WHERE l.practice_id = ? AND l.entry_date BETWEEN ? AND ?${w.sql}
+     FROM real_ledger_entries l WHERE l.practice_id = ? AND l.entry_date BETWEEN ? AND ?${w.sql}
      GROUP BY l.type, COALESCE(l.method, '')`, ctx.pid, from, to, ...w.args,
   );
 }
@@ -65,7 +65,7 @@ const typeSum = (rows, type, key = 'amount') => rows.filter((r) => r.type === ty
 async function appointmentCounts(ctx, from, to) {
   const w = join(ctx.office('a.location_id', { nullable: true }), ctx.provider('a.provider_id'));
   const rows = await ctx.db.all(
-    `SELECT a.status, COUNT(*) AS n FROM appointments a WHERE a.practice_id = ? AND a.start_time >= ? AND a.start_time < ?${w.sql} GROUP BY a.status`,
+    `SELECT a.status, COUNT(*) AS n FROM real_appointments a WHERE a.practice_id = ? AND a.start_time >= ? AND a.start_time < ?${w.sql} GROUP BY a.status`,
     ctx.pid, `${from} 00:00`, `${to} 24:00`, ...w.args,
   );
   return Object.fromEntries(rows.map((r) => [r.status, num(r.n)]));
@@ -74,7 +74,7 @@ async function appointmentCounts(ctx, from, to) {
 async function newPatientCount(ctx, from, to) {
   const [f, t] = await utcRange(ctx.db, ctx.pid, from, to);
   const s = ctx.patients('p');
-  return num((await ctx.db.get(`SELECT COUNT(*) AS n FROM patients p WHERE p.practice_id = ? AND p.merged_into_id IS NULL AND p.created_at >= ? AND p.created_at < ?${s.sql}`, ctx.pid, f, t, ...s.args)).n);
+  return num((await ctx.db.get(`SELECT COUNT(*) AS n FROM real_patients p WHERE p.practice_id = ? AND p.merged_into_id IS NULL AND p.created_at >= ? AND p.created_at < ?${s.sql}`, ctx.pid, f, t, ...s.args)).n);
 }
 
 // Payment allocation (allocation.js): which provider's work each payment and credit adjustment paid for.
@@ -86,7 +86,7 @@ async function allocatedByProvider(ctx) {
   const where = new Map();
   for (let i = 0; i < ids.length; i += 500) {
     const chunk = ids.slice(i, i + 500);
-    for (const r of await ctx.db.all(`SELECT id, location_id FROM ledger_entries WHERE practice_id = ? AND id IN (${chunk.map(() => '?').join(',')})`, ctx.pid, ...chunk)) where.set(r.id, r.location_id);
+    for (const r of await ctx.db.all(`SELECT id, location_id FROM real_ledger_entries ledger_entries WHERE practice_id = ? AND id IN (${chunk.map(() => '?').join(',')})`, ctx.pid, ...chunk)) where.set(r.id, r.location_id);
   }
   return all.filter((a) => ctx.officeIds.includes(where.get(a.charge_id || a.credit_id)));
 }
@@ -94,7 +94,7 @@ async function allocatedByProvider(ctx) {
 async function chargesByProvider(ctx) {
   const w = join(ctx.office('l.location_id'), ctx.provider('l.provider_id'));
   return ctx.db.all(
-    `SELECT l.provider_id, SUM(l.amount) AS production FROM ledger_entries l
+    `SELECT l.provider_id, SUM(l.amount) AS production FROM real_ledger_entries l
      WHERE l.practice_id = ? AND l.type = 'charge' AND l.retail_sale_id IS NULL AND l.entry_date BETWEEN ? AND ?${w.sql} GROUP BY l.provider_id`, ctx.pid, ctx.from, ctx.to, ...w.args,
   );
 }
@@ -110,8 +110,8 @@ async function openClaims(ctx, statuses) {
   const rows = await ctx.db.all(
     `SELECT c.id, c.patient_id, ${NAME} AS patient, c.status, c.total_fee, c.estimated_amount, c.paid_amount, c.denial_reason,
        c.submitted_at, c.created_at, c.follow_up_date, ic.name AS carrier, ic.id AS carrier_id
-     FROM claims c JOIN patients p ON p.id = c.patient_id
-     JOIN patient_insurance pi ON pi.id = c.patient_insurance_id JOIN insurance_carriers ic ON ic.id = pi.carrier_id
+     FROM real_claims c JOIN real_patients p ON p.id = c.patient_id
+     JOIN real_patient_insurance pi ON pi.id = c.patient_insurance_id JOIN insurance_carriers ic ON ic.id = pi.carrier_id
      WHERE c.practice_id = ? AND c.status IN (${statuses.map(() => '?').join(',')})${w.sql}`, ctx.pid, ...statuses, ...w.args,
   );
   return rows.map((c) => {
@@ -128,7 +128,7 @@ async function presentedPlans(ctx) {
   return ctx.db.all(
     `SELECT tp.id AS plan_id, tp.status AS plan_status, tp.signed_at, COALESCE(tp.presented_at, tp.created_at) AS presented,
        pr.fee, pr.status, pr.appointment_id, pr.provider_id
-     FROM treatment_plans tp JOIN procedures pr ON pr.treatment_plan_id = tp.id JOIN patients p ON p.id = tp.patient_id
+     FROM real_treatment_plans tp JOIN real_procedures pr ON pr.treatment_plan_id = tp.id JOIN real_patients p ON p.id = tp.patient_id
      WHERE tp.practice_id = ? AND COALESCE(tp.presented_at, tp.created_at) >= ? AND COALESCE(tp.presented_at, tp.created_at) < ? AND pr.status != 'cancelled'${w.sql}`,
     ctx.pid, f, t, ...w.args,
   );
@@ -199,7 +199,7 @@ async function ppoCredits(ctx, ids) {
   const list = [...new Set(ids)];
   for (let i = 0; i < list.length; i += 500) {
     const chunk = list.slice(i, i + 500);
-    const rows = await ctx.db.all(`SELECT l.id FROM ledger_entries l WHERE l.practice_id = ? AND l.id IN (${chunk.map(() => '?').join(',')}) AND l.type = 'adjustment' AND ${IS_PPO}`, ctx.pid, ...chunk);
+    const rows = await ctx.db.all(`SELECT l.id FROM real_ledger_entries l WHERE l.practice_id = ? AND l.id IN (${chunk.map(() => '?').join(',')}) AND l.type = 'adjustment' AND ${IS_PPO}`, ctx.pid, ...chunk);
     for (const r of rows) out.add(r.id);
   }
   return out;
@@ -209,7 +209,7 @@ async function ppoCredits(ctx, ids) {
 function plannedSql(ctx, from, to, joins = '') {
   const w = ctx.office('a.location_id', { nullable: true });
   return {
-    sql: `FROM procedures pr JOIN appointments a ON a.id = pr.appointment_id${joins}
+    sql: `FROM real_procedures pr JOIN real_appointments a ON a.id = pr.appointment_id${joins}
       WHERE pr.practice_id = ? AND pr.status = 'planned' AND a.status NOT IN ('cancelled','no_show') AND a.start_time >= ? AND a.start_time < ?${w.sql}`,
     args: [ctx.pid, `${from} 00:00`, `${to} 24:00`, ...w.args],
   };
@@ -225,7 +225,7 @@ export async function productionIncome(ctx) {
        -SUM(CASE WHEN l.type = 'payment' THEN l.amount ELSE 0 END) AS patient,
        -SUM(CASE WHEN l.type = 'insurance_payment' THEN l.amount ELSE 0 END) AS insurance,
        SUM(CASE WHEN l.type = 'refund' THEN l.amount ELSE 0 END) AS refunds
-     FROM ledger_entries l WHERE l.practice_id = ? AND l.entry_date BETWEEN ? AND ?${w.sql}
+     FROM real_ledger_entries l WHERE l.practice_id = ? AND l.entry_date BETWEEN ? AND ?${w.sql}
      GROUP BY l.entry_date ORDER BY l.entry_date`, ctx.pid, ctx.from, ctx.to, ...w.args,
   );
   const blank = () => ({ gross: 0, ppo_writeoffs: 0, other_adjustments: 0, adjustments: 0, net: 0, patient: 0, insurance: 0, collections: 0, refunds: 0 });
@@ -278,7 +278,7 @@ export async function productionIncome(ctx) {
     const last = monthEnd(month);
     const mw = join(ctx.office('l.location_id'));
     const mtd = await ctx.db.all(
-      `SELECT l.provider_id, SUM(l.amount) AS production FROM ledger_entries l
+      `SELECT l.provider_id, SUM(l.amount) AS production FROM real_ledger_entries l
        WHERE l.practice_id = ? AND l.type = 'charge' AND l.retail_sale_id IS NULL AND l.entry_date BETWEEN ? AND ?${mw.sql} GROUP BY l.provider_id`, ctx.pid, first, ctx.today, ...mw.args,
     );
     const q = plannedSql(ctx, ctx.today, last);
@@ -313,7 +313,7 @@ export async function productionIncomeEntries(ctx, { metric, providerId = null, 
   if (providerId != null && !none && !(await ctx.db.get('SELECT id FROM providers WHERE id = ? AND practice_id = ?', providerId, ctx.pid))) throw new HttpError(404, 'Provider not found');
   const month = ctx.today.slice(0, 7);
   if (metric === 'scheduled') {
-    const q = plannedSql(ctx, ctx.today, monthEnd(month), ' JOIN patients p ON p.id = a.patient_id LEFT JOIN providers pv ON pv.id = a.provider_id');
+    const q = plannedSql(ctx, ctx.today, monthEnd(month), ' JOIN real_patients p ON p.id = a.patient_id LEFT JOIN providers pv ON pv.id = a.provider_id');
     const pw = providerId == null ? frag() : none ? frag(' AND a.provider_id IS NULL') : frag(' AND a.provider_id = ?', [providerId]);
     const rows = await ctx.db.all(
       `SELECT pr.id, substr(a.start_time, 1, 10) AS entry_date, a.id AS appointment_id, a.patient_id, ${NAME} AS patient, pr.code, pr.tooth, pr.description, pv.name AS provider, pr.fee AS amount
@@ -330,7 +330,7 @@ export async function productionIncomeEntries(ctx, { metric, providerId = null, 
   const [f, t] = metric === 'month_to_date' ? [`${month}-01`, ctx.today] : [from, to];
   const kind = metric === 'ppo_writeoffs' ? ` AND ${IS_PPO}` : metric === 'other_adjustments' ? ` AND NOT ${IS_PPO}` : '';
   const select = `SELECT l.id, l.entry_date, l.patient_id, ${NAME} AS patient, l.type, l.description, l.adjustment_type, l.voided_at, l.reverses_id, pr.code, pr.tooth, pv.name AS provider, l.amount
-    FROM ledger_entries l JOIN patients p ON p.id = l.patient_id LEFT JOIN procedures pr ON pr.id = l.procedure_id LEFT JOIN providers pv ON pv.id = l.provider_id`;
+    FROM real_ledger_entries l JOIN real_patients p ON p.id = l.patient_id LEFT JOIN real_procedures pr ON pr.id = l.procedure_id LEFT JOIN providers pv ON pv.id = l.provider_id`;
   const shape = (r, amount) => ({ ...r, type_label: r.adjustment_type || TYPE_LABEL[r.type], status: entryStatus(r), amount });
   // An office number (or a provider's production): the ledger entries themselves.
   if (providerId == null || !credit) {
@@ -394,7 +394,7 @@ def({
     const w = join(ctx.office('l.location_id'), ctx.provider('l.provider_id'));
     const rows = await ctx.db.all(
       `SELECT l.provider_id, COALESCE(pv.name, 'No provider') AS provider, SUM(CASE WHEN ${LIVE} THEN 1 ELSE 0 END) AS procedures, SUM(l.amount) AS production
-       FROM ledger_entries l LEFT JOIN providers pv ON pv.id = l.provider_id
+       FROM real_ledger_entries l LEFT JOIN providers pv ON pv.id = l.provider_id
        WHERE l.practice_id = ? AND l.type = 'charge' AND l.retail_sale_id IS NULL AND l.entry_date BETWEEN ? AND ?${w.sql}
        GROUP BY l.provider_id, pv.name`, ctx.pid, ctx.from, ctx.to, ...w.args,
     );
@@ -413,7 +413,7 @@ def({
     const rows = await ctx.db.all(
       `SELECT COALESCE(pr.code, '(no code)') AS code, MIN(COALESCE(pr.description, l.description)) AS description,
          SUM(CASE WHEN ${LIVE} THEN 1 ELSE 0 END) AS count, SUM(l.amount) AS production
-       FROM ledger_entries l LEFT JOIN procedures pr ON pr.id = l.procedure_id
+       FROM real_ledger_entries l LEFT JOIN real_procedures pr ON pr.id = l.procedure_id
        WHERE l.practice_id = ? AND l.type = 'charge' AND l.retail_sale_id IS NULL AND l.entry_date BETWEEN ? AND ?${w.sql}
        GROUP BY 1`, ctx.pid, ctx.from, ctx.to, ...w.args,
     );
@@ -430,7 +430,7 @@ def({
     const w = join(ctx.office('l.location_id'), ctx.provider('l.provider_id'));
     const rows = await ctx.db.all(
       `SELECT COALESCE(pr.category, 'other') AS category, SUM(CASE WHEN ${LIVE} THEN 1 ELSE 0 END) AS count, SUM(l.amount) AS production
-       FROM ledger_entries l LEFT JOIN procedures pr ON pr.id = l.procedure_id
+       FROM real_ledger_entries l LEFT JOIN real_procedures pr ON pr.id = l.procedure_id
        WHERE l.practice_id = ? AND l.type = 'charge' AND l.retail_sale_id IS NULL AND l.entry_date BETWEEN ? AND ?${w.sql} GROUP BY 1`, ctx.pid, ctx.from, ctx.to, ...w.args,
     );
     const total = rows.reduce((s, r) => s + num(r.production), 0);
@@ -450,7 +450,7 @@ def({
          SUM(CASE WHEN l.type = 'charge' AND l.retail_sale_id IS NULL THEN l.amount ELSE 0 END) AS production,
          SUM(CASE WHEN l.type = 'adjustment' AND l.retail_sale_id IS NULL AND l.gift_certificate_id IS NULL THEN l.amount ELSE 0 END) AS adjustments,
          -SUM(CASE WHEN l.type IN ('payment','insurance_payment') THEN l.amount ELSE 0 END) AS collections
-       FROM ledger_entries l WHERE l.practice_id = ? AND l.entry_date BETWEEN ? AND ?${w.sql}
+       FROM real_ledger_entries l WHERE l.practice_id = ? AND l.entry_date BETWEEN ? AND ?${w.sql}
        GROUP BY l.entry_date ORDER BY l.entry_date`, ctx.pid, ctx.from, ctx.to, ...w.args,
     );
     return { rows: rows.map((r) => ({ ...r, net: num(r.production) + num(r.adjustments) })) };
@@ -492,8 +492,8 @@ def({
     const w = join(ctx.office('a.location_id', { nullable: true }), ctx.provider('a.provider_id'));
     const rows = await ctx.db.all(
       `SELECT substr(a.start_time, 1, 10) AS day, a.provider_id, pv.name AS provider, COUNT(DISTINCT a.id) AS visits, COALESCE(SUM(pr.fee), 0) AS scheduled
-       FROM appointments a JOIN providers pv ON pv.id = a.provider_id
-       LEFT JOIN procedures pr ON pr.appointment_id = a.id AND pr.status != 'cancelled'
+       FROM real_appointments a JOIN providers pv ON pv.id = a.provider_id
+       LEFT JOIN real_procedures pr ON pr.appointment_id = a.id AND pr.status != 'cancelled'
        WHERE a.practice_id = ? AND a.status NOT IN ('cancelled','no_show') AND a.start_time >= ? AND a.start_time < ?${w.sql}
        GROUP BY substr(a.start_time, 1, 10), a.provider_id, pv.name`, ctx.pid, `${ctx.from} 00:00`, `${ctx.to} 24:00`, ...w.args,
     );
@@ -509,15 +509,15 @@ def({
   async run(ctx) {
     const lw = join(ctx.office('l.location_id'), ctx.provider('l.provider_id'));
     const prod = await ctx.db.all(
-      `SELECT l.provider_id, SUM(l.amount) AS production FROM ledger_entries l JOIN providers pv ON pv.id = l.provider_id
+      `SELECT l.provider_id, SUM(l.amount) AS production FROM real_ledger_entries l JOIN providers pv ON pv.id = l.provider_id
        WHERE l.practice_id = ? AND pv.type = 'hygienist' AND l.type = 'charge' AND l.retail_sale_id IS NULL AND l.entry_date BETWEEN ? AND ?${lw.sql} GROUP BY l.provider_id`,
       ctx.pid, ctx.from, ctx.to, ...lw.args,
     );
     const aw = join(ctx.office('a.location_id', { nullable: true }), ctx.provider('a.provider_id'));
     const visits = await ctx.db.all(
-      `SELECT a.provider_id, COUNT(*) AS visits, SUM(CASE WHEN EXISTS (SELECT 1 FROM appointments b WHERE b.patient_id = a.patient_id AND b.start_time > a.start_time
+      `SELECT a.provider_id, COUNT(*) AS visits, SUM(CASE WHEN EXISTS (SELECT 1 FROM real_appointments b WHERE b.patient_id = a.patient_id AND b.start_time > a.start_time
            AND b.status NOT IN ('cancelled','no_show') AND substr(b.created_at, 1, 10) <= substr(a.start_time, 1, 10)) THEN 1 ELSE 0 END) AS reappointed
-       FROM appointments a JOIN providers pv ON pv.id = a.provider_id
+       FROM real_appointments a JOIN providers pv ON pv.id = a.provider_id
        WHERE a.practice_id = ? AND pv.type = 'hygienist' AND a.status = 'completed' AND a.start_time >= ? AND a.start_time < ?${aw.sql}
        GROUP BY a.provider_id`, ctx.pid, `${ctx.from} 00:00`, `${ctx.to} 24:00`, ...aw.args,
     );
@@ -571,7 +571,7 @@ def({
     const w = ctx.office('l.location_id');
     const rows = await ctx.db.all(
       `SELECT l.type, COALESCE(l.method, 'other') AS method, SUM(CASE WHEN ${LIVE} THEN 1 ELSE 0 END) AS count, -SUM(l.amount) AS amount
-       FROM ledger_entries l WHERE l.practice_id = ? AND l.type IN ('payment','insurance_payment','refund') AND l.entry_date BETWEEN ? AND ?${w.sql}
+       FROM real_ledger_entries l WHERE l.practice_id = ? AND l.type IN ('payment','insurance_payment','refund') AND l.entry_date BETWEEN ? AND ?${w.sql}
        GROUP BY l.type, COALESCE(l.method, 'other')`, ctx.pid, ctx.from, ctx.to, ...w.args,
     );
     const order = { payment: 0, insurance_payment: 1, refund: 2 };
@@ -594,7 +594,7 @@ def({
       `SELECT substr(l.entry_date, 1, 7) AS month,
          -SUM(CASE WHEN l.type = 'payment' THEN l.amount ELSE 0 END) AS patient,
          -SUM(CASE WHEN l.type = 'insurance_payment' THEN l.amount ELSE 0 END) AS insurance
-       FROM ledger_entries l WHERE l.practice_id = ? AND l.type IN ('payment','insurance_payment') AND l.entry_date BETWEEN ? AND ?${w.sql}
+       FROM real_ledger_entries l WHERE l.practice_id = ? AND l.type IN ('payment','insurance_payment') AND l.entry_date BETWEEN ? AND ?${w.sql}
        GROUP BY substr(l.entry_date, 1, 7) ORDER BY 1`, ctx.pid, ctx.from, ctx.to, ...w.args,
     );
     const list = rows.map((r) => ({ month: r.month, patient: num(r.patient), insurance: num(r.insurance), total: num(r.patient) + num(r.insurance), insurance_share: pct(num(r.insurance), num(r.patient) + num(r.insurance)) }));
@@ -616,7 +616,7 @@ def({
          SUM(CASE WHEN l.type = 'charge' AND l.retail_sale_id IS NULL THEN l.amount ELSE 0 END) AS production,
          SUM(CASE WHEN l.type = 'adjustment' AND l.retail_sale_id IS NULL AND l.gift_certificate_id IS NULL THEN l.amount ELSE 0 END) AS adjustments,
          -SUM(CASE WHEN l.type IN ('payment','insurance_payment') THEN l.amount ELSE 0 END) AS collections
-       FROM ledger_entries l WHERE l.practice_id = ? AND l.entry_date BETWEEN ? AND ?${w.sql}
+       FROM real_ledger_entries l WHERE l.practice_id = ? AND l.entry_date BETWEEN ? AND ?${w.sql}
        GROUP BY substr(l.entry_date, 1, 7) ORDER BY 1`, ctx.pid, ctx.from, ctx.to, ...w.args,
     );
     const list = rows.map((r) => {
@@ -636,7 +636,7 @@ def({
     const w = ctx.office('l.location_id');
     const rows = await ctx.db.all(
       `SELECT l.id, l.entry_date, l.patient_id, ${NAME} AS patient, l.type, l.method, l.reference, u.name AS posted_by, l.voided_at, l.reverses_id, -l.amount AS amount
-       FROM ledger_entries l JOIN patients p ON p.id = l.patient_id LEFT JOIN users u ON u.id = l.created_by
+       FROM real_ledger_entries l JOIN real_patients p ON p.id = l.patient_id LEFT JOIN users u ON u.id = l.created_by
        WHERE l.practice_id = ? AND l.type IN ('payment','insurance_payment','refund') AND l.entry_date BETWEEN ? AND ?${w.sql}
        ORDER BY l.entry_date, l.id`, ctx.pid, ctx.from, ctx.to, ...w.args,
     );
@@ -654,7 +654,7 @@ def({
     const rows = await ctx.db.all(
       `SELECT COALESCE(l.adjustment_type, CASE WHEN l.claim_id IS NOT NULL THEN 'Insurance write-off' ELSE 'Other' END) AS type,
          SUM(CASE WHEN ${LIVE} THEN 1 ELSE 0 END) AS count, SUM(l.amount) AS amount
-       FROM ledger_entries l WHERE l.practice_id = ? AND l.type = 'adjustment' AND l.retail_sale_id IS NULL AND l.gift_certificate_id IS NULL AND l.entry_date BETWEEN ? AND ?${w.sql} GROUP BY 1`,
+       FROM real_ledger_entries l WHERE l.practice_id = ? AND l.type = 'adjustment' AND l.retail_sale_id IS NULL AND l.gift_certificate_id IS NULL AND l.entry_date BETWEEN ? AND ?${w.sql} GROUP BY 1`,
       ctx.pid, ctx.from, ctx.to, ...w.args,
     );
     return { rows: rows.filter((r) => num(r.count) || num(r.amount)).sort((a, b) => a.amount - b.amount), note: 'Credits (write-offs, discounts) are negative; debit adjustments (fees) are positive.' };
@@ -670,7 +670,7 @@ def({
     const w = ctx.office('l.location_id');
     const rows = await ctx.db.all(
       `SELECT l.id, l.entry_date, l.patient_id, ${NAME} AS patient, l.method, l.description, u.name AS posted_by, l.voided_at, l.reverses_id, l.amount
-       FROM ledger_entries l JOIN patients p ON p.id = l.patient_id LEFT JOIN users u ON u.id = l.created_by
+       FROM real_ledger_entries l JOIN real_patients p ON p.id = l.patient_id LEFT JOIN users u ON u.id = l.created_by
        WHERE l.practice_id = ? AND l.type = 'refund' AND l.entry_date BETWEEN ? AND ?${w.sql} ORDER BY l.entry_date, l.id`, ctx.pid, ctx.from, ctx.to, ...w.args,
     );
     return { rows: rows.map((r) => ({ ...r, method: title(r.method), status: entryStatus(r) })) };
@@ -688,7 +688,7 @@ def({
     let rows = report.rows;
     if (ctx.officeIds) {
       const s = ctx.patients('p');
-      const ok = new Set((await ctx.db.all(`SELECT p.id FROM patients p WHERE p.practice_id = ?${s.sql}`, ctx.pid, ...s.args)).map((p) => p.id));
+      const ok = new Set((await ctx.db.all(`SELECT p.id FROM real_patients p WHERE p.practice_id = ?${s.sql}`, ctx.pid, ...s.args)).map((p) => p.id));
       rows = rows.filter((r) => ok.has(r.id));
     }
     return { rows: rows.map((r) => ({ ...r, patient_id: r.id, patient: `${r.first_name || ''} ${r.last_name || ''}`.trim() })), note: `As of ${ctx.asOf}. Payments and credits pay off the oldest charges first; accounts in credit are on the Credit balances report.` };
@@ -722,7 +722,7 @@ def({
     const s = ctx.patients('p');
     const rows = await ctx.db.all(
       `SELECT l.patient_id, ${NAME} AS patient, p.phone, SUM(l.amount) AS balance, MAX(CASE WHEN l.amount < 0 THEN l.entry_date END) AS last_credit
-       FROM ledger_entries l JOIN patients p ON p.id = l.patient_id
+       FROM real_ledger_entries l JOIN real_patients p ON p.id = l.patient_id
        WHERE l.practice_id = ?${s.sql}
        GROUP BY l.patient_id, p.first_name, p.last_name, p.phone HAVING SUM(l.amount) < 0`, ctx.pid, ...s.args,
     );
@@ -775,8 +775,8 @@ def({
     const s = ctx.patients('p');
     const rows = await ctx.db.all(
       `SELECT COALESCE(rc.name, p.referral_source, 'Not recorded') AS source, COUNT(*) AS patients, COALESCE(SUM(lp.n), 0) AS production
-       FROM patients p LEFT JOIN referral_contacts rc ON rc.id = p.referred_by_id
-       LEFT JOIN (SELECT patient_id, SUM(amount) AS n FROM ledger_entries WHERE practice_id = ? AND type = 'charge' AND retail_sale_id IS NULL GROUP BY patient_id) lp ON lp.patient_id = p.id
+       FROM real_patients p LEFT JOIN referral_contacts rc ON rc.id = p.referred_by_id
+       LEFT JOIN (SELECT patient_id, SUM(amount) AS n FROM real_ledger_entries ledger_entries WHERE practice_id = ? AND type = 'charge' AND retail_sale_id IS NULL GROUP BY patient_id) lp ON lp.patient_id = p.id
        WHERE p.practice_id = ? AND p.merged_into_id IS NULL AND p.created_at >= ? AND p.created_at < ?${s.sql}
        GROUP BY 1`, ctx.pid, ctx.pid, f, t, ...s.args,
     );
@@ -794,9 +794,9 @@ def({
     const w = join(ctx.patients('p'), ctx.provider('p.primary_provider_id'));
     const rows = await ctx.db.all(
       `SELECT p.primary_provider_id, COALESCE(pv.name, 'No primary provider') AS provider, COUNT(*) AS active,
-         SUM(CASE WHEN EXISTS (SELECT 1 FROM appointments a WHERE a.patient_id = p.id AND a.status = 'completed' AND a.start_time >= ?) THEN 1 ELSE 0 END) AS seen,
+         SUM(CASE WHEN EXISTS (SELECT 1 FROM real_appointments a WHERE a.patient_id = p.id AND a.status = 'completed' AND a.start_time >= ?) THEN 1 ELSE 0 END) AS seen,
          SUM(CASE WHEN p.created_at >= ? AND p.created_at < ? THEN 1 ELSE 0 END) AS new_patients
-       FROM patients p LEFT JOIN providers pv ON pv.id = p.primary_provider_id
+       FROM real_patients p LEFT JOIN providers pv ON pv.id = p.primary_provider_id
        WHERE p.practice_id = ? AND p.status = 'active'${w.sql}
        GROUP BY p.primary_provider_id, pv.name`, `${addMonths(ctx.today, -18)} 00:00`, f, t, ctx.pid, ...w.args,
     );
@@ -813,12 +813,12 @@ def({
     const w = join(ctx.patients('p'), ctx.provider('p.primary_provider_id'));
     const rows = await ctx.db.all(
       `SELECT p.id AS patient_id, ${NAME} AS patient, p.phone,
-         (SELECT MAX(substr(a.start_time, 1, 10)) FROM appointments a WHERE a.patient_id = p.id AND a.status = 'completed') AS last_visit,
-         (SELECT MIN(r.due_date) FROM recalls r WHERE r.patient_id = p.id AND r.status NOT IN ('inactive','completed')) AS recall_due
-       FROM patients p
+         (SELECT MAX(substr(a.start_time, 1, 10)) FROM real_appointments a WHERE a.patient_id = p.id AND a.status = 'completed') AS last_visit,
+         (SELECT MIN(r.due_date) FROM real_recalls r WHERE r.patient_id = p.id AND r.status NOT IN ('inactive','completed')) AS recall_due
+       FROM real_patients p
        WHERE p.practice_id = ? AND p.status = 'active'
-         AND EXISTS (SELECT 1 FROM appointments a WHERE a.patient_id = p.id AND a.status = 'completed' AND a.start_time >= ?)
-         AND NOT EXISTS (SELECT 1 FROM appointments a WHERE a.patient_id = p.id AND a.status IN ('scheduled','confirmed') AND a.start_time >= ?)${w.sql}`,
+         AND EXISTS (SELECT 1 FROM real_appointments a WHERE a.patient_id = p.id AND a.status = 'completed' AND a.start_time >= ?)
+         AND NOT EXISTS (SELECT 1 FROM real_appointments a WHERE a.patient_id = p.id AND a.status IN ('scheduled','confirmed') AND a.start_time >= ?)${w.sql}`,
       ctx.pid, `${addMonths(ctx.today, -18)} 00:00`, `${ctx.today} 00:00`, ...w.args,
     );
     return { rows: rows.map((r) => ({ ...r, days_since: r.last_visit ? daysBetween(r.last_visit, ctx.today) : null })).sort((a, b) => (a.last_visit < b.last_visit ? -1 : a.last_visit > b.last_visit ? 1 : 0)) };
@@ -837,7 +837,7 @@ def({
     const all = daysBetween(ctx.from, ctx.to) >= 365;
     const md = all ? frag() : a <= b && ctx.from.slice(0, 4) === ctx.to.slice(0, 4) ? frag(' AND substr(p.dob, 6, 5) >= ? AND substr(p.dob, 6, 5) <= ?', [a, b]) : frag(' AND (substr(p.dob, 6, 5) >= ? OR substr(p.dob, 6, 5) <= ?)', [a, b]);
     const rows = await ctx.db.all(
-      `SELECT p.id AS patient_id, ${NAME} AS patient, p.dob, p.phone, p.email FROM patients p
+      `SELECT p.id AS patient_id, ${NAME} AS patient, p.dob, p.phone, p.email FROM real_patients p
        WHERE p.practice_id = ? AND p.status = 'active' AND p.dob IS NOT NULL AND length(p.dob) = 10${md.sql}${s.sql}`, ctx.pid, ...md.args, ...s.args,
     );
     const out = rows.map((r) => {
@@ -859,13 +859,13 @@ def({
     const rows = await ctx.db.all(
       `SELECT ic.name AS carrier, COALESCE(ip.name, pi.group_number, '—') AS plan, COUNT(DISTINCT pi.patient_id) AS patients,
          SUM(CASE WHEN pi.priority = 'primary' THEN 1 ELSE 0 END) AS primary_count, SUM(CASE WHEN pi.priority = 'secondary' THEN 1 ELSE 0 END) AS secondary_count
-       FROM patient_insurance pi JOIN insurance_carriers ic ON ic.id = pi.carrier_id LEFT JOIN insurance_plans ip ON ip.id = pi.plan_id
-       JOIN patients p ON p.id = pi.patient_id
+       FROM real_patient_insurance pi JOIN insurance_carriers ic ON ic.id = pi.carrier_id LEFT JOIN insurance_plans ip ON ip.id = pi.plan_id
+       JOIN real_patients p ON p.id = pi.patient_id
        WHERE pi.practice_id = ? AND pi.active = 1 AND p.status = 'active'${s.sql}
        GROUP BY ic.name, COALESCE(ip.name, pi.group_number, '—')`, ctx.pid, ...s.args,
     );
     const insured = await ctx.db.get(
-      `SELECT COUNT(DISTINCT pi.patient_id) AS n FROM patient_insurance pi JOIN patients p ON p.id = pi.patient_id WHERE pi.practice_id = ? AND pi.active = 1 AND p.status = 'active'${s.sql}`, ctx.pid, ...s.args,
+      `SELECT COUNT(DISTINCT pi.patient_id) AS n FROM real_patient_insurance pi JOIN real_patients p ON p.id = pi.patient_id WHERE pi.practice_id = ? AND pi.active = 1 AND p.status = 'active'${s.sql}`, ctx.pid, ...s.args,
     );
     return { rows: rows.sort((a, b) => b.patients - a.patients || a.carrier.localeCompare(b.carrier)), totals: { patients: num(insured.n) }, note: 'The total counts each insured patient once, even with two plans.' };
   },
@@ -883,7 +883,7 @@ def({
          SUM(CASE WHEN a.status = 'completed' THEN 1 ELSE 0 END) AS completed,
          SUM(CASE WHEN a.status = 'cancelled' THEN 1 ELSE 0 END) AS cancelled,
          SUM(CASE WHEN a.status = 'no_show' THEN 1 ELSE 0 END) AS no_shows
-       FROM appointments a JOIN providers pv ON pv.id = a.provider_id
+       FROM real_appointments a JOIN providers pv ON pv.id = a.provider_id
        WHERE a.practice_id = ? AND a.start_time >= ? AND a.start_time < ?${w.sql}
        GROUP BY a.provider_id, pv.name`, ctx.pid, `${ctx.from} 00:00`, `${ctx.to} 24:00`, ...w.args,
     );
@@ -906,7 +906,7 @@ def({
     const rows = await ctx.db.all(
       `SELECT pr.patient_id, ${NAME} AS patient, p.phone, COUNT(*) AS procedures, SUM(pr.fee) AS amount, MIN(substr(pr.created_at, 1, 10)) AS diagnosed,
          MAX(CASE WHEN tp.status = 'accepted' OR tp.signed_at IS NOT NULL THEN 1 ELSE 0 END) AS accepted
-       FROM procedures pr JOIN treatment_plans tp ON tp.id = pr.treatment_plan_id JOIN patients p ON p.id = pr.patient_id
+       FROM real_procedures pr JOIN real_treatment_plans tp ON tp.id = pr.treatment_plan_id JOIN real_patients p ON p.id = pr.patient_id
        WHERE pr.practice_id = ? AND pr.status = 'planned' AND pr.appointment_id IS NULL AND tp.status IN ('proposed','accepted')${w.sql}
        GROUP BY pr.patient_id, p.first_name, p.last_name, p.phone`, ctx.pid, ...w.args,
     );
@@ -995,7 +995,7 @@ def({
     const s = ctx.patients('p');
     const rows = await ctx.db.all(
       `SELECT pa.id, pa.patient_id, ${NAME} AS patient, ic.name AS carrier, pa.status, pa.submitted_at, pa.created_at, pa.total_fee, pa.estimated_amount
-       FROM preauths pa JOIN patients p ON p.id = pa.patient_id JOIN patient_insurance pi ON pi.id = pa.patient_insurance_id JOIN insurance_carriers ic ON ic.id = pi.carrier_id
+       FROM preauths pa JOIN real_patients p ON p.id = pa.patient_id JOIN real_patient_insurance pi ON pi.id = pa.patient_insurance_id JOIN insurance_carriers ic ON ic.id = pi.carrier_id
        WHERE pa.practice_id = ? AND pa.status IN ('draft','submitted')${s.sql}`, ctx.pid, ...s.args,
     );
     return {
@@ -1017,8 +1017,8 @@ def({
     const w = join(ctx.office('a.location_id', { nullable: true }), ctx.provider('a.provider_id'));
     const rows = await ctx.db.all(
       `SELECT a.id, a.patient_id, ${NAME} AS patient, p.phone, a.start_time, a.end_time, pv.name AS provider, o.name AS chair, a.status, a.reason,
-         (SELECT COALESCE(SUM(pr.fee), 0) FROM procedures pr WHERE pr.appointment_id = a.id AND pr.status != 'cancelled') AS scheduled
-       FROM appointments a JOIN patients p ON p.id = a.patient_id JOIN providers pv ON pv.id = a.provider_id LEFT JOIN operatories o ON o.id = a.operatory_id
+         (SELECT COALESCE(SUM(pr.fee), 0) FROM real_procedures pr WHERE pr.appointment_id = a.id AND pr.status != 'cancelled') AS scheduled
+       FROM real_appointments a JOIN real_patients p ON p.id = a.patient_id JOIN providers pv ON pv.id = a.provider_id LEFT JOIN operatories o ON o.id = a.operatory_id
        WHERE a.practice_id = ? AND a.start_time >= ? AND a.start_time < ?${w.sql}
        ORDER BY a.start_time, a.id`, ctx.pid, `${ctx.date} 00:00`, `${ctx.date} 24:00`, ...w.args,
     );
@@ -1035,8 +1035,8 @@ def({
     const w = join(ctx.office('a.location_id', { nullable: true }), ctx.provider('a.provider_id'));
     const rows = await ctx.db.all(
       `SELECT a.id, a.patient_id, ${NAME} AS patient, p.phone, a.start_time, pv.name AS provider, a.status, a.broken_reason,
-         (SELECT MIN(b.start_time) FROM appointments b WHERE b.patient_id = a.patient_id AND b.id != a.id AND b.start_time > a.start_time AND b.status NOT IN ('cancelled','no_show')) AS rebooked
-       FROM appointments a JOIN patients p ON p.id = a.patient_id JOIN providers pv ON pv.id = a.provider_id
+         (SELECT MIN(b.start_time) FROM real_appointments b WHERE b.patient_id = a.patient_id AND b.id != a.id AND b.start_time > a.start_time AND b.status NOT IN ('cancelled','no_show')) AS rebooked
+       FROM real_appointments a JOIN real_patients p ON p.id = a.patient_id JOIN providers pv ON pv.id = a.provider_id
        WHERE a.practice_id = ? AND a.status IN ('cancelled','no_show') AND a.start_time >= ? AND a.start_time < ?${w.sql}
        ORDER BY a.start_time, a.id`, ctx.pid, `${ctx.from} 00:00`, `${ctx.to} 24:00`, ...w.args,
     );
@@ -1053,7 +1053,7 @@ def({
     const practice = await ctx.db.get('SELECT * FROM practices WHERE id = ?', ctx.pid);
     const w = join(ctx.office('a.location_id', { nullable: true }), ctx.provider('a.provider_id'));
     const appts = await ctx.db.all(
-      `SELECT a.provider_id, a.operatory_id, a.start_time, a.end_time FROM appointments a
+      `SELECT a.provider_id, a.operatory_id, a.start_time, a.end_time FROM real_appointments a
        WHERE a.practice_id = ? AND a.status NOT IN ('cancelled','no_show') AND a.start_time >= ? AND a.start_time < ?${w.sql}`,
       ctx.pid, `${ctx.from} 00:00`, `${ctx.to} 24:00`, ...w.args,
     );
@@ -1094,13 +1094,13 @@ def({
     const aw = join(ctx.office('a.location_id', { nullable: true }), ctx.provider('a.provider_id'));
     const asap = await ctx.db.all(
       `SELECT a.id, a.patient_id, ${NAME} AS patient, p.phone, pv.name AS provider, a.start_time AS current, a.reason, a.created_at
-       FROM appointments a JOIN patients p ON p.id = a.patient_id JOIN providers pv ON pv.id = a.provider_id
+       FROM real_appointments a JOIN real_patients p ON p.id = a.patient_id JOIN providers pv ON pv.id = a.provider_id
        WHERE a.practice_id = ? AND a.asap = 1 AND a.start_time > ? AND a.status IN ('scheduled','confirmed')${aw.sql}`, ctx.pid, ctx.now, ...aw.args,
     );
     const ww = join(ctx.patients('p'), ctx.provider('w.provider_id'));
     const wait = await ctx.db.all(
       `SELECT w.id, w.patient_id, ${NAME} AS patient, p.phone, pv.name AS provider, w.reason, w.created_at
-       FROM waitlist w JOIN patients p ON p.id = w.patient_id LEFT JOIN providers pv ON pv.id = w.provider_id
+       FROM real_waitlist w JOIN real_patients p ON p.id = w.patient_id LEFT JOIN providers pv ON pv.id = w.provider_id
        WHERE w.practice_id = ? AND w.status = 'waiting'${ww.sql}`, ctx.pid, ...ww.args,
     );
     const rows = [
@@ -1126,7 +1126,7 @@ def({
        WHERE pc.practice_id = ? AND pc.active = 1`, ctx.feeScheduleId, ctx.pid,
     );
     const done = new Map((await ctx.db.all(
-      `SELECT pr.code, SUM(CASE WHEN ${LIVE} THEN 1 ELSE 0 END) AS n FROM ledger_entries l JOIN procedures pr ON pr.id = l.procedure_id
+      `SELECT pr.code, SUM(CASE WHEN ${LIVE} THEN 1 ELSE 0 END) AS n FROM real_ledger_entries l JOIN real_procedures pr ON pr.id = l.procedure_id
        WHERE l.practice_id = ? AND l.type = 'charge' AND l.retail_sale_id IS NULL AND l.entry_date BETWEEN ? AND ?${w.sql} GROUP BY pr.code`, ctx.pid, ctx.from, ctx.to, ...w.args,
     )).map((r) => [r.code, num(r.n)]));
     const list = rows.filter((r) => r.ppo_fee != null).map((r) => {
@@ -1149,7 +1149,7 @@ def({
       `SELECT COALESCE(ic.name, 'Unknown carrier') AS carrier, COUNT(DISTINCT l.claim_id) AS claims,
          -SUM(CASE WHEN l.type = 'insurance_payment' THEN l.amount ELSE 0 END) AS paid,
          -SUM(CASE WHEN l.type = 'adjustment' THEN l.amount ELSE 0 END) AS written_off
-       FROM ledger_entries l LEFT JOIN claims c ON c.id = l.claim_id LEFT JOIN patient_insurance pi ON pi.id = c.patient_insurance_id LEFT JOIN insurance_carriers ic ON ic.id = pi.carrier_id
+       FROM real_ledger_entries l LEFT JOIN real_claims c ON c.id = l.claim_id LEFT JOIN real_patient_insurance pi ON pi.id = c.patient_insurance_id LEFT JOIN insurance_carriers ic ON ic.id = pi.carrier_id
        WHERE l.practice_id = ? AND l.claim_id IS NOT NULL AND l.type IN ('adjustment','insurance_payment') AND l.entry_date BETWEEN ? AND ?${w.sql}
        GROUP BY 1`, ctx.pid, ctx.from, ctx.to, ...w.args,
     );
@@ -1170,7 +1170,7 @@ def({
     const rows = await ctx.db.all(
       `SELECT COALESCE(ic.name, ic2.name, ck.payer_name, 'Unknown carrier') AS carrier, SUM(CASE WHEN ${LIVE} THEN 1 ELSE 0 END) AS payments,
          COUNT(DISTINCT l.claim_id) AS claims, -SUM(l.amount) AS amount
-       FROM ledger_entries l LEFT JOIN claims c ON c.id = l.claim_id LEFT JOIN patient_insurance pi ON pi.id = c.patient_insurance_id
+       FROM real_ledger_entries l LEFT JOIN real_claims c ON c.id = l.claim_id LEFT JOIN real_patient_insurance pi ON pi.id = c.patient_insurance_id
        LEFT JOIN insurance_carriers ic ON ic.id = pi.carrier_id
        LEFT JOIN insurance_checks ck ON ck.id = l.insurance_check_id LEFT JOIN insurance_carriers ic2 ON ic2.id = ck.carrier_id
        WHERE l.practice_id = ? AND l.type = 'insurance_payment' AND l.entry_date BETWEEN ? AND ?${w.sql} GROUP BY 1`, ctx.pid, ctx.from, ctx.to, ...w.args,
@@ -1189,10 +1189,10 @@ def({
     const w = join(ctx.office('a.location_id', { nullable: true }), ctx.provider('a.provider_id'));
     const rows = await ctx.db.all(
       `SELECT a.id, a.patient_id, ${NAME} AS patient, a.start_time, pv.name AS provider, ic.name AS carrier, pi.subscriber_id,
-         (SELECT MAX(e.created_at) FROM eligibility_checks e WHERE e.patient_insurance_id = pi.id) AS last_checked,
-         (SELECT COUNT(*) FROM eligibility_checks e WHERE e.patient_insurance_id = pi.id AND e.status = 'active' AND e.created_at >= ?) AS recent
-       FROM appointments a JOIN patients p ON p.id = a.patient_id JOIN providers pv ON pv.id = a.provider_id
-       JOIN patient_insurance pi ON pi.patient_id = a.patient_id AND pi.active = 1 AND pi.priority = 'primary' JOIN insurance_carriers ic ON ic.id = pi.carrier_id
+         (SELECT MAX(e.created_at) FROM real_eligibility_checks e WHERE e.patient_insurance_id = pi.id) AS last_checked,
+         (SELECT COUNT(*) FROM real_eligibility_checks e WHERE e.patient_insurance_id = pi.id AND e.status = 'active' AND e.created_at >= ?) AS recent
+       FROM real_appointments a JOIN real_patients p ON p.id = a.patient_id JOIN providers pv ON pv.id = a.provider_id
+       JOIN real_patient_insurance pi ON pi.patient_id = a.patient_id AND pi.active = 1 AND pi.priority = 'primary' JOIN insurance_carriers ic ON ic.id = pi.carrier_id
        WHERE a.practice_id = ? AND a.status IN ('scheduled','confirmed') AND a.start_time >= ? AND a.start_time < ?${w.sql}
        ORDER BY a.start_time, a.id`, since, ctx.pid, `${ctx.from} 00:00`, `${ctx.to} 24:00`, ...w.args,
     );
@@ -1200,7 +1200,7 @@ def({
     const last = new Map();
     const ids = [...new Set(pending.map((r) => r.patient_id))];
     if (ids.length) {
-      for (const e of await ctx.db.all(`SELECT e.patient_id, e.status, e.created_at FROM eligibility_checks e WHERE e.practice_id = ? AND e.patient_id IN (${ids.map(() => '?').join(',')}) ORDER BY e.id`, ctx.pid, ...ids)) last.set(e.patient_id, e.status);
+      for (const e of await ctx.db.all(`SELECT e.patient_id, e.status, e.created_at FROM real_eligibility_checks e WHERE e.practice_id = ? AND e.patient_id IN (${ids.map(() => '?').join(',')}) ORDER BY e.id`, ctx.pid, ...ids)) last.set(e.patient_id, e.status);
     }
     return { rows: pending.map(({ recent: _r, ...r }) => ({ ...r, last_checked: r.last_checked ? String(r.last_checked).slice(0, 10) : null, last_result: r.last_checked ? title(last.get(r.patient_id)) : 'Never checked' })) };
   },
@@ -1216,7 +1216,7 @@ def({
     const w = join(ctx.patients('p'), ctx.provider('x.provider_id'));
     const rows = await ctx.db.all(
       `SELECT x.id, x.patient_id, ${NAME} AS patient, x.referral_date, rc.name AS specialist, rc.specialty, x.reason, pv.name AS provider, x.status
-       FROM referrals x JOIN patients p ON p.id = x.patient_id JOIN referral_contacts rc ON rc.id = x.contact_id LEFT JOIN providers pv ON pv.id = x.provider_id
+       FROM real_referrals x JOIN real_patients p ON p.id = x.patient_id JOIN referral_contacts rc ON rc.id = x.contact_id LEFT JOIN providers pv ON pv.id = x.provider_id
        WHERE x.practice_id = ? AND x.direction = 'out' AND x.referral_date BETWEEN ? AND ?${w.sql}
        ORDER BY x.referral_date, x.id`, ctx.pid, ctx.from, ctx.to, ...w.args,
     );
@@ -1233,8 +1233,8 @@ def({
     const w = join(ctx.patients('p'), ctx.provider('lc.provider_id'));
     const rows = await ctx.db.all(
       `SELECT lc.id, lc.patient_id, ${NAME} AS patient, lc.lab_name, lc.description, lc.tooth, lc.status, lc.sent_date, lc.due_date, ap.start_time AS seat_appt,
-         (SELECT MIN(a.start_time) FROM appointments a WHERE a.patient_id = lc.patient_id AND a.start_time >= ? AND a.status IN ('scheduled','confirmed')) AS next_visit
-       FROM lab_cases lc JOIN patients p ON p.id = lc.patient_id LEFT JOIN appointments ap ON ap.id = lc.appointment_id
+         (SELECT MIN(a.start_time) FROM real_appointments a WHERE a.patient_id = lc.patient_id AND a.start_time >= ? AND a.status IN ('scheduled','confirmed')) AS next_visit
+       FROM real_lab_cases lc JOIN real_patients p ON p.id = lc.patient_id LEFT JOIN real_appointments ap ON ap.id = lc.appointment_id
        WHERE lc.practice_id = ? AND lc.status IN ('sent','received','returned_for_adjustment')${w.sql}`, `${ctx.today} 00:00`, ctx.pid, ...w.args,
     );
     const out = rows.map((r) => ({
@@ -1332,14 +1332,14 @@ def({
     const insurance = -typeSum(m, 'insurance_payment');
     const refunds = typeSum(m, 'refund');
     const w = ctx.office('l.location_id');
-    const ar = num((await ctx.db.get(`SELECT COALESCE(SUM(l.amount), 0) AS n FROM ledger_entries l WHERE l.practice_id = ? AND l.entry_date <= ?${w.sql}`, ctx.pid, to, ...w.args)).n);
+    const ar = num((await ctx.db.get(`SELECT COALESCE(SUM(l.amount), 0) AS n FROM real_ledger_entries l WHERE l.practice_id = ? AND l.entry_date <= ?${w.sql}`, ctx.pid, to, ...w.args)).n);
     const cw = ctx.officeOrPatient('c.location_id', 'c_p');
     const claims = await ctx.db.get(
       `SELECT SUM(CASE WHEN substr(c.submitted_at, 1, 10) BETWEEN ? AND ? THEN 1 ELSE 0 END) AS sent,
          SUM(CASE WHEN substr(c.submitted_at, 1, 10) BETWEEN ? AND ? THEN c.total_fee ELSE 0 END) AS sent_fee,
          SUM(CASE WHEN c.paid_date BETWEEN ? AND ? THEN 1 ELSE 0 END) AS paid,
          SUM(CASE WHEN c.status = 'denied' THEN 1 ELSE 0 END) AS denied
-       FROM claims c JOIN patients c_p ON c_p.id = c.patient_id WHERE c.practice_id = ? AND c.status != 'void'${cw.sql}`, from, to, from, to, from, to, ctx.pid, ...cw.args,
+       FROM real_claims c JOIN real_patients c_p ON c_p.id = c.patient_id WHERE c.practice_id = ? AND c.status != 'void'${cw.sql}`, from, to, from, to, from, to, ctx.pid, ...cw.args,
     );
     const appts = await appointmentCounts(ctx, from, to);
     const booked = Object.values(appts).reduce((s, n) => s + n, 0);

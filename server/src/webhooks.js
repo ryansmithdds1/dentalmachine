@@ -1,4 +1,5 @@
 import { createHmac, randomBytes } from 'node:crypto';
+import { isTrainingPatient } from './training.js';
 import { raiseIssue, resolveIssue } from './issues.js';
 import { insert } from './util.js';
 import { assertPublicUrl } from './netguard.js';
@@ -33,6 +34,9 @@ let deliverer = null; // set by startWebhooks; tests can deliver synchronously
 
 // Queues an event for every endpoint that wants it, and sends right away in the background.
 export async function emitEvent(db, practiceId, type, object) {
+  // Nothing about the training patient goes to other systems (training.js).
+  const patientId = type.startsWith('patient.') ? object?.id : object?.patient_id;
+  if (patientId != null && await isTrainingPatient(db, patientId)) return [];
   const endpoints = await db.all('SELECT id, events FROM webhook_endpoints WHERE practice_id = ? AND active = 1', practiceId);
   const wanted = endpoints.filter((e) => { const ev = JSON.parse(e.events || '[]'); return ev.includes('*') || ev.includes(type); });
   if (!wanted.length) return [];

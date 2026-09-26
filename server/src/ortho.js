@@ -1,4 +1,5 @@
 import { insert, practiceNow } from './util.js';
+import { NOT_TRAINING } from './training.js';
 import { primaryPolicy } from './services.js';
 import { withPlan } from './benefits.js';
 import { addInterval } from './memberships.js';
@@ -35,7 +36,7 @@ export async function orthoEstimate(db, practiceId, patient, { total_fee, down_p
 // Posts each month's charge that has come due, and charges the card when autopay is on.
 export async function runOrthoBilling(db, payments, { caseId = null, messenger = null } = {}) {
   const results = [];
-  const due = await db.all(`SELECT id, practice_id FROM ortho_cases WHERE status IN ('active','retention') AND billed_months < months${caseId ? ' AND id = ?' : ''}`, ...(caseId ? [caseId] : []));
+  const due = await db.all(`SELECT id, practice_id FROM ortho_cases WHERE status IN ('active','retention') AND billed_months < months AND ${NOT_TRAINING()}${caseId ? ' AND id = ?' : ''}`, ...(caseId ? [caseId] : []));
   for (const { id, practice_id: pid } of due) {
     const today = (await practiceNow(db, pid)).slice(0, 10);
     const lock = new Date(Date.now() + 10 * 60_000).toISOString();

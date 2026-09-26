@@ -177,7 +177,7 @@ export default function ppoRoutes({ db, config }) {
       `SELECT c.id, c.patient_id, c.status, c.total_fee, c.estimated_amount, c.paid_amount, c.submitted_at, c.control_number,
          c.follow_up_date, c.last_call_at, c.last_call_outcome,
          p.first_name, p.last_name, ic.name AS carrier_name, ic.phone AS carrier_phone
-       FROM claims c JOIN patients p ON p.id = c.patient_id JOIN patient_insurance pi ON pi.id = c.patient_insurance_id JOIN insurance_carriers ic ON ic.id = pi.carrier_id
+       FROM real_claims c JOIN real_patients p ON p.id = c.patient_id JOIN real_patient_insurance pi ON pi.id = c.patient_insurance_id JOIN insurance_carriers ic ON ic.id = pi.carrier_id
        WHERE c.practice_id = ? AND c.status IN ('submitted','partially_paid')${req.query.carrier_id ? ' AND ic.id = ?' : ''} ORDER BY c.submitted_at`,
       req.user.practice_id, ...(req.query.carrier_id ? [Number(req.query.carrier_id)] : []),
     );

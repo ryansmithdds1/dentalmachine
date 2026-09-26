@@ -37,6 +37,7 @@ import { log } from './monitoring.js';
 import { productionProblems } from './preflight.js';
 import { runCadences } from './cadence.js';
 import { createMailer } from './mail.js';
+import { guardAdapter, guardMessenger } from './training.js';
 import { runChatJobs } from './chat.js';
 import { runDigests } from './digests.js';
 import { depositWatchAll } from './deposits.js';
@@ -70,7 +71,8 @@ if (!secret) {
 const db = await openDb();
 const cluster = await initCluster();
 const config = loadConfig();
-const messenger = createMessenger();
+// Guarded here too: the background jobs below use this messenger directly (the training patient never leaves the office).
+const messenger = guardMessenger(db, createMessenger());
 const app = createApp({ db, secret, config, messenger });
 // Background jobs: failures are logged and reported like request errors.
 const jobFailed = (name) => (err) => {
@@ -118,7 +120,7 @@ if (process.env.MEMBERSHIP_BILLING !== 'off') {
 }
 // Recall autopilot (and later treatment follow-up): due steps every 5 minutes; each step claimed once.
 if (process.env.CADENCES !== 'off') {
-  const cadenceMailer = createMailer();
+  const cadenceMailer = guardAdapter(db, createMailer(), 'Mail', ['sendLetter']);
   const cadence = () => runExclusive('cadence', 4 * 60 * 1000, () => runCadences(db, { messenger, mailer: cadenceMailer, appUrl: config.appUrl, secret }))
     .catch(jobFailed('Recall autopilot'));
   setInterval(cadence, 5 * 60 * 1000).unref();
@@ -178,7 +180,7 @@ if (process.env.REFERRAL_JOBS !== 'off') {
 // Insurance autopilot: clean ERA lines post (practices that turned it on), balances left after insurance are billed
 // (the texts/emails go through the cadence job), paper statements mailed, reconciliation gaps raised — every 15 minutes.
 if (process.env.EOB_AUTOPILOT !== 'off') {
-  const eobMailer = createMailer();
+  const eobMailer = guardAdapter(db, createMailer(), 'Mail', ['sendLetter']);
   const eob = () => runExclusive('eob-autopilot', 10 * 60 * 1000, () => runEobAutopilot(db, { mailer: eobMailer, appUrl: config.appUrl }))
     .catch(jobFailed('Insurance autopilot'));
   setInterval(eob, 15 * 60 * 1000).unref();
@@ -187,7 +189,7 @@ if (process.env.EOB_AUTOPILOT !== 'off') {
 // Patient journeys extras: thank-you card tasks, milestones, life-event suggestions, survey comments, holiday cards and
 // the newsletter (the journey texts/emails themselves go out through the cadence job).
 if (process.env.JOURNEYS !== 'off') {
-  const journeyMailer = createMailer();
+  const journeyMailer = guardAdapter(db, createMailer(), 'Mail', ['sendLetter']);
   const journeys = () => runExclusive('journeys', 10 * 60 * 1000, () => runJourneyExtras(db, { messenger, mailer: journeyMailer, appUrl: config.appUrl })).catch(jobFailed('Patient journeys'));
   setInterval(journeys, 15 * 60 * 1000).unref();
   setTimeout(journeys, 75_000).unref();

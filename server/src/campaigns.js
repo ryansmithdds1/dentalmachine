@@ -41,7 +41,7 @@ export function cleanParams(segment, params = {}) {
   return out;
 }
 
-const NO_FUTURE = "NOT EXISTS (SELECT 1 FROM appointments f WHERE f.patient_id = p.id AND f.status IN ('scheduled','confirmed') AND f.start_time >= ?)";
+const NO_FUTURE = "NOT EXISTS (SELECT 1 FROM real_appointments f WHERE f.patient_id = p.id AND f.status IN ('scheduled','confirmed') AND f.start_time >= ?)";
 
 // The patients in a segment (before channel and opt-out filtering).
 export async function segmentPatients(db, practiceId, segment, params = {}) {
@@ -53,25 +53,25 @@ export async function segmentPatients(db, practiceId, segment, params = {}) {
     const d = new Date(`${today}T00:00:00Z`);
     d.setUTCMonth(d.getUTCMonth() - (params.months || 18));
     const cutoff = d.toISOString().slice(0, 10);
-    where.push(`NOT EXISTS (SELECT 1 FROM appointments a WHERE a.patient_id = p.id AND a.status = 'completed' AND a.start_time >= ?)`, NO_FUTURE, 'substr(p.created_at, 1, 10) < ?');
+    where.push(`NOT EXISTS (SELECT 1 FROM real_appointments a WHERE a.patient_id = p.id AND a.status = 'completed' AND a.start_time >= ?)`, NO_FUTURE, 'substr(p.created_at, 1, 10) < ?');
     args.push(cutoff, now, cutoff);
   } else if (segment === 'unscheduled_treatment') {
-    where.push(`EXISTS (SELECT 1 FROM procedures x LEFT JOIN treatment_plans t ON t.id = x.treatment_plan_id
+    where.push(`EXISTS (SELECT 1 FROM real_procedures x LEFT JOIN real_treatment_plans t ON t.id = x.treatment_plan_id
       WHERE x.patient_id = p.id AND x.status = 'planned' AND (t.id IS NULL OR t.status IN ('proposed','accepted')))`, NO_FUTURE);
     args.push(now);
   } else if (segment === 'recall_due') {
-    where.push("EXISTS (SELECT 1 FROM recalls r WHERE r.patient_id = p.id AND r.status IN ('due','contacted') AND r.due_date < ?)", NO_FUTURE);
+    where.push("EXISTS (SELECT 1 FROM real_recalls r WHERE r.patient_id = p.id AND r.status IN ('due','contacted') AND r.due_date < ?)", NO_FUTURE);
     args.push(today, now);
   } else if (segment === 'birthdays') {
     where.push("p.dob IS NOT NULL AND substr(p.dob, 6, 2) = ?");
     args.push(String(params.month || Number(today.slice(5, 7))).padStart(2, '0'));
   } else if (segment === 'no_insurance') {
-    where.push("NOT EXISTS (SELECT 1 FROM patient_insurance i WHERE i.patient_id = p.id AND i.active = 1)",
+    where.push("NOT EXISTS (SELECT 1 FROM real_patient_insurance i WHERE i.patient_id = p.id AND i.active = 1)",
       "NOT EXISTS (SELECT 1 FROM memberships m WHERE m.patient_id = p.id AND m.status IN ('active','past_due'))");
   } else if (segment !== 'all_active') throw new HttpError(400, 'Unknown segment');
   const rows = await db.all(
     `SELECT p.id, p.first_name, p.last_name, p.dob, p.phone, p.email, p.sms_opt_in, p.email_opt_in, p.guarantor_id
-     FROM patients p WHERE ${where.join(' AND ')} ORDER BY p.last_name, p.first_name, p.id`, ...args,
+     FROM real_patients p WHERE ${where.join(' AND ')} ORDER BY p.last_name, p.first_name, p.id`, ...args,
   );
   const age = (dob) => (dob ? Math.floor((new Date(`${today}T00:00:00Z`) - new Date(`${dob}T00:00:00Z`)) / (365.25 * 86400_000)) : null);
   return rows.filter((r) => (params.min_age == null || (age(r.dob) ?? -1) >= params.min_age) && (params.max_age == null || (age(r.dob) ?? 999) <= params.max_age));

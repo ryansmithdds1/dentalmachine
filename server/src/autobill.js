@@ -1,4 +1,5 @@
 import { HttpError } from './auth.js';
+import { NOT_TRAINING } from './training.js';
 import { insert, audit, localNow, recorded } from './util.js';
 import { raiseIssue, resolveIssue } from './issues.js';
 import { pendingInsurance } from './services.js';
@@ -112,11 +113,11 @@ export async function runAutoBilling(db, practice, deps = {}) {
   //    at least wait_days ago, not looked at yet. Closed = when the payment was posted (paid_at), not the
   //    payer's check date.
   const closed = await db.all(
-    `SELECT c.*, substr(c.paid_at, 1, 10) AS closed_on FROM claims c WHERE c.practice_id = ? AND c.status = 'paid' AND substr(c.paid_at, 1, 10) >= ? AND substr(c.paid_at, 1, 10) <= ?
+    `SELECT c.*, substr(c.paid_at, 1, 10) AS closed_on FROM claims c WHERE c.practice_id = ? AND ${NOT_TRAINING('c.patient_id')} AND c.status = 'paid' AND substr(c.paid_at, 1, 10) >= ? AND substr(c.paid_at, 1, 10) <= ?
        AND NOT EXISTS (SELECT 1 FROM balance_bills b WHERE b.claim_id = c.id)
      UNION
      SELECT c.*, substr(MAX(r.resolved_at), 1, 10) AS closed_on FROM claims c JOIN remit_lines r ON r.claim_id = c.id AND r.resolution = 'bill_patient'
-     WHERE c.practice_id = ? AND c.status = 'denied' AND substr(r.resolved_at, 1, 10) >= ? AND substr(r.resolved_at, 1, 10) <= ?
+     WHERE c.practice_id = ? AND ${NOT_TRAINING('c.patient_id')} AND c.status = 'denied' AND substr(r.resolved_at, 1, 10) >= ? AND substr(r.resolved_at, 1, 10) <= ?
        AND NOT EXISTS (SELECT 1 FROM balance_bills b WHERE b.claim_id = c.id)
      GROUP BY c.id`,
     pid, since, lastClose, pid, since, lastClose,

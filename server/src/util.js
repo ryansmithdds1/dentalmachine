@@ -84,6 +84,14 @@ async function officeFor(db, row) {
 }
 
 export async function insert(db, table, row) {
+  // Someone added to the training patient's household is a training patient too (training.js): practice data
+  // never becomes a real chart by being put in the pretend family.
+  // So is a patient made during a guided walkthrough in practice mode (the "new patient" tour).
+  if (table === 'patients' && !row.is_training && currentActor()?.practiceMode) row = { ...row, is_training: 1 };
+  if (table === 'patients' && !row.is_training && (row.guarantor_id || row.second_responsible_id)) {
+    const heads = await db.all('SELECT is_training FROM patients WHERE id IN (?, ?)', row.guarantor_id ?? null, row.second_responsible_id ?? null);
+    if (heads.some((h) => h.is_training)) row = { ...row, is_training: 1 };
+  }
   if (LOCATED.has(table) && row.location_id == null && (row.appointment_id || row.patient_id || currentActor()?.locationId)) {
     const office = await officeFor(db, row);
     if (office) row = { ...row, location_id: office };

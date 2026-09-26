@@ -32,6 +32,8 @@ jobs:
       - run: npm run lint
       # Every office action has a user-manual page (docs/testing.md, "User manual").
       - run: npm run manual -- --check
+      # Every frequent office action has a guided walkthrough (or a written reason); the tours are replayed in `e2e`.
+      - run: npm run tours -- --check
       - run: npm test
       - run: npm run build
       # A 5,000-patient practice: every main screen and report must stay within its time budget.

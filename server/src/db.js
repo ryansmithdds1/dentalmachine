@@ -5705,6 +5705,47 @@ CREATE TABLE IF NOT EXISTS staff_credentials (
 );
 CREATE INDEX IF NOT EXISTS idx_staff_credentials_due ON staff_credentials(practice_id, status, expires_on);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_staff_credentials_key ON staff_credentials(practice_id, client_key);
+
+-- Guided walkthroughs ("Show me", training.js / routes/training.js). One row per time a person starts a tour:
+-- which tour (its id in client/public/manual/tours.json, the action it teaches), on the training patient or on a
+-- real chart, how far they got and how it ended. Kept as the team's training record (never edited after it ends).
+CREATE TABLE IF NOT EXISTS tour_runs (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  tour_id TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'started' CHECK (status IN ('started','completed','exited')),
+  on_training INTEGER NOT NULL DEFAULT 1,
+  patient_id INTEGER REFERENCES patients(id),
+  steps_total INTEGER NOT NULL DEFAULT 0,
+  steps_done INTEGER NOT NULL DEFAULT 0,
+  steps_shown INTEGER NOT NULL DEFAULT 0,
+  client_key TEXT,
+  started_at TEXT NOT NULL DEFAULT (datetime('now')),
+  finished_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_tour_runs_user ON tour_runs(practice_id, user_id, tour_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tour_runs_key ON tour_runs(user_id, client_key);
+
+-- Tours a manager gave someone to do ("Front desk basics"): their to-do list under My training. Cancelled, not
+-- deleted; progress is worked out from tour_runs (a tour counts once that person has completed it).
+CREATE TABLE IF NOT EXISTS training_assignments (
+  id INTEGER PRIMARY KEY,
+  practice_id INTEGER NOT NULL REFERENCES practices(id),
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  set_key TEXT,
+  title TEXT NOT NULL,
+  tour_ids TEXT NOT NULL,
+  due_on TEXT,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','cancelled')),
+  assigned_by INTEGER REFERENCES users(id),
+  client_key TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  cancelled_at TEXT,
+  cancelled_by INTEGER REFERENCES users(id)
+);
+CREATE INDEX IF NOT EXISTS idx_training_assignments_user ON training_assignments(practice_id, user_id, status);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_training_assignments_key ON training_assignments(practice_id, client_key);
 `;
 
 // Columns added after the first release. SQLite has no ADD COLUMN IF NOT EXISTS, so check first.
@@ -6319,7 +6360,24 @@ const COLUMNS = [
   ['prescriptions', 'pdmp_override_reason', 'TEXT'],
   ['practices', 'sales_tax_bp', 'INTEGER NOT NULL DEFAULT 0'],
   ['practices', 'gift_certificate_expiry_months', 'INTEGER'],
+  // The training patient (training.js): a pretend chart per practice that guided walkthroughs run on. Nothing done
+  // to it leaves the office, and it (with everything recorded against it) is left out of every report and list.
+  ['patients', 'is_training', 'INTEGER NOT NULL DEFAULT 0'],
 ];
+
+// Read-only views that leave the training patient out (training.js). Reports, totals, dashboards, audiences and
+// exports read these instead of the tables, so practice work on "Tess Training" never counts as real work:
+// `FROM real_ledger_entries le` in place of `FROM ledger_entries le`. Made after the columns above.
+export const REAL_VIEWS = ['patients', 'ledger_entries', 'procedures', 'appointments', 'claims', 'recalls', 'treatment_plans', 'patient_insurance',
+  'payment_plans', 'clinical_notes', 'messages', 'calls', 'referrals', 'tooth_conditions', 'booking_requests', 'lab_cases', 'eligibility_checks', 'tasks', 'waitlist'];
+const TRAINING_IDS = 'SELECT id FROM patients WHERE is_training = 1';
+const viewSql = (t) => (t === 'patients'
+  ? 'SELECT * FROM patients WHERE is_training = 0'
+  : `SELECT * FROM ${t} WHERE patient_id IS NULL OR patient_id NOT IN (${TRAINING_IDS})`);
+// SQLite reads a view's "*" afresh each time, so made once; Postgres fixes a view's columns when it is made:
+// replaced after the columns are added (new ones go at the end).
+const VIEWS_SQLITE = REAL_VIEWS.map((t) => `CREATE VIEW IF NOT EXISTS real_${t} AS ${viewSql(t)};`).join('\n');
+const VIEWS_PG = REAL_VIEWS.map((t) => `CREATE OR REPLACE VIEW real_${t} AS ${viewSql(t)}`);
 
 // CHECK constraints widened after release: [table, constraint name on Postgres, old text, new text].
 const RELAXED = [
@@ -6456,6 +6514,8 @@ CREATE INDEX IF NOT EXISTS idx_claims_policy ON claims(patient_insurance_id, sta
 CREATE INDEX IF NOT EXISTS idx_policy_plan_sub ON patient_insurance(plan_id, subscriber_id);
 -- Denial predictions (predict/denial.js) ask whether each answered claim went with a narrative.
 CREATE INDEX IF NOT EXISTS idx_claim_attachments_claim ON claim_attachments(claim_id);
+-- The training patient (training.js): the real_* views and the outbound guards look it up constantly.
+CREATE INDEX IF NOT EXISTS idx_patients_training ON patients(practice_id) WHERE is_training = 1;
 `;
 
 // ---------------------------------------------------------------------------
@@ -6545,6 +6605,7 @@ function openSqlite(path) {
   }
   db.exec(INDEXES);
   db.exec(GUARDS_SQLITE);
+  db.exec(VIEWS_SQLITE);
 
   const cache = new Map();
   const stmt = (sql) => {
@@ -6714,7 +6775,7 @@ async function openPostgres(url, { freshSchema = false } = {}) {
   const setup = await retryOnConnectionLimit(() => pool.connect());
   // Skip the migration when this exact schema is already in place (serverless cold starts would
   // otherwise re-run hundreds of statements each time).
-  const version = createHash('sha256').update(JSON.stringify([SCHEMA, COLUMNS, INDEXES, RELAXED, NULLABLE, GUARDS_PG])).digest('hex').slice(0, 16);
+  const version = createHash('sha256').update(JSON.stringify([SCHEMA, COLUMNS, INDEXES, RELAXED, NULLABLE, GUARDS_PG, VIEWS_PG])).digest('hex').slice(0, 16);
   const current = await setup.query('SELECT version FROM schema_meta').then((r) => r.rows[0]?.version, () => null);
   if (current === version && !freshSchema) setup.release();
   else {
@@ -6729,6 +6790,7 @@ async function openPostgres(url, { freshSchema = false } = {}) {
       for (const [table, column] of NULLABLE) await setup.query(`ALTER TABLE ${table} ALTER COLUMN ${column} DROP NOT NULL`);
       await setup.query(pgSchema(INDEXES));
       for (const q of GUARDS_PG) await setup.query(q);
+      for (const q of VIEWS_PG) await setup.query(q);
       await setup.query('CREATE TABLE IF NOT EXISTS schema_meta (version TEXT NOT NULL)');
       await setup.query('DELETE FROM schema_meta');
       await setup.query('INSERT INTO schema_meta (version) VALUES ($1)', [version]);

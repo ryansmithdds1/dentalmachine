@@ -127,7 +127,7 @@ const HIST_COLS = 'id, patient_id, start_time, created_at, status, broken_reason
 
 async function owingPatients(db, pid, ids = null) {
   const out = new Set();
-  const q = (extra, args) => db.all(`SELECT patient_id FROM ledger_entries WHERE practice_id = ?${extra} GROUP BY patient_id HAVING SUM(amount) > 0`, pid, ...args);
+  const q = (extra, args) => db.all(`SELECT patient_id FROM real_ledger_entries ledger_entries WHERE practice_id = ?${extra} GROUP BY patient_id HAVING SUM(amount) > 0`, pid, ...args);
   if (!ids) for (const r of await q('', [])) out.add(r.patient_id);
   else for (const c of chunks(ids)) for (const r of await q(` AND patient_id IN (${IN(c)})`, c)) out.add(r.patient_id);
   return out;
@@ -139,12 +139,12 @@ export async function practiceNoShowStats(db, pid, today, lateHours = DEFAULT_LA
   return cachedStats(`no_show:${pid}:${lateHours}`, today, async () => {
     const from = addDays(today, -RATE_DAYS);
     const rows = await db.all(
-      `SELECT ${HIST_COLS} FROM appointments WHERE practice_id = ? AND start_time >= ? AND start_time < ? AND status IN ('completed','checked_in','in_chair','no_show','cancelled') ORDER BY patient_id, start_time`,
+      `SELECT ${HIST_COLS} FROM real_appointments appointments WHERE practice_id = ? AND start_time >= ? AND start_time < ? AND status IN ('completed','checked_in','in_chair','no_show','cancelled') ORDER BY patient_id, start_time`,
       pid, `${from} 00:00`, `${today} 00:00`,
     );
     // Who had already come before those two years (so their visit then wasn't a first visit).
     const keptEarlier = new Set((await db.all(
-      "SELECT DISTINCT patient_id FROM appointments WHERE practice_id = ? AND start_time >= ? AND start_time < ? AND status IN ('completed','checked_in','in_chair')",
+      "SELECT DISTINCT patient_id FROM real_appointments appointments WHERE practice_id = ? AND start_time >= ? AND start_time < ? AND status IN ('completed','checked_in','in_chair')",
       pid, `${addDays(today, -365 * HISTORY_YEARS)} 00:00`, `${from} 00:00`,
     )).map((r) => r.patient_id));
     const types = Object.fromEntries((await db.all('SELECT id, name FROM appointment_types WHERE practice_id = ?', pid)).map((t) => [t.id, t.name]));
@@ -168,7 +168,7 @@ export async function noShowRisks(db, pid, appts, { now = null } = {}) {
     for (const r of await db.all(
       // "+practice_id": still only this practice's rows, but lets the database use the patient index (idx_appt_patient)
       // rather than walking five years of the practice's visits.
-      `SELECT ${HIST_COLS} FROM appointments WHERE +practice_id = ? AND patient_id IN (${IN(c)}) AND start_time >= ? AND start_time < ? AND status IN ('completed','checked_in','in_chair','no_show','cancelled')`,
+      `SELECT ${HIST_COLS} FROM real_appointments appointments WHERE +practice_id = ? AND patient_id IN (${IN(c)}) AND start_time >= ? AND start_time < ? AND status IN ('completed','checked_in','in_chair','no_show','cancelled')`,
       pid, ...c, `${addDays(today, -365 * HISTORY_YEARS)} 00:00`, now,
     )) hist.get(r.patient_id).push(r);
   }
@@ -215,7 +215,7 @@ export async function noShowAccuracy(db, pid, { months = 6, today = null } = {})
   const lateHours = await lateCancelHours(db, pid);
   const start = addDays(today, -Math.round(months * 30.44));
   const rows = await db.all(
-    `SELECT ${HIST_COLS} FROM appointments WHERE practice_id = ? AND start_time >= ? AND start_time < ? AND status IN ('completed','checked_in','in_chair','no_show','cancelled') ORDER BY patient_id, start_time`,
+    `SELECT ${HIST_COLS} FROM real_appointments appointments WHERE practice_id = ? AND start_time >= ? AND start_time < ? AND status IN ('completed','checked_in','in_chair','no_show','cancelled') ORDER BY patient_id, start_time`,
     pid, `${addDays(start, -365 * HISTORY_YEARS)} 00:00`, `${today} 00:00`,
   );
   const types = Object.fromEntries((await db.all('SELECT id, name FROM appointment_types WHERE practice_id = ?', pid)).map((t) => [t.id, t.name]));

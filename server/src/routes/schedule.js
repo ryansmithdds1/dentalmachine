@@ -18,6 +18,7 @@ import { linkNoteBookings } from './doctornotes.js';
 import { withNoShowRisk } from '../predict/noshow.js';
 import { cancelledNow } from '../latecancel.js';
 import { logShown, noShowEntries } from '../predict/log.js';
+import { worklist } from '../training.js';
 
 export const STATUSES = ['scheduled', 'confirmed', 'checked_in', 'in_chair', 'completed', 'cancelled', 'no_show'];
 export const INACTIVE = "('cancelled','no_show')";
@@ -29,7 +30,7 @@ export const READY_FOR = ['doctor', 'checkout'];
 // Why a visit was cancelled or missed, from the reason picker (labels live in the client's BrokenPicker).
 export const BROKEN_REASONS = ['sick', 'conflict', 'transportation', 'cost', 'forgot', 'office', 'no_contact', 'other'];
 
-const SELECT = `SELECT a.*, p.first_name, p.last_name, p.preferred_name, p.phone, p.medical_alerts, p.premed_required, p.dob,
+const SELECT = `SELECT a.*, p.first_name, p.last_name, p.preferred_name, p.phone, p.medical_alerts, p.premed_required, p.dob, p.is_training,
   pr.name AS provider_name, pr.color AS provider_color, o.name AS operatory_name,
   t.name AS type_name, t.color AS type_color,
   (SELECT COALESCE(SUM(fee), 0) FROM procedures x WHERE x.appointment_id = a.id AND x.status != 'cancelled') AS production,
@@ -998,7 +999,7 @@ export default function scheduleRoutes({ db }) {
     res.json(paged(req, res, await db.all(
       `SELECT r.*, p.first_name, p.last_name, p.phone, p.email, rt.name AS type_name, rt.appointment_type_id,
          (SELECT MAX(sent_at) FROM recall_contacts rc WHERE rc.recall_id = r.id) AS auto_contacted_at
-       FROM recalls r JOIN patients p ON p.id = r.patient_id LEFT JOIN recall_types rt ON rt.practice_id = r.practice_id AND rt.key = r.type
+       FROM ${worklist('recalls')} r JOIN ${worklist('patients')} p ON p.id = r.patient_id LEFT JOIN recall_types rt ON rt.practice_id = r.practice_id AND rt.key = r.type
        WHERE r.practice_id = ? AND r.due_date <= ? AND r.status IN (${statuses.map(() => '?').join(',')}) AND p.status = 'active'
        ORDER BY r.due_date`,
       pid, before, ...statuses,

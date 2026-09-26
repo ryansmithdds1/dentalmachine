@@ -24,7 +24,7 @@ export async function reconcileCards(db, payments, practiceId, from, to) {
     .map((c) => ({ ...c, date: localNow(timezone, new Date(c.created * 1000)).slice(0, 10) }))
     .filter((c) => c.date >= from && c.date <= to);
   const ledger = await db.all(
-    `SELECT l.id, l.patient_id, l.amount, l.entry_date, l.reference, l.voided_at, p.first_name, p.last_name FROM ledger_entries l LEFT JOIN patients p ON p.id = l.patient_id
+    `SELECT l.id, l.patient_id, l.amount, l.entry_date, l.reference, l.voided_at, p.first_name, p.last_name FROM real_ledger_entries l LEFT JOIN real_patients p ON p.id = l.patient_id
      WHERE l.practice_id = ? AND l.type = 'payment' AND l.method = 'credit_card' AND l.reverses_id IS NULL AND l.entry_date BETWEEN ? AND ?`, practiceId, from, to,
   );
   const byRef = new Map(ledger.filter((l) => l.reference).map((l) => [l.reference, l]));
@@ -52,7 +52,7 @@ export async function reconcileCards(db, payments, practiceId, from, to) {
 export async function reconcileInsuranceChecks(db, practiceId, from, to) {
   const rows = await db.all(
     `SELECT ic.id, ic.payer_name, ic.check_number, ic.check_date, ic.amount, ic.era_import_id,
-       COALESCE((SELECT -SUM(l.amount) FROM ledger_entries l WHERE l.insurance_check_id = ic.id AND l.type = 'insurance_payment'), 0) AS posted
+       COALESCE((SELECT -SUM(l.amount) FROM real_ledger_entries l WHERE l.insurance_check_id = ic.id AND l.type = 'insurance_payment'), 0) AS posted
      FROM insurance_checks ic WHERE ic.practice_id = ? AND ic.check_date BETWEEN ? AND ? ORDER BY ic.check_date, ic.id`, practiceId, from, to,
   );
   const checks = rows.map((r) => ({ ...r, posted: Number(r.posted), unposted: r.amount - Number(r.posted) }));
@@ -63,7 +63,7 @@ export async function reconcileInsuranceChecks(db, practiceId, from, to) {
 // Claims: how many were created, sent, acknowledged by the payer and paid — and the ones stuck between steps.
 export async function reconcileClaims(db, practiceId, from, to, now = Date.now()) {
   const range = [practiceId, ...(await utcRange(db, practiceId, from, to))];
-  const count = async (extra) => Number((await db.get(`SELECT COUNT(*) AS n FROM claims c WHERE c.practice_id = ? AND c.created_at BETWEEN ? AND ?${extra}`, ...range)).n);
+  const count = async (extra) => Number((await db.get(`SELECT COUNT(*) AS n FROM real_claims c WHERE c.practice_id = ? AND c.created_at BETWEEN ? AND ?${extra}`, ...range)).n);
   const answered = " AND (c.status IN ('paid','partially_paid','denied') OR EXISTS (SELECT 1 FROM claim_events e WHERE e.claim_id = c.id AND e.status IN ('accepted','paid','denied','rejected')))";
   const funnel = {
     created: await count(''),
@@ -75,7 +75,7 @@ export async function reconcileClaims(db, practiceId, from, to, now = Date.now()
   };
   const list = (where, ...args) => db.all(
     `SELECT c.id, c.status, c.total_fee, c.created_at, c.submitted_at, c.ch_status, c.ch_message, p.first_name || ' ' || p.last_name AS patient, ic.name AS carrier
-     FROM claims c JOIN patients p ON p.id = c.patient_id LEFT JOIN patient_insurance pi ON pi.id = c.patient_insurance_id LEFT JOIN insurance_carriers ic ON ic.id = pi.carrier_id
+     FROM real_claims c JOIN real_patients p ON p.id = c.patient_id LEFT JOIN real_patient_insurance pi ON pi.id = c.patient_insurance_id LEFT JOIN insurance_carriers ic ON ic.id = pi.carrier_id
      WHERE c.practice_id = ? AND ${where} ORDER BY c.id LIMIT 200`, practiceId, ...args,
   );
   const stuck = {

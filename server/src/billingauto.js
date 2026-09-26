@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
+import { NOT_TRAINING, refuseTraining } from './training.js';
 import { HttpError } from './auth.js';
 import { requireHuman } from './aiguard.js';
 import { withActor } from './actor.js';
@@ -235,6 +236,8 @@ export async function authorizedSurcharge(db, sourceType, sourceId) {
 // own ledger line (once, by the processor's id). The caller posts the payment for out.total.
 export async function trackedCharge(db, payments, { method, amount, description, idempotencyKey, metadata = {} }, { practiceId, patientId, sourceType, sourceId = null, authorizedBps = null }) {
   requireHuman('charging a card');
+  // Never for the training patient: no attempt, no dunning, nothing to the processor (training.js).
+  await refuseTraining(db, patientId, 'charging a card');
   let att = await db.get('SELECT * FROM billing_attempts WHERE idempotency_key = ?', idempotencyKey);
   if (!att) {
     const bps = authorizedBps ?? (await authorizedSurcharge(db, sourceType, sourceId));
@@ -543,7 +546,8 @@ export function firstOn(from, day) {
 
 export async function runRecurringCharges(db, payments, messenger, { id = null, force = false } = {}) {
   if (!payments?.enabled) return [];
-  const rows = await db.all(`SELECT * FROM recurring_charges WHERE status = 'active'${id ? ' AND id = ?' : ''}`, ...(id ? [id] : []));
+  // Never the training patient (training.js): nothing is charged for it.
+  const rows = await db.all(`SELECT * FROM recurring_charges WHERE status = 'active' AND ${NOT_TRAINING()}${id ? ' AND id = ?' : ''}`, ...(id ? [id] : []));
   const results = [];
   for (const listed of rows) {
     const today = await todayFor(db, listed.practice_id);
@@ -732,7 +736,7 @@ export async function runAutoFees(db, practiceId) {
   const today = await todayFor(db, practiceId);
   for (const fee of await activeFees(db, practiceId, 'late_payment')) {
     const since = String(fee.created_at).slice(0, 10);
-    const plans = await db.all("SELECT * FROM payment_plans WHERE practice_id = ? AND status = 'active' AND late_fee = 0", practiceId);
+    const plans = await db.all(`SELECT * FROM payment_plans WHERE practice_id = ? AND status = 'active' AND late_fee = 0 AND ${NOT_TRAINING()}`, practiceId);
     for (const plan of plans) {
       const st = await planStatus(db, plan, today);
       for (const s of st.schedule) {
@@ -759,7 +763,7 @@ export async function runAutoFees(db, practiceId) {
     }
   }
   for (const fee of await activeFees(db, practiceId, 'missed_appointment')) {
-    const appts = await db.all("SELECT id, patient_id, start_time FROM appointments WHERE practice_id = ? AND status = 'no_show' AND start_time >= ? ORDER BY id", practiceId, String(fee.created_at).slice(0, 10));
+    const appts = await db.all("SELECT id, patient_id, start_time FROM real_appointments appointments WHERE practice_id = ? AND status = 'no_show' AND start_time >= ? ORDER BY id", practiceId, String(fee.created_at).slice(0, 10));
     for (const a of appts) {
       if (await db.get('SELECT id FROM billing_fee_charges WHERE fee_id = ? AND source_key = ?', fee.id, `appt:${a.id}`)) continue;
       if (await applyFee(db, fee, { patientId: a.patient_id, sourceKey: `appt:${a.id}`, date: today, note: `missed appointment ${String(a.start_time).slice(0, 10)}` })) out.missed++;

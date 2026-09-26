@@ -149,7 +149,7 @@ export async function waitingEntries(db, pid, locationId, date) {
   const rows = await db.all(
     `SELECT l.id, l.type, l.method, l.amount, l.reference, l.entry_date, l.patient_id, l.created_by, l.description, l.location_id, l.insurance_check_id,
        p.first_name, p.last_name, u.name AS taken_by_name, ic.payer_name, ic.check_number
-     FROM ledger_entries l JOIN patients p ON p.id = l.patient_id LEFT JOIN users u ON u.id = l.created_by
+     FROM real_ledger_entries l JOIN real_patients p ON p.id = l.patient_id LEFT JOIN users u ON u.id = l.created_by
        LEFT JOIN insurance_checks ic ON ic.id = l.insurance_check_id
      WHERE l.practice_id = ? AND l.entry_date <= ? AND ${WAITING}${office.sql}
      ORDER BY l.entry_date, l.id`, pid, date, ...office.args,
@@ -190,7 +190,7 @@ export async function dayLedger(db, pid, locationId, date) {
   const office = await officeWhere(db, pid, locationId);
   const rows = await db.all(
     `SELECT CASE WHEN l.type = 'refund' THEN 'cash_refund' WHEN COALESCE(l.method, 'check') = 'cash' THEN 'cash' ELSE 'check' END AS kind, COUNT(*) AS n, -SUM(l.amount) AS amount
-     FROM ledger_entries l WHERE l.practice_id = ? AND l.entry_date = ? AND ${LIVE}
+     FROM real_ledger_entries l WHERE l.practice_id = ? AND l.entry_date = ? AND ${LIVE}
        AND ((l.type IN ('payment','insurance_payment') AND l.amount < 0 AND COALESCE(l.method, 'check') IN ('cash','check')) OR (l.type = 'refund' AND l.method = 'cash' AND l.amount > 0))${office.sql}
      GROUP BY CASE WHEN l.type = 'refund' THEN 'cash_refund' WHEN COALESCE(l.method, 'check') = 'cash' THEN 'cash' ELSE 'check' END`, pid, date, ...office.args,
   );
@@ -209,7 +209,7 @@ export async function electronicDeposits(db, pid, locationId, date) {
   const office = await officeWhere(db, pid, locationId);
   const cards = await db.all(
     `SELECT CASE WHEN l.method IN ('care_credit','financing') THEN 'financing' WHEN l.method = 'ach' THEN 'ach' ELSE 'card' END AS kind, COUNT(*) AS n, -SUM(l.amount) AS amount
-     FROM ledger_entries l WHERE l.practice_id = ? AND l.entry_date = ? AND ${LIVE} AND l.type IN ('payment','insurance_payment','refund')
+     FROM real_ledger_entries l WHERE l.practice_id = ? AND l.entry_date = ? AND ${LIVE} AND l.type IN ('payment','insurance_payment','refund')
        AND l.method IN ('credit_card','debit_card','care_credit','financing','ach')${office.sql}
      GROUP BY CASE WHEN l.method IN ('care_credit','financing') THEN 'financing' WHEN l.method = 'ach' THEN 'ach' ELSE 'card' END`, pid, date, ...office.args,
   );
@@ -270,13 +270,13 @@ export async function assignCashReceipt(db, entryOrId) {
 // voided since as voided — they stay on the list, so a missing number is never silent.
 export async function syncCashReceipts(db, pid) {
   const missing = await db.all(
-    `SELECT l.* FROM ledger_entries l LEFT JOIN cash_receipts r ON r.ledger_entry_id = l.id
+    `SELECT l.* FROM real_ledger_entries l LEFT JOIN cash_receipts r ON r.ledger_entry_id = l.id
      WHERE l.practice_id = ? AND r.id IS NULL AND l.method = 'cash' AND l.reverses_id IS NULL
        AND ((l.type = 'payment' AND l.amount < 0) OR (l.type = 'refund' AND l.amount > 0)) ORDER BY l.id LIMIT 500`, pid,
   );
   for (const e of missing) await assignCashReceipt(db, e);
   const voided = await db.all(
-    `SELECT r.id, l.voided_at, l.voided_by, l.void_reason FROM cash_receipts r JOIN ledger_entries l ON l.id = r.ledger_entry_id
+    `SELECT r.id, l.voided_at, l.voided_by, l.void_reason FROM cash_receipts r JOIN real_ledger_entries l ON l.id = r.ledger_entry_id
      WHERE r.practice_id = ? AND r.status = 'issued' AND l.voided_at IS NOT NULL`, pid,
   );
   for (const v of voided) await change(db, 'cash_receipts', v.id, { status: 'voided', voided_at: v.voided_at, voided_by: v.voided_by ?? null, void_reason: v.void_reason ?? null });
@@ -289,7 +289,7 @@ export async function syncCashReceipts(db, pid) {
 export async function drawerExpected(db, session) {
   await syncCashReceipts(db, session.practice_id);
   const rows = await db.all(
-    `SELECT r.kind, COUNT(*) AS n, SUM(r.amount) AS amount FROM cash_receipts r JOIN ledger_entries l ON l.id = r.ledger_entry_id
+    `SELECT r.kind, COUNT(*) AS n, SUM(r.amount) AS amount FROM cash_receipts r JOIN real_ledger_entries l ON l.id = r.ledger_entry_id
      WHERE r.drawer_session_id = ? AND l.voided_at IS NULL GROUP BY r.kind`, session.id,
   );
   const by = Object.fromEntries(rows.map((r) => [r.kind, { n: Number(r.n), amount: Number(r.amount) }]));
@@ -350,7 +350,7 @@ export async function depositSeparation(db, slip, items, names) {
   const from = shift(slip.business_date, -30);
   const to = shift(slip.business_date, 30);
   const adjustments = await db.all(
-    `SELECT patient_id, created_by, amount FROM ledger_entries l WHERE l.practice_id = ? AND l.type = 'adjustment' AND l.retail_sale_id IS NULL AND l.gift_certificate_id IS NULL AND l.amount < 0 AND ${LIVE}
+    `SELECT patient_id, created_by, amount FROM real_ledger_entries l WHERE l.practice_id = ? AND l.type = 'adjustment' AND l.retail_sale_id IS NULL AND l.gift_certificate_id IS NULL AND l.amount < 0 AND ${LIVE}
        AND l.transfer_id IS NULL AND l.entry_date BETWEEN ? AND ? AND l.patient_id IN (${patients.map(() => '?').join(',')})`, slip.practice_id, from, to, ...patients,
   );
   return separationFlags({ items, adjustments, preparedBy: slip.prepared_by, names });
@@ -401,7 +401,7 @@ export async function depositWatch(db, pid, today = null) {
     const stage = nextStage(s, deposit);
     if (stage !== s.stage) await change(db, 'deposit_slips', s.id, { stage });
     const voidedItems = Number((await db.get(
-      'SELECT COUNT(*) AS n FROM deposit_slip_items i JOIN ledger_entries l ON l.id = i.ledger_entry_id WHERE i.deposit_id = ? AND l.voided_at IS NOT NULL', s.deposit_id,
+      'SELECT COUNT(*) AS n FROM deposit_slip_items i JOIN real_ledger_entries l ON l.id = i.ledger_entry_id WHERE i.deposit_id = ? AND l.voided_at IS NOT NULL', s.deposit_id,
     )).n);
     for (const x of slipExceptions({ ...s, stage }, deposit, { today, lateDays, voidedItems })) {
       const base = { practiceId: pid, kind: 'payment', role: 'billing', entity: 'deposits', entityId: s.deposit_id, severity: 'high' };
@@ -493,7 +493,7 @@ export async function cashIntegrity(db, pid, { from, to, today }) {
     .map((f) => [`${f.kind}:${f.ledger_entry_id}`, f.approved_by]));
   const voids = (await db.all(
     `SELECT l.id, l.type, l.entry_date, l.amount, l.voided_at, l.void_reason, l.voided_by, l.created_by, p.first_name, p.last_name
-     FROM ledger_entries l JOIN patients p ON p.id = l.patient_id
+     FROM real_ledger_entries l JOIN real_patients p ON p.id = l.patient_id
      WHERE l.practice_id = ? AND l.method = 'cash' AND l.type IN ('payment','refund') AND l.voided_at IS NOT NULL AND l.reverses_id IS NULL
        AND substr(l.voided_at, 1, 10) BETWEEN ? AND ? ORDER BY l.voided_at`, pid, from, to,
   )).map((v) => ({
@@ -502,7 +502,7 @@ export async function cashIntegrity(db, pid, { from, to, today }) {
     approved_by: approvals.has(`cash_void:${v.id}`) ? who(approvals.get(`cash_void:${v.id}`)) : null,
   }));
   const refunds = (await db.all(
-    `SELECT l.id, l.entry_date, l.amount, l.created_by, l.description, p.first_name, p.last_name FROM ledger_entries l JOIN patients p ON p.id = l.patient_id
+    `SELECT l.id, l.entry_date, l.amount, l.created_by, l.description, p.first_name, p.last_name FROM real_ledger_entries l JOIN real_patients p ON p.id = l.patient_id
      WHERE l.practice_id = ? AND l.type = 'refund' AND l.method = 'cash' AND ${LIVE} AND l.entry_date BETWEEN ? AND ? ORDER BY l.entry_date, l.id`, pid, from, to,
   )).map((r) => ({
     id: r.id, entry_date: r.entry_date, amount: r.amount, patient: `${r.first_name} ${r.last_name}`, by: who(r.created_by), description: r.description,
@@ -513,7 +513,7 @@ export async function cashIntegrity(db, pid, { from, to, today }) {
   const adjustments = (await db.all(
     `SELECT l.created_by, COUNT(*) AS n, -SUM(l.amount) AS amount,
        -SUM(CASE WHEN LOWER(COALESCE(l.adjustment_type, '')) LIKE '%write%' THEN l.amount ELSE 0 END) AS write_offs
-     FROM ledger_entries l WHERE l.practice_id = ? AND l.type = 'adjustment' AND l.retail_sale_id IS NULL AND l.gift_certificate_id IS NULL AND l.amount < 0 AND ${LIVE} AND l.transfer_id IS NULL AND l.entry_date BETWEEN ? AND ?
+     FROM real_ledger_entries l WHERE l.practice_id = ? AND l.type = 'adjustment' AND l.retail_sale_id IS NULL AND l.gift_certificate_id IS NULL AND l.amount < 0 AND ${LIVE} AND l.transfer_id IS NULL AND l.entry_date BETWEEN ? AND ?
      GROUP BY l.created_by`, pid, from, to,
   )).map((a) => ({ user_id: a.created_by, name: who(a.created_by), count: Number(a.n), amount: Number(a.amount), write_offs: Number(a.write_offs), discounts: Number(a.amount) - Number(a.write_offs) }))
     .sort((a, b) => b.amount - a.amount);

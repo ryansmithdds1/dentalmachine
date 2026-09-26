@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { trainingRowFilter } from '../training.js';
 import { restricted, canSeePatient, requireVisiblePatients } from '../officeaccess.js';
 import { requirePermission, HttpError } from '../auth.js';
 import { insert, audit, practiceNow, toCents, publicPractice, toCsv } from '../util.js';
@@ -49,7 +50,7 @@ export default function growthRoutes({ db, messenger, config, mailer = { enabled
     const split = pt.adjustments;
     const adjustments = v.adjustments;
     const hygieneProduction = await one(
-      `SELECT COALESCE(SUM(l.amount),0) AS n FROM ledger_entries l JOIN providers pv ON pv.id = l.provider_id
+      `SELECT COALESCE(SUM(l.amount),0) AS n FROM real_ledger_entries l JOIN providers pv ON pv.id = l.provider_id
        WHERE l.practice_id = ? AND l.type = 'charge' AND l.retail_sale_id IS NULL AND pv.type = 'hygienist' AND l.entry_date BETWEEN ? AND ?${byProv('l.provider_id')}`, ...range,
     );
     const kept = pt.broken_rate.kept;
@@ -59,12 +60,12 @@ export default function growthRoutes({ db, messenger, config, mailer = { enabled
     const hyg = pt.hygiene_reappointment;
     const newPatients = whole.parts.new_patients.by_source;
     const active = await one(
-      `SELECT COUNT(DISTINCT patient_id) AS n FROM appointments WHERE practice_id = ? AND status = 'completed' AND start_time >= ?`,
+      `SELECT COUNT(DISTINCT patient_id) AS n FROM real_appointments appointments WHERE practice_id = ? AND status = 'completed' AND start_time >= ?`,
       pid, `${addDays(today, -547)} 00:00`,
     );
     const byProvider = await db.all(
       `SELECT pv.id, pv.name, pv.type, COALESCE(SUM(l.amount),0) AS production, COUNT(DISTINCT l.patient_id) AS patients
-       FROM providers pv LEFT JOIN ledger_entries l ON l.provider_id = pv.id AND l.type = 'charge' AND l.retail_sale_id IS NULL AND l.entry_date BETWEEN ? AND ?
+       FROM providers pv LEFT JOIN real_ledger_entries l ON l.provider_id = pv.id AND l.type = 'charge' AND l.retail_sale_id IS NULL AND l.entry_date BETWEEN ? AND ?
        WHERE pv.practice_id = ? AND pv.active = 1${byProv('pv.id')} GROUP BY pv.id ORDER BY production DESC`, from, to, pid,
     );
     const days = Math.max(1, (Date.parse(to) - Date.parse(from)) / 86400_000 + 1);
@@ -72,12 +73,12 @@ export default function growthRoutes({ db, messenger, config, mailer = { enabled
       `SELECT substr(entry_date, 1, 7) AS month,
          SUM(CASE WHEN type = 'charge' AND retail_sale_id IS NULL THEN amount ELSE 0 END) AS production,
          -SUM(CASE WHEN type IN ('payment','insurance_payment') THEN amount ELSE 0 END) AS collections
-       FROM ledger_entries WHERE practice_id = ? AND entry_date >= ? GROUP BY month ORDER BY month`, pid, `${addDays(today, -365).slice(0, 7)}-01`,
+       FROM real_ledger_entries ledger_entries WHERE practice_id = ? AND entry_date >= ? GROUP BY month ORDER BY month`, pid, `${addDays(today, -365).slice(0, 7)}-01`,
     );
     if (prov) {
       // For one provider: their production each month, and the payments credited to their work.
       const start = `${addDays(today, -365).slice(0, 7)}-01`;
-      const prodRows = await db.all(`SELECT substr(entry_date, 1, 7) AS month, SUM(amount) AS n FROM ledger_entries WHERE practice_id = ? AND type = 'charge' AND retail_sale_id IS NULL AND entry_date >= ?${byProv()} GROUP BY month`, pid, start);
+      const prodRows = await db.all(`SELECT substr(entry_date, 1, 7) AS month, SUM(amount) AS n FROM real_ledger_entries ledger_entries WHERE practice_id = ? AND type = 'charge' AND retail_sale_id IS NULL AND entry_date >= ?${byProv()} GROUP BY month`, pid, start);
       const alloc = (await allocationsForRange(db, pid, start, today)).filter((a) => a.provider_id === prov && ['payment', 'insurance_payment'].includes(a.credit_type));
       const months = new Map(monthly.map((m) => [m.month, { month: m.month, production: 0, collections: 0 }]));
       for (const p of prodRows) (months.get(p.month) || months.set(p.month, { month: p.month, production: 0, collections: 0 }).get(p.month)).production = p.n;
@@ -108,14 +109,14 @@ export default function growthRoutes({ db, messenger, config, mailer = { enabled
     const cutoff = addDays((await practiceNow(db, pid)).slice(0, 10), -sinceDays);
     const rows = (await db.all(
       `SELECT g.id, g.first_name, g.last_name, g.email, g.email_opt_in, g.address, g.city, g.state, g.zip, g.statement_sent_at,
-         (SELECT COALESCE(SUM(l.amount),0) FROM ledger_entries l JOIN patients m ON m.id = l.patient_id WHERE m.id = g.id OR m.guarantor_id = g.id) AS balance
-       FROM patients g WHERE g.practice_id = ? AND g.guarantor_id IS NULL AND g.status != 'archived' AND g.deceased_at IS NULL
+         (SELECT COALESCE(SUM(l.amount),0) FROM real_ledger_entries l JOIN real_patients m ON m.id = l.patient_id WHERE m.id = g.id OR m.guarantor_id = g.id) AS balance
+       FROM real_patients g WHERE g.practice_id = ? AND g.guarantor_id IS NULL AND g.status != 'archived' AND g.deceased_at IS NULL
          AND (g.statement_sent_at IS NULL OR g.statement_sent_at < ?)`, pid, cutoff,
     )).filter((x) => x.balance >= minBalance);
     // Same patient-portion rule as the ledger and portal: minus what insurance and in-network discounts will cover.
     const out = [];
     for (const x of rows) {
-      const members = (await db.all('SELECT id FROM patients WHERE practice_id = ? AND (id = ? OR guarantor_id = ?)', pid, x.id, x.id)).map((m) => m.id);
+      const members = (await db.all('SELECT id FROM real_patients patients WHERE practice_id = ? AND (id = ? OR guarantor_id = ?)', pid, x.id, x.id)).map((m) => m.id);
       const pending = await pendingInsurance(db, pid, members);
       out.push({ ...x, pending_insurance: pending.insurance, pending_write_off: pending.write_off, patient_portion: x.balance - pending.total });
     }
@@ -284,24 +285,31 @@ export default function growthRoutes({ db, messenger, config, mailer = { enabled
   // automatically), without sign-in secrets or internal storage keys: one JSON file, or any table as CSV.
   const SECRET = /(_hash$|^mfa_secret$|secret|_token$|^token$|^storage_key$|^thumb_key$|^recording_key$|^api_key)/;
   const scrubRow = (row) => Object.fromEntries(Object.entries(row).filter(([k]) => !SECRET.test(k)));
-  const exportRows = (t, pid) => db.all(`SELECT * FROM ${t.table} WHERE ${t.where}${t.cols.some((c) => c.name === 'id') ? ' ORDER BY id' : ''}`, pid).then((rows) => rows.map(scrubRow));
+  // The training patient (training.js) and everything recorded against it is practice data, not the practice's
+  // records: never in an export.
+  const exportRows = async (t, pid, training) => {
+    const rows = await db.all(`SELECT * FROM ${t.table} WHERE ${t.where}${t.cols.some((c) => c.name === 'id') ? ' ORDER BY id' : ''}`, pid);
+    return rows.filter((row) => !training(t.table, row)).map(scrubRow);
+  };
   r.get('/export', requireAdmin, async (req, res) => {
     const pid = req.user.practice_id;
     const out = { exported_at: new Date().toISOString(), format: 'dentalmachine-export-v2', tables: {} };
-    for (const t of backupTables()) out.tables[t.table] = await exportRows(t, pid);
+    const training = await trainingRowFilter(db, pid);
+    for (const t of backupTables()) out.tables[t.table] = await exportRows(t, pid, training);
     await audit(db, req, 'practice.export', 'practices', pid);
     res.set({ 'Content-Type': 'application/json', 'Content-Disposition': `attachment; filename="dentalmachine-export-${(await practiceNow(db, pid)).slice(0, 10)}.json"` });
     res.send(JSON.stringify(out));
   });
   r.get('/export/tables', requireAdmin, async (req, res) => {
     const list = [];
-    for (const t of backupTables()) list.push({ table: t.table, rows: Number((await db.get(`SELECT COUNT(*) AS n FROM ${t.table} WHERE ${t.where}`, req.user.practice_id)).n) });
+    const training = await trainingRowFilter(db, req.user.practice_id);
+    for (const t of backupTables()) list.push({ table: t.table, rows: (await exportRows(t, req.user.practice_id, training)).length });
     res.json(list.filter((t) => t.rows > 0));
   });
   r.get('/export/:table.csv', requireAdmin, async (req, res) => {
     const t = backupTables().find((x) => x.table === req.params.table);
     if (!t) throw new HttpError(404, 'No such dataset');
-    const rows = await exportRows(t, req.user.practice_id);
+    const rows = await exportRows(t, req.user.practice_id, await trainingRowFilter(db, req.user.practice_id));
     const cols = t.cols.map((c) => c.name).filter((k) => !SECRET.test(k));
     await audit(db, req, 'practice.export_table', 'practices', req.user.practice_id, { table: t.table, rows: rows.length });
     res.set({ 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="${t.table}.csv"`, 'Cache-Control': 'no-store' });

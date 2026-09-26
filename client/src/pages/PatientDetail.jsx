@@ -108,7 +108,7 @@ export default function PatientDetail() {
             <div>
               {inModule && <div className="pt-module" data-module={inModule.key}><ModIcon size={13} aria-hidden /> {inModule.label}</div>}
               {/* Name and birth date are corrected right here (click, fix, Enter — with Undo). */}
-              <h1><NameInPlace p={p} canEdit={can('patients:write')}>{fullName(p)}</NameInPlace> {p.deceased_at ? <Badge value="deceased" /> : p.status !== 'active' && <Badge value={p.status} />}</h1>
+              <h1><NameInPlace p={p} canEdit={can('patients:write')}>{fullName(p)}</NameInPlace> {p.deceased_at ? <Badge value="deceased" /> : p.status !== 'active' && <Badge value={p.status} />}{p.is_training ? <span className="training-badge" title="Practice patient for the guided walkthroughs — nothing done here leaves the office or counts in reports">Training</span> : null}</h1>
               <div className="muted">
                 #{p.id} · <DobInPlace p={p} canEdit={can('patients:write')}>{p.dob ? `${fmtDate(p.dob)} (${age(p.dob)} y)` : 'DOB not recorded'}</DobInPlace> {p.gender ? `· ${label(p.gender)}` : ''} {p.phone ? `· ${p.phone}` : ''}
               </div>

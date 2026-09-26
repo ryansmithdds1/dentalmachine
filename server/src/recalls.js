@@ -94,9 +94,9 @@ export async function runRecallSequences(db, messenger, { appUrl, now = new Date
     const today = nowLocal.slice(0, 10);
     const horizon = new Date(Date.parse(`${today}T12:00:00Z`) - steps[0].days * 86400000).toISOString().slice(0, 10);
     const due = await db.all(
-      `SELECT r.*, p.first_name, p.phone, p.email, p.sms_opt_in, p.email_opt_in, p.language FROM recalls r JOIN patients p ON p.id = r.patient_id
+      `SELECT r.*, p.first_name, p.phone, p.email, p.sms_opt_in, p.email_opt_in, p.language FROM real_recalls r JOIN real_patients p ON p.id = r.patient_id
        WHERE r.practice_id = ? AND r.status IN ('due','contacted') AND r.due_date <= ? AND p.status = 'active'
-         AND NOT EXISTS (SELECT 1 FROM appointments a WHERE a.patient_id = r.patient_id AND a.start_time >= ? AND a.status IN ('scheduled','confirmed'))
+         AND NOT EXISTS (SELECT 1 FROM real_appointments a WHERE a.patient_id = r.patient_id AND a.start_time >= ? AND a.status IN ('scheduled','confirmed'))
        ORDER BY r.due_date`,
       practice.id, horizon, nowLocal,
     );

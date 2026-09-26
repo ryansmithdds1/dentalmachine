@@ -21,13 +21,13 @@ export async function collectionsList(db, pid) {
   const { rows } = await agingReport(db, pid, today, { family: true });
   const overdueOf = (r) => Math.min(r.patient_portion, r.d31_60 + r.d61_90 + r.d90_plus);
   // Looked up for every account at once (three grouped queries, however many accounts there are).
-  const info = new Map((await db.all('SELECT id, guarantor_id, collection_status, email, address, city, state, zip FROM patients WHERE practice_id = ?', pid)).map((p) => [p.id, p]));
+  const info = new Map((await db.all('SELECT id, guarantor_id, collection_status, email, address, city, state, zip FROM real_patients patients WHERE practice_id = ?', pid)).map((p) => [p.id, p]));
   const lastAction = new Map((await db.all(
     'SELECT patient_id, action, created_at FROM collection_actions WHERE id IN (SELECT MAX(id) FROM collection_actions WHERE practice_id = ? GROUP BY patient_id)', pid,
   )).map((a) => [a.patient_id, a]));
   // The latest payment by anyone in each household.
   const lastPaid = new Map();
-  for (const x of await db.all("SELECT patient_id, MAX(entry_date) AS d FROM ledger_entries WHERE practice_id = ? AND type = 'payment' AND voided_at IS NULL GROUP BY patient_id", pid)) {
+  for (const x of await db.all("SELECT patient_id, MAX(entry_date) AS d FROM real_ledger_entries ledger_entries WHERE practice_id = ? AND type = 'payment' AND voided_at IS NULL GROUP BY patient_id", pid)) {
     const account = info.get(x.patient_id)?.guarantor_id ?? x.patient_id;
     if (!lastPaid.has(account) || x.d > lastPaid.get(account)) lastPaid.set(account, x.d);
   }

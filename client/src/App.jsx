@@ -12,6 +12,9 @@ import CommandPalette from './components/CommandPalette.jsx';
 import IntranetCommands from './components/intranet/IntranetCommands.jsx';
 import DocumentCommands from './components/docs/DocumentCommands.jsx';
 import ManualCommands from './components/manual/ManualCommands.jsx';
+import { TourProvider } from './components/tours/TourProvider.jsx';
+import TourCommands from './components/tours/TourCommands.jsx';
+import TourWelcome from './components/tours/TourWelcome.jsx';
 import ChecklistCommands from './components/checklists/ChecklistCommands.jsx';
 import PaperworkCommands from './components/consents/PaperworkCommands.jsx';
 import QuickCommands from './components/QuickCommands.jsx';
@@ -112,6 +115,7 @@ const Referrals = lazy(() => import('./pages/Referrals.jsx'));
 const CheckinPage = lazy(() => import('./pages/public/CheckinPage.jsx'));
 const StatusPage = lazy(() => import('./pages/public/StatusPage.jsx'));
 const Help = lazy(() => import('./pages/Help.jsx'));
+const Training = lazy(() => import('./pages/Training.jsx'));
 // Batch 2B: compliance log, letters, gift certificates.
 const Compliance = lazy(() => import('./pages/Compliance.jsx'));
 const Letters = lazy(() => import('./pages/Letters.jsx'));
@@ -270,7 +274,7 @@ function StaffApp() {
       <Route path="/deposits/:id/slip" element={<DepositSlipPrint />} />
       <Route path="/appointments/:id/walkout" element={<WalkoutPrint />} />
       <Route path="/referrals/:id/letter" element={<ReferralLetterPrint />} />
-      <Route path="*" element={<ActivePatientProvider><Shell /></ActivePatientProvider>} />
+      <Route path="*" element={<ActivePatientProvider><TourProvider><Shell /></TourProvider></ActivePatientProvider>} />
     </Routes>
   );
 }
@@ -338,7 +342,7 @@ function UserMenu({ user, practice, logout }) {
   }, [open]);
   return (
     <div className="user-menu">
-      <button className="rail-item user-button" onClick={() => setOpen(!open)} aria-expanded={open} data-tip={user.name}>
+      <button className="rail-item user-button" data-tour="user-menu" onClick={() => setOpen(!open)} aria-expanded={open} data-tip={user.name}>
         <span className="rail-avatar">{initials(user.name)}</span>
         <span className="rail-label">{user.name}<small>{label(user.role)}</small></span>
       </button>
@@ -383,6 +387,7 @@ function Shell() {
       <IntranetCommands />
       <DocumentCommands />
       <ManualCommands />
+      <TourCommands />
       <ChecklistCommands />
       <QuickCommands />
       <ExportCommands />
@@ -413,6 +418,7 @@ function Shell() {
           <div className="setup-banner no-print">Finish setting up {practice.name} — providers, fees, insurance and reminders. <NavLink to="/setup">Continue setup →</NavLink></div>
         )}
         {user.role === 'admin' && practice?.setup_status === 'pending' && location.pathname === '/' && !seenSetup() && <Navigate to="/setup" replace />}
+        <TourWelcome />
         <PatientBar />
         <ErrorBoundary key={location.pathname}>
         <Suspense fallback={<div className="empty">Loading…</div>}>
@@ -463,6 +469,7 @@ function Shell() {
             <Route path="/group" element={<Group />} />
             <Route path="/reputation" element={<Reputation />} />
             <Route path="/help" element={<Help />} />
+            <Route path="/training" element={<Training />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/intranet/*" element={<Intranet />} />
             <Route path="/intake" element={<><div className="page-header"><h1>Sent in online</h1></div><IntakeReview /></>} />

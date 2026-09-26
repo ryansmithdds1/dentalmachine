@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { refuseTraining } from '../training.js';
 import { requirePermission, HttpError } from '../auth.js';
 import { findOr404, insert, audit, toCents, practiceNow } from '../util.js';
 import { sendReceipt } from '../receipts.js';
@@ -71,6 +72,7 @@ export default function terminalRoutes({ db, payments, messenger }) {
   // Send an amount to a reader; the patient taps, inserts or swipes. The screen polls for the result.
   r.post('/patients/:id/terminal-payments', requirePermission('billing:write'), async (req, res) => {
     const patient = await findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient');
+    await refuseTraining(db, patient.id, 'taking a card on the card reader');
     const reader = await findOr404(db, 'terminal_readers', req.body?.reader_id, req.user.practice_id, 'Card reader');
     if (reader.removed_at) throw new HttpError(400, 'That reader was removed');
     const amount = toCents(req.body?.amount);

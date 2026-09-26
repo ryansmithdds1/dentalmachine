@@ -1,4 +1,5 @@
 import express, { Router } from 'express';
+import { refuseTraining } from '../training.js';
 import { requirePermission, requireAnyPermission, HttpError, can, USER_PERMISSION_SQL } from '../auth.js';
 import { findOr404, insert, audit, recorded, isRealDate, practiceNow } from '../util.js';
 import { publish } from '../events.js';
@@ -427,6 +428,7 @@ export default function docManageRoutes({ db, storage, config = {}, reader, scan
   // "Scan now" for the active patient: the bridge on that workstation scans, makes one PDF (or JPGs) and files it here.
   r.post('/patients/:id/scan', requireAnyPermission('clinical:write', 'documents:add'), async (req, res) => {
     const patient = await findOr404(db, 'patients', req.params.id, pid(req), 'Patient');
+    await refuseTraining(db, patient.id, 'a scan order to the imaging workstation');
     const agent = await findOr404(db, 'bridge_agents', req.body?.agent_id, pid(req), 'Workstation');
     if (!agent.active) throw new HttpError(409, 'That workstation was removed');
     if (!agent.scanner) throw new HttpError(400, `No scanner is set up in the imaging bridge on ${agent.name}`);

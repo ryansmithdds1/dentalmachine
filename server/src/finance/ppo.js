@@ -21,16 +21,16 @@ export async function ppoProfitability(db, pid, { today, months = 12, retention 
     `SELECT pr.id, pr.patient_id, pr.appointment_id, pr.code, pr.description, pr.fee, substr(pr.completed_at, 1, 10) AS d,
        cl.status AS claim_status, pi.carrier_id AS claim_carrier,
        ci.write_off, ci.adjusted_amount, ci.paid_amount, ci.estimated_amount
-     FROM procedures pr
-     LEFT JOIN claim_items ci ON ci.procedure_id = pr.id AND ci.claim_id IN (SELECT id FROM claims WHERE status <> 'void' AND primary_claim_id IS NULL)
-     LEFT JOIN claims cl ON cl.id = ci.claim_id
-     LEFT JOIN patient_insurance pi ON pi.id = cl.patient_insurance_id
+     FROM real_procedures pr
+     LEFT JOIN claim_items ci ON ci.procedure_id = pr.id AND ci.claim_id IN (SELECT id FROM real_claims claims WHERE status <> 'void' AND primary_claim_id IS NULL)
+     LEFT JOIN real_claims cl ON cl.id = ci.claim_id
+     LEFT JOIN real_patient_insurance pi ON pi.id = cl.patient_insurance_id
      WHERE pr.practice_id = ? AND pr.status = 'completed' AND pr.completed_at >= ? AND pr.completed_at <= ?`, pid, from, `${today} 23:59:59`,
   );
-  const primary = new Map((await db.all("SELECT patient_id, carrier_id FROM patient_insurance WHERE practice_id = ? AND active = 1 AND priority = 'primary' ORDER BY id", pid)).map((r) => [r.patient_id, r.carrier_id]));
+  const primary = new Map((await db.all("SELECT patient_id, carrier_id FROM real_patient_insurance patient_insurance WHERE practice_id = ? AND active = 1 AND priority = 'primary' ORDER BY id", pid)).map((r) => [r.patient_id, r.carrier_id]));
   const carriers = new Map((await db.all('SELECT id, name FROM insurance_carriers WHERE practice_id = ?', pid)).map((c) => [c.id, c.name]));
   const visits = await db.all(
-    `SELECT id, patient_id, start_time, end_time FROM appointments WHERE practice_id = ? AND status IN ('completed','checked_in','in_chair') AND start_time >= ? AND start_time <= ?`,
+    `SELECT id, patient_id, start_time, end_time FROM real_appointments appointments WHERE practice_id = ? AND status IN ('completed','checked_in','in_chair') AND start_time >= ? AND start_time <= ?`,
     pid, `${from} 00:00`, `${today} 23:59`,
   );
   const mins = (v) => Math.max(0, (Date.parse(`${v.end_time.replace(' ', 'T')}:00Z`) - Date.parse(`${v.start_time.replace(' ', 'T')}:00Z`)) / 60000);

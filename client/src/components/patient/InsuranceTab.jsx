@@ -315,7 +315,7 @@ function PolicyForm({ patient, policy, card = null, onDone, taken = [] }) {
       <div className="form-grid">
         <label>
           Carrier *
-          <select required value={form.carrier_id} onChange={set('carrier_id')}>
+          <select required data-tour="policy-carrier" value={form.carrier_id} onChange={set('carrier_id')}>
             <option value="">Select…</option>
             {carriers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             {can('billing:write') && <option value="new">{card?.new_carrier ? `+ New: ${card.new_carrier.name}` : '+ Add a new carrier…'}</option>}
@@ -327,7 +327,7 @@ function PolicyForm({ patient, policy, card = null, onDone, taken = [] }) {
             <label>Payer ID<input value={form.new_carrier_payer_id} onChange={set('new_carrier_payer_id')} placeholder="for e-claims" /></label>
           </div>
         )}
-        <label>Priority<select value={form.priority} onChange={set('priority')}><option value="primary">Primary</option><option value="secondary">Secondary</option></select></label>
+        <label>Priority<select data-tour="policy-priority" value={form.priority} onChange={set('priority')}><option value="primary">Primary</option><option value="secondary">Secondary</option></select></label>
         {plans?.length > 0 && (
           <label className="full">
             Employer plan
@@ -338,12 +338,12 @@ function PolicyForm({ patient, policy, card = null, onDone, taken = [] }) {
           </label>
         )}
         {chosenPlan && chosenPlan.members > (policy?.plan_id === chosenPlan.id ? 1 : 0) && <div className="full muted" style={{ fontSize: 12 }}>Benefit changes below apply to everyone on this plan ({chosenPlan.members} patient{chosenPlan.members === 1 ? '' : 's'}).</div>}
-        <label>Subscriber name *<input required value={form.subscriber_name} onChange={set('subscriber_name')} /></label>
-        <label>Member ID *<input required value={form.subscriber_id} onChange={set('subscriber_id')} /></label>
+        <label>Subscriber name *<input required data-tour="policy-subscriber" value={form.subscriber_name} onChange={set('subscriber_name')} /></label>
+        <label>Member ID *<input required data-tour="policy-member-id" value={form.subscriber_id} onChange={set('subscriber_id')} /></label>
         <label>Subscriber DOB<input type="date" value={form.subscriber_dob} onChange={set('subscriber_dob')} /></label>
         <label>
           Relationship
-          <select value={form.relationship} onChange={set('relationship')}>
+          <select data-tour="policy-relationship" value={form.relationship} onChange={set('relationship')}>
             <option value="self">Self</option><option value="spouse">Spouse</option><option value="child">Child</option><option value="other">Other</option>
           </select>
         </label>

@@ -1,0 +1,60 @@
+/* Guided walkthroughs (TourProvider.jsx): the page dimmed around the control to use, and a small box that says what
+   to do. Colours come from the app's tokens, so light and dark both work. Above everything else in the app. */
+.tour-layer { position: fixed; inset: 0; z-index: 10000; pointer-events: none; }
+.tour-dim { position: fixed; background: rgba(8, 14, 26, 0.46); pointer-events: none; }
+.tour-dim-all { inset: 0; pointer-events: none; }
+.tour-dim-all.light { background: rgba(8, 14, 26, 0.22); }
+[data-theme='dark'] .tour-dim { background: rgba(0, 0, 0, 0.58); }
+[data-theme='dark'] .tour-dim-all.light { background: rgba(0, 0, 0, 0.32); }
+.tour-ring { position: fixed; border-radius: 10px; box-shadow: 0 0 0 3px var(--primary), 0 0 0 7px rgba(13, 148, 136, 0.28); pointer-events: none; transition: top 0.15s ease, left 0.15s ease, width 0.15s ease, height 0.15s ease; animation: tour-pulse 1.8s ease-in-out infinite; }
+@keyframes tour-pulse { 50% { box-shadow: 0 0 0 3px var(--primary), 0 0 0 11px rgba(13, 148, 136, 0.12); } }
+@media (prefers-reduced-motion: reduce) { .tour-ring, .tour-callout.nudge { animation: none; transition: none; } }
+
+.tour-callout {
+  position: fixed; z-index: 10001; width: 360px; max-width: calc(100vw - 24px); background: var(--panel); color: var(--text);
+  border: 1px solid var(--border-strong); border-radius: 14px; box-shadow: var(--shadow-lg); padding: 12px 14px 10px; font-size: 13.5px;
+}
+.tour-callout.center { left: 50%; bottom: 24px; transform: translateX(-50%); }
+.tour-callout.center.wide { bottom: auto; top: 18vh; width: 460px; }
+.tour-callout.nudge { animation: tour-nudge 0.4s ease; }
+@keyframes tour-nudge { 25% { margin-left: -6px; } 75% { margin-left: 6px; } }
+.tour-head { display: flex; align-items: center; gap: 8px; color: var(--primary-ink); }
+[data-theme='dark'] .tour-head { color: var(--primary); }
+.tour-head strong { color: var(--text); font-size: 13px; }
+.tour-count { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.tour-x { border: none; background: none; min-height: 0; padding: 4px; color: var(--muted); box-shadow: none; }
+.tour-x:hover { color: var(--text); }
+.tour-body { margin-top: 6px; }
+.tour-q { font-size: 16px; margin: 4px 0 6px; }
+.tour-text { font-size: 14.5px; font-weight: 600; margin: 4px 0 6px; line-height: 1.4; }
+.tour-do { margin: 0 0 8px; color: var(--text-2); }
+.tour-kbd { display: inline-flex; gap: 3px; margin: 0 2px; }
+.tour-kbd kbd { opacity: 1; font-size: 12px; padding: 2px 6px; background: var(--subtle); border-color: var(--border-strong); color: var(--text); }
+.tour-meta { font-size: 12.5px; color: var(--muted); }
+.tour-note { border-radius: 8px; padding: 6px 8px; margin: 8px 0; font-size: 12.5px; background: var(--subtle); color: var(--text-2); }
+.tour-note.ok { background: var(--ok-soft); color: var(--ok); }
+.tour-note.warn { background: var(--warn-soft); color: var(--warn); }
+.tour-note.small, .tour-callout .small { font-size: 12px; }
+.tour-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.tour-actions button { display: inline-flex; align-items: center; gap: 5px; }
+.tour-missing { background: var(--warn-soft); color: var(--warn); border-radius: 8px; padding: 8px; font-size: 13px; }
+.tour-missing svg { vertical-align: -3px; }
+.tour-progress { height: 3px; border-radius: 3px; background: var(--border); margin: 10px 0 4px; overflow: hidden; }
+.tour-progress span { display: block; height: 100%; background: var(--primary); transition: width 0.25s ease; }
+.tour-help { font-size: 11px; margin: 2px 0 0; }
+.tour-done { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 600; color: var(--ok); margin: 6px 0; }
+
+/* Help → Show me, My training, the Training page */
+.showme-list { list-style: none; padding: 0; margin: 0; }
+.showme-list li { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border); }
+.showme-list li:last-child { border-bottom: none; }
+.showme-list .showme-q { flex: 1; min-width: 0; }
+.showme-list .done-mark { color: var(--ok); }
+.showme-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 10px 0; }
+.training-badge { display: inline-flex; align-items: center; gap: 3px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.02em; text-transform: uppercase; padding: 1px 6px; border-radius: 999px; background: var(--warn-soft); color: var(--warn); vertical-align: 1px; }
+.tour-welcome { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 0 0 12px; padding: 10px 14px; border-radius: 12px; background: var(--primary-soft); color: var(--primary-ink); border: 1px solid var(--border); }
+[data-theme='dark'] .tour-welcome { color: var(--text); }
+.tour-welcome strong { font-weight: 650; }
+.progress-bar { height: 6px; border-radius: 6px; background: var(--border); overflow: hidden; min-width: 80px; }
+.progress-bar span { display: block; height: 100%; background: var(--primary); }
+.cal-training { position: absolute; top: 2px; right: 4px; z-index: 1; font-size: 9px; padding: 0 5px; pointer-events: none; }

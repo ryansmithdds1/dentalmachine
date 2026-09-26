@@ -315,7 +315,7 @@ export default function chartingRoutes({ db, config = {}, transcriber = null }) 
   r.get('/procedure-codes/favorites', requirePermission('clinical:read'), async (req, res) => {
     const since = new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10);
     const rows = await db.all(
-      `SELECT pc.*, COUNT(pr.id) AS uses FROM procedures pr JOIN procedure_codes pc ON pc.id = pr.code_id
+      `SELECT pc.*, COUNT(pr.id) AS uses FROM real_procedures pr JOIN procedure_codes pc ON pc.id = pr.code_id
        WHERE pr.practice_id = ? AND pr.created_at >= ? AND pc.active = 1
        GROUP BY pc.id, pc.practice_id, pc.code, pc.description, pc.category, pc.fee, pc.requires_tooth, pc.requires_surface, pc.active, pc.area, pc.time_units
        ORDER BY COUNT(pr.id) DESC, pc.code LIMIT ?`,

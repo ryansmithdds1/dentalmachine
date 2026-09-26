@@ -434,7 +434,7 @@ const ENGINES = {
     const loc = cfg.location_id ? ' AND l.location_id = ?' : '';
     const rows = codes.length ? await ctx.db.all(
       `SELECT l.id, l.amount, l.entry_date, COALESCE(pr.provider_id, l.provider_id) AS provider_id, pr.id AS procedure_id, pr.code, pr.appointment_id, a.operatory_id
-       FROM ledger_entries l JOIN procedures pr ON pr.id = l.procedure_id LEFT JOIN appointments a ON a.id = pr.appointment_id
+       FROM real_ledger_entries l JOIN real_procedures pr ON pr.id = l.procedure_id LEFT JOIN real_appointments a ON a.id = pr.appointment_id
        WHERE l.practice_id = ? AND l.type = 'charge' AND l.retail_sale_id IS NULL AND l.voided_at IS NULL AND l.reverses_id IS NULL AND l.entry_date >= ? AND l.entry_date <= ?
          AND pr.code IN (${codes.map(() => '?').join(',')})${loc} ORDER BY l.id`,
       ctx.pid, period.start, to, ...codes, ...(cfg.location_id ? [cfg.location_id] : []),
@@ -568,7 +568,7 @@ export async function kpiValue(ctx, key, from, to, locationId = null) {
       for (const pv of provs) for (const [o, c] of (await providerHoursOn(db, office, pv, d)) || []) available += Math.max(0, toMin(c) - toMin(o));
     }
     const visits = await db.all(
-      `SELECT start_time, end_time FROM appointments WHERE practice_id = ? AND start_time >= ? AND start_time < ? AND status NOT IN ('cancelled','no_show')${locationId ? ' AND location_id = ?' : ''}`,
+      `SELECT start_time, end_time FROM real_appointments appointments WHERE practice_id = ? AND start_time >= ? AND start_time < ? AND status NOT IN ('cancelled','no_show')${locationId ? ' AND location_id = ?' : ''}`,
       pid, `${from} 00:00`, `${to} 24:00`, ...(locationId ? [locationId] : []),
     );
     const booked = visits.reduce((t, v) => t + Math.max(0, (Date.parse(`${v.end_time.replace(' ', 'T')}:00Z`) - Date.parse(`${v.start_time.replace(' ', 'T')}:00Z`)) / 60000), 0);
@@ -576,8 +576,8 @@ export async function kpiValue(ctx, key, from, to, locationId = null) {
   }
   if (def.source === 'otc') {
     const r = await db.get(
-      `SELECT COALESCE(SUM(-l.amount),0) AS n FROM ledger_entries l WHERE l.practice_id = ? AND l.type = 'payment' AND l.voided_at IS NULL AND l.reverses_id IS NULL AND l.entry_date >= ? AND l.entry_date <= ?
-         AND EXISTS (SELECT 1 FROM appointments a WHERE a.patient_id = l.patient_id AND a.status = 'completed' AND substr(a.start_time, 1, 10) = l.entry_date)${locationId ? ' AND l.location_id = ?' : ''}`,
+      `SELECT COALESCE(SUM(-l.amount),0) AS n FROM real_ledger_entries l WHERE l.practice_id = ? AND l.type = 'payment' AND l.voided_at IS NULL AND l.reverses_id IS NULL AND l.entry_date >= ? AND l.entry_date <= ?
+         AND EXISTS (SELECT 1 FROM real_appointments a WHERE a.patient_id = l.patient_id AND a.status = 'completed' AND substr(a.start_time, 1, 10) = l.entry_date)${locationId ? ' AND l.location_id = ?' : ''}`,
       pid, from, to, ...(locationId ? [locationId] : []),
     );
     return Number(r.n);
@@ -585,7 +585,7 @@ export async function kpiValue(ctx, key, from, to, locationId = null) {
   if (def.source === 'txsched') {
     const [a, b] = await utcRange(db, pid, from, to);
     const r = await db.get(
-      `SELECT COALESCE(SUM(pr.fee),0) AS n FROM procedures pr JOIN appointments ap ON ap.id = pr.appointment_id
+      `SELECT COALESCE(SUM(pr.fee),0) AS n FROM real_procedures pr JOIN real_appointments ap ON ap.id = pr.appointment_id
        WHERE pr.practice_id = ? AND pr.status != 'cancelled' AND ap.status NOT IN ('cancelled','no_show') AND ap.created_at >= ? AND ap.created_at < ?
          AND substr(pr.created_at, 1, 10) < substr(ap.created_at, 1, 10)${locationId ? ' AND ap.location_id = ?' : ''}`,
       pid, a, b, ...(locationId ? [locationId] : []),

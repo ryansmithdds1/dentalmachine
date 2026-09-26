@@ -20,11 +20,11 @@ export async function financeOverview(db, pid, { months = 12, today }) {
   const to = today;
   const byMonth = (rows, key = 'n') => Object.fromEntries(rows.map((r) => [r.month, Number(r[key]) || 0]));
   const m7 = 'substr(entry_date, 1, 7)';
-  const production = byMonth(await db.all(`SELECT ${m7} AS month, SUM(amount) AS n FROM ledger_entries WHERE practice_id = ? AND type = 'charge' AND retail_sale_id IS NULL AND entry_date BETWEEN ? AND ? GROUP BY ${m7}`, pid, from, to));
-  const writeOffs = byMonth(await db.all(`SELECT ${m7} AS month, -SUM(amount) AS n FROM ledger_entries WHERE practice_id = ? AND type = 'adjustment' AND retail_sale_id IS NULL AND gift_certificate_id IS NULL AND amount < 0 AND voided_at IS NULL AND reverses_id IS NULL AND entry_date BETWEEN ? AND ? GROUP BY ${m7}`, pid, from, to));
-  const collections = byMonth(await db.all(`SELECT ${m7} AS month, -SUM(amount) AS n FROM ledger_entries WHERE practice_id = ? AND type IN ('payment','insurance_payment','refund') AND voided_at IS NULL AND reverses_id IS NULL AND entry_date BETWEEN ? AND ? GROUP BY ${m7}`, pid, from, to));
+  const production = byMonth(await db.all(`SELECT ${m7} AS month, SUM(amount) AS n FROM real_ledger_entries ledger_entries WHERE practice_id = ? AND type = 'charge' AND retail_sale_id IS NULL AND entry_date BETWEEN ? AND ? GROUP BY ${m7}`, pid, from, to));
+  const writeOffs = byMonth(await db.all(`SELECT ${m7} AS month, -SUM(amount) AS n FROM real_ledger_entries ledger_entries WHERE practice_id = ? AND type = 'adjustment' AND retail_sale_id IS NULL AND gift_certificate_id IS NULL AND amount < 0 AND voided_at IS NULL AND reverses_id IS NULL AND entry_date BETWEEN ? AND ? GROUP BY ${m7}`, pid, from, to));
+  const collections = byMonth(await db.all(`SELECT ${m7} AS month, -SUM(amount) AS n FROM real_ledger_entries ledger_entries WHERE practice_id = ? AND type IN ('payment','insurance_payment','refund') AND voided_at IS NULL AND reverses_id IS NULL AND entry_date BETWEEN ? AND ? GROUP BY ${m7}`, pid, from, to));
   const visitRows = await db.all(
-    `SELECT substr(start_time, 1, 7) AS month, substr(start_time, 1, 10) AS d, start_time, end_time FROM appointments
+    `SELECT substr(start_time, 1, 7) AS month, substr(start_time, 1, 10) AS d, start_time, end_time FROM real_appointments appointments
      WHERE practice_id = ? AND status IN ('completed','checked_in','in_chair') AND start_time >= ? AND start_time <= ?`, pid, `${from} 00:00`, `${to} 23:59`,
   );
   const mins = (a, b) => Math.max(0, (Date.parse(`${b.replace(' ', 'T')}:00Z`) - Date.parse(`${a.replace(' ', 'T')}:00Z`)) / 60000);

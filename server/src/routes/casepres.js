@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { refuseTraining } from '../training.js';
 import { messageText, patientLang, subjectFor } from '../templates.js';
 import { requirePermission, HttpError, rateLimit, signToken, verifyToken } from '../auth.js';
 import { pick, requireFields, insert, findOr404, audit, newToken, hashToken, recorded } from '../util.js';
@@ -259,6 +260,7 @@ export default function casePresentationRoutes({ db, messenger, config, erx, sec
     const patient = await findOr404(db, 'patients', req.query.patient_id, req.user.practice_id, 'Patient');
     const provider = await db.get('SELECT * FROM providers WHERE practice_id = ? AND user_id = ? AND erx_user_id IS NOT NULL', req.user.practice_id, req.user.id);
     if (!provider) throw new HttpError(403, `Your login isn't linked to a ${erx.name} prescriber (Settings → Providers → e-Rx user ID)`);
+    await refuseTraining(db, patient.id, 'opening e-prescribing');
     await audit(db, req, 'erx.launch', 'patients', patient.id);
     res.json({ url: erx.ssoUrl({ userId: provider.erx_user_id, patient }) });
   });
@@ -294,6 +296,7 @@ export default function casePresentationRoutes({ db, messenger, config, erx, sec
     let signature = null;
     let pharmacy = null;
     if (send) {
+      await refuseTraining(db, patient.id, 'sending a prescription to the pharmacy');
       if (!erx.inApp) throw new HttpError(409, erx.ssoUrl ? `Write electronic prescriptions in ${erx.name}` : 'Electronic prescribing is not set up — print instead');
       pharmacy = patient.preferred_pharmacy ? JSON.parse(patient.preferred_pharmacy) : null;
       if (!pharmacy?.ncpdp) throw new HttpError(400, "Choose the patient's pharmacy first");

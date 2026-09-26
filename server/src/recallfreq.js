@@ -11,6 +11,7 @@ import { primaryPolicy } from './services.js';
 import { withPlan, benefitYear, DEFAULT_FREQUENCIES } from './benefits.js';
 import { officeFee } from './fees.js';
 import { patientScope } from './officeaccess.js';
+import { worklist } from './training.js';
 
 export const STATUSES = ['current', 'due_soon', 'due', 'overdue', 'scheduled', 'none', 'retired'];
 export const STATUS_LABELS = { current: 'Current', due_soon: 'Due soon', due: 'Due', overdue: 'Overdue', scheduled: 'Scheduled', none: 'No record', retired: 'Retired' };
@@ -296,7 +297,7 @@ export async function recallBoard(db, user, { today, type = null, status = null,
        p.first_name, p.last_name, p.phone, p.email, p.dob, p.location_id, p.primary_provider_id, p.primary_hygienist_id,
        a.start_time AS appt_start, a.status AS appt_status, l.name AS location_name,
        COALESCE(hy.name, dr.name) AS provider_name, COALESCE(p.primary_hygienist_id, p.primary_provider_id) AS provider_id
-     FROM recalls r JOIN patients p ON p.id = r.patient_id
+     FROM ${worklist('recalls')} r JOIN ${worklist('patients')} p ON p.id = r.patient_id
        LEFT JOIN appointments a ON a.id = r.appointment_id
        LEFT JOIN locations l ON l.id = p.location_id
        LEFT JOIN providers hy ON hy.id = p.primary_hygienist_id
@@ -306,7 +307,7 @@ export async function recallBoard(db, user, { today, type = null, status = null,
   );
   // Patients with any visit booked from today on (a bundled x-ray is "scheduled" when the cleaning is).
   const booked = new Map((await db.all(
-    `SELECT a.patient_id, MIN(a.start_time) AS start_time FROM appointments a WHERE a.practice_id = ? AND a.status IN (${ACTIVE_VISIT.map(() => '?').join(',')}) AND a.start_time >= ? GROUP BY a.patient_id`,
+    `SELECT a.patient_id, MIN(a.start_time) AS start_time FROM real_appointments a WHERE a.practice_id = ? AND a.status IN (${ACTIVE_VISIT.map(() => '?').join(',')}) AND a.start_time >= ? GROUP BY a.patient_id`,
     pid, ...ACTIVE_VISIT, `${today} 00:00`,
   )).map((x) => [x.patient_id, x.start_time]));
   const out = [];
@@ -369,7 +370,7 @@ export async function reappointment(db, user, { today, locationId = null, days =
   const since = addDays(today, -days);
   const scope = patientScope(user, 'p');
   const done = await db.all(
-    `SELECT pr.patient_id, pr.code, pr.completed_at FROM procedures pr JOIN patients p ON p.id = pr.patient_id
+    `SELECT pr.patient_id, pr.code, pr.completed_at FROM real_procedures pr JOIN real_patients p ON p.id = pr.patient_id
      WHERE pr.practice_id = ? AND pr.status = 'completed' AND pr.completed_at >= ? AND pr.completed_at <= ?${locationId ? ' AND (pr.location_id = ? OR (pr.location_id IS NULL AND p.location_id = ?))' : ''}${scope.sql}`,
     pid, since, `${today} 23:59:59`, ...(locationId ? [locationId, locationId] : []), ...scope.args,
   );

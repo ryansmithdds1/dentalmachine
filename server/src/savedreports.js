@@ -31,12 +31,12 @@ export const REPORTS = {
       const where = [];
       const args = [];
       for (const k of ['location_id', 'provider_id']) if (params[k]) { where.push(` AND l.${k} = ?`); args.push(Number(params[k])); }
-      const sum = async (types) => (await db.get(`SELECT COALESCE(SUM(l.amount), 0) AS n FROM ledger_entries l WHERE l.practice_id = ? AND l.entry_date BETWEEN ? AND ? AND l.type IN (${types.map(() => '?').join(',')})${where.join('')}`, pid, from, to, ...types, ...args)).n;
+      const sum = async (types) => (await db.get(`SELECT COALESCE(SUM(l.amount), 0) AS n FROM real_ledger_entries l WHERE l.practice_id = ? AND l.entry_date BETWEEN ? AND ? AND l.type IN (${types.map(() => '?').join(',')})${where.join('')}`, pid, from, to, ...types, ...args)).n;
       const production = await sum(['charge']);
       const collections = -(await sum(['payment', 'insurance_payment']));
       const adjustments = await sum(['adjustment']);
       const byProvider = await db.all(
-        `SELECT pv.name, SUM(l.amount) AS n FROM ledger_entries l JOIN providers pv ON pv.id = l.provider_id WHERE l.practice_id = ? AND l.type = 'charge' AND l.retail_sale_id IS NULL AND l.entry_date BETWEEN ? AND ?${where.join('')}
+        `SELECT pv.name, SUM(l.amount) AS n FROM real_ledger_entries l JOIN providers pv ON pv.id = l.provider_id WHERE l.practice_id = ? AND l.type = 'charge' AND l.retail_sale_id IS NULL AND l.entry_date BETWEEN ? AND ?${where.join('')}
          GROUP BY pv.name ORDER BY SUM(l.amount) DESC`, pid, from, to, ...args,
       );
       return [
@@ -51,9 +51,9 @@ export const REPORTS = {
     label: 'Day sheet (yesterday)',
     async render(db, pid, params, today) {
       const day = addDays(today, -1);
-      const rows = await db.all("SELECT type, method, SUM(amount) AS n FROM ledger_entries WHERE practice_id = ? AND entry_date = ?" + (params.location_id ? ' AND location_id = ?' : '') + ' GROUP BY type, method', pid, day, ...(params.location_id ? [Number(params.location_id)] : []));
+      const rows = await db.all("SELECT type, method, SUM(amount) AS n FROM real_ledger_entries ledger_entries WHERE practice_id = ? AND entry_date = ?" + (params.location_id ? ' AND location_id = ?' : '') + ' GROUP BY type, method', pid, day, ...(params.location_id ? [Number(params.location_id)] : []));
       const t = (type) => rows.filter((r) => r.type === type).reduce((s, r) => s + r.n, 0);
-      const visits = await db.all('SELECT status, COUNT(*) AS n FROM appointments WHERE practice_id = ? AND start_time >= ? AND start_time < ? GROUP BY status', pid, `${day} 00:00`, `${day} 24:00`);
+      const visits = await db.all('SELECT status, COUNT(*) AS n FROM real_appointments appointments WHERE practice_id = ? AND start_time >= ? AND start_time < ? GROUP BY status', pid, `${day} 00:00`, `${day} 24:00`);
       return [
         day, '', pad('Production', $(t('charge'))), pad('Patient payments', $(-t('payment'))), pad('Insurance payments', $(-t('insurance_payment'))),
         pad('Adjustments', $(t('adjustment'))), pad('Refunds', $(t('refund'))), '',

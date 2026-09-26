@@ -1,4 +1,5 @@
 import { autoReceipt } from './receipts.js';
+import { NOT_TRAINING } from './training.js';
 import { raiseIssue, resolveIssue, failed } from './issues.js';
 import { randomBytes } from 'node:crypto';
 import { HttpError } from './auth.js';
@@ -237,7 +238,7 @@ export async function runAutopay(db, payments, messenger, { planId = null, force
   const plans = await db.all(
     `SELECT pp.*, pm.customer_id, pm.payment_method_id, pm.brand, pm.last4, pm.funding, pm.removed_at AS method_removed
      FROM payment_plans pp JOIN payment_methods pm ON pm.id = pp.autopay_method_id
-     WHERE pp.status = 'active' AND pp.autopay_method_id IS NOT NULL AND (pp.autopay_paused = 0 OR ?)${planId ? ' AND pp.id = ?' : ''}`,
+     WHERE pp.status = 'active' AND pp.autopay_method_id IS NOT NULL AND (pp.autopay_paused = 0 OR ?) AND ${NOT_TRAINING('pp.patient_id')}${planId ? ' AND pp.id = ?' : ''}`,
     force ? 1 : 0, ...(planId ? [planId] : []),
   );
   const results = [];

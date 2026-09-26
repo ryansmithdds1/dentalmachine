@@ -482,6 +482,7 @@ export default function CalendarGrid({
                             {[...a.pattern].map((c, i) => <i key={i} className={c === 'X' ? 'x' : 'a'} style={{ height: `${Math.min(100, (10 / Math.max(10, e - s)) * 100)}%` }} />)}
                           </div>
                         )}
+                        {a.is_training ? <span className="training-badge cal-training" title="Practice visit for the guided walkthroughs (Tess Training) — not a real patient">Training</span> : null}
                         <CardLines layout={layout} a={a} col={col} s={s} e={e} h={h} nowMin={nowMin} now={now} lt={lt} x={cards.by_appt?.[a.id]}
                           readiness={readiness} onReadiness={onReadiness} opportunities={opportunities} onOpportunities={onOpportunities}
                           onNotes={(appt, el) => openNotes(cards.by_appt?.[appt.id]?.notes || [], el)} />

@@ -63,7 +63,7 @@ export function nameScore(words, p) {
   return total;
 }
 
-const COLS = 'p.id, p.first_name, p.last_name, p.preferred_name, p.dob, p.phone, p.status, p.medical_alerts';
+const COLS = 'p.id, p.first_name, p.last_name, p.preferred_name, p.dob, p.phone, p.status, p.medical_alerts, p.is_training';
 
 export async function searchPatients(db, practiceId, q, { scope = { sql: '', args: [] }, limit = 8 } = {}) {
   const text = String(q || '').trim();

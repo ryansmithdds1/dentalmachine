@@ -19,7 +19,7 @@ export async function huddleMoments(db, user, { date }) {
   await ensureJourneySetup(db, pid);
   const scope = appointmentScope(user);
   const appts = await db.all(
-    `SELECT a.id, a.patient_id, a.start_time, a.status, a.provider_id, p.first_name, p.last_name, p.preferred_name, p.dob FROM appointments a JOIN patients p ON p.id = a.patient_id
+    `SELECT a.id, a.patient_id, a.start_time, a.status, a.provider_id, p.first_name, p.last_name, p.preferred_name, p.dob FROM real_appointments a JOIN real_patients p ON p.id = a.patient_id
      WHERE a.practice_id = ? AND a.start_time >= ? AND a.start_time < ? AND a.status NOT IN ('cancelled','no_show')${scope.sql} ORDER BY a.start_time`,
     pid, `${date} 00:00`, `${date} 24:00`, ...scope.args,
   );
@@ -33,7 +33,7 @@ export async function huddleMoments(db, user, { date }) {
   // Birthdays of patients not coming in today (to text or call), a short list.
   const mds = [date.slice(5), ...(date.endsWith('-02-28') ? ['02-29'] : [])];
   const others = (await db.all(
-    `SELECT id AS patient_id, first_name, last_name, preferred_name, dob FROM patients WHERE practice_id = ? AND status = 'active' AND merged_into_id IS NULL AND dob IS NOT NULL AND substr(dob, 6, 5) IN (${IN(mds)}) ORDER BY last_name, first_name LIMIT 60`,
+    `SELECT id AS patient_id, first_name, last_name, preferred_name, dob FROM real_patients patients WHERE practice_id = ? AND status = 'active' AND merged_into_id IS NULL AND dob IS NOT NULL AND substr(dob, 6, 5) IN (${IN(mds)}) ORDER BY last_name, first_name LIMIT 60`,
     pid, ...mds,
   )).filter((p) => !firstAppt.has(p.patient_id) && birthdayIn(p.dob, year) === date);
 
@@ -41,7 +41,7 @@ export async function huddleMoments(db, user, { date }) {
   const firstVisits = appts.filter((a) => firsts.has(a.id)).map((a) => who(a));
 
   const milestones = (await db.all(
-    `SELECT m.*, p.first_name, p.last_name, p.preferred_name FROM journey_moments m JOIN patients p ON p.id = m.patient_id
+    `SELECT m.*, p.first_name, p.last_name, p.preferred_name FROM journey_moments m JOIN real_patients p ON p.id = m.patient_id
      WHERE m.practice_id = ? AND m.kind IN ('braces_off','cavity_free') AND m.status = 'suggested' AND (m.detected_on >= ?${ids.length ? ` OR m.patient_id IN (${IN(ids)})` : ''}) ORDER BY m.detected_on DESC LIMIT 50`,
     pid, addDays(date, -14), ...ids,
   )).map((m) => ({ moment_id: m.id, patient_id: m.patient_id, name: nameOf(m), kind: m.kind, detail: m.detail, detected_on: m.detected_on, time: firstAppt.get(m.patient_id)?.start_time.slice(11, 16) || null, certificate: true }));
@@ -72,11 +72,11 @@ export async function huddleMoments(db, user, { date }) {
     for (const [patientId, list] of byPatient) if (list.length) notes.push({ ...who(firstAppt.get(patientId)), notes: list.map((n) => excerpt(n)) });
   }
   const lifeEvents = (await db.all(
-    `SELECT m.*, p.first_name, p.last_name, p.preferred_name FROM journey_moments m JOIN patients p ON p.id = m.patient_id
+    `SELECT m.*, p.first_name, p.last_name, p.preferred_name FROM journey_moments m JOIN real_patients p ON p.id = m.patient_id
      WHERE m.practice_id = ? AND m.kind = 'life_event' AND m.status = 'suggested' AND m.detected_on >= ? ORDER BY m.detected_on DESC LIMIT 30`, pid, addDays(date, -14),
   )).map((m) => ({ moment_id: m.id, patient_id: m.patient_id, name: nameOf(m), detail: m.detail, time: firstAppt.get(m.patient_id)?.start_time.slice(11, 16) || null }));
 
-  const cards = await db.get("SELECT COUNT(*) AS n FROM journey_cards c JOIN tasks t ON t.id = c.task_id WHERE c.practice_id = ? AND t.status = 'open'", pid);
+  const cards = await db.get("SELECT COUNT(*) AS n FROM journey_cards c JOIN real_tasks t ON t.id = c.task_id WHERE c.practice_id = ? AND t.status = 'open'", pid);
   return {
     date, birthdays, other_birthdays: others.map((p) => ({ patient_id: p.patient_id, name: nameOf(p), preferred_name: p.preferred_name || null })),
     first_visits: firstVisits, milestones, hard_visits: hard, notes, life_events: lifeEvents, cards_to_write: Number(cards?.n) || 0,
@@ -88,7 +88,7 @@ export async function huddleMoments(db, user, { date }) {
 export async function npsTrend(db, pid, { from, to, by = 'provider' }) {
   const rows = await db.all(
     `SELECT r.nps, substr(r.answered_at, 1, 7) AS month, a.provider_id, pv.name AS provider_name, a.location_id, l.name AS location_name
-     FROM survey_responses r LEFT JOIN appointments a ON a.id = r.appointment_id LEFT JOIN providers pv ON pv.id = a.provider_id LEFT JOIN locations l ON l.id = a.location_id
+     FROM survey_responses r LEFT JOIN real_appointments a ON a.id = r.appointment_id LEFT JOIN providers pv ON pv.id = a.provider_id LEFT JOIN locations l ON l.id = a.location_id
      WHERE r.practice_id = ? AND r.nps IS NOT NULL AND r.answered_at >= ? AND r.answered_at < ?`, pid, `${from} 00:00`, `${to} 24:00`,
   );
   const months = new Map();

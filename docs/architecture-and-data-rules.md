@@ -113,7 +113,34 @@ edited) so accuracy can be checked against what staff saw.
   `schema_migrations`. Environments, releases, rollback and restore drills: `docs/environments-and-releases.md`.
 - Restore drills (`restore_drills`) prove stored backups come back whole every week.
 
+## Training patient (guided walkthroughs)
+- `patients.is_training = 1` marks **Tess Training**, a pretend patient made per practice on first use
+  (`server/src/training.js`, `routes/training.js`). Walkthroughs (`client/src/components/tours/`) run on her; anything
+  a walkthrough creates in practice mode (`X-Practice-Mode: 1`: a "new patient", her family members) is a training
+  patient too. Her contact details are always pretend (555-01xx, `.invalid`/example addresses).
+- **Nothing leaves the building:** every outbound boundary refuses her — `sendMessage` records texts/email as blocked,
+  and the call sites for claims, pre-auths, claim status, attachments, card charges/refunds/readers, e-Rx, PDMP, lab Rx,
+  imaging-bridge orders, x-ray AI vendors, mail and webhooks call `refuseTraining()` (409, `details.training`);
+  eligibility is answered by the built-in simulated payer. Underneath, the adapters themselves are wrapped
+  (`guardAdapter`, `guardMessenger`) and `loggedFetch` refuses any request carrying her mark (`DMTRAIN`).
+- **Nothing counts:** reports, totals, dashboards, metrics, predictions, audiences (reminders, recall, campaigns,
+  journeys, statements, eligibility/verification batches, autopay), deposits and cash drawers, exports and the day
+  sheet read the **`real_*` views** (`real_ledger_entries`, `real_appointments`, … in `db.js`), which leave training
+  patients out. A new report reads the views, not the tables. Worklists she's practised in (the schedule, her chart,
+  claims being worked, tasks) show her with a **Training** badge; the patient list shows her only when searched for.
+  Worklists that are otherwise real-only (the recall list and board, tomorrow's verification) include her only while
+  someone is practising (`worklist()` in `training.js`, driven by the practice-mode header).
+- Referral letters about her are made but never emailed to the specialist (`sendLetter`).
+- **Reset** (`POST /training/patient/reset`) is the one deliberate hard delete of clinical/money rows: training
+  records are scratch data, found by following the schema's references outward from the training patients (never
+  parents, never the audit log), removed (with the files behind her documents), and the starting chart made again.
+  Audited.
+- Training records: `tour_runs` (one per walkthrough started: how far, how it ended — never edited after it ends) and
+  `training_assignments` (sets of walkthroughs a manager gave someone, cancelled not deleted). `training:manage`
+  assigns and sees the team; everyone sees their own.
+
 ## Remaining exceptions (deliberate)
+- Resetting the training patient removes its practice records (above); nothing real is ever touched, and it is audited.
 - Undoing a data import removes the rows that import created (it's the undo of a mistake, before anyone
   works with them); it is audited.
 - Configuration (saved reports, templates, blockouts, fee-schedule rows, finance rules, image mounts) can be

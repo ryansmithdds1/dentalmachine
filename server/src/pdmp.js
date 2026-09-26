@@ -1,4 +1,5 @@
 import { HttpError } from './auth.js';
+import { refuseTraining } from './training.js';
 import { insert, audit } from './util.js';
 import { logIntegration, raiseIssue, resolveIssue } from './issues.js';
 
@@ -86,6 +87,7 @@ export async function runCheck(db, pdmp, req, patient, { provider = null, manual
     await audit(db, req, 'pdmp.check', 'pdmp_checks', id, { mode: 'manual', patient_id: patient.id }, { patientId: patient.id });
     return db.get('SELECT * FROM pdmp_checks WHERE id = ?', id);
   }
+  await refuseTraining(db, patient.id, 'a PDMP check with the state');
   try {
     const out = await pdmp.query({ patient, provider, practiceId: pid });
     const id = await insert(db, 'pdmp_checks', {

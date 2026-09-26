@@ -188,7 +188,7 @@ export async function runReviewJobs(db, messenger, { now = new Date(), appUrl = 
       const yesterday = new Date(`${local.slice(0, 10)}T12:00:00Z`);
       yesterday.setUTCDate(yesterday.getUTCDate() - 1);
       const due = await db.all(
-        `SELECT a.id, a.patient_id FROM appointments a WHERE a.practice_id = ? AND a.status = 'completed' AND a.review_sent_at IS NULL
+        `SELECT a.id, a.patient_id FROM real_appointments a WHERE a.practice_id = ? AND a.status = 'completed' AND a.review_sent_at IS NULL
          AND a.start_time >= ? AND a.end_time <= ? ORDER BY a.id`, practice.id, `${yesterday.toISOString().slice(0, 10)} 00:00`, local,
       );
       for (const a of due) {

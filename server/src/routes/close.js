@@ -23,7 +23,7 @@ export default function closeRoutes({ db }) {
     const { start, end } = period(type, value);
     const [f, t] = await utcRange(db, pid, start, end);
     const now = await practiceNow(db, pid);
-    const sum = async (where) => (await db.get(`SELECT COALESCE(SUM(amount), 0) AS n FROM ledger_entries WHERE practice_id = ? AND entry_date BETWEEN ? AND ? AND ${where}`, pid, start, end)).n;
+    const sum = async (where) => (await db.get(`SELECT COALESCE(SUM(amount), 0) AS n FROM real_ledger_entries ledger_entries WHERE practice_id = ? AND entry_date BETWEEN ? AND ? AND ${where}`, pid, start, end)).n;
     const count = async (sql, ...args) => Number((await db.get(sql, ...args)).n);
     const totals = {
       production: await sum("type = 'charge' AND retail_sale_id IS NULL"),
@@ -39,20 +39,20 @@ export default function closeRoutes({ db }) {
     totals.net_collections = totals.patient_payments + totals.insurance_payments - totals.refunds;
     const checks = [
       { key: 'visits', label: 'Visits still open (not completed, cancelled or no-show)', link: '/schedule',
-        count: await count(`SELECT COUNT(*) AS n FROM appointments WHERE practice_id = ? AND start_time >= ? AND start_time < ? AND start_time < ? AND status IN ('scheduled','confirmed','checked_in','in_chair')`, pid, `${start} 00:00`, `${end} 24:00`, now) },
+        count: await count(`SELECT COUNT(*) AS n FROM real_appointments appointments WHERE practice_id = ? AND start_time >= ? AND start_time < ? AND start_time < ? AND status IN ('scheduled','confirmed','checked_in','in_chair')`, pid, `${start} 00:00`, `${end} 24:00`, now) },
       { key: 'notes', label: 'Clinical notes not signed', link: '/',
-        count: await count('SELECT COUNT(*) AS n FROM clinical_notes WHERE practice_id = ? AND signed = 0 AND created_at >= ? AND created_at < ?', pid, f, t) },
+        count: await count('SELECT COUNT(*) AS n FROM real_clinical_notes clinical_notes WHERE practice_id = ? AND signed = 0 AND created_at >= ? AND created_at < ?', pid, f, t) },
       { key: 'unbilled', label: 'Completed work for insured patients not on a claim', link: '/claims',
         count: await count(
-          `SELECT COUNT(*) AS n FROM procedures pr WHERE pr.practice_id = ? AND pr.status = 'completed' AND pr.completed_at >= ? AND pr.completed_at < ?
-             AND EXISTS (SELECT 1 FROM patient_insurance pi WHERE pi.patient_id = pr.patient_id AND pi.active = 1)
+          `SELECT COUNT(*) AS n FROM real_procedures pr WHERE pr.practice_id = ? AND pr.status = 'completed' AND pr.completed_at >= ? AND pr.completed_at < ?
+             AND EXISTS (SELECT 1 FROM real_patient_insurance pi WHERE pi.patient_id = pr.patient_id AND pi.active = 1)
              AND NOT EXISTS (SELECT 1 FROM claim_items ci WHERE ci.procedure_id = pr.id)`, pid, f, t,
         ) },
       { key: 'draft_claims', label: 'Claims not sent', link: '/claims',
-        count: await count("SELECT COUNT(*) AS n FROM claims WHERE practice_id = ? AND status = 'draft' AND created_at < ?", pid, t) },
+        count: await count("SELECT COUNT(*) AS n FROM real_claims claims WHERE practice_id = ? AND status = 'draft' AND created_at < ?", pid, t) },
       { key: 'undeposited', label: 'Cash and check payments not on a deposit', link: '/claims?tab=deposits',
         count: await count(
-          `SELECT COUNT(*) AS n FROM ledger_entries WHERE practice_id = ? AND type IN ('payment','insurance_payment') AND amount < 0 AND voided_at IS NULL
+          `SELECT COUNT(*) AS n FROM real_ledger_entries ledger_entries WHERE practice_id = ? AND type IN ('payment','insurance_payment') AND amount < 0 AND voided_at IS NULL
              AND reverses_id IS NULL AND deposit_id IS NULL AND COALESCE(method, 'check') IN ('cash','check') AND entry_date BETWEEN ? AND ?`, pid, start, end,
         ) },
       { key: 'unreconciled', label: 'Deposits not reconciled with the bank', link: '/claims?tab=deposits',

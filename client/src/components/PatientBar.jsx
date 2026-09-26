@@ -66,7 +66,7 @@ export default function PatientBar() {
   return (
     <div className="patient-bar no-print" role="region" aria-label="Active patient">
       <button type="button" className="pb-name" onClick={() => nav(`/patients/${p.id}`)} title="Open the chart">
-        <strong>{p.preferred_name || p.first_name} {p.last_name}</strong>
+        <strong>{p.preferred_name || p.first_name} {p.last_name}</strong>{p.is_training ? <span className="training-badge" title="Practice patient: nothing leaves the office">Training</span> : null}
         <span className="muted">{p.dob ? `${age(p.dob)}y` : ''} · #{p.id}</span>
       </button>
       {alerts.length > 0 && <span className="pb-alert" title={alerts.join(' · ')}><AlertTriangle size={14} aria-hidden /> {alerts[0].length > 40 ? `${alerts[0].slice(0, 40)}…` : alerts[0]}{alerts.length > 1 ? ` +${alerts.length - 1}` : ''}</span>}

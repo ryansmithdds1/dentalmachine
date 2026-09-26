@@ -61,8 +61,10 @@ export function createEligibility({ db, config = {}, clearinghouse: ch = null })
     const trace = `EL${Date.now()}`;
     const request = build270({ practice, patient, policy, carrier, ...ids(practice), control: (Date.now() % 1_000_000_000) || 1, trace });
     let row = { practice_id: policy.practice_id, patient_id: patient.id, patient_insurance_id: policy.id, request_x12: request, created_by: userId, status: 'pending' };
-    if (automatic) {
-      const live = !!ch?.realtime;
+    // The training patient (training.js) is answered by the built-in simulated payer, whatever is connected: nothing
+    // about it goes to the clearinghouse.
+    if (automatic || patient.is_training) {
+      const live = !!ch?.realtime && !patient.is_training;
       const response = live ? await ch.realtime.eligibility(request) : await sandbox271(policy, patient, trace);
       let summary;
       try {
@@ -70,10 +72,10 @@ export function createEligibility({ db, config = {}, clearinghouse: ch = null })
       } catch {
         throw new HttpError(502, `The clearinghouse answered with a ${x12Type(response) || 'non-X12'} instead of an eligibility response (271)`);
       }
-      row = { ...row, response_x12: response, summary: JSON.stringify({ ...summary, ...(live ? {} : { sandbox: true }) }), status: summary.errors.length ? 'error' : summary.active ? 'active' : 'inactive' };
+      row = { ...row, response_x12: response, summary: JSON.stringify({ ...summary, ...(live ? {} : { sandbox: true }), ...(patient.is_training ? { training: true } : {}) }), status: summary.errors.length ? 'error' : summary.active ? 'active' : 'inactive' };
     }
     const id = await insert(db, 'eligibility_checks', row);
-    const mode = ch?.realtime ? 'realtime' : row.response_x12 ? 'sandbox' : 'manual';
+    const mode = ch?.realtime && !patient.is_training ? 'realtime' : row.response_x12 ? 'sandbox' : 'manual';
     const settled = row.response_x12 ? await settle(id, { source: live(mode) }) : null;
     return { id, status: row.status, mode, ...(settled || {}) };
   }
@@ -163,10 +165,10 @@ export function createEligibility({ db, config = {}, clearinghouse: ch = null })
     return await db.all(
       `SELECT a.id AS appointment_id, a.start_time, a.patient_id, p.first_name, p.last_name, pi.id AS policy_id, c.name AS carrier_name, pi.subscriber_id,
          e.id AS check_id, e.status, e.summary, e.created_at AS checked_at
-       FROM appointments a JOIN patients p ON p.id = a.patient_id
-       LEFT JOIN patient_insurance pi ON pi.id = (SELECT x.id FROM patient_insurance x WHERE x.patient_id = a.patient_id AND x.active = 1 ORDER BY CASE x.priority WHEN 'primary' THEN 0 ELSE 1 END, x.id LIMIT 1)
+       FROM real_appointments a JOIN real_patients p ON p.id = a.patient_id
+       LEFT JOIN real_patient_insurance pi ON pi.id = (SELECT x.id FROM real_patient_insurance x WHERE x.patient_id = a.patient_id AND x.active = 1 ORDER BY CASE x.priority WHEN 'primary' THEN 0 ELSE 1 END, x.id LIMIT 1)
        LEFT JOIN insurance_carriers c ON c.id = pi.carrier_id
-       LEFT JOIN eligibility_checks e ON e.id = (SELECT MAX(y.id) FROM eligibility_checks y WHERE y.patient_insurance_id = pi.id)
+       LEFT JOIN real_eligibility_checks e ON e.id = (SELECT MAX(y.id) FROM real_eligibility_checks y WHERE y.patient_insurance_id = pi.id)
        WHERE a.practice_id = ? AND a.start_time >= ? AND a.start_time < ? AND a.status NOT IN ('cancelled','no_show')
        ORDER BY a.start_time`, practiceId, `${date} 00:00`, `${date} 24:00`,
     );

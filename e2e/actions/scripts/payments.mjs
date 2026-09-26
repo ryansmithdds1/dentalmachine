@@ -9,7 +9,10 @@ async function demoPatient(t) {
   const today = (await admin.get('/appointments')).map((a) => a.patient_id);
   const list = await admin.get('/patients?limit=80');
   const rows = (list.rows || list).filter((p) => !today.includes(p.id) && !p.guarantor_id);
-  return rows[(used++ * 3) % rows.length];
+  const p = rows[(used++ * 3) % rows.length];
+  // The run is about this patient (the guided walkthrough uses the training patient in their place).
+  t.subjects?.push({ kind: 'patient', id: p.id, first: p.first_name, last: p.last_name, dob: p.dob, phone: p.phone, email: p.email });
+  return p;
 }
 let early = 0;
 // A visit early today (before the demo day) with its work done by the clinical team.

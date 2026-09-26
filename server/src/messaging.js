@@ -125,9 +125,11 @@ export async function isOptedOutAddress(db, practiceId, channel, to) {
 const OPT_OUT_EXEMPT = new Set(['portal_code']);
 // Why a message can't go: the patient turned the channel off, or the address itself opted out (STOP).
 async function blockedReason(db, { practiceId, patientId, channel, to, kind }) {
+  const p = patientId ? await db.get('SELECT sms_opt_in, email_opt_in, deceased_at, is_training FROM patients WHERE id = ?', patientId) : null;
+  // The training patient (training.js): recorded on the chart as practice, never sent — portal messages too.
+  if (p?.is_training) return 'Practice mode: this is the training patient, so nothing was sent';
   if (channel === 'portal' || OPT_OUT_EXEMPT.has(kind)) return null;
   if (patientId) {
-    const p = await db.get('SELECT sms_opt_in, email_opt_in, deceased_at FROM patients WHERE id = ?', patientId);
     // Marked deceased (routes/deceased.js): nothing more goes to them, whatever sent it.
     if (p?.deceased_at) return 'Patient is deceased — nothing is sent to them';
     if (p && channel === 'sms' && !p.sms_opt_in) return 'Patient has opted out of text messages';
@@ -423,7 +425,7 @@ export async function placeConfirmCalls(db, messenger, due, appUrl) {
   }
   const out = [];
   for (const g of groups.values()) {
-    if (!g.number || !messenger.call) {
+    if (!g.number || !messenger.call || g.to?.is_training) {
       out.push({ items: g.items, status: 'unreachable' });
       continue;
     }
@@ -459,7 +461,7 @@ export async function runReminders(db, messenger, { appUrl, now = new Date() } =
     if (steps.length) {
       const to = localNow(practice.timezone, new Date(now.getTime() + steps[0].hours * 3600_000));
       const upcoming = await db.all(
-        `SELECT * FROM appointments WHERE practice_id = ? AND status IN ('scheduled','confirmed') AND start_time > ? AND start_time <= ? ORDER BY start_time`, practice.id, from, to,
+        `SELECT * FROM real_appointments appointments WHERE practice_id = ? AND status IN ('scheduled','confirmed') AND start_time > ? AND start_time <= ? ORDER BY start_time`, practice.id, from, to,
       );
       for (const a of upcoming) {
         const left = hoursUntil(from, a.start_time);
@@ -491,7 +493,7 @@ export async function runReminders(db, messenger, { appUrl, now = new Date() } =
     }
 
     // Booked or moved by the office. A visit starting within the hour, or one a reminder just covered, needs no notice.
-    const notices = await db.all("SELECT * FROM appointments WHERE practice_id = ? AND notice_due IS NOT NULL AND status IN ('scheduled','confirmed')", practice.id);
+    const notices = await db.all("SELECT * FROM real_appointments appointments WHERE practice_id = ? AND notice_due IS NOT NULL AND status IN ('scheduled','confirmed')", practice.id);
     const soon = localNow(practice.timezone, new Date(now.getTime() + 3600_000));
     const skip = notices.filter((a) => !practice.booking_notices || reminded.has(a.id) || a.start_time <= soon);
     if (skip.length) await db.run(`UPDATE appointments SET notice_due = NULL WHERE id IN (${skip.map(() => '?').join(',')})`, ...skip.map((a) => a.id));
@@ -513,7 +515,7 @@ export async function runReminders(db, messenger, { appUrl, now = new Date() } =
 async function sendNoShowTexts(db, messenger, practice, local, appUrl) {
   let sent = 0;
   const missed = await db.all(
-    "SELECT * FROM appointments WHERE practice_id = ? AND status = 'no_show' AND no_show_msg_at IS NULL AND start_time >= ? AND start_time <= ?",
+    "SELECT * FROM real_appointments appointments WHERE practice_id = ? AND status = 'no_show' AND no_show_msg_at IS NULL AND start_time >= ? AND start_time <= ?",
     practice.id, `${local.slice(0, 10)} 00:00`, local,
   );
   for (const a of missed) {

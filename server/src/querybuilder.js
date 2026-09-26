@@ -16,7 +16,7 @@ export const DATASETS = {
     },
   },
   appointments: {
-    label: 'Appointments', from: 'appointments t JOIN patients p ON p.id = t.patient_id JOIN providers pv ON pv.id = t.provider_id LEFT JOIN operatories o ON o.id = t.operatory_id LEFT JOIN appointment_types at ON at.id = t.appointment_type_id',
+    label: 'Appointments', from: 'appointments t JOIN real_patients p ON p.id = t.patient_id JOIN providers pv ON pv.id = t.provider_id LEFT JOIN operatories o ON o.id = t.operatory_id LEFT JOIN appointment_types at ON at.id = t.appointment_type_id',
     columns: {
       date: c('Date', 'substr(t.start_time, 1, 10)', 'date'), time: c('Time', 'substr(t.start_time, 12, 5)'), status: c('Status', 't.status'), reason: c('Reason', 't.reason'),
       type: c('Visit type', 'at.name'), provider: c('Provider', 'pv.name'), chair: c('Chair', 'o.name'), patient: c('Patient', "p.first_name || ' ' || p.last_name"),
@@ -24,7 +24,7 @@ export const DATASETS = {
     },
   },
   procedures: {
-    label: 'Procedures', from: 'procedures t JOIN patients p ON p.id = t.patient_id LEFT JOIN providers pv ON pv.id = t.provider_id',
+    label: 'Procedures', from: 'procedures t JOIN real_patients p ON p.id = t.patient_id LEFT JOIN providers pv ON pv.id = t.provider_id',
     columns: {
       code: c('Code', 't.code'), description: c('Description', 't.description'), category: c('Category', 't.category'), tooth: c('Tooth', 't.tooth'),
       status: c('Status', 't.status'), fee: c('Fee', 't.fee', 'money'), provider: c('Provider', 'pv.name'), patient: c('Patient', "p.first_name || ' ' || p.last_name"),
@@ -32,7 +32,7 @@ export const DATASETS = {
     },
   },
   ledger: {
-    label: 'Ledger (charges, payments, adjustments)', from: 'ledger_entries t JOIN patients p ON p.id = t.patient_id LEFT JOIN providers pv ON pv.id = t.provider_id',
+    label: 'Ledger (charges, payments, adjustments)', from: 'ledger_entries t JOIN real_patients p ON p.id = t.patient_id LEFT JOIN providers pv ON pv.id = t.provider_id',
     columns: {
       date: c('Date', 't.entry_date', 'date'), type: c('Type', 't.type'), amount: c('Amount', 't.amount', 'money'), method: c('Method', 't.method'),
       adjustment_type: c('Adjustment type', 't.adjustment_type'), description: c('Description', 't.description'), provider: c('Provider', 'pv.name'),
@@ -40,7 +40,7 @@ export const DATASETS = {
     },
   },
   claims: {
-    label: 'Insurance claims', from: 'claims t JOIN patients p ON p.id = t.patient_id JOIN patient_insurance pi ON pi.id = t.patient_insurance_id JOIN insurance_carriers ic ON ic.id = pi.carrier_id',
+    label: 'Insurance claims', from: 'claims t JOIN real_patients p ON p.id = t.patient_id JOIN real_patient_insurance pi ON pi.id = t.patient_insurance_id JOIN insurance_carriers ic ON ic.id = pi.carrier_id',
     columns: {
       claim: c('Claim #', 't.id', 'number'), status: c('Status', 't.status'), carrier: c('Carrier', 'ic.name'), billed: c('Billed', 't.total_fee', 'money'),
       expected: c('Expected', 't.estimated_amount', 'money'), paid: c('Paid', 't.paid_amount', 'money'), submitted: c('Submitted on', 'substr(t.submitted_at, 1, 10)', 'date'),

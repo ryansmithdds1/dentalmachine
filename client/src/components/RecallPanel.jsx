@@ -55,7 +55,7 @@ export default function RecallPanel({ patientId, compact = false, heading = true
               </div>
             )}
             {clinical && !compact && i.recall_id && (
-              <button type="button" className="link rf-act" onClick={() => setOpen({ kind: 'interval', item: i })} aria-label={`Change ${i.short} interval`}><Pencil size={12} /></button>
+              <button type="button" className="link rf-act" onClick={() => setOpen({ kind: 'interval', item: i })} data-tour="recall-interval" aria-label={`Change ${i.short} interval`}><Pencil size={12} /></button>
             )}
           </li>
         ))}

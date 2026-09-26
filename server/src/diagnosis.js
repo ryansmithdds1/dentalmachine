@@ -103,7 +103,7 @@ export async function loadDiagnoses(db, pid, o) {
   // 1. Exams: completed exam-code procedures dated in the range (completed_at is practice-local).
   const exams = await db.all(
     `SELECT pr.id, pr.patient_id, pr.code, pr.provider_id, pr.appointment_id, pr.location_id, pr.completed_at, p.first_name, p.last_name, p.location_id AS home_location_id
-     FROM procedures pr JOIN patients p ON p.id = pr.patient_id
+     FROM real_procedures pr JOIN real_patients p ON p.id = pr.patient_id
      WHERE pr.practice_id = ? AND pr.status = 'completed' AND pr.code IN (${IN(codes)}) AND pr.completed_at >= ? AND pr.completed_at < ? AND p.merged_into_id IS NULL
      ORDER BY pr.completed_at, pr.id`, pid, ...codes, o.from, addDays(o.to, 1),
   );
@@ -114,14 +114,14 @@ export async function loadDiagnoses(db, pid, o) {
   const firstRoutine = new Map();
   if (Object.values(rules).includes('first_exam')) {
     for (const r of await chunked(patientIds, (ids) => db.all(
-      `SELECT patient_id, MIN(completed_at) AS first FROM procedures WHERE practice_id = ? AND status = 'completed' AND code IN (${IN(ROUTINE_EXAMS)}) AND patient_id IN (${IN(ids)}) GROUP BY patient_id`,
+      `SELECT patient_id, MIN(completed_at) AS first FROM real_procedures procedures WHERE practice_id = ? AND status = 'completed' AND code IN (${IN(ROUTINE_EXAMS)}) AND patient_id IN (${IN(ids)}) GROUP BY patient_id`,
       pid, ...ROUTINE_EXAMS, ...ids,
     ))) firstRoutine.set(r.patient_id, String(r.first).slice(0, 10));
   }
 
   // The visit of each exam: its own appointment, else the patient's live visit that day.
   const visits = await chunked(patientIds, (ids) => db.all(
-    `SELECT a.id, a.patient_id, a.provider_id, a.location_id, a.start_time, a.status FROM appointments a
+    `SELECT a.id, a.patient_id, a.provider_id, a.location_id, a.start_time, a.status FROM real_appointments a
      WHERE a.practice_id = ? AND a.patient_id IN (${IN(ids)}) AND a.start_time >= ? AND a.start_time < ? ORDER BY a.start_time, a.id`,
     pid, ...ids, o.from, addDays(o.to, 1),
   ));
@@ -168,7 +168,7 @@ export async function loadDiagnoses(db, pid, o) {
     `SELECT pr.id, pr.patient_id, pr.code, pr.description, pr.category, pr.tooth, pr.surfaces, pr.area, pr.fee, pr.status, pr.created_at, pr.completed_at,
        pr.appointment_id, pr.treatment_plan_id, pr.provider_id, tp.status AS plan_status, tp.signed_at, tp.option_group,
        a.status AS appt_status, a.created_at AS appt_created_at, a.start_time AS appt_start
-     FROM procedures pr LEFT JOIN treatment_plans tp ON tp.id = pr.treatment_plan_id LEFT JOIN appointments a ON a.id = pr.appointment_id
+     FROM real_procedures pr LEFT JOIN real_treatment_plans tp ON tp.id = pr.treatment_plan_id LEFT JOIN real_appointments a ON a.id = pr.appointment_id
      WHERE pr.practice_id = ? AND pr.patient_id IN (${IN(ids)}) AND pr.status != 'cancelled' AND pr.category NOT IN (${IN(NOT_TREATMENT)}) AND pr.code NOT IN (${IN(codes)})`,
     pid, ...ids, ...NOT_TREATMENT, ...codes,
   ));
@@ -249,7 +249,7 @@ export async function loadDiagnoses(db, pid, o) {
   if (withWork.length) {
     const schedules = new Map();
     for (const r of await chunked(withWork, (ids) => db.all(
-      `SELECT pi.patient_id, COALESCE(ip.fee_schedule_id, ic.fee_schedule_id) AS fs FROM patient_insurance pi
+      `SELECT pi.patient_id, COALESCE(ip.fee_schedule_id, ic.fee_schedule_id) AS fs FROM real_patient_insurance pi
        JOIN insurance_carriers ic ON ic.id = pi.carrier_id LEFT JOIN insurance_plans ip ON ip.id = pi.plan_id
        WHERE pi.patient_id IN (${IN(ids)}) AND pi.active = 1 AND pi.priority = 'primary' ORDER BY pi.id`, ...ids,
     ))) if (r.fs && !schedules.has(r.patient_id)) schedules.set(r.patient_id, r.fs);

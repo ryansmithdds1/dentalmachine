@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { pretendPhone, pretendEmail } from '../training.js';
 import { requirePermission, HttpError, can } from '../auth.js';
 import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, practiceNow, recorded, isRealDate, validEmail } from '../util.js';
 import { schemaInfo } from '../db.js';
@@ -68,6 +69,15 @@ function validate(row) {
     if (!Array.isArray(list)) throw new HttpError(400, 'medical_conditions must be a list');
     row.medical_conditions = JSON.stringify([...new Set(list.map((c) => String(c).trim().slice(0, 80)).filter(Boolean))].slice(0, 60));
   }
+}
+
+// The training patient (training.js) only ever has pretend contact details, so nothing addressed to it could reach a
+// real person: 555-01xx numbers (reserved for fiction) and .invalid / example.com addresses.
+function checkPretendContacts(row) {
+  for (const k of ['phone', 'phone_home', 'phone_work']) {
+    if (row[k] && !pretendPhone(row[k])) throw new HttpError(400, `Tess Training is a practice patient: use a pretend number such as (512) 555-0142 — 555-0100 to 555-0199 are never real`);
+  }
+  if (row.email && !pretendEmail(row.email)) throw new HttpError(400, 'Tess Training is a practice patient: use a pretend address such as tess@example.com');
 }
 
 // Custom patient fields: the practice defines them (text, number, date, yes/no or a pick list);
@@ -218,6 +228,8 @@ export default function patientRoutes({ db }) {
     const from = await findOr404(db, 'patients', req.body?.from_id, req.user.practice_id, 'Patient');
     if (keep.id === from.id) throw new HttpError(400, 'Choose a different chart to merge');
     if (from.merged_into_id || keep.merged_into_id) throw new HttpError(409, 'That chart was already merged into another one');
+    // A real chart and the pretend one are never the same person (training.js).
+    if (!!keep.is_training !== !!from.is_training) throw new HttpError(400, 'The training patient can’t be merged with a real chart');
     const moved = {};
     await db.tx(async () => {
       // Recalls are one per type: keep the sooner due date. The duplicate's own copy stays on its archived chart.
@@ -282,6 +294,9 @@ export default function patientRoutes({ db }) {
       where.push('p.status = ?');
       params.push(status);
     }
+    // The training patient (training.js) isn't one of the practice's patients: it's only listed when searched for
+    // (and then with a Training badge).
+    if (!q) where.push('p.is_training = 0');
     if (q) {
       // Phone numbers match on their digits, however either side is formatted: 5125550100 finds (512) 555-0100.
       const digits = /^[\d\s().+-]+$/.test(q) ? q.replace(/\D/g, '').replace(/^1(?=\d{10}$)/, '') : '';
@@ -295,7 +310,7 @@ export default function patientRoutes({ db }) {
     params.push(...scope.args);
     const total = (await db.get(`SELECT COUNT(*) AS n FROM patients p WHERE ${whereSql}`, ...params)).n;
     const rows = await db.all(
-      `SELECT p.id, p.first_name, p.last_name, p.preferred_name, p.dob, p.phone, p.email, p.status, p.medical_alerts,
+      `SELECT p.id, p.first_name, p.last_name, p.preferred_name, p.dob, p.phone, p.email, p.status, p.medical_alerts, p.is_training,
         (SELECT COALESCE(SUM(amount),0) FROM ledger_entries l WHERE l.patient_id = p.id) AS balance,
         (SELECT MIN(start_time) FROM appointments a WHERE a.patient_id = p.id AND a.start_time >= ? AND a.status NOT IN ('cancelled','no_show')) AS next_appointment
        FROM patients p WHERE ${whereSql} ORDER BY p.last_name, p.first_name LIMIT ? OFFSET ?`,
@@ -314,6 +329,9 @@ export default function patientRoutes({ db }) {
     else if ('primary_hygienist_id' in row) row.primary_hygienist_id = null;
     await checkFeeSchedule(db, row, req);
     if (row.guarantor_id && (await findOr404(db, 'patients', row.guarantor_id, req.user.practice_id, 'Guarantor')).guarantor_id) throw new HttpError(400, 'Choose the head of household as guarantor');
+    // A family member added to the training patient's household is a training patient too (util.js insert), as is a
+    // patient made during a guided walkthrough in practice mode — with pretend details, like Tess.
+    if (req.get('X-Practice-Mode') === '1' || (row.guarantor_id && (await db.get('SELECT is_training FROM patients WHERE id = ?', row.guarantor_id))?.is_training)) checkPretendContacts(row);
     // A number that already replied STOP starts with texting off.
     if (row.phone && await isOptedOutAddress(db, req.user.practice_id, 'sms', row.phone)) row.sms_opt_in = 0;
     // New charts belong to the office they're made in.
@@ -344,7 +362,7 @@ export default function patientRoutes({ db }) {
     const missed = (await db.get("SELECT COUNT(*) AS n FROM appointments WHERE practice_id = ? AND patient_id = ? AND status = 'no_show' AND start_time >= ?", pid, p.id, `${Number(today.slice(0, 4)) - 2}${today.slice(4)}`)).n;
     res.json({
       id: p.id, first_name: p.first_name, last_name: p.last_name, preferred_name: p.preferred_name, dob: p.dob, phone: p.phone, email: p.email,
-      photo: p.photo || null, office_alert: p.office_alert, language: p.language,
+      is_training: p.is_training ? 1 : 0, photo: p.photo || null, office_alert: p.office_alert, language: p.language,
       ...(clinical ? {
         medical_alerts: p.medical_alerts, allergies: p.allergies, premed_required: !!p.premed_required, medical_reviewed_at: p.medical_reviewed_at,
         medical_review_due: medicalReviewDue(p.medical_reviewed_at, today),
@@ -415,7 +433,9 @@ export default function patientRoutes({ db }) {
       const g = await findOr404(db, 'patients', row.guarantor_id, req.user.practice_id, 'Guarantor');
       if (g.id === existing.id) row.guarantor_id = null;
       else if (g.guarantor_id) throw new HttpError(400, 'Choose the head of household as guarantor');
+      else if (!!g.is_training !== !!existing.is_training) throw new HttpError(400, 'The training patient’s family is pretend: a real patient can’t join it, and it can’t join a real family');
     }
+    if (existing.is_training) checkPretendContacts(row);
     await update(db, 'patients', existing.id, req.user.practice_id, { ...row, updated_at: new Date().toISOString() });
     await audit(db, req, 'patient.update', 'patients', existing.id, { fields: Object.keys(row) });
     await emitPatient(db, existing.id, 'patient.updated');

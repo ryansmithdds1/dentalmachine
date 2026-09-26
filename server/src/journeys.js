@@ -476,7 +476,7 @@ export const journeyCadence = {
         if (!on(k)) continue;
         const to = addDays(today, k === 'welcome' ? 120 : 1);
         const rows = await db.all(
-          `SELECT a.id, a.patient_id, a.start_time, a.status, a.location_id FROM appointments a JOIN patients p ON p.id = a.patient_id
+          `SELECT a.id, a.patient_id, a.start_time, a.status, a.location_id FROM real_appointments a JOIN real_patients p ON p.id = a.patient_id
            WHERE a.practice_id = ? AND a.status IN ('scheduled','confirmed') AND a.start_time >= ? AND a.start_time < ? AND p.status = 'active' AND a.created_at >= ?`,
           pid, `${today} 00:00`, `${to} 24:00`, s.get(k)?.enabled_since || '9999',
         );
@@ -490,7 +490,7 @@ export const journeyCadence = {
 
     if (on('thankyou') || on('summary')) {
       const rows = await db.all(
-        `SELECT a.patient_id, MIN(a.id) AS id, MIN(a.location_id) AS location_id FROM appointments a JOIN patients p ON p.id = a.patient_id
+        `SELECT a.patient_id, MIN(a.id) AS id, MIN(a.location_id) AS location_id FROM real_appointments a JOIN real_patients p ON p.id = a.patient_id
          WHERE a.practice_id = ? AND a.status = 'completed' AND a.start_time >= ? AND a.start_time < ? AND p.status = 'active' GROUP BY a.patient_id`, pid, t0, t1,
       );
       // The summary says thank you too: with both on, only the summary goes.
@@ -502,7 +502,7 @@ export const journeyCadence = {
       const prefixes = s.get('postop')?.options.code_prefixes || [];
       if (prefixes.length) {
         const rows = await db.all(
-          `SELECT pr.patient_id, MIN(pr.location_id) AS location_id FROM procedures pr JOIN patients p ON p.id = pr.patient_id
+          `SELECT pr.patient_id, MIN(pr.location_id) AS location_id FROM real_procedures pr JOIN real_patients p ON p.id = pr.patient_id
            WHERE pr.practice_id = ? AND pr.status = 'completed' AND pr.completed_at >= ? AND pr.completed_at < ? AND p.status = 'active'
              AND (${prefixes.map(() => 'pr.code LIKE ?').join(' OR ')}) GROUP BY pr.patient_id`, pid, t0, t1, ...prefixes.map((x) => `${x}%`),
         );
@@ -517,8 +517,8 @@ export const journeyCadence = {
       const recent = s.get('birthday')?.options.recent_months ?? 36;
       const since = `${addDays(today, -Math.round(recent * 30.44))} 00:00`;
       const rows = await db.all(
-        `SELECT p.id, p.dob, p.location_id, p.created_at, (SELECT MAX(a.start_time) FROM appointments a WHERE a.patient_id = p.id AND a.status = 'completed') AS last_visit
-         FROM patients p WHERE p.practice_id = ? AND p.status = 'active' AND p.merged_into_id IS NULL AND p.dob IS NOT NULL AND substr(p.dob, 6, 5) IN (${[...mds].map(() => '?').join(',')})`,
+        `SELECT p.id, p.dob, p.location_id, p.created_at, (SELECT MAX(a.start_time) FROM real_appointments a WHERE a.patient_id = p.id AND a.status = 'completed') AS last_visit
+         FROM real_patients p WHERE p.practice_id = ? AND p.status = 'active' AND p.merged_into_id IS NULL AND p.dob IS NOT NULL AND substr(p.dob, 6, 5) IN (${[...mds].map(() => '?').join(',')})`,
         pid, ...mds,
       );
       for (const p of rows) {
@@ -540,7 +540,7 @@ export const journeyCadence = {
       const dates = years.map((y) => `${Number(today.slice(0, 4)) - y}${today.slice(4)}`);
       if (dates.length) {
         const rows = await db.all(
-          `SELECT a.patient_id, MIN(a.start_time) AS first, MIN(p.location_id) AS location_id FROM appointments a JOIN patients p ON p.id = a.patient_id
+          `SELECT a.patient_id, MIN(a.start_time) AS first, MIN(p.location_id) AS location_id FROM real_appointments a JOIN real_patients p ON p.id = a.patient_id
            WHERE a.practice_id = ? AND a.status = 'completed' AND p.status = 'active' GROUP BY a.patient_id HAVING substr(MIN(a.start_time), 6, 5) = ?`, pid, today.slice(5),
         );
         for (const r of rows) {
@@ -552,7 +552,7 @@ export const journeyCadence = {
 
     if (on('milestone')) {
       const rows = await db.all(
-        "SELECT m.id, m.patient_id, m.detected_on, p.location_id FROM journey_moments m JOIN patients p ON p.id = m.patient_id WHERE m.practice_id = ? AND m.kind IN ('braces_off','cavity_free') AND m.status <> 'dismissed' AND m.detected_on >= ?",
+        "SELECT m.id, m.patient_id, m.detected_on, p.location_id FROM journey_moments m JOIN real_patients p ON p.id = m.patient_id WHERE m.practice_id = ? AND m.kind IN ('braces_off','cavity_free') AND m.status <> 'dismissed' AND m.detected_on >= ?",
         pid, addDays(today, -7),
       );
       for (const r of rows) out.push({ patient_id: r.patient_id, subtype: 'milestone', source_type: 'journey_moment', source_id: r.id, anchor_date: r.detected_on, location_id: r.location_id });
@@ -564,9 +564,9 @@ export const journeyCadence = {
       const oldest = addDays(today, -365 * 5);
       const recallOn = Number(practice.recall_cadence) === 1;
       const rows = await db.all(
-        `SELECT p.id, p.location_id, MAX(a.start_time) AS last FROM patients p JOIN appointments a ON a.patient_id = p.id AND a.status = 'completed'
+        `SELECT p.id, p.location_id, MAX(a.start_time) AS last FROM real_patients p JOIN real_appointments a ON a.patient_id = p.id AND a.status = 'completed'
          WHERE p.practice_id = ? AND p.status = 'active' AND p.merged_into_id IS NULL
-           AND NOT EXISTS (SELECT 1 FROM appointments f WHERE f.patient_id = p.id AND f.status IN ${ACTIVE_VISIT} AND f.start_time >= ?)
+           AND NOT EXISTS (SELECT 1 FROM real_appointments f WHERE f.patient_id = p.id AND f.status IN ${ACTIVE_VISIT} AND f.start_time >= ?)
          GROUP BY p.id, p.location_id HAVING MAX(a.start_time) < ? AND MAX(a.start_time) >= ?`, pid, `${today} 00:00`, `${cutoff} 00:00`, `${oldest} 00:00`,
       );
       for (const r of rows) {
@@ -830,7 +830,7 @@ async function detectMilestones(db, practice, today, stats) {
     await addMoment(db, practice, { patientId: c.patient_id, kind: 'braces_off', sourceKey: `case:${c.id}`, detail: 'Braces off', today: c.debond_date.slice(0, 10) }, stats);
   }
   const exams = await db.all(
-    `SELECT pr.patient_id, MAX(pr.completed_at) AS at, p.dob FROM procedures pr JOIN patients p ON p.id = pr.patient_id
+    `SELECT pr.patient_id, MAX(pr.completed_at) AS at, p.dob FROM real_procedures pr JOIN real_patients p ON p.id = pr.patient_id
      WHERE pr.practice_id = ? AND pr.status = 'completed' AND pr.code IN ('D0120','D0145','D0150') AND pr.completed_at >= ? AND pr.completed_at < ? AND p.dob IS NOT NULL
      GROUP BY pr.patient_id, p.dob`, practice.id, `${from} 00:00`, `${today} 24:00`,
   );
@@ -857,12 +857,12 @@ export const LIFE_EVENTS = [
 // (PP2) exist, read them here too — the huddle and the suggestions use this one function.
 export async function personalNotes(db, practiceId, patientIds) {
   if (!patientIds.length) return new Map();
-  const rows = await db.all(`SELECT id, notes, office_alert FROM patients WHERE practice_id = ? AND id IN (${patientIds.map(() => '?').join(',')})`, practiceId, ...patientIds);
+  const rows = await db.all(`SELECT id, notes, office_alert FROM real_patients patients WHERE practice_id = ? AND id IN (${patientIds.map(() => '?').join(',')})`, practiceId, ...patientIds);
   return new Map(rows.map((r) => [r.id, [r.office_alert, r.notes].filter((x) => x && String(x).trim()).map((x) => String(x).trim())]));
 }
 async function detectLifeEvents(db, practice, today, stats) {
   const ids = (await db.all(
-    `SELECT DISTINCT patient_id FROM appointments WHERE practice_id = ? AND status IN ${ACTIVE_VISIT} AND start_time >= ? AND start_time < ?`, practice.id, `${today} 00:00`, `${addDays(today, 7)} 24:00`,
+    `SELECT DISTINCT patient_id FROM real_appointments appointments WHERE practice_id = ? AND status IN ${ACTIVE_VISIT} AND start_time >= ? AND start_time < ?`, practice.id, `${today} 00:00`, `${addDays(today, 7)} 24:00`,
   )).map((r) => r.patient_id);
   const notes = await personalNotes(db, practice.id, ids);
   for (const [pid, list] of notes) {
@@ -897,9 +897,9 @@ async function cardTasks(db, practice, today, o, stats) {
   const note = 'Write a short, personal note from the team (the doctor signs) and mail it. Tick this task when the card is in the mail.';
   if (o.first_visit !== false) {
     const done = await db.all(
-      `SELECT a.id, a.patient_id, a.start_time, p.first_name, p.last_name FROM appointments a JOIN patients p ON p.id = a.patient_id
+      `SELECT a.id, a.patient_id, a.start_time, p.first_name, p.last_name FROM real_appointments a JOIN real_patients p ON p.id = a.patient_id
        WHERE a.practice_id = ? AND a.status = 'completed' AND a.start_time >= ? AND a.start_time < ? AND p.status = 'active'
-         AND NOT EXISTS (SELECT 1 FROM appointments b WHERE b.patient_id = a.patient_id AND b.status = 'completed' AND b.start_time < a.start_time)`,
+         AND NOT EXISTS (SELECT 1 FROM real_appointments b WHERE b.patient_id = a.patient_id AND b.status = 'completed' AND b.start_time < a.start_time)`,
       practice.id, `${from} 00:00`, `${today} 24:00`,
     );
     for (const a of done) {
@@ -912,7 +912,7 @@ async function cardTasks(db, practice, today, o, stats) {
   const threshold = Number(o.threshold_cents) || 0;
   if (threshold > 0) {
     const big = await db.all(
-      `SELECT pr.patient_id, substr(pr.completed_at, 1, 10) AS day, SUM(pr.fee) AS total, p.first_name, p.last_name FROM procedures pr JOIN patients p ON p.id = pr.patient_id
+      `SELECT pr.patient_id, substr(pr.completed_at, 1, 10) AS day, SUM(pr.fee) AS total, p.first_name, p.last_name FROM real_procedures pr JOIN real_patients p ON p.id = pr.patient_id
        WHERE pr.practice_id = ? AND pr.status = 'completed' AND pr.completed_at >= ? AND pr.completed_at < ? AND p.status = 'active'
        GROUP BY pr.patient_id, substr(pr.completed_at, 1, 10), p.first_name, p.last_name`, practice.id, `${from} 00:00`, `${today} 24:00`,
     );
@@ -938,7 +938,7 @@ async function giftTasks(db, practice, today, o, stats) {
 async function routeFeedback(db, practice, today, o, stats, now) {
   const since = utcStamp(new Date(now.getTime() - 7 * 86400_000));
   const rows = await db.all(
-    `SELECT r.id, r.patient_id, r.nps, r.answers, p.first_name, p.last_name FROM survey_responses r JOIN patients p ON p.id = r.patient_id
+    `SELECT r.id, r.patient_id, r.nps, r.answers, p.first_name, p.last_name FROM survey_responses r JOIN real_patients p ON p.id = r.patient_id
      WHERE r.practice_id = ? AND r.answered_at IS NOT NULL AND r.answered_at >= ?`, practice.id, since,
   );
   let owner = o.owner_user_id || null;
@@ -976,13 +976,13 @@ export async function broadcastAudience(db, pid, kind, channel) {
   const since = `${addDays(new Date().toISOString().slice(0, 10), -730)} 00:00`;
   if (kind === 'newsletter') {
     return db.all(
-      `SELECT p.* FROM patients p JOIN journey_prefs jp ON jp.patient_id = p.id AND jp.newsletter = 1
+      `SELECT p.* FROM real_patients p JOIN journey_prefs jp ON jp.patient_id = p.id AND jp.newsletter = 1
        WHERE p.practice_id = ? AND p.status = 'active' AND p.merged_into_id IS NULL AND p.email IS NOT NULL AND p.email_opt_in = 1 ORDER BY p.id`, pid,
     );
   }
   const rows = await db.all(
-    `SELECT p.* FROM patients p WHERE p.practice_id = ? AND p.status = 'active' AND p.merged_into_id IS NULL AND (p.guarantor_id IS NULL OR p.guarantor_id = p.id)
-       AND EXISTS (SELECT 1 FROM appointments a JOIN patients m ON m.id = a.patient_id WHERE (m.id = p.id OR m.guarantor_id = p.id) AND a.status = 'completed' AND a.start_time >= ?)
+    `SELECT p.* FROM real_patients p WHERE p.practice_id = ? AND p.status = 'active' AND p.merged_into_id IS NULL AND (p.guarantor_id IS NULL OR p.guarantor_id = p.id)
+       AND EXISTS (SELECT 1 FROM real_appointments a JOIN real_patients m ON m.id = a.patient_id WHERE (m.id = p.id OR m.guarantor_id = p.id) AND a.status = 'completed' AND a.start_time >= ?)
      ORDER BY p.id`, pid, since,
   );
   const out = [];

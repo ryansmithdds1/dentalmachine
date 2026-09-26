@@ -512,7 +512,7 @@ async function checkBounces(db) {
   const since = new Date(Date.now() - 8 * 86400_000).toISOString().slice(0, 19).replace('T', ' ');
   const rows = await db.all(
     `SELECT ds.subscription_id, ds.practice_id, m.delivery, m.id AS message_id, u.name AS user_name, s.digest FROM digest_sends ds
-     JOIN messages m ON m.id = ds.message_id JOIN digest_subscriptions s ON s.id = ds.subscription_id JOIN users u ON u.id = s.user_id
+     JOIN real_messages m ON m.id = ds.message_id JOIN digest_subscriptions s ON s.id = ds.subscription_id JOIN users u ON u.id = s.user_id
      WHERE ds.created_at >= ? AND m.delivery IN ('bounced','delivered') ORDER BY ds.id`, since,
   );
   const latest = new Map();

@@ -1,5 +1,5 @@
 {
- "_about": "Hand-written prose for the user manual (npm run manual → e2e/actions/manual.mjs). One entry per action in actions.json. Fields: q (the question, if the automatic one reads badly), keywords (extra words people search with), what (plain-language intro), where (overrides the route), start (text for the start picture), steps {index: better caption for the robot's step at that index}, skipSteps [indexes], mouse (the mouse way), tips [..], problems [[what you see, what to do]], related [ids], to (the screen to open; null for none), manualSteps [{text, keys, shot}] (used when the robot has no run, e.g. hardware), useManualSteps (use manualSteps even when the robot ran). Keep it accurate to the app: check the screen or the code, don't invent features.",
+ "_about": "Hand-written prose for the user manual (npm run manual → e2e/actions/manual.mjs). One entry per action in actions.json. Fields: q (the question, if the automatic one reads badly), keywords (extra words people search with), what (plain-language intro), where (overrides the route), start (text for the start picture), steps {index: better caption for the robot's step at that index}, skipSteps [indexes], mouse (the mouse way), tips [..], problems [[what you see, what to do]], related [ids], to (the screen to open; null for none), manualSteps [{text, keys, shot}] (used when the robot has no run, e.g. hardware), useManualSteps (use manualSteps even when the robot ran). Keep it accurate to the app: check the screen or the code, don't invent features. tour: the guided walkthrough made from the same run (npm run tours → e2e/actions/tours.mjs): needs [set-up on the training patient before it starts: visit_today[:status], visit_future[:days], visit_planned, unbilled, paid_up, owes, recall_open, planned, draft_note, claim_sent, lab_case, xrays], skip (why it has no walkthrough), typed {index: example words to type in place of the robot’s}, practice (true: no patient of its own, but what it creates is practice data — a new patient).",
  "A001": {
   "keywords": "schedule calendar day view appointments today book open",
   "what": "The schedule shows every visit for the day, one column per chair. Use it to see who is coming, who has arrived and where the gaps are. It opens on today.",
@@ -69,7 +69,10 @@
    "A066",
    "A053",
    "A002"
-  ]
+  ],
+  "tour": {
+   "skip": "it starts with a live phone call ringing in (the call pop-up) — practise it on a real call with a colleague"
+  }
  },
  "A005": {
   "keywords": "text message sms reply inbox conversation",
@@ -126,7 +129,12 @@
    "A031",
    "A078",
    "A056"
-  ]
+  ],
+  "tour": {
+   "needs": [
+    "xrays"
+   ]
+  }
  },
  "A008": {
   "keywords": "text sms message send patient",
@@ -203,7 +211,12 @@
    "A023",
    "A052",
    "A095"
-  ]
+  ],
+  "tour": {
+   "needs": [
+    "visit_today:in_chair"
+   ]
+  }
  },
  "A012": {
   "keywords": "seat patient chair operatory in chair",
@@ -220,7 +233,12 @@
    "A010",
    "A018",
    "A013"
-  ]
+  ],
+  "tour": {
+   "needs": [
+    "visit_today:checked_in"
+   ]
+  }
  },
  "A013": {
   "keywords": "patient out done finished complete visit dismiss",
@@ -244,7 +262,12 @@
    "A017",
    "A015",
    "A012"
-  ]
+  ],
+  "tour": {
+   "needs": [
+    "visit_today:in_chair"
+   ]
+  }
  },
  "A014": {
   "keywords": "medical history review no changes health history update",
@@ -276,7 +299,12 @@
    "A017",
    "A022",
    "A021"
-  ]
+  ],
+  "tour": {
+   "needs": [
+    "visit_planned"
+   ]
+  }
  },
  "A016": {
   "keywords": "confirm appointment confirmed call patient reminder",
@@ -311,7 +339,14 @@
    "A019",
    "A027",
    "A044"
-  ]
+  ],
+  "tour": {
+   "needs": [
+    "unbilled",
+    "paid_up",
+    "recall_open"
+   ]
+  }
  },
  "A018": {
   "keywords": "ready for doctor exam hygiene check flag",
@@ -330,7 +365,12 @@
   "related": [
    "A012",
    "A013"
-  ]
+  ],
+  "tour": {
+   "needs": [
+    "visit_today:in_chair"
+   ]
+  }
  },
  "A019": {
   "keywords": "take payment collect money pay card cash check post payment",
@@ -408,7 +448,12 @@
    "A048",
    "A056",
    "A067"
-  ]
+  ],
+  "tour": {
+   "needs": [
+    "unbilled"
+   ]
+  }
  },
  "A023": {
   "keywords": "sign note signature finalize lock",
@@ -427,7 +472,12 @@
   "related": [
    "A011",
    "A095"
-  ]
+  ],
+  "tour": {
+   "needs": [
+    "draft_note"
+   ]
+  }
  },
  "A024": {
   "q": "How do I explain a balance (show the ledger)?",
@@ -484,7 +534,14 @@
    "A017",
    "A020",
    "A037"
-  ]
+  ],
+  "tour": {
+   "needs": [
+    "unbilled",
+    "owes",
+    "recall_open"
+   ]
+  }
  },
  "A028": {
   "keywords": "task todo assign co-worker remind colleague",
@@ -555,7 +612,10 @@
    "A031",
    "A007",
    "A182"
-  ]
+  ],
+  "tour": {
+   "skip": "it needs the x-ray sensor and the imaging bridge on the workstation"
+  }
  },
  "A031": {
   "keywords": "upload x-rays photos images add files drop pictures",
@@ -691,7 +751,12 @@
    {
     "text": "Press Enter (or click “Sign here on this device”): the consent opens for the patient to read and sign. Hand them the screen; when they have signed, it is filed on the chart."
    }
-  ]
+  ],
+  "tour": {
+   "needs": [
+    "planned"
+   ]
+  }
  },
  "A040": {
   "keywords": "send forms intake paperwork before visit online",
@@ -732,6 +797,11 @@
   ],
   "steps": {
    "2": "The patient sees their name on the signing line, ticks “I agree” and taps Accept & sign"
+  },
+  "tour": {
+   "needs": [
+    "planned"
+   ]
   }
  },
  "A043": {
@@ -765,7 +835,10 @@
    "A083",
    "A017",
    "A041"
-  ]
+  ],
+  "tour": {
+   "skip": "the visit panel has no route-slip button yet (the robot flags this as a dead end); the dashboard’s visit list has one"
+  }
  },
  "A045": {
   "keywords": "perio chart pocket depths probing bleeding periodontal",
@@ -878,7 +951,10 @@
    "A031",
    "A030",
    "A007"
-  ]
+  ],
+  "tour": {
+   "skip": "it needs the intraoral camera"
+  }
  },
  "A051": {
   "q": "How do I mark a recall call as “left a message”?",
@@ -892,7 +968,12 @@
   "related": [
    "A037",
    "A057"
-  ]
+  ],
+  "tour": {
+   "needs": [
+    "recall_open"
+   ]
+  }
  },
  "A052": {
   "keywords": "dictate voice microphone speech note talk",
@@ -928,7 +1009,10 @@
   "related": [
    "A011",
    "A023"
-  ]
+  ],
+  "tour": {
+   "skip": "it needs a microphone and a clinician talking"
+  }
  },
  "A053": {
   "keywords": "log call phone note spoke called patient record call",
@@ -976,7 +1060,13 @@
    "A002",
    "A091",
    "A090"
-  ]
+  ],
+  "tour": {
+   "practice": true,
+   "typed": {
+    "3": "Sam Sample 4/5/1991 512-555-0177 sam.sample@example.com"
+   }
+  }
  },
  "A056": {
   "keywords": "attach xray attachment claim send narrative",
@@ -988,7 +1078,13 @@
   "related": [
    "A022",
    "A048"
-  ]
+  ],
+  "tour": {
+   "needs": [
+    "unbilled"
+   ],
+   "skip": "it needs x-rays on the chart for the claim’s teeth (the training patient has none)"
+  }
  },
  "A057": {
   "keywords": "unscheduled treatment call follow up plan not booked",
@@ -1010,7 +1106,10 @@
   "related": [
    "A180",
    "A020"
-  ]
+  ],
+  "tour": {
+   "skip": "it starts from a patient’s own online booking request — only a real request makes one"
+  }
  },
  "A059": {
   "keywords": "clock in time clock start shift punch",
@@ -1043,7 +1142,10 @@
   "related": [
    "A059",
    "A061"
-  ]
+  ],
+  "tour": {
+   "skip": "it needs you to be clocked in, and it changes your real time card (the walkthrough doesn’t clock you in for practice)"
+  }
  },
  "A061": {
   "keywords": "lunch break start end time clock",
@@ -1052,7 +1154,10 @@
   "related": [
    "A059",
    "A060"
-  ]
+  ],
+  "tour": {
+   "skip": "it needs you to be clocked in, and it changes your real time card (the walkthrough doesn’t clock you in for practice)"
+  }
  },
  "A062": {
   "keywords": "prescription rx write antibiotic painkiller favorite",
@@ -1125,7 +1230,10 @@
   "related": [
    "A004",
    "A055"
-  ]
+  ],
+  "tour": {
+   "skip": "it starts with a missed call from an unknown number — only a real call makes one"
+  }
  },
  "A067": {
   "keywords": "claim status look up find claim number",
@@ -1137,7 +1245,12 @@
   "related": [
    "A075",
    "A106"
-  ]
+  ],
+  "tour": {
+   "needs": [
+    "claim_sent"
+   ]
+  }
  },
  "A068": {
   "keywords": "caries risk cambra assessment",
@@ -1172,7 +1285,10 @@
   "related": [
    "A076",
    "A054"
-  ]
+  ],
+  "tour": {
+   "skip": "it needs a real opening on today’s schedule and a real patient on the ASAP list, and it moves that patient’s visit"
+  }
  },
  "A071": {
   "keywords": "no show missed appointment broken",
@@ -1233,7 +1349,12 @@
   "related": [
    "A073",
    "A103"
-  ]
+  ],
+  "tour": {
+   "needs": [
+    "lab_case"
+   ]
+  }
  },
  "A075": {
   "keywords": "insurance follow up unpaid claim call payer aging",
@@ -1246,7 +1367,12 @@
    "A067",
    "A109",
    "A124"
-  ]
+  ],
+  "tour": {
+   "needs": [
+    "claim_sent"
+   ]
+  }
  },
  "A076": {
   "keywords": "asap list waitlist earlier appointment sooner",
@@ -1317,7 +1443,10 @@
   "related": [
    "A132",
    "A034"
-  ]
+  ],
+  "tour": {
+   "skip": "it needs today’s checklist items for your position (set up in Checklists), and ticking one changes the office’s real checklist"
+  }
  },
  "A080": {
   "keywords": "patient education send after visit care instructions",
@@ -1338,7 +1467,12 @@
   "related": [
    "A038",
    "A022"
-  ]
+  ],
+  "tour": {
+   "needs": [
+    "planned"
+   ]
+  }
  },
  "A082": {
   "keywords": "emergency same day toothache urgent book today",
@@ -1428,7 +1562,10 @@
   ],
   "related": [
    "A084"
-  ]
+  ],
+  "tour": {
+   "skip": "it needs a cash drawer opened for the day, and it closes and counts the office’s real drawer"
+  }
  },
  "A087": {
   "keywords": "insurance verification tomorrow eligibility batch",
@@ -1440,7 +1577,12 @@
   "related": [
    "A026",
    "A047"
-  ]
+  ],
+  "tour": {
+   "needs": [
+    "visit_future:1"
+   ]
+  }
  },
  "A088": {
   "keywords": "financing carecredit sunbit cherry application lender",
@@ -1453,7 +1595,10 @@
   "related": [
    "A113",
    "A077"
-  ]
+  ],
+  "tour": {
+   "skip": "it needs a financing lender with an application link set up (Settings → Payments), which the office may not have"
+  }
  },
  "A089": {
   "keywords": "referral refer out specialist endo oral surgeon letter",
@@ -1465,7 +1610,10 @@
   "related": [
    "A092",
    "A152"
-  ]
+  ],
+  "tour": {
+   "skip": "it needs specialists in the office’s referral contacts (Patients → Referrals), which the demo office doesn’t have"
+  }
  },
  "A090": {
   "keywords": "family member household add child spouse",
@@ -1559,7 +1707,12 @@
    {
     "text": "Print it from that tab with Ctrl/⌘ P."
    }
-  ]
+  ],
+  "tour": {
+   "needs": [
+    "planned"
+   ]
+  }
  },
  "A097": {
   "keywords": "recall interval frequency 3 4 6 months perio maintenance",
@@ -1614,7 +1767,10 @@
   "where": "Chart ▾ → Ortho tab → + Log adjustment",
   "related": [
    "A011"
-  ]
+  ],
+  "tour": {
+   "skip": "it needs a patient in orthodontic treatment (the training patient has none)"
+  }
  },
  "A102": {
   "keywords": "void payment mistake reverse wrong payment delete payment",
@@ -1693,7 +1849,10 @@
    "A114",
    "A109",
    "A067"
-  ]
+  ],
+  "tour": {
+   "skip": "it needs a claim the payer rejected (the walkthrough can’t make a real rejection)"
+  }
  },
  "A107": {
   "keywords": "missed punch forgot clock in out time correction",
@@ -1736,7 +1895,10 @@
   "related": [
    "A106",
    "A075"
-  ]
+  ],
+  "tour": {
+   "skip": "it needs a claim the payer denied (the walkthrough can’t make a real denial)"
+  }
  },
  "A110": {
   "keywords": "refund credit balance overpayment money back",
@@ -1758,7 +1920,10 @@
   "related": [
    "A102",
    "A019"
-  ]
+  ],
+  "tour": {
+   "skip": "it needs a patient with a credit balance, and a refund moves real money back to a card"
+  }
  },
  "A111": {
   "keywords": "supplies order reorder low stock inventory",
@@ -1777,7 +1942,10 @@
   "where": "Manage ▾ → To-do & labs → Supplies",
   "related": [
    "A111"
-  ]
+  ],
+  "tour": {
+   "skip": "it needs a supply order waiting to be received"
+  }
  },
  "A113": {
   "keywords": "payment plan installments monthly",
@@ -1807,7 +1975,10 @@
   "related": [
    "A106",
    "A067"
-  ]
+  ],
+  "tour": {
+   "skip": "it needs a claim the payer has accepted (the walkthrough can’t make one)"
+  }
  },
  "A115": {
   "keywords": "block time schedule meeting lunch closed",
@@ -1848,7 +2019,10 @@
    {
     "text": "Read it, change what you like, and click “Post reply”: it is posted to Google."
    }
-  ]
+  ],
+  "tour": {
+   "skip": "it needs an online review waiting for a reply, and the reply is posted publicly"
+  }
  },
  "A117": {
   "keywords": "inactive patient archive deactivate left practice",
@@ -1871,7 +2045,10 @@
   ],
   "related": [
    "A113"
-  ]
+  ],
+  "tour": {
+   "skip": "it needs a membership plan set up (Settings → Memberships), which the demo office doesn’t have"
+  }
  },
  "A119": {
   "keywords": "statements send billing patient balance mail email",
@@ -1880,7 +2057,10 @@
   "related": [
    "A024",
    "A147"
-  ]
+  ],
+  "tour": {
+   "skip": "it needs patients whose statements go on paper today (the statement run is the office’s real one)"
+  }
  },
  "A120": {
   "keywords": "provider day off vacation hours special hours time off",
@@ -1911,7 +2091,10 @@
   "related": [
    "A055",
    "A117"
-  ]
+  ],
+  "tour": {
+   "skip": "it needs a real pair of duplicate charts, and merging them can’t be practised on a pretend one"
+  }
  },
  "A122": {
   "keywords": "payroll approve hours pay period timesheet",
@@ -2047,7 +2230,10 @@
   "related": [
    "A079",
    "A169"
-  ]
+  ],
+  "tour": {
+   "skip": "it needs a spore-test item due in Compliance and a photo of the test strip"
+  }
  },
  "A133": {
   "keywords": "time off request vacation pto holiday leave",
@@ -2062,7 +2248,10 @@
   "related": [
    "A134",
    "A123"
-  ]
+  ],
+  "tour": {
+   "skip": "it asks for your real time off"
+  }
  },
  "A134": {
   "keywords": "approve time off request vacation pto",
@@ -2070,7 +2259,10 @@
   "where": "Manage ▾ → Time clock → Time off → Requests",
   "related": [
    "A133"
-  ]
+  ],
+  "tour": {
+   "skip": "it needs a time-off request waiting for approval"
+  }
  },
  "A135": {
   "keywords": "announcement team news post intranet",
@@ -2098,7 +2290,10 @@
   "related": [
    "A177",
    "A149"
-  ]
+  ],
+  "tour": {
+   "skip": "it really sends the campaign to every patient who accepts messages — try it with a test audience instead"
+  }
  },
  "A137": {
   "keywords": "business view what pays profitability margin",
@@ -2228,7 +2423,10 @@
    {
     "text": "Pick the office in the Office list. The page reloads and every screen now shows that office (or All offices, if you are allowed to see them all)."
    }
-  ]
+  ],
+  "tour": {
+   "skip": "it needs a second office"
+  }
  },
  "A146": {
   "keywords": "month end close books period lock",
@@ -2326,7 +2524,10 @@
   "related": [
    "A155",
    "A165"
-  ]
+  ],
+  "tour": {
+   "skip": "it changes the office’s real fees"
+  }
  },
  "A155": {
   "keywords": "ppo fee schedule insurance update new fees contract",
@@ -2338,6 +2539,9 @@
   ],
   "steps": {
    "2": "Click the new schedule waiting for approval (the payer’s file): every difference is shown side by side"
+  },
+  "tour": {
+   "skip": "it changes the office’s real insurance fee schedule"
   }
  },
  "A156": {
@@ -2365,6 +2569,9 @@
   ],
   "steps": {
    "2": "Pick the new role (here Billing) in the person’s Role list: saved at once (audited; they sign in again; Undo shows)"
+  },
+  "tour": {
+   "skip": "it changes a real person’s permissions"
   }
  },
  "A158": {
@@ -2457,7 +2664,10 @@
   "related": [
    "A039",
    "A040"
-  ]
+  ],
+  "tour": {
+   "skip": "it changes the office’s real form or consent"
+  }
  },
  "A167": {
   "keywords": "reminder settings text schedule confirmation messages",
@@ -2573,7 +2783,10 @@
   "related": [
    "A019",
    "A184"
-  ]
+  ],
+  "tour": {
+   "skip": "it needs products set up for sale (Settings → Products)"
+  }
  },
  "A177": {
   "keywords": "mailing labels print avery postcards",
@@ -2658,7 +2871,10 @@
   ],
   "related": [
    "A182"
-  ]
+  ],
+  "tour": {
+   "skip": "it needs an export file from the other system"
+  }
  },
  "A184": {
   "keywords": "gift certificate sell redeem voucher gift card",

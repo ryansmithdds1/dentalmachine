@@ -82,7 +82,7 @@ async function money(db, pid, o) {
     // One provider: their charges; payments and write-offs credited to their work (the same allocation as
     // Collections by provider: insurance to the claim's procedures, the rest to the oldest charges first).
     const s = scope(o, { provider: 'l.provider_id = ?', location: 'l.location_id' });
-    const charges = (await db.get(`SELECT COALESCE(SUM(l.amount),0) AS n FROM ledger_entries l WHERE l.practice_id = ? AND l.type = 'charge' AND l.retail_sale_id IS NULL AND l.entry_date BETWEEN ? AND ? AND ${LIVE()}${s.sql}`, pid, from, to, ...s.args)).n;
+    const charges = (await db.get(`SELECT COALESCE(SUM(l.amount),0) AS n FROM real_ledger_entries l WHERE l.practice_id = ? AND l.type = 'charge' AND l.retail_sale_id IS NULL AND l.entry_date BETWEEN ? AND ? AND ${LIVE()}${s.sql}`, pid, from, to, ...s.args)).n;
     const alloc = (await allocationsForRange(db, pid, from, to)).filter((a) => a.provider_id === o.providerId);
     const received = alloc.filter((a) => ['payment', 'insurance_payment'].includes(a.credit_type)).reduce((x, a) => x + a.amount, 0);
     const adj = alloc.filter((a) => a.credit_type === 'adjustment');
@@ -91,7 +91,7 @@ async function money(db, pid, o) {
     const kinds = new Map();
     for (let i = 0; i < ids.length; i += 500) {
       const chunk = ids.slice(i, i + 500);
-      for (const e of await db.all(`SELECT id, adjustment_type, claim_id, location_id FROM ledger_entries WHERE id IN (${IN(chunk)})`, ...chunk)) kinds.set(e.id, e);
+      for (const e of await db.all(`SELECT id, adjustment_type, claim_id, location_id FROM real_ledger_entries ledger_entries WHERE id IN (${IN(chunk)})`, ...chunk)) kinds.set(e.id, e);
     }
     for (const a of adj) {
       const e = kinds.get(a.credit_id);
@@ -105,11 +105,11 @@ async function money(db, pid, o) {
     `SELECT COALESCE(SUM(CASE WHEN l.type = 'charge' AND l.retail_sale_id IS NULL THEN l.amount ELSE 0 END),0) AS charges,
        COALESCE(SUM(CASE WHEN l.type IN ('payment','insurance_payment') THEN -l.amount ELSE 0 END),0) AS received,
        COALESCE(SUM(CASE WHEN l.type = 'refund' THEN l.amount ELSE 0 END),0) AS refunds
-     FROM ledger_entries l WHERE l.practice_id = ? AND l.entry_date BETWEEN ? AND ? AND ${LIVE()}${s.sql}`, pid, from, to, ...s.args,
+     FROM real_ledger_entries l WHERE l.practice_id = ? AND l.entry_date BETWEEN ? AND ? AND ${LIVE()}${s.sql}`, pid, from, to, ...s.args,
   );
   const split = { insurance_write_offs: 0, discounts: 0, other_write_offs: 0 };
   const rows = await db.all(
-    `SELECT l.adjustment_type, CASE WHEN l.claim_id IS NULL THEN 0 ELSE 1 END AS on_claim, -SUM(l.amount) AS n FROM ledger_entries l
+    `SELECT l.adjustment_type, CASE WHEN l.claim_id IS NULL THEN 0 ELSE 1 END AS on_claim, -SUM(l.amount) AS n FROM real_ledger_entries l
      WHERE l.practice_id = ? AND l.type = 'adjustment' AND l.retail_sale_id IS NULL AND l.gift_certificate_id IS NULL AND l.amount < 0 AND ${LIVE()} AND l.entry_date BETWEEN ? AND ?${s.sql}
      GROUP BY l.adjustment_type, CASE WHEN l.claim_id IS NULL THEN 0 ELSE 1 END`, pid, from, to, ...s.args,
   );
@@ -119,16 +119,16 @@ async function money(db, pid, o) {
 
 // A patient's first visit: the earliest completed appointment or completed procedure's charge.
 const FIRST_VISITS = `SELECT x.patient_id, MIN(x.d) AS first_visit FROM (
-    SELECT a.patient_id, substr(a.start_time, 1, 10) AS d FROM appointments a WHERE a.practice_id = ? AND a.status = 'completed'
+    SELECT a.patient_id, substr(a.start_time, 1, 10) AS d FROM real_appointments a WHERE a.practice_id = ? AND a.status = 'completed'
     UNION ALL
-    SELECT l.patient_id, l.entry_date AS d FROM ledger_entries l WHERE l.practice_id = ? AND l.type = 'charge' AND l.procedure_id IS NOT NULL AND ${LIVE()}
+    SELECT l.patient_id, l.entry_date AS d FROM real_ledger_entries l WHERE l.practice_id = ? AND l.type = 'charge' AND l.procedure_id IS NOT NULL AND ${LIVE()}
   ) x GROUP BY x.patient_id`;
 
 async function newPatients(db, pid, o) {
   const s = scope(o, { location: 'p.location_id' });
   const rows = await db.all(
     `SELECT f.patient_id, f.first_visit, p.first_name, p.last_name, COALESCE(NULLIF(p.referral_source, ''), 'Not recorded') AS source
-     FROM (${FIRST_VISITS}) f JOIN patients p ON p.id = f.patient_id
+     FROM (${FIRST_VISITS}) f JOIN real_patients p ON p.id = f.patient_id
      WHERE f.first_visit BETWEEN ? AND ? AND p.merged_into_id IS NULL${s.sql} ORDER BY f.first_visit, p.last_name`, pid, pid, o.from, o.to, ...s.args,
   );
   return rows;
@@ -140,19 +140,19 @@ async function caseAcceptance(db, pid, o) {
   return db.get(
     `SELECT COALESCE(SUM(pr.fee),0) AS presented, COALESCE(SUM(CASE WHEN tp.status IN ('accepted','completed') THEN pr.fee ELSE 0 END),0) AS accepted,
        COUNT(DISTINCT tp.id) AS plans, COUNT(DISTINCT CASE WHEN tp.status IN ('accepted','completed') THEN tp.id END) AS accepted_plans
-     FROM treatment_plans tp JOIN procedures pr ON pr.treatment_plan_id = tp.id
+     FROM real_treatment_plans tp JOIN real_procedures pr ON pr.treatment_plan_id = tp.id
      WHERE tp.practice_id = ? AND tp.created_at >= ? AND tp.created_at < ? AND pr.status != 'cancelled'${s.sql}`, pid, fromUtc, toUtc, ...s.args,
   );
 }
 
 // Hygiene visits completed in range whose patient left with the next visit booked (booked by the day of the visit).
-const REBOOKED = `EXISTS (SELECT 1 FROM appointments b WHERE b.patient_id = a.patient_id AND b.start_time > a.start_time
+const REBOOKED = `EXISTS (SELECT 1 FROM real_appointments b WHERE b.patient_id = a.patient_id AND b.start_time > a.start_time
   AND b.status NOT IN ('cancelled','no_show') AND substr(b.created_at, 1, 10) <= substr(a.start_time, 1, 10))`;
 async function hygieneReappointment(db, pid, o) {
   const s = scope(o, { provider: 'a.provider_id = ?', location: 'a.location_id' });
   return db.get(
     `SELECT COUNT(*) AS visits, COALESCE(SUM(CASE WHEN ${REBOOKED} THEN 1 ELSE 0 END),0) AS reappointed
-     FROM appointments a JOIN providers pv ON pv.id = a.provider_id
+     FROM real_appointments a JOIN providers pv ON pv.id = a.provider_id
      WHERE a.practice_id = ? AND pv.type = 'hygienist' AND a.status = 'completed' AND a.start_time >= ? AND a.start_time < ?${s.sql}`,
     pid, `${o.from} 00:00`, `${o.to} 24:00`, ...s.args,
   );
@@ -166,30 +166,30 @@ async function appointmentOutcomes(db, pid, o) {
     `SELECT COALESCE(SUM(CASE WHEN a.status IN ('completed','checked_in','in_chair') THEN 1 ELSE 0 END),0) AS kept,
        COALESCE(SUM(CASE WHEN a.status IN ('no_show','cancelled') THEN 1 ELSE 0 END),0) AS broken,
        COALESCE(SUM(CASE WHEN a.status = 'no_show' THEN 1 ELSE 0 END),0) AS no_shows
-     FROM appointments a WHERE a.practice_id = ? AND a.start_time >= ? AND a.start_time < ?${s.sql}`,
+     FROM real_appointments a WHERE a.practice_id = ? AND a.start_time >= ? AND a.start_time < ?${s.sql}`,
     pid, `${o.from} 00:00`, `${end} 24:00`, ...s.args,
   );
 }
 
 // Planned treatment not on a live appointment, for active patients, on no plan or a plan still open.
 const UNSCHEDULED = `pr.status = 'planned' AND p.status = 'active' AND p.merged_into_id IS NULL
-  AND (pr.appointment_id IS NULL OR EXISTS (SELECT 1 FROM appointments x WHERE x.id = pr.appointment_id AND x.status IN ('cancelled','no_show')))
-  AND (pr.treatment_plan_id IS NULL OR EXISTS (SELECT 1 FROM treatment_plans tp WHERE tp.id = pr.treatment_plan_id AND tp.status IN ('proposed','accepted')))`;
+  AND (pr.appointment_id IS NULL OR EXISTS (SELECT 1 FROM real_appointments x WHERE x.id = pr.appointment_id AND x.status IN ('cancelled','no_show')))
+  AND (pr.treatment_plan_id IS NULL OR EXISTS (SELECT 1 FROM real_treatment_plans tp WHERE tp.id = pr.treatment_plan_id AND tp.status IN ('proposed','accepted')))`;
 async function unscheduled(db, pid, o) {
   const s = scope(o, { provider: 'pr.provider_id = ?', location: 'pr.location_id' });
   return db.get(
     `SELECT COALESCE(SUM(pr.fee),0) AS amount, COUNT(*) AS procedures, COUNT(DISTINCT pr.patient_id) AS patients
-     FROM procedures pr JOIN patients p ON p.id = pr.patient_id WHERE pr.practice_id = ? AND ${UNSCHEDULED}${s.sql}`, pid, ...s.args,
+     FROM real_procedures pr JOIN real_patients p ON p.id = pr.patient_id WHERE pr.practice_id = ? AND ${UNSCHEDULED}${s.sql}`, pid, ...s.args,
   );
 }
 
 // Claims sent more than 30 days before `asOf` with no answer yet.
-const CLAIM_PROVIDER = 'EXISTS (SELECT 1 FROM claim_items ci JOIN procedures cp ON cp.id = ci.procedure_id WHERE ci.claim_id = c.id AND cp.provider_id = ?)';
+const CLAIM_PROVIDER = 'EXISTS (SELECT 1 FROM claim_items ci JOIN real_procedures cp ON cp.id = ci.procedure_id WHERE ci.claim_id = c.id AND cp.provider_id = ?)';
 async function claimsWaiting(db, pid, o) {
   const s = scope(o, { provider: CLAIM_PROVIDER, location: 'c.location_id' });
   return db.get(
     `SELECT COUNT(*) AS n, COALESCE(SUM(CASE WHEN c.estimated_amount > c.paid_amount THEN c.estimated_amount - c.paid_amount ELSE 0 END),0) AS expected
-     FROM claims c WHERE c.practice_id = ? AND c.status = 'submitted' AND c.submitted_at IS NOT NULL AND substr(c.submitted_at, 1, 10) < ?${s.sql}`,
+     FROM real_claims c WHERE c.practice_id = ? AND c.status = 'submitted' AND c.submitted_at IS NOT NULL AND substr(c.submitted_at, 1, 10) < ?${s.sql}`,
     pid, addDays(o.asOf, -30), ...s.args,
   );
 }
@@ -204,7 +204,7 @@ async function recall(db, pid, o) {
        COALESCE(SUM(CASE WHEN r.status IN ('due','contacted') AND r.due_date < ? THEN 1 ELSE 0 END),0) AS overdue,
        COALESCE(SUM(CASE WHEN r.status IN ('due','contacted') AND r.due_date >= ? AND r.due_date <= ? THEN 1 ELSE 0 END),0) AS due_soon,
        COALESCE(SUM(CASE WHEN r.due_date >= ? OR r.status = 'scheduled' THEN 1 ELSE 0 END),0) AS current_n
-     FROM recalls r JOIN patients p ON p.id = r.patient_id
+     FROM real_recalls r JOIN real_patients p ON p.id = r.patient_id
      WHERE r.practice_id = ? AND p.status = 'active' AND r.status != 'inactive'${s.sql}`, d, d, addDays(d, 30), d, pid, ...s.args,
   );
 }
@@ -215,8 +215,8 @@ async function bookedVisits(db, pid, o) {
   const s = scope(o, { provider: 'a.provider_id = ?', location: 'a.location_id' });
   return db.all(
     `SELECT a.id, a.patient_id, a.provider_id, a.start_time, a.end_time, a.status, a.location_id, p.first_name, p.last_name, p.guarantor_id, pv.name AS provider_name,
-       (SELECT COALESCE(SUM(fee), 0) FROM procedures x WHERE x.appointment_id = a.id AND x.status != 'cancelled') AS production
-     FROM appointments a JOIN patients p ON p.id = a.patient_id JOIN providers pv ON pv.id = a.provider_id
+       (SELECT COALESCE(SUM(fee), 0) FROM real_procedures x WHERE x.appointment_id = a.id AND x.status != 'cancelled') AS production
+     FROM real_appointments a JOIN real_patients p ON p.id = a.patient_id JOIN providers pv ON pv.id = a.provider_id
      WHERE a.practice_id = ? AND a.start_time >= ? AND a.start_time < ? AND a.status NOT IN ${INACTIVE}${s.sql} ORDER BY a.start_time`,
     pid, `${o.from} 00:00`, `${o.to} 24:00`, ...s.args,
   );
@@ -228,12 +228,12 @@ async function toVerify(db, visits) {
   const ids = [...new Set(visits.map((v) => v.patient_id))];
   if (!ids.length) return [];
   const policies = new Map();
-  for (const x of await db.all(`SELECT id, patient_id FROM patient_insurance WHERE patient_id IN (${IN(ids)}) AND active = 1 ORDER BY patient_id, CASE priority WHEN 'primary' THEN 0 ELSE 1 END, id`, ...ids)) {
+  for (const x of await db.all(`SELECT id, patient_id FROM real_patient_insurance patient_insurance WHERE patient_id IN (${IN(ids)}) AND active = 1 ORDER BY patient_id, CASE priority WHEN 'primary' THEN 0 ELSE 1 END, id`, ...ids)) {
     if (!policies.has(x.patient_id)) policies.set(x.patient_id, x.id);
   }
   const pol = [...policies.values()];
   const last = new Map();
-  if (pol.length) for (const e of await db.all(`SELECT patient_insurance_id, MAX(created_at) AS at FROM eligibility_checks WHERE patient_insurance_id IN (${IN(pol)}) GROUP BY patient_insurance_id`, ...pol)) last.set(e.patient_insurance_id, e.at);
+  if (pol.length) for (const e of await db.all(`SELECT patient_insurance_id, MAX(created_at) AS at FROM real_eligibility_checks eligibility_checks WHERE patient_insurance_id IN (${IN(pol)}) GROUP BY patient_insurance_id`, ...pol)) last.set(e.patient_insurance_id, e.at);
   return visits.filter((v) => {
     const policy = policies.get(v.patient_id);
     if (!policy) return false;
@@ -249,7 +249,7 @@ async function balancesDue(db, pid, visits) {
   const rows = await db.all(
     // Written as guarantor-or-self from the practice's patients (not COALESCE(...) IN over the ledger) so it reads
     // only those households' entries: the old form read every ledger entry in the practice.
-    `SELECT COALESCE(p.guarantor_id, p.id) AS g, COALESCE(SUM(l.amount),0) AS n FROM patients p JOIN ledger_entries l ON l.patient_id = p.id
+    `SELECT COALESCE(p.guarantor_id, p.id) AS g, COALESCE(SUM(l.amount),0) AS n FROM real_patients p JOIN real_ledger_entries l ON l.patient_id = p.id
      WHERE p.practice_id = ? AND (p.guarantor_id IN (${IN(heads)}) OR (p.guarantor_id IS NULL AND p.id IN (${IN(heads)}))) GROUP BY COALESCE(p.guarantor_id, p.id)`, pid, ...heads, ...heads,
   );
   const owed = new Map(rows.filter((r) => Number(r.n) > 0).map((r) => [r.g, Number(r.n)]));
@@ -537,7 +537,7 @@ export async function compareMetrics(db, pid, o) {
     await goalsFor(db, pid, o),
   ];
   // Before the practice's first ledger entry there's nothing to compare with (a new practice's "last year" isn't $0).
-  const first = (await db.get('SELECT MIN(entry_date) AS d FROM ledger_entries WHERE practice_id = ?', pid))?.d || null;
+  const first = (await db.get('SELECT MIN(entry_date) AS d FROM real_ledger_entries ledger_entries WHERE practice_id = ?', pid))?.d || null;
   const hadData = (end) => !!first && first <= end;
   const metrics = keys.map((k) => {
     const def = METRICS[k];
@@ -575,7 +575,7 @@ export async function metricRows(db, pid, key, o, { limit = 500 } = {}) {
       const s = scope(opts, { provider: 'l.provider_id = ?', location: 'l.location_id' });
       const rows = await db.all(
         `SELECT l.id, l.entry_date, l.type, l.amount, l.description, l.adjustment_type, l.patient_id, p.first_name, p.last_name, pv.name AS provider_name
-         FROM ledger_entries l JOIN patients p ON p.id = l.patient_id LEFT JOIN providers pv ON pv.id = l.provider_id
+         FROM real_ledger_entries l JOIN real_patients p ON p.id = l.patient_id LEFT JOIN providers pv ON pv.id = l.provider_id
          WHERE l.practice_id = ? AND l.entry_date BETWEEN ? AND ? AND ${LIVE()} AND l.type IN (${IN(types)})${types.includes('adjustment') ? " AND (l.type != 'adjustment' OR l.amount < 0)" : ''}${s.sql}
          ORDER BY l.entry_date DESC, l.id DESC`, pid, opts.from, opts.to, ...types, ...s.args,
       );
@@ -592,7 +592,7 @@ export async function metricRows(db, pid, key, o, { limit = 500 } = {}) {
       const rows = await db.all(
         `SELECT tp.id AS plan_id, tp.name, tp.status, tp.created_at, tp.patient_id, p.first_name, p.last_name, COALESCE(SUM(pr.fee),0) AS presented,
            CASE WHEN tp.status IN ('accepted','completed') THEN COALESCE(SUM(pr.fee),0) ELSE 0 END AS accepted
-         FROM treatment_plans tp JOIN procedures pr ON pr.treatment_plan_id = tp.id JOIN patients p ON p.id = tp.patient_id
+         FROM real_treatment_plans tp JOIN real_procedures pr ON pr.treatment_plan_id = tp.id JOIN real_patients p ON p.id = tp.patient_id
          WHERE tp.practice_id = ? AND tp.created_at >= ? AND tp.created_at < ? AND pr.status != 'cancelled'${s.sql}
          GROUP BY tp.id, tp.name, tp.status, tp.created_at, tp.patient_id, p.first_name, p.last_name ORDER BY tp.created_at DESC`, pid, fromUtc, toUtc, ...s.args,
       );
@@ -607,7 +607,7 @@ export async function metricRows(db, pid, key, o, { limit = 500 } = {}) {
       const s = scope(opts, { provider: 'a.provider_id = ?', location: 'a.location_id' });
       const rows = await db.all(
         `SELECT a.id AS appointment_id, a.start_time, a.patient_id, p.first_name, p.last_name, pv.name AS provider_name, CASE WHEN ${REBOOKED} THEN 1 ELSE 0 END AS reappointed
-         FROM appointments a JOIN providers pv ON pv.id = a.provider_id JOIN patients p ON p.id = a.patient_id
+         FROM real_appointments a JOIN providers pv ON pv.id = a.provider_id JOIN real_patients p ON p.id = a.patient_id
          WHERE a.practice_id = ? AND pv.type = 'hygienist' AND a.status = 'completed' AND a.start_time >= ? AND a.start_time < ?${s.sql}
          ORDER BY CASE WHEN ${REBOOKED} THEN 1 ELSE 0 END, a.start_time DESC`, pid, `${opts.from} 00:00`, `${opts.to} 24:00`, ...s.args,
       );
@@ -618,8 +618,8 @@ export async function metricRows(db, pid, key, o, { limit = 500 } = {}) {
       const end = opts.to < opts.today ? opts.to : opts.today;
       const rows = await db.all(
         `SELECT a.id AS appointment_id, a.start_time, a.status, a.broken_reason, a.patient_id, p.first_name, p.last_name, pv.name AS provider_name,
-           (SELECT MIN(b.start_time) FROM appointments b WHERE b.patient_id = a.patient_id AND b.start_time > a.start_time AND b.status NOT IN ('cancelled','no_show')) AS rebooked_for
-         FROM appointments a JOIN patients p ON p.id = a.patient_id JOIN providers pv ON pv.id = a.provider_id
+           (SELECT MIN(b.start_time) FROM real_appointments b WHERE b.patient_id = a.patient_id AND b.start_time > a.start_time AND b.status NOT IN ('cancelled','no_show')) AS rebooked_for
+         FROM real_appointments a JOIN real_patients p ON p.id = a.patient_id JOIN providers pv ON pv.id = a.provider_id
          WHERE a.practice_id = ? AND a.status IN ('no_show','cancelled') AND a.start_time >= ? AND a.start_time < ?${s.sql} ORDER BY a.start_time DESC`,
         pid, `${opts.from} 00:00`, `${end} 24:00`, ...s.args,
       );
@@ -629,7 +629,7 @@ export async function metricRows(db, pid, key, o, { limit = 500 } = {}) {
       const s = scope(opts, { provider: 'pr.provider_id = ?', location: 'pr.location_id' });
       const rows = await db.all(
         `SELECT pr.patient_id, p.first_name, p.last_name, COUNT(*) AS procedures, COALESCE(SUM(pr.fee),0) AS amount, MIN(pr.created_at) AS oldest
-         FROM procedures pr JOIN patients p ON p.id = pr.patient_id WHERE pr.practice_id = ? AND ${UNSCHEDULED}${s.sql}
+         FROM real_procedures pr JOIN real_patients p ON p.id = pr.patient_id WHERE pr.practice_id = ? AND ${UNSCHEDULED}${s.sql}
          GROUP BY pr.patient_id, p.first_name, p.last_name ORDER BY COALESCE(SUM(pr.fee),0) DESC`, pid, ...s.args,
       );
       return cap(rows, ['patient', 'procedures', 'amount', 'oldest']);
@@ -644,7 +644,7 @@ export async function metricRows(db, pid, key, o, { limit = 500 } = {}) {
       const s = scope(opts, { provider: CLAIM_PROVIDER, location: 'c.location_id' });
       const rows = await db.all(
         `SELECT c.id AS claim_id, c.submitted_at, c.total_fee, c.estimated_amount, c.follow_up_date, c.patient_id, p.first_name, p.last_name, ic.name AS carrier
-         FROM claims c JOIN patients p ON p.id = c.patient_id LEFT JOIN patient_insurance pi ON pi.id = c.patient_insurance_id LEFT JOIN insurance_carriers ic ON ic.id = pi.carrier_id
+         FROM real_claims c JOIN real_patients p ON p.id = c.patient_id LEFT JOIN real_patient_insurance pi ON pi.id = c.patient_insurance_id LEFT JOIN insurance_carriers ic ON ic.id = pi.carrier_id
          WHERE c.practice_id = ? AND c.status = 'submitted' AND c.submitted_at IS NOT NULL AND substr(c.submitted_at, 1, 10) < ?${s.sql} ORDER BY c.submitted_at`,
         pid, addDays(opts.asOf, -30), ...s.args,
       );
@@ -657,7 +657,7 @@ export async function metricRows(db, pid, key, o, { limit = 500 } = {}) {
       const cond = key === 'recall_due' ? "r.status IN ('due','contacted') AND r.due_date >= ? AND r.due_date <= ?" : "r.status IN ('due','contacted') AND r.due_date < ?";
       const rows = await db.all(
         `SELECT r.id AS recall_id, r.type, r.due_date, r.status, r.last_contacted_at, r.patient_id, p.first_name, p.last_name
-         FROM recalls r JOIN patients p ON p.id = r.patient_id WHERE r.practice_id = ? AND p.status = 'active' AND ${cond}${s.sql} ORDER BY r.due_date`,
+         FROM real_recalls r JOIN real_patients p ON p.id = r.patient_id WHERE r.practice_id = ? AND p.status = 'active' AND ${cond}${s.sql} ORDER BY r.due_date`,
         pid, ...(key === 'recall_due' ? [d, addDays(d, 30)] : [d]), ...s.args,
       );
       return cap(rows, ['patient', 'type', 'due_date', 'status', 'last_contacted_at']);
@@ -780,7 +780,7 @@ export async function examsForDay(db, pid, date, { locationId = null, providerId
   const codes = Object.keys(EXAM_CODES);
   const next = addDays(date, 1);
   const visits = await db.all(
-    `SELECT a.id, a.patient_id, a.status, t.procedure_codes AS type_codes FROM appointments a LEFT JOIN appointment_types t ON t.id = a.appointment_type_id
+    `SELECT a.id, a.patient_id, a.status, t.procedure_codes AS type_codes FROM real_appointments a LEFT JOIN appointment_types t ON t.id = a.appointment_type_id
      WHERE a.practice_id = ? AND a.start_time >= ? AND a.start_time < ? AND a.status NOT IN ('cancelled','no_show')${locationId ? ' AND a.location_id = ?' : ''}${providerId ? ' AND a.provider_id = ?' : ''}`,
     pid, date, next, ...(locationId ? [locationId] : []), ...(providerId ? [providerId] : []),
   );
@@ -788,10 +788,10 @@ export async function examsForDay(db, pid, date, { locationId = null, providerId
   const onVisits = [];
   for (let i = 0; i < ids.length; i += 500) {
     const chunk = ids.slice(i, i + 500);
-    onVisits.push(...await db.all(`SELECT appointment_id, patient_id, code, status FROM procedures WHERE appointment_id IN (${IN(chunk)}) AND status != 'cancelled' AND code IN (${IN(codes)})`, ...chunk, ...codes));
+    onVisits.push(...await db.all(`SELECT appointment_id, patient_id, code, status FROM real_procedures procedures WHERE appointment_id IN (${IN(chunk)}) AND status != 'cancelled' AND code IN (${IN(codes)})`, ...chunk, ...codes));
   }
   const walkIns = await db.all(
-    `SELECT patient_id, code, status FROM procedures WHERE practice_id = ? AND appointment_id IS NULL AND status = 'completed' AND code IN (${IN(codes)}) AND completed_at >= ? AND completed_at < ?${locationId ? ' AND location_id = ?' : ''}${providerId ? ' AND provider_id = ?' : ''}`,
+    `SELECT patient_id, code, status FROM real_procedures procedures WHERE practice_id = ? AND appointment_id IS NULL AND status = 'completed' AND code IN (${IN(codes)}) AND completed_at >= ? AND completed_at < ?${locationId ? ' AND location_id = ?' : ''}${providerId ? ' AND provider_id = ?' : ''}`,
     pid, ...codes, date, next, ...(locationId ? [locationId] : []), ...(providerId ? [providerId] : []),
   );
   const byPatient = new Map();
@@ -816,7 +816,7 @@ export async function examsForDay(db, pid, date, { locationId = null, providerId
     const pids = [...byPatient.keys()];
     for (let i = 0; i < pids.length; i += 500) {
       const chunk = pids.slice(i, i + 500);
-      for (const r of await db.all(`SELECT DISTINCT patient_id FROM procedures WHERE patient_id IN (${IN(chunk)}) AND status = 'completed' AND code IN (${IN(ROUTINE_EXAMS)}) AND completed_at < ?`, ...chunk, ...ROUTINE_EXAMS, date)) seenBefore.add(r.patient_id);
+      for (const r of await db.all(`SELECT DISTINCT patient_id FROM real_procedures procedures WHERE patient_id IN (${IN(chunk)}) AND status = 'completed' AND code IN (${IN(ROUTINE_EXAMS)}) AND completed_at < ?`, ...chunk, ...ROUTINE_EXAMS, date)) seenBefore.add(r.patient_id);
     }
   }
   const byType = Object.fromEntries(Object.keys(EXAM_TYPES).map((t) => [t, 0]));

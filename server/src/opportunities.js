@@ -130,7 +130,7 @@ async function loadPatient(db, practiceId, patientId, date) {
   const procedures = await db.all(
     `SELECT pr.id, pr.code, pr.tooth, pr.area, pr.status, pr.fee, pr.category, pr.description, pr.completed_at, pr.appointment_id, pr.treatment_plan_id, pr.provider_id, pr.patient_id,
        a.status AS appt_status, a.start_time AS appt_time, tp.status AS plan_status
-     FROM procedures pr LEFT JOIN appointments a ON a.id = pr.appointment_id LEFT JOIN treatment_plans tp ON tp.id = pr.treatment_plan_id
+     FROM real_procedures pr LEFT JOIN real_appointments a ON a.id = pr.appointment_id LEFT JOIN real_treatment_plans tp ON tp.id = pr.treatment_plan_id
      WHERE pr.practice_id = ? AND pr.patient_id = ? AND pr.status != 'cancelled'`, practiceId, patientId,
   );
   const conditions = await db.all('SELECT tooth, condition, notes FROM tooth_conditions WHERE practice_id = ? AND patient_id = ? AND voided_at IS NULL AND resolved = 0', practiceId, patientId);

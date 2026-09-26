@@ -85,9 +85,9 @@ export const treatmentCadence = {
     // Treatment is one person's: never grouped into a family message (unless the office sets a window itself).
     await db.run("UPDATE cadence_sequences SET family_window_days = 0 WHERE practice_id = ? AND type = ? AND updated_by IS NULL AND family_window_days <> 0", pid, TYPE);
     const plans = await db.all(
-      `SELECT tp.*, p.location_id AS home_office FROM treatment_plans tp JOIN patients p ON p.id = tp.patient_id
+      `SELECT tp.*, p.location_id AS home_office FROM real_treatment_plans tp JOIN real_patients p ON p.id = tp.patient_id
        WHERE tp.practice_id = ? AND tp.status IN ('proposed','accepted') AND p.status = 'active' AND p.merged_into_id IS NULL
-         AND EXISTS (SELECT 1 FROM procedures pr WHERE pr.treatment_plan_id = tp.id AND pr.status = 'planned' AND pr.appointment_id IS NULL)
+         AND EXISTS (SELECT 1 FROM real_procedures pr WHERE pr.treatment_plan_id = tp.id AND pr.status = 'planned' AND pr.appointment_id IS NULL)
        ORDER BY tp.id`, pid,
     );
     const out = [];
@@ -173,7 +173,7 @@ export async function board(db, practiceId, { days = 90, officeSql = '', officeA
   const practice = await db.get('SELECT * FROM practices WHERE id = ?', practiceId);
   const today = localNow(practice.timezone || 'America/New_York', now).slice(0, 10);
   const since = new Date(now.getTime() - days * 86400_000).toISOString().slice(0, 19).replace('T', ' ');
-  const base = `FROM cadence_enrollments e JOIN cadence_sequences s ON s.id = e.sequence_id JOIN patients p ON p.id = e.patient_id
+  const base = `FROM cadence_enrollments e JOIN cadence_sequences s ON s.id = e.sequence_id JOIN real_patients p ON p.id = e.patient_id
     WHERE e.practice_id = ? AND s.type = ?${officeSql}`;
   const rows = await db.all(
     `SELECT e.*, s.subtype, s.name AS sequence_name, p.first_name, p.last_name, p.preferred_name ${base} AND (e.status = 'active' OR e.stopped_at >= ? OR e.created_at >= ?)

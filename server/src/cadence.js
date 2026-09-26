@@ -444,7 +444,7 @@ async function runPractice(db, practice, type, def, deps, stats) {
     if (!item.retry && seq.family_window_days > 0) {
       const head = patient.guarantor_id || patient.id;
       const family = await db.all(
-        `SELECT e.* FROM cadence_enrollments e JOIN patients p ON p.id = e.patient_id JOIN cadence_sequences s ON s.id = e.sequence_id
+        `SELECT e.* FROM cadence_enrollments e JOIN real_patients p ON p.id = e.patient_id JOIN cadence_sequences s ON s.id = e.sequence_id
          WHERE e.practice_id = ? AND s.type = ? AND e.status = 'active' AND e.id <> ? AND (p.guarantor_id = ? OR p.id = ?)
            AND e.anchor_date >= ? AND e.anchor_date <= ? ORDER BY e.anchor_date, e.id`,
         practice.id, type, item.e.id, head, head, addDays(item.e.anchor_date, -seq.family_window_days), addDays(item.e.anchor_date, seq.family_window_days),
@@ -588,6 +588,7 @@ async function deliver(db, practice, { channel, recipient, patients, text, subje
     const number = recipient.phone || recipient.phone_home;
     if (!number) return { status: 'unreachable', result: 'no phone number' };
     if (!messenger?.call) return { status: 'unreachable', result: 'calling is not set up' };
+    if (recipient.is_training) return { status: 'unreachable', result: 'practice mode: the training patient is never called' };
     const token = link ? link.split('/').pop() : null;
     if (!token) return { status: 'unreachable', result: 'no booking link to offer' };
     const callId = await withActor({ source: 'ai', actor: 'AI recall call' }, () => insert(db, 'calls', {

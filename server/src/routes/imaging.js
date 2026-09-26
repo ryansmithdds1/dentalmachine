@@ -1,4 +1,5 @@
 import express, { Router } from 'express';
+import { refuseTraining } from '../training.js';
 import { autoAnalyze } from '../xrayai.js';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -57,6 +58,7 @@ export default function imagingRoutes({ db, storage }) {
   // "Open in DEXIS" from the chart: queue a launch on the chosen workstation.
   r.post('/patients/:id/imaging/launch', requirePermission('clinical:write'), async (req, res) => {
     const patient = await findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient');
+    await refuseTraining(db, patient.id, 'an order to the imaging workstation');
     const agent = await findOr404(db, 'bridge_agents', req.body?.agent_id, req.user.practice_id, 'Workstation');
     if (!agent.active) throw new HttpError(409, 'That workstation was removed');
     const apps = JSON.parse(agent.apps || '[]');
@@ -77,6 +79,7 @@ export default function imagingRoutes({ db, storage }) {
   // exposure, or the sensor driver's output folder) and each image lands in the next empty spot of the mount.
   r.post('/patients/:id/imaging/capture', requirePermission('clinical:write'), async (req, res) => {
     const patient = await findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient');
+    await refuseTraining(db, patient.id, 'an order to the imaging workstation');
     const agent = await findOr404(db, 'bridge_agents', req.body?.agent_id, req.user.practice_id, 'Workstation');
     if (!agent.active) throw new HttpError(409, 'That workstation was removed');
     if (!agent.sensor) throw new HttpError(400, `No sensor is set up in the imaging bridge on ${agent.name}`);

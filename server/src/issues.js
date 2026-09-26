@@ -1,6 +1,7 @@
 import { currentActor } from './actor.js';
 import { log, scrubMessage } from './monitoring.js';
 import { publish } from './events.js';
+import { fetchCarriesTraining, TrainingBlocked } from './training.js';
 
 // "Needs attention": when something important fails — a claim the clearinghouse rejected, a text that didn't
 // go, an ERA line that matched nothing, a sync or an AI step that broke — it becomes a work item here with
@@ -79,6 +80,11 @@ export function loggedFetch(db, fetchImpl = globalThis.fetch) {
   return async (url, opts = {}) => {
     let u;
     try { u = new URL(String(url)); } catch { return fetchImpl(url, opts); }
+    // The last line for the training patient (training.js): a request carrying its mark never goes out.
+    if (fetchCarriesTraining(url, opts)) {
+      await logIntegration(db, { service: serviceFor(u.hostname), operation: `${(opts.method || 'GET').toUpperCase()} (refused: training patient)`, ok: false, error: 'Refused: the training patient never leaves the office' });
+      throw new TrainingBlocked('a call to an outside service');
+    }
     if (['localhost', '127.0.0.1'].includes(u.hostname) && !process.env.LOG_LOCAL_INTEGRATIONS) return fetchImpl(url, opts);
     const started = Date.now();
     const operation = `${(opts.method || 'GET').toUpperCase()} ${u.pathname.replace(/\/[A-Za-z0-9_-]{16,}(?=\/|$)/g, '/:id').replace(/\/\d+(?=\/|$)/g, '/:n')}`;

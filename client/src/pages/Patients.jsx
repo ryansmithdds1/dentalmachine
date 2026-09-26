@@ -54,7 +54,7 @@ export default function Patients() {
               {data?.rows.map((p) => (
                 <tr key={p.id} className="clickable" onClick={() => nav(`/patients/${p.id}`)}>
                   <td>
-                    <strong>{fullName(p)}</strong>
+                    <strong>{fullName(p)}</strong>{p.is_training ? <> <span className="training-badge" title="Practice patient for the guided walkthroughs — nothing done here is real">Training</span></> : null}
                     {p.medical_alerts && <span className="alert-chip" style={{ marginLeft: 6 }} title={p.medical_alerts}>⚠ Alert</span>}
                   </td>
                   <td>{p.dob ? `${p.dob} (${age(p.dob)})` : '—'}</td>

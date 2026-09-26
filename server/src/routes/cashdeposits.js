@@ -380,7 +380,7 @@ export default function cashDepositRoutes({ db, storage = null }) {
     }
     const date = await today(pid);
     const unassigned = Number((await db.get(
-      `SELECT COUNT(*) AS n FROM cash_receipts r JOIN ledger_entries l ON l.id = r.ledger_entry_id WHERE r.practice_id = ? AND r.drawer_session_id IS NULL AND r.status = 'issued' AND l.entry_date = ?`, pid, date,
+      `SELECT COUNT(*) AS n FROM cash_receipts r JOIN real_ledger_entries l ON l.id = r.ledger_entry_id WHERE r.practice_id = ? AND r.drawer_session_id IS NULL AND r.status = 'issued' AND l.entry_date = ?`, pid, date,
     )).n);
     res.json({ drawers: out, unassigned_cash_today: unassigned, denominations: DENOMINATIONS.map(([key, cents, label]) => ({ key, cents, label })), manager: isManager(req.user) });
   });
@@ -509,7 +509,7 @@ export default function cashDepositRoutes({ db, storage = null }) {
     const office = await resolveOffice(db, req.user, req.query.location_id, req.location_id);
     const names = await userNames(db, pid);
     const rows = await db.all(
-      `SELECT r.*, l.entry_date, p.first_name, p.last_name FROM cash_receipts r JOIN ledger_entries l ON l.id = r.ledger_entry_id JOIN patients p ON p.id = r.patient_id
+      `SELECT r.*, l.entry_date, p.first_name, p.last_name FROM cash_receipts r JOIN real_ledger_entries l ON l.id = r.ledger_entry_id JOIN real_patients p ON p.id = r.patient_id
        WHERE r.practice_id = ? AND l.entry_date = ?${office != null ? ' AND r.office_key IN (?, 0)' : ''} ORDER BY r.office_key, r.receipt_no`, pid, date, ...(office != null ? [office] : []),
     );
     res.json(rows.map((r) => ({ ...r, patient_name: `${r.first_name} ${r.last_name}`, taken_by_name: names[r.taken_by] || null, voided_by_name: names[r.voided_by] || null })));

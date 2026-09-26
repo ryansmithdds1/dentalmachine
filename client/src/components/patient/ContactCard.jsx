@@ -94,7 +94,7 @@ function Row({ field, text, value, editing, canEdit, onEdit, onCancel, onSave, b
             // Clicking elsewhere keeps what was typed (saved, with Undo) rather than losing it.
             onBlur={() => finish(() => onSave(draft, false))} />
         ) : canEdit ? (
-          <button type="button" className="med-value" aria-label={`Change ${CONTACT_FIELDS[field]}${value ? ` (${options ? nameOf(value) : value})` : ''}`} title="Click to change" onClick={onEdit}>{(options ? nameOf(value) : value) || '—'}</button>
+          <button type="button" className="med-value" data-tour={`contact-${field}`} aria-label={`Change ${CONTACT_FIELDS[field]}${value ? ` (${options ? nameOf(value) : value})` : ''}`} title="Click to change" onClick={onEdit}>{(options ? nameOf(value) : value) || '—'}</button>
         ) : ((options ? nameOf(value) : value) || '—')}
         {!editing && badge}
       </dd>

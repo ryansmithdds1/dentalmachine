@@ -93,6 +93,9 @@ async function main() {
     apis[role] = new Proxy({}, { get: (_, k) => async (...a) => (await lazy())[k](...a) });
   }
   if (process.env.E2E_URL) writeFileSync(cacheFile, JSON.stringify({ [app.base]: tokens }));
+  // The first-login welcome (take the tour for your role) is a line at the top of the page: seen, so the manual's
+  // screenshots show the screens as people use them every day.
+  for (const role of Object.keys(ROLES)) await apis[role].put('/me/prefs/tour.welcome', { value: 'seen' }).catch(() => {});
   const today = (await apis.admin.get('/dashboard')).today;
   const file = join(OUT, 'results.json');
   const all = existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : {};

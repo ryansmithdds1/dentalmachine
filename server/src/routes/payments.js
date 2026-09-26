@@ -1,4 +1,5 @@
 import express, { Router } from 'express';
+import { refuseTraining } from '../training.js';
 import { messageText, patientLang, subjectFor } from '../templates.js';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { requirePermission, HttpError } from '../auth.js';
@@ -35,6 +36,7 @@ export default function paymentRoutes({ db, config, messenger, payments, mailer 
   r.post('/patients/:id/card-setup', requirePermission('billing:write'), async (req, res) => {
     if (!enabled()) throw new HttpError(409, payments.mode === 'sandbox' ? 'Sandbox: add a test card directly' : 'Card payments are not configured. Set STRIPE_SECRET_KEY on the server.');
     const g = await guarantorOf(await findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient'));
+    await refuseTraining(db, g.id, 'saving a card with the card processor');
     const url = await payments.cardSetupUrl(db, g, { successUrl: `${config.appUrl}/pay/card-saved`, cancelUrl: `${config.appUrl}/pay/cancelled` });
     let message = null;
     if (req.body?.send) {

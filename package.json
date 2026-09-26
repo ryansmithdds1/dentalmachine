@@ -26,7 +26,8 @@
     "smoke": "node e2e/smoke/live.test.mjs",
     "actions": "node e2e/actions/run.mjs",
     "actions:report": "node e2e/actions/report.mjs",
-    "manual": "node e2e/actions/manual.mjs"
+    "manual": "node e2e/actions/manual.mjs",
+    "tours": "node e2e/actions/tours.mjs"
   },
   "type": "module",
   "engines": {

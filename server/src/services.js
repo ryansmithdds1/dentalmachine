@@ -1,4 +1,5 @@
 import { HttpError } from './auth.js';
+import { isTrainingPatient } from './training.js';
 import { requireHuman } from './aiguard.js';
 import { raiseIssue, resolveIssue, failed } from './issues.js';
 import { insert, practiceNow, recorded, isRealDate } from './util.js';
@@ -84,7 +85,8 @@ export async function completeProcedure(db, user, procedure, { providerId, appoi
       created_by: user.id,
     });
 
-    await useSupplies(db, procedure, { userId: user.id, today });
+    // Practice work on the training patient (training.js) never uses up the office's real supplies.
+    if (!(await isTrainingPatient(db, procedure.patient_id))) await useSupplies(db, procedure, { userId: user.id, today });
 
     if (isExtraction(procedure.code) && procedure.tooth) {
       await insert(db, 'tooth_conditions', {

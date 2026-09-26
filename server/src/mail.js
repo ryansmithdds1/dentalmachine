@@ -39,7 +39,8 @@ const lobAddress = (a) => ({
   address_city: a.city, address_state: a.state, address_zip: a.zip, address_country: 'US',
 });
 
-export const mailable = (p) => !!(p?.address && p.city && p.state && /^\d{5}/.test(String(p.zip || '')));
+// The training patient (training.js) never gets post: it has no address a letter could go to.
+export const mailable = (p) => !!(p?.address && p.city && p.state && /^\d{5}/.test(String(p.zip || ''))) && !p.is_training;
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const money = (c) => `${c < 0 ? '-' : ''}$${(Math.abs(c) / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;

@@ -22,6 +22,7 @@ import { officeFee } from './fees.js';
 import { resolveFee } from './feeversions.js';
 import { primaryPolicy } from './services.js';
 import { aiClient, structured } from './ai.js';
+import { isTrainingPatient } from './training.js';
 
 export const STATUSES = ['open', 'scheduled', 'seen', 'report_received', 'closed'];
 export const STATUS_LABELS = { open: 'Sent', scheduled: 'Scheduled with them', seen: 'Seen', report_received: 'Report back', closed: 'Closed' };
@@ -662,6 +663,11 @@ export async function sendLetter(db, req, ref, { channel, messenger, config }) {
   if (channel === 'none') return { channel };
   if (channel === 'email') {
     if (!r.contact_email) throw new HttpError(400, `${r.contact_name} has no email address — print or fax the letter instead`);
+    // The training patient (guided walkthroughs): the letter is made, but nothing is emailed to a real specialist.
+    if (await isTrainingPatient(db, r.patient_id)) {
+      await logEvent(db, { practiceId: r.practice_id, referralId: r.id, kind: 'letter', note: `Practice mode: not emailed to ${r.contact_email} (training patient)`, userId: req?.user?.id });
+      return { channel, status: 'blocked', training: true, error: 'Practice mode: nothing is sent for the training patient' };
+    }
     const link = newLink();
     await change(db, 'referrals', r.id, { link_token_hash: link.hash, link_expires: link.expires });
     const url = linkUrl(config, link.token);
@@ -741,7 +747,9 @@ export async function sendInboundLetter(db, req, ref, kind, { channel, note, mes
   if (channel === 'email') {
     const r = letter.referral;
     if (!r.contact_email) throw new HttpError(400, `${r.contact_name} has no email address — print it instead`);
-    if (kind === 'thank_you') {
+    if (kind === 'thank_you' && await isTrainingPatient(db, r.patient_id)) {
+      result = { channel, status: 'blocked', training: true, error: 'Practice mode: nothing is sent for the training patient' };
+    } else if (kind === 'thank_you') {
       // A thank-you names the patient by first name and initial only (email isn't a secure channel).
       const body = letter.text.replace(nameOf(r), shortName(r));
       const msg = await sendMessage(db, messenger, { practiceId: r.practice_id, patientId: null, channel: 'email', to: r.contact_email, subject: `Thank you for your referral — ${letter.practice.name}`, body, kind: 'referral_thanks', userId: req.user.id });

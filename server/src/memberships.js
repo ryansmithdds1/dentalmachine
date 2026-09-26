@@ -1,4 +1,5 @@
 import { autoReceipt } from './receipts.js';
+import { NOT_TRAINING } from './training.js';
 import { raiseIssue, resolveIssue, failed } from './issues.js';
 import { HttpError } from './auth.js';
 import { insert, practiceNow } from './util.js';
@@ -160,7 +161,7 @@ async function billPeriod(db, payments, m, today, messenger) {
 // Bills every membership that's due (catching up at most a year of missed periods), once a day.
 export async function runMembershipBilling(db, payments, { membershipId = null, messenger = null } = {}) {
   const due = await db.all(
-    `SELECT m.id, m.practice_id FROM memberships m WHERE m.status IN ('active','past_due')${membershipId ? ' AND m.id = ?' : ''}`,
+    `SELECT m.id, m.practice_id FROM memberships m WHERE m.status IN ('active','past_due') AND ${NOT_TRAINING('m.patient_id')}${membershipId ? ' AND m.id = ?' : ''}`,
     ...(membershipId ? [membershipId] : []),
   );
   const results = [];

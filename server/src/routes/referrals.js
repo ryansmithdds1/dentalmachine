@@ -124,8 +124,8 @@ export default function referralRoutes({ db }) {
     const sources = await db.all(
       `SELECT c.id, c.name, c.practice_name, c.specialty,
          COUNT(DISTINCT x.patient_id) AS patients,
-         COALESCE(SUM((SELECT COALESCE(SUM(pr.fee), 0) FROM procedures pr WHERE pr.patient_id = x.patient_id AND pr.status = 'completed' AND pr.completed_at >= x.referral_date${byProv})), 0) AS production
-       FROM referrals x JOIN referral_contacts c ON c.id = x.contact_id
+         COALESCE(SUM((SELECT COALESCE(SUM(pr.fee), 0) FROM real_procedures pr WHERE pr.patient_id = x.patient_id AND pr.status = 'completed' AND pr.completed_at >= x.referral_date${byProv})), 0) AS production
+       FROM real_referrals x JOIN referral_contacts c ON c.id = x.contact_id
        WHERE x.practice_id = ? AND x.direction = 'in' AND x.referral_date BETWEEN ? AND ?
        GROUP BY c.id, c.name, c.practice_name, c.specialty ORDER BY COUNT(DISTINCT x.patient_id) DESC`,
       pid, from, to,
@@ -133,8 +133,8 @@ export default function referralRoutes({ db }) {
     // New patients whose source is only the free-text "referral source" (Google, a friend, …).
     const freeText = await db.all(
       `SELECT COALESCE(p.referral_source, 'Not recorded') AS source, COUNT(*) AS patients,
-         COALESCE(SUM((SELECT COALESCE(SUM(pr.fee), 0) FROM procedures pr WHERE pr.patient_id = p.id AND pr.status = 'completed'${byProv})), 0) AS production
-       FROM patients p
+         COALESCE(SUM((SELECT COALESCE(SUM(pr.fee), 0) FROM real_procedures pr WHERE pr.patient_id = p.id AND pr.status = 'completed'${byProv})), 0) AS production
+       FROM real_patients p
        WHERE p.practice_id = ? AND p.referred_by_id IS NULL AND substr(p.created_at, 1, 10) BETWEEN ? AND ?
        GROUP BY COALESCE(p.referral_source, 'Not recorded') ORDER BY COUNT(*) DESC`,
       pid, from, to,
@@ -143,7 +143,7 @@ export default function referralRoutes({ db }) {
       `SELECT c.name, c.specialty, COUNT(*) AS referrals,
          SUM(CASE WHEN x.status IN ('seen','report_received','closed') THEN 1 ELSE 0 END) AS seen,
          SUM(CASE WHEN x.status = 'report_received' OR x.status = 'closed' THEN 1 ELSE 0 END) AS reports
-       FROM referrals x JOIN referral_contacts c ON c.id = x.contact_id
+       FROM real_referrals x JOIN referral_contacts c ON c.id = x.contact_id
        WHERE x.practice_id = ? AND x.direction = 'out' AND x.referral_date BETWEEN ? AND ?
        GROUP BY c.id, c.name, c.specialty ORDER BY COUNT(*) DESC`,
       pid, from, to,

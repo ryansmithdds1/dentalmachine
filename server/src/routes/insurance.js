@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { isTrainingPatient } from '../training.js';
 import { requirePermission, HttpError } from '../auth.js';
 import { pick, requireFields, requireOneOf, insert, update, findOr404, audit, toCents, practiceNow, mapSeq, publicPractice, validTooth, paged, pageArgs, recorded, isRealDate } from '../util.js';
 import { estimateCoverage, postClaimPayment, benefitYear, deductibleMet, reverseEntry, createClaim, checkPostingDate, primaryPolicy } from '../services.js';
@@ -109,10 +110,14 @@ export default function insuranceRoutes({ db }) {
     age_limits: plan.age_limits ? JSON.parse(plan.age_limits) : [],
   });
   r.get('/insurance-plans', requirePermission('billing:read'), async (req, res) => {
+    // The training patient's own plan (training.js) isn't one of the practice's plans.
     const rows = await db.all(
-      `SELECT p.*, c.name AS carrier_name, (SELECT COUNT(*) FROM patient_insurance pi WHERE pi.plan_id = p.id AND pi.active = 1) AS members
+      `SELECT p.*, c.name AS carrier_name, (SELECT COUNT(*) FROM real_patient_insurance pi WHERE pi.plan_id = p.id AND pi.active = 1) AS members
        FROM insurance_plans p JOIN insurance_carriers c ON c.id = p.carrier_id
-       WHERE p.practice_id = ?${req.query.carrier_id ? ' AND p.carrier_id = ?' : ''} ORDER BY c.name, p.name, p.group_number`,
+       WHERE p.practice_id = ?${req.query.carrier_id ? ' AND p.carrier_id = ?' : ''}
+         AND NOT (EXISTS (SELECT 1 FROM patient_insurance t JOIN patients tp ON tp.id = t.patient_id WHERE t.plan_id = p.id AND tp.is_training = 1)
+           AND NOT EXISTS (SELECT 1 FROM real_patient_insurance r WHERE r.plan_id = p.id))
+       ORDER BY c.name, p.name, p.group_number`,
       req.user.practice_id, ...(req.query.carrier_id ? [Number(req.query.carrier_id)] : []),
     );
     res.json(rows.map((p) => planView(p, p.members)));
@@ -470,6 +475,8 @@ export default function insuranceRoutes({ db }) {
       for (const x of rows) {
         const claim = await findOr404(db, 'claims', x.claim_id, pid, 'Claim');
         if (!['submitted', 'partially_paid'].includes(claim.status)) throw new HttpError(409, `Claim #${claim.id} is ${claim.status}`);
+        // A real check never pays a training claim (training.js): real money stays on real accounts.
+        if (await isTrainingPatient(db, claim.patient_id)) throw new HttpError(400, `Claim #${claim.id} is the training patient’s — a real insurance check can’t be posted to it`);
         const paid = toCents(x.paid ?? 0);
         const writeOff = toCents(x.write_off ?? 0);
         if (paid < 0 || writeOff < 0) throw new HttpError(400, `Claim #${claim.id}: amounts can't be negative`);
@@ -496,11 +503,11 @@ export default function insuranceRoutes({ db }) {
   // Open claims to choose from when posting a check, with their procedures for line-by-line entry.
   r.get('/insurance-checks/open-claims', requirePermission('billing:read'), async (req, res) => {
     const rows = await db.all(
-      `${CLAIM_SELECT} WHERE c.practice_id = ? AND c.status IN ('submitted','partially_paid')${req.query.carrier_id ? ' AND ic.id = ?' : ''} ORDER BY c.submitted_at, c.id`,
+      `${CLAIM_SELECT} WHERE c.practice_id = ? AND c.status IN ('submitted','partially_paid') AND p.is_training = 0${req.query.carrier_id ? ' AND ic.id = ?' : ''} ORDER BY c.submitted_at, c.id`,
       req.user.practice_id, ...(req.query.carrier_id ? [Number(req.query.carrier_id)] : []),
     );
     for (const c of rows) {
-      c.items = await db.all('SELECT ci.id, ci.fee, ci.estimated_amount, ci.write_off, pr.code, pr.tooth, pr.description FROM claim_items ci JOIN procedures pr ON pr.id = ci.procedure_id WHERE ci.claim_id = ?', c.id);
+      c.items = await db.all('SELECT ci.id, ci.fee, ci.estimated_amount, ci.write_off, pr.code, pr.tooth, pr.description FROM claim_items ci JOIN real_procedures pr ON pr.id = ci.procedure_id WHERE ci.claim_id = ?', c.id);
     }
     res.json(rows);
   });

@@ -22,6 +22,8 @@ export async function refs(t) {
 export async function newPatient(t, first = 'Robin', extra = {}) {
   const last = extra.last_name || `Robot${uniq()}`;
   const p = await t.as('admin').post('/patients', { first_name: first, last_name: last, dob: '1984-03-04', phone: `(512) 555-${String(1000 + (seq % 8999)).slice(-4)}`, email: `${first.toLowerCase()}.${last.toLowerCase()}@example.com`, sms_opt_in: 1, ...extra });
+  // The run is about this patient (the guided walkthrough uses the training patient in their place).
+  t.subjects?.push({ kind: 'patient', id: p.id, first: p.first_name, last: p.last_name, dob: p.dob, phone: p.phone, email: p.email });
   return p;
 }
 
@@ -31,10 +33,12 @@ export async function book(t, patient, date, minute, length = 30, extra = {}) {
   const { dentist, chairs } = await refs(t);
   for (let m = minute, i = 0; i < 12; i++, m += length + 5) {
     try {
-      return await t.as('admin').post('/appointments', {
+      const a = await t.as('admin').post('/appointments', {
         patient_id: patient.id, provider_id: dentist.id, operatory_id: chairs[0].id, start_time: `${date} ${hhmm(m)}`, end_time: `${date} ${hhmm(m + length)}`,
         override_blockout: true, notify: false, reason: 'Robot visit', ...extra,
       });
+      t.subjects?.push({ kind: 'appt', id: a.id, date, time: hhmm(m) });
+      return a;
     } catch (e) {
       if (e.status !== 409 || m + 2 * length + 5 >= 24 * 60) throw e;
     }

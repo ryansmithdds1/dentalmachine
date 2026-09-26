@@ -1,4 +1,5 @@
 import express, { Router } from 'express';
+import { refuseTraining } from '../training.js';
 import { scrubClaim } from '../scrubber.js';
 import { claimDenial } from '../predict/denial.js';
 import { logShown, denialEntries } from '../predict/log.js';
@@ -131,6 +132,8 @@ export default function ediRoutes({ db, config, clearinghouse: ch }) {
     const claimIds = [...new Set((wanted || []).map(Number))];
     if (!claimIds.length) throw new HttpError(400, 'claim_ids is required');
     const bundles = await mapSeq(claimIds, (id) => claimBundle(id, pid));
+    // Claims for the training patient never go into a file for the payer (training.js).
+    for (const b of bundles) await refuseTraining(db, b.claim.patient_id, 'sending a claim to the clearinghouse');
     for (const b of bundles) {
       if (['void', 'paid'].includes(b.claim.status)) throw new HttpError(409, `Claim #${b.claim.id} is ${b.claim.status}`);
       // Resending a claim the payer already has causes duplicate-claim denials; it must be deliberate.
@@ -264,6 +267,7 @@ export default function ediRoutes({ db, config, clearinghouse: ch }) {
     const pid = req.user.practice_id;
     const bundle = await claimBundle(req.params.cid, pid);
     if (!['submitted', 'partially_paid', 'paid', 'denied'].includes(bundle.claim.status)) throw new HttpError(409, 'Send the claim before checking its status');
+    await refuseTraining(db, bundle.claim.patient_id, 'asking the payer for the claim status');
     const practice = await db.get('SELECT * FROM practices WHERE id = ?', pid);
     const request = build276({ practice, bundle, ...ids(practice), control: nextControl(), trace: `CS${bundle.claim.id}T${Date.now()}` });
     let response;

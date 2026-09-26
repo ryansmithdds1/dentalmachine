@@ -28,7 +28,7 @@ export const INSTRUMENT = () => {
   if (window.__dmRobot) return;
   window.__dmRobot = true;
   const KEY = 'dm_robot';
-  const blank = () => ({ on: false, clicks: 0, keys: 0, fields: 0, textChars: 0, cmd: 0, modals: 0, maxModals: 0, confirms: 0, travel: 0, last: null, touched: [], log: [] });
+  const blank = () => ({ on: false, clicks: 0, keys: 0, fields: 0, textChars: 0, cmd: 0, modals: 0, maxModals: 0, confirms: 0, travel: 0, last: null, touched: [], log: [], ev: [] });
   const read = () => { try { return JSON.parse(sessionStorage.getItem(KEY)) || blank(); } catch { return blank(); } };
   const save = (c) => { try { sessionStorage.setItem(KEY, JSON.stringify(c)); } catch { /* storage unavailable */ } };
   window.__dmRobotReset = (on) => { const c = blank(); c.on = on; save(c); };
@@ -44,6 +44,80 @@ export const INSTRUMENT = () => {
     return t.replace(/\s+/g, ' ').trim().slice(0, 40);
   };
   window.__dmNameOf = nameOf;
+  // ---- Stable targets for the guided walkthroughs (npm run tours → client/public/manual/tours.json) ----
+  // What a person acted on, described so the tour overlay can find it again on another day, another patient and
+  // another screen size: its data-tour name, test id, label, link, other data-* attributes, or its role and words —
+  // whichever is the first that picks out just that element. Kept in step with resolveTarget() in
+  // client/src/components/tours/tourEngine.js (same { css, text } meaning).
+  const normText = (x) => String(x || '').replace(/\s+/g, ' ').trim();
+  const visible = (el) => !!el && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden';
+  const textOf = (el) => normText(el.innerText || el.value || el.getAttribute?.('aria-label') || '').slice(0, 80);
+  // A form field's own label words ("Carrier *" → "Carrier"), for fields with nothing else to name them by.
+  const labelOf = (el) => {
+    const l = el.closest?.('label') || el.labels?.[0];
+    if (!l) return '';
+    return normText([...l.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join(' ')).replace(/\s*\*$/, '').slice(0, 60);
+  };
+  const resolve = (t) => {
+    let els;
+    try { els = [...document.querySelectorAll(t.css)]; } catch { return []; }
+    els = els.filter(visible);
+    if (t.lab != null) els = els.filter((el) => labelOf(el) === t.lab);
+    if (t.text != null) {
+      const exact = els.filter((el) => textOf(el) === t.text);
+      els = exact.length ? exact : els.filter((el) => textOf(el).startsWith(t.text));
+    }
+    return els;
+  };
+  window.__dmResolve = resolve;
+  const INTERACTIVE = 'button, a[href], input, select, textarea, summary, label, [role=button], [role=tab], [role=option], [role=menuitem], [role=checkbox], [role=switch], [role=link], [role=row], [data-tour], [contenteditable="true"], [tabindex]:not([tabindex="-1"])';
+  const cssq = (v) => `"${String(v).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+  const STATE = /^(active|hl|focus|focused|selected|open|pending|current|is-|has-|hover|dragging|disabled|small|primary|secondary|link|ghost|danger)/;
+  const candidates = (el) => {
+    const tag = el.tagName.toLowerCase();
+    const a = (n) => el.getAttribute(n);
+    const out = [];
+    if (a('data-tour')) out.push({ css: `[data-tour=${cssq(a('data-tour'))}]` });
+    if (a('data-testid')) out.push({ css: `[data-testid=${cssq(a('data-testid'))}]` });
+    if (a('aria-label')) out.push({ css: `${tag}[aria-label=${cssq(a('aria-label'))}]` });
+    if (el.id && !/\d{2,}|^:|^r\d/.test(el.id)) out.push({ css: `#${CSS.escape(el.id)}` });
+    if (tag === 'a' && a('href') && !/^(https?:|mailto:|tel:)/.test(a('href'))) out.push({ css: `a[href=${cssq(a('href'))}]` });
+    for (const n of ['name', 'placeholder', 'title']) if (a(n) && /^(input|select|textarea|button)$/.test(tag)) out.push({ css: `${tag}[${n}=${cssq(a(n))}]` });
+    for (const at of el.attributes) if (/^data-(?!tip$|state$|ready$|v$)/.test(at.name) && at.value && at.value.length < 60) out.push({ css: `${tag}[${at.name}=${cssq(at.value)}]` });
+    const role = a('role');
+    const text = textOf(el);
+    const cls = [...el.classList].filter((c) => !STATE.test(c) && !/\d{2,}/.test(c)).slice(0, 2);
+    const base = role ? `[role=${cssq(role)}]` : cls.length ? `${tag}.${cls.map((c) => CSS.escape(c)).join('.')}` : tag;
+    if (text && text.length <= 60) out.push({ css: base, text });
+    if (/^(input|select|textarea)$/.test(tag) && labelOf(el)) out.push({ css: tag, lab: labelOf(el) });
+    if (cls.length) out.push({ css: base });
+    return out;
+  };
+  // The nearest named ancestor, to narrow a description that matches more than one element.
+  const scopeOf = (el) => {
+    for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {
+      const c = candidates(p).find((x) => !x.text && x.lab == null && resolve(x).length === 1);
+      if (c) return c.css;
+    }
+    return null;
+  };
+  // Every description that finds just this element (unique ones first, then ones where it is the first match,
+  // marked weak) — npm run tours keeps the first that doesn't name a record by its id.
+  const describe = (raw) => {
+    if (!raw || raw === document.body || raw === document.documentElement || !raw.closest) return null;
+    const el = raw.closest(INTERACTIVE) || raw;
+    const label = normText(el.getAttribute('aria-label') || textOf(el) || nameOf(el)).slice(0, 60);
+    const cands = candidates(el);
+    const scope = scopeOf(el);
+    const scoped = scope ? cands.map((c) => ({ ...c, css: `${scope} ${c.css}` })) : [];
+    const unique = [...cands, ...scoped].filter((c) => { const r = resolve(c); return r.length === 1 && r[0] === el; });
+    const first = [...cands, ...scoped].filter((c) => !unique.includes(c) && resolve(c)[0] === el).map((c) => ({ ...c, weak: true }));
+    const alts = [...unique, ...first].slice(0, 8);
+    if (!alts.length) return cands[0] ? { ...cands[0], label, weak: true } : null;
+    return { ...alts[0], label, alts: alts.slice(1) };
+  };
+  window.__dmDescribe = describe;
+  const combo = (e) => [e.ctrlKey && 'Ctrl', e.metaKey && 'Meta', e.altKey && 'Alt', e.shiftKey && e.key.length > 1 && 'Shift', e.key === ' ' ? 'Space' : e.key].filter(Boolean).join('+');
   const what = (el) => (el.closest('button, a, [role=button], [role=tab], [role=option], label, input, select, textarea, td, th, li')?.textContent || el.getAttribute?.('aria-label') || el.tagName || '').replace(/\s+/g, ' ').trim().slice(0, 30);
   document.addEventListener('pointerdown', (e) => {
     if (!e.isTrusted) return;
@@ -53,6 +127,7 @@ export const INSTRUMENT = () => {
     if (c.last) c.travel += Math.round(Math.hypot(e.clientX - c.last[0], e.clientY - c.last[1]));
     c.last = [e.clientX, e.clientY];
     c.log.push(`click ${what(e.target)}`);
+    c.ev.push({ k: 'click', t: describe(e.target) });
     save(c);
     lastField = null;
   }, true);
@@ -62,7 +137,7 @@ export const INSTRUMENT = () => {
     if (!c.on) return;
     if (window.__dmCmd) {
       // A command typed as words ("bill", "month-end close", "MERGE"): one key for the whole word.
-      if (window.__dmCmd === 1) { c.keys++; c.cmd++; c.log.push(`command "${window.__dmCmdText || ''}"`); window.__dmCmd = 2; }
+      if (window.__dmCmd === 1) { c.keys++; c.cmd++; c.log.push(`command "${window.__dmCmdText || ''}"`); c.ev.push({ k: 'type', text: window.__dmCmdText || '', cmd: true, t: describe(document.activeElement) }); window.__dmCmd = 2; }
       save(c);
       return;
     }
@@ -74,23 +149,29 @@ export const INSTRUMENT = () => {
         const n = nameOf(field);
         c.log.push(`type into "${n}"`);
         if (!c.touched.includes(n)) c.touched.push(n);
+        c.ev.push({ k: 'type', text: '', t: describe(field) });
       }
+      const lastEv = c.ev[c.ev.length - 1];
+      if (lastEv?.k === 'type' && !lastEv.cmd) lastEv.text += e.key;
       c.textChars++;
       lastField = field;
     } else {
       c.keys++;
-      c.log.push(`key ${[e.ctrlKey && 'Ctrl', e.metaKey && 'Meta', e.altKey && 'Alt', e.shiftKey && e.key.length > 1 && 'Shift', e.key === ' ' ? 'Space' : e.key].filter(Boolean).join('+')}`);
+      c.log.push(`key ${combo(e)}`);
+      c.ev.push({ k: 'key', key: combo(e), t: describe(document.activeElement) });
       lastField = null;
     }
     save(c);
   }, true);
   // A choice made in a select or a checkbox (by mouse or keyboard) is a box the person touched.
   document.addEventListener('change', (e) => {
-    if (!e.isTrusted) return;
+    // A choice in a list (select) counts however it was made — the robot's selectOption isn't a "trusted" event.
+    if (!e.isTrusted && !e.target?.matches?.('select')) return;
     const c = read();
     if (!c.on || !e.target?.matches?.('select, input[type=checkbox], input[type=radio], input[type=date], input[type=time]')) return;
     const n = nameOf(e.target);
     if (!c.touched.includes(n)) c.touched.push(n);
+    if (e.target.matches('select')) c.ev.push({ k: 'select', value: e.target.value, text: normText(e.target.selectedOptions?.[0]?.textContent), t: describe(e.target) });
     save(c);
   }, true);
   // Dialogs: how many opened, how deep they stacked, and whether one asked "Are you sure?".
@@ -180,6 +261,15 @@ export function robot({ page, ctx, base, api, action, outDir, today }) {
     const s = screenOf(f.url());
     if (t.screens.at(-1) !== s) t.screens.push(s);
   });
+  // Changes the step made (POST/PUT/PATCH/DELETE to the API), so a walkthrough can say whether doing it for real
+  // changes office records or only the training patient's.
+  t.stepWrites = [];
+  page.on('request', (r) => {
+    if (!t.measuring || ['GET', 'HEAD', 'OPTIONS'].includes(r.method())) return;
+    let path = '';
+    try { path = new URL(r.url()).pathname; } catch { return; }
+    if (path.startsWith('/api/') && !/^\/api\/(me\/prefs|client-errors|audit\/view|events)/.test(path)) t.stepWrites.push(`${r.method()} ${path}`);
+  });
   page.on('dialog', async (d) => {
     if (t.measuring) t.dialogs.push(`${d.type()}: ${d.message().slice(0, 100)}`);
     // The robot says yes so the action can finish (a person would have to click it: it's counted).
@@ -209,6 +299,7 @@ export function robot({ page, ctx, base, api, action, outDir, today }) {
 
   // Opens where the action starts (not measured), closes pop-ups, and takes the "start here" picture.
   t.open = async (path, selector) => {
+    t.readySel = selector || null; // the walkthrough waits for the same thing before its first step
     await page.goto(`${base}${path}`);
     if (selector) await page.waitForSelector(selector, { timeout: 20_000 });
     await t.quiet();
@@ -216,8 +307,13 @@ export function robot({ page, ctx, base, api, action, outDir, today }) {
   t.quiet = async () => {
     for (let i = 0; i < 6 && (await page.locator('.modal-backdrop').count()); i++) { await page.keyboard.press('Escape'); await page.waitForTimeout(120); }
   };
+  // Where the page is (path and query), for the guided walkthroughs.
+  const here = () => { try { const u = new URL(page.url()); return `${u.pathname}${u.search}`; } catch { return null; } };
+  t.subjects = [];
   // Starts the clock and the counters.
   t.begin = async (caption = 'Where this starts') => {
+    t.startUrl = here();
+    t.startFocus = await page.evaluate(() => window.__dmDescribe?.(document.activeElement) || null).catch(() => null);
     await page.evaluate(() => window.__dmRobotReset?.(true));
     w.reset();
     t.screens = [screenOf(page.url())];
@@ -232,6 +328,8 @@ export function robot({ page, ctx, base, api, action, outDir, today }) {
   t.step = async (caption, fn) => {
     if (!t.measuring) await t.begin();
     const before = await tally();
+    const url0 = here();
+    t.stepWrites = [];
     const s0 = Date.now();
     const shot0 = t.shotTime;
     await fn();
@@ -240,7 +338,11 @@ export function robot({ page, ctx, base, api, action, outDir, today }) {
     const after = await tally();
     const s = await shot(caption, caption);
     const d = (k) => (after?.[k] || 0) - (before?.[k] || 0);
-    t.steps.push({ caption, shot: s.file, ms, clicks: d('clicks'), keys: d('keys'), fields: d('fields'), did: (after?.log || []).slice((before?.log || []).length) });
+    t.steps.push({
+      caption, shot: s.file, ms, clicks: d('clicks'), keys: d('keys'), fields: d('fields'), did: (after?.log || []).slice((before?.log || []).length),
+      // For the walkthroughs: what was acted on (a stable description of each target) and where the page was.
+      ev: (after?.ev || []).slice((before?.ev || []).length), url0, url1: here(), writes: [...new Set(t.stepWrites)],
+    });
   };
   // A command typed as words into the command bar or a confirmation box: counts as one key.
   t.cmd = async (text) => {
@@ -312,6 +414,9 @@ export function robot({ page, ctx, base, api, action, outDir, today }) {
       keyboardOnly: ((c.clicks || 0) + (t.extraClicks || 0)) === 0,
       a11y: [...t.a11y], errors: bad, flags: t.flags, notes: t.notes,
       log: c.log || [], steps: t.steps.map((s) => ({ ...s, shot: s.shot.replace(`${outDir}/`, '') })),
+      // The guided walkthrough's starting point and the records the run was about (npm run tours makes them
+      // placeholders: this patient becomes the training patient, this visit its visit…).
+      tour: { start: { url: t.startUrl || null, focus: t.startFocus || null, ready: t.readySel || null }, subjects: t.subjects }, today: t.today,
     };
     result.actions = result.clicks + result.keys + result.fields;
     writeFileSync(join(dir, 'result.json'), JSON.stringify(result, null, 2));

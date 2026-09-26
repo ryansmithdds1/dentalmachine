@@ -18,7 +18,7 @@ export default function depositRoutes({ db }) {
   r.get('/deposits/undeposited', requirePermission('billing:read'), async (req, res) => {
     const methods = String(req.query.methods || 'cash,check').split(',').filter(Boolean);
     res.json(await db.all(
-      `SELECT ${entryCols} FROM ledger_entries l JOIN patients p ON p.id = l.patient_id
+      `SELECT ${entryCols} FROM real_ledger_entries l JOIN real_patients p ON p.id = l.patient_id
        WHERE ${UNDEPOSITED} AND COALESCE(l.method, 'check') IN (${methods.map(() => '?').join(',')})${req.location_id ? ' AND l.location_id = ?' : ''}${officeSql(req).sql}
        ORDER BY l.entry_date, l.id`, req.user.practice_id, ...methods, ...(req.location_id ? [req.location_id] : []), ...officeSql(req).args,
     ));
@@ -26,14 +26,14 @@ export default function depositRoutes({ db }) {
 
   r.get('/deposits', requirePermission('billing:read'), async (req, res) => {
     res.json(await db.all(
-      `SELECT d.*, u.name AS created_by_name, (SELECT COUNT(*) FROM ledger_entries l WHERE l.deposit_id = d.id) AS items
+      `SELECT d.*, u.name AS created_by_name, (SELECT COUNT(*) FROM real_ledger_entries l WHERE l.deposit_id = d.id) AS items
        FROM deposits d LEFT JOIN users u ON u.id = d.created_by WHERE d.practice_id = ? AND d.voided_at IS NULL ORDER BY d.deposit_date DESC, d.id DESC LIMIT 200`, req.user.practice_id,
     ));
   });
 
   r.get('/deposits/:did', requirePermission('billing:read'), async (req, res) => {
     const d = await findOr404(db, 'deposits', req.params.did, req.user.practice_id, 'Deposit');
-    const entries = await db.all(`SELECT ${entryCols}, l.voided_at FROM ledger_entries l JOIN patients p ON p.id = l.patient_id WHERE l.deposit_id = ? ORDER BY l.method, l.id`, d.id);
+    const entries = await db.all(`SELECT ${entryCols}, l.voided_at FROM real_ledger_entries l JOIN real_patients p ON p.id = l.patient_id WHERE l.deposit_id = ? ORDER BY l.method, l.id`, d.id);
     const byMethod = {};
     for (const e of entries) byMethod[e.method || 'check'] = (byMethod[e.method || 'check'] || 0) + e.amount;
     res.json({
@@ -49,7 +49,7 @@ export default function depositRoutes({ db }) {
     const date = req.body?.deposit_date || (await practiceNow(db, pid)).slice(0, 10);
     if (!DATE.test(date)) throw new HttpError(400, 'deposit_date must be YYYY-MM-DD');
     const id = await db.tx(async () => {
-      const entries = await db.all(`SELECT l.id, l.amount FROM ledger_entries l WHERE ${UNDEPOSITED} AND l.id IN (${ids.map(() => '?').join(',')})${officeSql(req).sql}`, pid, ...ids, ...officeSql(req).args);
+      const entries = await db.all(`SELECT l.id, l.amount FROM real_ledger_entries l WHERE ${UNDEPOSITED} AND l.id IN (${ids.map(() => '?').join(',')})${officeSql(req).sql}`, pid, ...ids, ...officeSql(req).args);
       if (entries.length !== ids.length) throw new HttpError(409, 'Some of those payments are already on a deposit or were voided — refresh and try again');
       const depositId = await insert(db, 'deposits', {
         practice_id: pid, location_id: req.location_id ?? null, deposit_date: date, total: -entries.reduce((s, e) => s + e.amount, 0),

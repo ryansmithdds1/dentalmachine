@@ -76,7 +76,7 @@ export function allocate(entries, claimLines = []) {
 // Allocations for every patient with credits in [from, to] (for collections-by-provider reporting).
 export async function allocationsForRange(db, practiceId, from, to) {
   const patientIds = (await db.all(
-    'SELECT DISTINCT patient_id FROM ledger_entries WHERE practice_id = ? AND amount < 0 AND entry_date BETWEEN ? AND ?', practiceId, from, to,
+    'SELECT DISTINCT patient_id FROM real_ledger_entries ledger_entries WHERE practice_id = ? AND amount < 0 AND entry_date BETWEEN ? AND ?', practiceId, from, to,
   )).map((r) => r.patient_id);
   if (!patientIds.length) return [];
   const out = [];
@@ -85,11 +85,11 @@ export async function allocationsForRange(db, practiceId, from, to) {
     const ids = patientIds.slice(i, i + 500);
     const inList = ids.map(() => '?').join(',');
     const entries = await db.all(
-      `SELECT l.*, pr.appointment_id AS visit_appointment_id FROM ledger_entries l LEFT JOIN procedures pr ON pr.id = l.procedure_id
+      `SELECT l.*, pr.appointment_id AS visit_appointment_id FROM real_ledger_entries l LEFT JOIN real_procedures pr ON pr.id = l.procedure_id
        WHERE l.practice_id = ? AND l.patient_id IN (${inList})`, practiceId, ...ids,
     );
     const lines = await db.all(
-      `SELECT ci.claim_id, ci.procedure_id, ci.paid_amount, ci.adjusted_amount FROM claim_items ci JOIN claims c ON c.id = ci.claim_id WHERE c.practice_id = ? AND c.patient_id IN (${inList})`,
+      `SELECT ci.claim_id, ci.procedure_id, ci.paid_amount, ci.adjusted_amount FROM claim_items ci JOIN real_claims c ON c.id = ci.claim_id WHERE c.practice_id = ? AND c.patient_id IN (${inList})`,
       practiceId, ...ids,
     );
     const byPatient = new Map();

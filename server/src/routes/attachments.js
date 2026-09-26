@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { refuseTraining } from '../training.js';
 import { requirePermission, HttpError } from '../auth.js';
 import { findOr404, audit, insert, practiceNow } from '../util.js';
 import { REPORT_TYPES, TRANSMISSION, attachmentHints } from '../attachments.js';
@@ -110,6 +111,7 @@ export async function suggestAttachments(db, { practiceId, patientId, items, att
 
 // Sends every attachment on the claim that hasn't gone yet; each one that works gets its control number.
 export async function sendPendingAttachments(db, { storage, sender }, claim) {
+  await refuseTraining(db, claim.patient_id, 'sending claim attachments to the payer');
   if (!claim.control_number) {
     claim.control_number = `DM${claim.id}`;
     await db.run('UPDATE claims SET control_number = ? WHERE id = ?', claim.control_number, claim.id);

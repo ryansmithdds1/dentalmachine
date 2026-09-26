@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { refuseTraining } from '../training.js';
 import { raiseIssue } from '../issues.js';
 import { setActor } from '../actor.js';
 import { requirePermission, HttpError, rateLimit } from '../auth.js';
@@ -25,6 +26,7 @@ export default function labRxRoutes({ db, messenger, config }) {
   // Save the Rx and send the lab its link (by email when the lab has one; the link is returned either way).
   r.post('/lab-cases/:lid/send', requirePermission('clinical:write'), async (req, res) => {
     const c = await findOr404(db, 'lab_cases', req.params.lid, req.user.practice_id, 'Lab case');
+    await refuseTraining(db, c.patient_id, 'sending the case to the lab');
     const rx = cleanRx(req.body?.rx || {});
     const docs = [...new Set((Array.isArray(req.body?.document_ids) ? req.body.document_ids : []).map(Number).filter(Boolean))].slice(0, 20);
     for (const id of docs) {

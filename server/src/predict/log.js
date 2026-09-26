@@ -61,7 +61,21 @@ export function logShown(db, req, entries, screen) {
   return job;
 }
 
-async function write(db, pid, userId, entries, screen) {
+// What was shown about the training patient (training.js) is never logged: it isn't a real prediction to check.
+const SUBJECT_TABLE = { appointment: 'appointments', procedure: 'procedures', claim: 'claims', claim_group: 'procedures' };
+async function withoutTraining(db, pid, entries) {
+  if (!(await db.get('SELECT id FROM patients WHERE practice_id = ? AND is_training = 1 LIMIT 1', pid))) return entries;
+  const out = [];
+  for (const e of entries) {
+    const table = SUBJECT_TABLE[e.subject_type];
+    const row = table ? await db.get(`SELECT p.is_training FROM ${table} x JOIN patients p ON p.id = x.patient_id WHERE x.id = ?`, Number(e.subject_id)) : null;
+    if (!row?.is_training) out.push(e);
+  }
+  return out;
+}
+
+async function write(db, pid, userId, allEntries, screen) {
+  const entries = await withoutTraining(db, pid, allEntries);
   const day = (await practiceNow(db, pid)).slice(0, 10);
   const rows = [];
   const keys = [];
@@ -133,7 +147,7 @@ export async function loggedWithOutcomes(db, pid, kind, { from, to }) {
   if (kind === 'no_show') {
     const hours = await lateCancelHours(db, pid);
     await inChunks(ids('appointment'), async (c) => {
-      for (const a of await db.all(`SELECT id, status, broken_reason, cancelled_at, start_time FROM appointments WHERE practice_id = ? AND id IN (${Q(c)})`, pid, ...c)) {
+      for (const a of await db.all(`SELECT id, status, broken_reason, cancelled_at, start_time FROM real_appointments appointments WHERE practice_id = ? AND id IN (${Q(c)})`, pid, ...c)) {
         const o = outcomeOf(a, hours);
         if (o) outcome.set(`appointment:${a.id}`, o === 'missed' ? 1 : 0);
       }
@@ -142,18 +156,18 @@ export async function loggedWithOutcomes(db, pid, kind, { from, to }) {
     await inChunks(ids('procedure'), async (c) => {
       for (const r of await db.all(
         `SELECT ci.procedure_id AS id, MAX(${DENIED} OR (ci.paid_amount = 0 AND ci.estimated_amount > 0) THEN 1 ELSE 0 END) AS denied
-         FROM claim_items ci JOIN claims c ON c.id = ci.claim_id WHERE c.practice_id = ? AND ${ANSWERED} AND ci.procedure_id IN (${Q(c)}) GROUP BY ci.procedure_id`, pid, ...c,
+         FROM claim_items ci JOIN real_claims c ON c.id = ci.claim_id WHERE c.practice_id = ? AND ${ANSWERED} AND ci.procedure_id IN (${Q(c)}) GROUP BY ci.procedure_id`, pid, ...c,
       )) outcome.set(`procedure:${r.id}`, Number(r.denied) ? 1 : 0);
     });
     const claimDenied = `MAX(${DENIED} OR EXISTS (SELECT 1 FROM claim_items x WHERE x.claim_id = c.id AND x.paid_amount = 0 AND x.estimated_amount > 0) THEN 1 ELSE 0 END)`;
     await inChunks(ids('claim'), async (c) => {
-      for (const r of await db.all(`SELECT c.id AS id, ${claimDenied} AS denied FROM claims c WHERE c.practice_id = ? AND ${ANSWERED} AND c.id IN (${Q(c)}) GROUP BY c.id`, pid, ...c)) {
+      for (const r of await db.all(`SELECT c.id AS id, ${claimDenied} AS denied FROM real_claims c WHERE c.practice_id = ? AND ${ANSWERED} AND c.id IN (${Q(c)}) GROUP BY c.id`, pid, ...c)) {
         outcome.set(`claim:${r.id}`, Number(r.denied) ? 1 : 0);
       }
     });
     await inChunks(ids('claim_group'), async (c) => {
       for (const r of await db.all(
-        `SELECT ci.procedure_id AS id, ${claimDenied} AS denied FROM claim_items ci JOIN claims c ON c.id = ci.claim_id
+        `SELECT ci.procedure_id AS id, ${claimDenied} AS denied FROM claim_items ci JOIN real_claims c ON c.id = ci.claim_id
          WHERE c.practice_id = ? AND ${ANSWERED} AND ci.procedure_id IN (${Q(c)}) GROUP BY ci.procedure_id`, pid, ...c,
       )) outcome.set(`claim_group:${r.id}`, Number(r.denied) ? 1 : 0);
     });

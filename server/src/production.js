@@ -132,15 +132,15 @@ export async function scheduleProduction(db, user, { from, days = 1, locationId 
 
   const appts = (await db.all(
     `SELECT a.id, a.provider_id, a.operatory_id, a.status, a.start_time, a.appointment_type_id, pv.type AS provider_type
-     FROM appointments a JOIN providers pv ON pv.id = a.provider_id WHERE ${where}`, ...args,
+     FROM real_appointments a JOIN providers pv ON pv.id = a.provider_id WHERE ${where}`, ...args,
   ));
   const procsOf = new Map();
   for (const x of await db.all(
-    `SELECT x.id, x.appointment_id, x.category, x.fee FROM procedures x JOIN appointments a ON a.id = x.appointment_id WHERE ${where} AND x.status != 'cancelled'`, ...args,
+    `SELECT x.id, x.appointment_id, x.category, x.fee FROM real_procedures x JOIN real_appointments a ON a.id = x.appointment_id WHERE ${where} AND x.status != 'cancelled'`, ...args,
   )) procsOf.set(x.appointment_id, [...(procsOf.get(x.appointment_id) || []), x]);
   // The ledger decides what's done: live charges for these procedures (a voided charge and its reversal both drop out).
   const charges = new Map((await db.all(
-    `SELECT le.procedure_id, SUM(le.amount) AS amount FROM ledger_entries le JOIN procedures x ON x.id = le.procedure_id JOIN appointments a ON a.id = x.appointment_id
+    `SELECT le.procedure_id, SUM(le.amount) AS amount FROM real_ledger_entries le JOIN real_procedures x ON x.id = le.procedure_id JOIN real_appointments a ON a.id = x.appointment_id
      WHERE ${where} AND le.practice_id = a.practice_id AND le.type = 'charge' AND le.retail_sale_id IS NULL AND le.voided_at IS NULL AND le.reverses_id IS NULL GROUP BY le.procedure_id`, ...args,
   )).map((r) => [r.procedure_id, Number(r.amount) || 0]));
 
@@ -235,7 +235,7 @@ export async function scheduleProduction(db, user, { from, days = 1, locationId 
   const ps = patientScope(user);
   const unscheduled = { amount: 0, procedures: 0, patients: 0, categories: {} };
   const pending = (await db.all(
-    `SELECT x.fee, x.category, x.patient_id, pv.type AS provider_type FROM procedures x JOIN patients p ON p.id = x.patient_id LEFT JOIN providers pv ON pv.id = x.provider_id
+    `SELECT x.fee, x.category, x.patient_id, pv.type AS provider_type FROM real_procedures x JOIN real_patients p ON p.id = x.patient_id LEFT JOIN providers pv ON pv.id = x.provider_id
      WHERE x.practice_id = ? AND x.status = 'planned' AND x.appointment_id IS NULL AND p.status = 'active'${locationId ? ' AND (x.location_id = ? OR (x.location_id IS NULL AND p.location_id = ?))' : ''}${ps.sql}`,
     pid, ...(locationId ? [locationId, locationId] : []), ...ps.args,
   )).filter((x) => kind === 'all' || (x.provider_type ? kindOf(x.provider_type) : x.category === 'preventive' ? 'hygiene' : 'doctor') === kind);

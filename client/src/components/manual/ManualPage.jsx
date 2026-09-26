@@ -1,6 +1,8 @@
-import { Fragment } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowLeft, Printer, Keyboard, ExternalLink } from 'lucide-react';
+import { ArrowLeft, Printer, Keyboard, ExternalLink, GraduationCap } from 'lucide-react';
+import { loadTours } from '../tours/tourEngine.js';
+import { startTour } from '../tours/TourProvider.jsx';
 import { roleLabel } from './manualData.js';
 
 // One "How do I…?" page: who, where, what it's for, the numbered steps with their keys and screenshots, the mouse
@@ -27,11 +29,20 @@ const Shot = ({ img, alt, eager }) => (
 // `inBook`: one page of the whole printed manual (no buttons or related links; pictures load at once for print).
 export default function ManualPage({ page: p, onBack, inBook }) {
   const titleId = inBook ? `manual-title-${p.id}` : 'manual-title';
+  // A guided walkthrough of the same task, when there is one ("Show me" does it with you, on a practice patient).
+  const [tour, setTour] = useState(null);
+  useEffect(() => {
+    if (inBook) return;
+    let on = true;
+    loadTours().then((d) => on && setTour(d.tours.find((t) => t.id === p.id) || null)).catch(() => { /* the page reads fine without it */ });
+    return () => { on = false; };
+  }, [p.id, inBook]);
   return (
     <article className={`manual-page${inBook ? ' manual-book-page' : ''}`} aria-labelledby={titleId} id={inBook ? p.id : undefined}>
       {!inBook && <div className="manual-page-bar no-print">
         <button type="button" className="small" onClick={onBack}><ArrowLeft size={14} aria-hidden /> All how-tos</button>
         <span style={{ flex: 1 }} />
+        {tour && <button type="button" className="small primary" onClick={() => startTour(tour.id)} title="A guided walkthrough: you do each step on a practice patient"><GraduationCap size={14} aria-hidden /> Show me</button>}
         {p.to && <Link to={p.to}><button type="button" className="small">Go there <ExternalLink size={13} aria-hidden /></button></Link>}
         <button type="button" className="small" onClick={() => window.print()}><Printer size={14} aria-hidden /> Print this page</button>
       </div>}

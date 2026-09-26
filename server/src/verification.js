@@ -9,6 +9,7 @@ import { requireHuman } from './aiguard.js';
 import { structured, aiClient } from './ai.js';
 import { parse271Detail } from './benefitdetail.js';
 import { applyVerification, METHOD_LABELS, PLAN_LEVEL, PATIENT_LEVEL, planDiff } from './planverify.js';
+import { worklist } from './training.js';
 
 // ---- Insurance verification center (IV1–IV4, docs/workflows/specs/IV-verification.md) ----
 // Every upcoming patient has two statuses that answer "can we trust what's on file for this visit?":
@@ -212,7 +213,7 @@ export async function upcoming(db, practiceId, { from, to, locationId = null, us
   const visits = await db.all(
     `SELECT a.id AS appointment_id, a.start_time, a.status, a.location_id, a.patient_id, l.name AS location_name, pr.name AS provider_name,
        p.first_name, p.last_name, p.preferred_name, p.dob, p.phone, p.guarantor_id
-     FROM appointments a JOIN patients p ON p.id = a.patient_id LEFT JOIN locations l ON l.id = a.location_id LEFT JOIN providers pr ON pr.id = a.provider_id
+     FROM ${worklist('appointments')} a JOIN ${worklist('patients')} p ON p.id = a.patient_id LEFT JOIN locations l ON l.id = a.location_id LEFT JOIN providers pr ON pr.id = a.provider_id
      WHERE a.practice_id = ? AND a.start_time >= ? AND a.start_time < ? AND a.status NOT IN ('cancelled','no_show','completed')${locationId ? ' AND a.location_id = ?' : ''}${scope.sql}
      ORDER BY a.start_time, a.id`,
     practiceId, `${from} 00:00`, `${addDays(to, 1)} 00:00`, ...(locationId ? [locationId] : []), ...scope.args,
@@ -330,7 +331,7 @@ export async function runVerificationAutomation(db, eligibility, { now = new Dat
     const out = { practice_id: practice.id, checked: 0, skipped: 0, failed: 0, requested: 0, windows: {} };
     for (const w of windows) {
       const visits = await db.all(
-        `SELECT a.id, a.patient_id, a.start_time FROM appointments a WHERE a.practice_id = ? AND a.start_time >= ? AND a.start_time < ? AND a.status IN ('scheduled','confirmed','checked_in')
+        `SELECT a.id, a.patient_id, a.start_time FROM real_appointments a WHERE a.practice_id = ? AND a.start_time >= ? AND a.start_time < ? AND a.status IN ('scheduled','confirmed','checked_in')
          ORDER BY a.start_time`, practice.id, w.after && w.name === 'morning' ? w.after : `${w.from} 00:00`, `${addDays(w.to, 1)} 00:00`,
       );
       const n = { checked: 0, skipped: 0, failed: 0 };
@@ -664,17 +665,17 @@ export async function verificationMetrics(db, practiceId, { from, to, locationId
   to ||= today;
   from ||= addDays(to, -29);
   const visits = await db.all(
-    `SELECT a.id, a.patient_id, a.start_time FROM appointments a WHERE a.practice_id = ? AND a.start_time >= ? AND a.start_time < ? AND a.status NOT IN ('cancelled','no_show')${locationId ? ' AND a.location_id = ?' : ''}`,
+    `SELECT a.id, a.patient_id, a.start_time FROM real_appointments a WHERE a.practice_id = ? AND a.start_time >= ? AND a.start_time < ? AND a.status NOT IN ('cancelled','no_show')${locationId ? ' AND a.location_id = ?' : ''}`,
     practiceId, `${from} 00:00`, `${addDays(to, 1)} 00:00`, ...(locationId ? [locationId] : []),
   );
   const pids = [...new Set(visits.map((v) => v.patient_id))];
   const policyOf = new Map();
   if (pids.length) {
-    for (const p of await db.all(`SELECT id, patient_id FROM patient_insurance WHERE patient_id IN (${IN(pids)}) ORDER BY CASE priority WHEN 'primary' THEN 0 ELSE 1 END, active DESC, id`, ...pids)) if (!policyOf.has(p.patient_id)) policyOf.set(p.patient_id, p.id);
+    for (const p of await db.all(`SELECT id, patient_id FROM real_patient_insurance patient_insurance WHERE patient_id IN (${IN(pids)}) ORDER BY CASE priority WHEN 'primary' THEN 0 ELSE 1 END, active DESC, id`, ...pids)) if (!policyOf.has(p.patient_id)) policyOf.set(p.patient_id, p.id);
   }
   const answers = new Map();
   const ids = [...new Set(policyOf.values())];
-  if (ids.length) for (const c of await db.all(`SELECT patient_insurance_id, created_at FROM eligibility_checks WHERE status IN ('active','inactive') AND patient_insurance_id IN (${IN(ids)})`, ...ids)) (answers.get(c.patient_insurance_id) || answers.set(c.patient_insurance_id, []).get(c.patient_insurance_id)).push(c.created_at);
+  if (ids.length) for (const c of await db.all(`SELECT patient_insurance_id, created_at FROM real_eligibility_checks eligibility_checks WHERE status IN ('active','inactive') AND patient_insurance_id IN (${IN(ids)})`, ...ids)) (answers.get(c.patient_insurance_id) || answers.set(c.patient_insurance_id, []).get(c.patient_insurance_id)).push(c.created_at);
   const nowUtc = utcNow(now);
   let measured = 0;
   let verified = 0;
@@ -737,7 +738,7 @@ export async function reviewList(db, practiceId) {
   const rows = await db.all(
     `SELECT bv.id, bv.plan_id, bv.patient_id, bv.patient_insurance_id, bv.method, bv.proposed, bv.review_reasons, bv.created_at, bv.reference, bv.rep_name, u.name AS by_name, bv.actor,
        p.first_name, p.last_name, pl.name AS plan_name, pl.group_number AS plan_group, c.name AS carrier_name, pl.carrier_id
-     FROM benefit_verifications bv JOIN patients p ON p.id = bv.patient_id JOIN insurance_plans pl ON pl.id = bv.plan_id JOIN insurance_carriers c ON c.id = pl.carrier_id
+     FROM benefit_verifications bv JOIN real_patients p ON p.id = bv.patient_id JOIN insurance_plans pl ON pl.id = bv.plan_id JOIN insurance_carriers c ON c.id = pl.carrier_id
      LEFT JOIN users u ON u.id = bv.verified_by
      WHERE bv.practice_id = ? AND bv.group_status = 'review' ORDER BY bv.id`, practiceId,
   );

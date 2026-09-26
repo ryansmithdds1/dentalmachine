@@ -41,10 +41,10 @@ export async function agingReport(db, pid, today, { family = false } = {}) {
   const debit = (cond) => `SUM(CASE WHEN l.amount > 0 AND l.voided_at IS NULL AND l.reverses_id IS NULL AND ${cond} THEN l.amount ELSE 0 END)`;
   const perPatient = await db.all(
     `SELECT l.patient_id, SUM(l.amount) AS balance, ${debit('l.entry_date >= ?')} AS s0, ${debit('l.entry_date >= ? AND l.entry_date < ?')} AS s1, ${debit('l.entry_date >= ? AND l.entry_date < ?')} AS s2
-     FROM ledger_entries l WHERE l.practice_id = ? AND l.entry_date <= ? GROUP BY l.patient_id`,
+     FROM real_ledger_entries l WHERE l.practice_id = ? AND l.entry_date <= ? GROUP BY l.patient_id`,
     b30, b60, b30, b90, b60, pid, today,
   );
-  const people = new Map((await db.all('SELECT id, guarantor_id, first_name, last_name, phone FROM patients WHERE practice_id = ?', pid)).map((p) => [p.id, p]));
+  const people = new Map((await db.all('SELECT id, guarantor_id, first_name, last_name, phone FROM real_patients patients WHERE practice_id = ?', pid)).map((p) => [p.id, p]));
   const accounts = new Map();
   for (const r of perPatient) {
     const id = family ? (people.get(r.patient_id)?.guarantor_id ?? r.patient_id) : r.patient_id;
@@ -68,7 +68,7 @@ export async function agingReport(db, pid, today, { family = false } = {}) {
     `SELECT ${acct} AS id,
        COALESCE(SUM(CASE WHEN c.estimated_amount > c.paid_amount THEN c.estimated_amount - c.paid_amount ELSE 0 END), 0)
        + COALESCE(SUM(CASE WHEN c.status IN ('draft','submitted') THEN c.write_off_estimate ELSE 0 END), 0) AS pending
-     FROM claims c JOIN patients p ON p.id = c.patient_id
+     FROM real_claims c JOIN real_patients p ON p.id = c.patient_id
      WHERE c.practice_id = ? AND c.status IN ('draft','submitted','partially_paid') GROUP BY ${acct}`, pid,
   ) : [];
   const pending = new Map(pendingRows.map((x) => [x.id, x.pending]));
