@@ -51,7 +51,8 @@ export function useCardData(from, to) {
 const conn = new Map(); // patientId → { data, listeners, loading }
 async function loadConn(id) {
   const e = conn.get(id);
-  if (e.loading) return;
+  // A live event can arrive for a patient whose panel hasn't mounted its entry yet (the next render does that).
+  if (!e || e.loading) return;
   e.loading = true;
   try {
     e.data = await api.get(`/patients/${id}/connection`);

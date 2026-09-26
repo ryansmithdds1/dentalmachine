@@ -48,6 +48,16 @@ const savePref = (k, v) => {
     /* storage unavailable */
   }
 };
+// Keyboard move helpers. Same chair/provider: every key the column sets (operatory_id, provider_id) matches.
+const sameAssign = (x = {}, y = {}) => {
+  const keys = new Set([...Object.keys(x), ...Object.keys(y)]);
+  return [...keys].every((k) => (x[k] ?? null) === (y[k] ?? null));
+};
+// Is the visit already in that chair/provider? (Only the keys the column sets matter.)
+const sameSpot = (a, assign = {}) => Object.entries(assign).every(([k, v]) => (a[k] ?? null) === (v ?? null));
+// Which column on screen is the carried target's (its date and chair/provider), or -1.
+const columnOf = (columns, c) => columns.findIndex((col) => col.date === c.date && sameAssign(col.assign, c.assign));
+const dayDiff = (a, b) => Math.round((Date.parse(`${b}T12:00:00Z`) - Date.parse(`${a}T12:00:00Z`)) / 86400_000);
 const weekStart = (d) => shiftDate(d, -((new Date(`${d}T12:00:00Z`).getUTCDay() + 6) % 7));
 const dayName = (d, opts) => new Date(`${d}T12:00:00Z`).toLocaleDateString('en-US', { timeZone: 'UTC', ...opts });
 const hhmm = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
@@ -235,8 +245,18 @@ export default function Schedule() {
   // A move that landed on blocked time or outside hours, waiting for "move it there anyway" or "keep it".
   const [override, setOverride] = useState(null);
   const answerOverride = (yes) => { const o = override; setOverride(null); o?.resolve(yes); };
-  // Keyboard move (M): the visit being carried, where it would go (column index, start minute) and its length.
-  const [carry, setCarry] = useState(null);
+  // Keyboard move (M): the visit being carried and where it would go — its own date, start minute, length and
+  // chair/provider (`assign`) — so the target never depends on which day's columns happen to be on screen. Changing
+  // the day (Shift+← →) moves the URL too, but React Router renders that as a transition: a fast Enter can arrive
+  // before the new day's columns do, and must still put the visit on the day the person asked for. The ref holds
+  // the latest target synchronously, so a key pressed before the re-render still sees the one before it.
+  const carryRef = useRef(null);
+  const [carry, setCarryState] = useState(null);
+  const setCarry = useCallback((v) => {
+    const next = typeof v === 'function' ? v(carryRef.current) : v;
+    carryRef.current = next || null;
+    setCarryState(next || null);
+  }, []);
   // Cancel / no-show from the keyboard (X, Shift+X): which picker the drawer opens with.
   const [brokenAsk, setBrokenAsk] = useState(null);
   // Closing the panel drops the request, so the next visit opened doesn't come up on the reason picker again.
@@ -498,56 +518,81 @@ export default function Schedule() {
     if (view === 'agenda') go({ view: 'day' });
     const at = columns.findIndex((c) => c.accepts(a));
     const near = at >= 0 ? at : Math.max(0, columns.findIndex((c) => (c.assign.provider_id && c.assign.provider_id === a.provider_id) || (c.assign.operatory_id && c.assign.operatory_id === a.operatory_id)));
+    const col = columns[near];
     setSelectedId(null);
-    setCarry({ appt: a, col: near, s: toMin(a.start_time), dur: toMin(a.end_time) - toMin(a.start_time), fromPin });
+    setCarry({
+      appt: a, date: col?.date || date, s: toMin(a.start_time), dur: toMin(a.end_time) - toMin(a.start_time), fromPin,
+      assign: col ? col.assign : { operatory_id: a.operatory_id ?? null }, label: col?.label || '', colAt: near,
+    });
   };
   const cancelCarry = () => {
-    const c = carry;
+    const c = carryRef.current;
     setCarry(null);
     setPlacing(null);
     if (c && !c.fromPin) focusCard(c.appt.id);
   };
+  // Enter / "Put it here": always the carried target (date, time, chair/provider), whether or not that day has
+  // loaded yet — the server checks the time (hours, blocks, conflicts) and asks inline when it needs to.
   const dropCarry = () => {
-    const c = carry;
-    const col = c && columns[c.col];
+    const c = carryRef.current;
     setCarry(null);
     setPlacing(null);
-    if (!col) return;
-    const start = `${col.date} ${hhmm(c.s)}`;
-    if (start === c.appt.start_time && col.accepts(c.appt)) {
+    if (!c) return;
+    const start = `${c.date} ${hhmm(c.s)}`;
+    if (start === c.appt.start_time && sameSpot(c.appt, c.assign)) {
       focusCard(c.appt.id);
       return toast('Left where it was');
     }
-    saveMove(c.appt, { start_time: start, end_time: `${col.date} ${hhmm(c.s + c.dur)}`, ...col.assign }).then((saved) => {
+    saveMove(c.appt, { start_time: start, end_time: `${c.date} ${hhmm(c.s + c.dur)}`, ...c.assign }).then((saved) => {
       if (!saved) return;
       setPins((cur) => cur.filter((p) => p.id !== c.appt.id));
       focusCard(saved.id);
     });
   };
+  // Every key updates the carried target itself (through the ref), never what's rendered, so keys typed faster
+  // than the screen redraws (Shift+→ then Enter) each act on the target the one before left.
+  const carryKey = (e) => {
+    const cur = carryRef.current;
+    if (!cur) return;
+    if (e.ctrlKey || e.metaKey || e.altKey || ['Shift', 'Control', 'Alt', 'Meta', 'Tab'].includes(e.key)) return;
+    if (document.querySelector('.modal, .palette, .side-panel')) return;
+    // Handled here: the schedule's other keys and the focused card see defaultPrevented and stay out of it.
+    e.preventDefault();
+    const k = e.key;
+    const clampS = (v) => Math.max(timeRange.start, Math.min(timeRange.end - cur.dur, v));
+    if (k === 'ArrowUp' || k === 'ArrowDown') setCarry({ ...cur, s: clampS(cur.s + (k === 'ArrowUp' ? -1 : 1) * (e.shiftKey ? 60 : step)) });
+    else if ((k === 'ArrowLeft' || k === 'ArrowRight') && !e.shiftKey) {
+      // The next column over. Found by the chair/provider (and, in the week view, the day); if the columns on
+      // screen are still the previous day's, the same position works, and only the day difference between
+      // neighbouring columns is applied to the carried date (none in the day view).
+      if (!columns.length) return;
+      const i = columnOf(columns, cur);
+      const at = i >= 0 ? i : Math.min(columns.length - 1, Math.max(0, cur.colAt ?? 0));
+      const j = Math.max(0, Math.min(columns.length - 1, at + (k === 'ArrowLeft' ? -1 : 1)));
+      const here = columns[at];
+      const there = columns[j];
+      setCarry({ ...cur, date: shiftDate(cur.date, dayDiff(here.date, there.date)), assign: there.assign, label: there.label || '', colAt: j });
+    } else if (['ArrowLeft', 'ArrowRight', 'PageUp', 'PageDown'].includes(k)) {
+      const nextDate = shiftDate(cur.date, (k === 'ArrowLeft' || k === 'PageUp' ? -1 : 1) * (view === 'week' ? 7 : 1));
+      setCarry({ ...cur, date: nextDate });
+      go({ date: nextDate });
+    } else if (k === 'Enter') dropCarry();
+    else if (k === 'Escape') cancelCarry();
+    else if (k.toLowerCase() === 'b') {
+      onPin(cur.appt);
+      setCarry(null);
+      setPlacing(null);
+    }
+  };
+  const carryKeyRef = useRef(carryKey);
+  carryKeyRef.current = carryKey;
   useEffect(() => {
-    if (!carry) return undefined;
-    // Capture phase: while a visit is being carried, the arrows and letters belong to the move.
-    const onKey = (e) => {
-      if (e.ctrlKey || e.metaKey || e.altKey || ['Shift', 'Control', 'Alt', 'Meta', 'Tab'].includes(e.key)) return;
-      if (document.querySelector('.modal, .palette, .side-panel')) return;
-      // Handled here: the schedule's other keys and the focused card see defaultPrevented and stay out of it.
-      e.preventDefault();
-      const k = e.key;
-      const clampS = (v) => Math.max(timeRange.start, Math.min(timeRange.end - carry.dur, v));
-      if (k === 'ArrowUp' || k === 'ArrowDown') setCarry((c) => c && { ...c, s: clampS(c.s + (k === 'ArrowUp' ? -1 : 1) * (e.shiftKey ? 60 : step)) });
-      else if ((k === 'ArrowLeft' || k === 'ArrowRight') && !e.shiftKey) setCarry((c) => c && { ...c, col: Math.max(0, Math.min(columns.length - 1, c.col + (k === 'ArrowLeft' ? -1 : 1))) });
-      else if (['ArrowLeft', 'ArrowRight', 'PageUp', 'PageDown'].includes(k)) go({ date: shiftDate(date, (k === 'ArrowLeft' || k === 'PageUp' ? -1 : 1) * (view === 'week' ? 7 : 1)) });
-      else if (k === 'Enter') dropCarry();
-      else if (k === 'Escape') cancelCarry();
-      else if (k.toLowerCase() === 'b') {
-        onPin(carry.appt);
-        setCarry(null);
-        setPlacing(null);
-      }
-    };
+    // Capture phase: while a visit is being carried, the arrows and letters belong to the move. Listening all the
+    // time (it does nothing without a carried visit) means no key is lost between M and the next render.
+    const onKey = (e) => carryKeyRef.current(e);
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  });
+  }, []);
   // X / Shift+X: cancel or no-show the focused visit — the drawer opens on the reason picker (1–7 picks one).
   const askBroken = (kind) => () => {
     const a = target();
@@ -692,6 +737,9 @@ export default function Schedule() {
     }
     return cols;
   }, [data, view, mode, date, from, today, providers, operatories, providerFilter, weekSplit]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The column the carried visit is over, if its day is the one on screen (the ghost shows there); -1 while the
+  // day it's being carried to is still loading.
+  const carryAt = carry ? columnOf(columns, carry) : -1;
 
   // Each column's production (in its heading) and its perfect-day blocks (tinted lanes). Chairs show the blocks of
   // the chair's usual provider; a hygienist's column shows no numbers while "Doctor" is picked, and vice versa.
@@ -928,13 +976,14 @@ export default function Schedule() {
       {opps.totals?.count > 0 && <OpportunityTotal count={opps.totals.count} fee={opps.totals.fee} />}
       {override && <OverrideBanner message={override.message} name={`${override.appt.first_name} ${override.appt.last_name}`} onAnswer={answerOverride} />}
       {carry && (() => {
-        const col = columns[carry.col];
+        const col = carryAt >= 0 ? columns[carryAt] : null;
+        const where = carry.label || col?.label;
         return (
           <div className="placing-banner carry-banner" role="status">
             <span>
               Moving <strong>{carry.appt.first_name} {carry.appt.last_name}</strong> to{' '}
-              <strong>{col ? `${dayName(col.date, { weekday: 'short', month: 'short', day: 'numeric' })} ${fmtTime(`${col.date} ${hhmm(carry.s)}`)}` : '…'}</strong>
-              {col && col.label && view !== 'week' ? ` · ${col.label}` : ''}
+              <strong>{`${dayName(carry.date, { weekday: 'short', month: 'short', day: 'numeric' })} ${fmtTime(`${carry.date} ${hhmm(carry.s)}`)}`}</strong>
+              {where && view !== 'week' ? ` · ${where}` : ''}
               <span className="muted"> — ↑ ↓ time · ← → column · Shift+← → day · <kbd>Enter</kbd> put it here · <kbd>B</kbd> pinboard · <kbd>Esc</kbd> cancel</span>
             </span>
             <span className="inline">
@@ -986,7 +1035,7 @@ export default function Schedule() {
             onNext={w ? (a) => runStep(a, nextKind(a)) : undefined}
             onOpenBlockout={(b) => can('schedule:write') && setModal({ type: 'block', blockout: b })}
             placing={placing} onPlace={onPlace} selectedId={selectedId} scrollKey={`${view}|${from}|${zoom}`}
-            carry={carry && columns[carry.col] ? { col: carry.col, s: carry.s, e: carry.s + carry.dur, id: carry.appt.id } : null}
+            carry={carry && carryAt >= 0 ? { col: carryAt, s: carry.s, e: carry.s + carry.dur, id: carry.appt.id } : null}
             onPin={can('schedule:write') ? onPin : undefined}
             now={nowStamp} late={lateCfg}
             onReorderColumn={view === 'day' && mode === 'operatory' ? (from, to) => moveChair(from.chairId, to.chairId) : undefined}

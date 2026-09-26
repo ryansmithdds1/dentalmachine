@@ -1,7 +1,7 @@
 // Workflows 9, 10, 13 and 19 (docs/workflows/specs/09-book.md, 10-reschedule.md, 13-confirm.md,
 // 19-cancel-no-show.md): booking with smart defaults and the next open time, moving a visit with the keyboard,
 // confirming from the unconfirmed list, and cancel / no-show with a reason and a one-step rebook.
-/* global document, sessionStorage */
+/* global document, sessionStorage, KeyboardEvent */
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { startApp, launch, signIn } from '../lib/server.mjs';
@@ -196,6 +196,44 @@ test('#10 move with the keyboard: M, ↓, Enter (3 keys); another day with Shift
   await page.keyboard.press('Escape');
   await page.waitForSelector('.cal-ghost.carry', { state: 'detached' });
   assert.equal((await s.get(`/appointments/${a.id}`)).start_time, `${NEXT} 14:00`);
+  assert.deepEqual(s.errors, []);
+});
+
+test('#10 fast typing: M, Shift+→, Enter with no pause still moves it to the next day (never "left where it was")', async () => {
+  const { page } = s;
+  const p = await newPatient('Speedy');
+  const a = await bookAt(p, DAY, '13:00', 30);
+  await openDay(DAY);
+  await page.waitForSelector(card(a.id));
+  await page.focus(card(a.id));
+  // Real key presses back to back: no waiting for the banner, the ghost or the next day's columns.
+  await page.keyboard.press('m');
+  await page.keyboard.press('Shift+ArrowRight');
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('.toast-undo');
+  await until(async () => (await s.get(`/appointments/${a.id}`)).start_time === `${NEXT} 13:00`, 'the move to the next day');
+  const moved = await s.get(`/appointments/${a.id}`);
+  assert.equal(moved.end_time, `${NEXT} 13:30`, 'the length is kept');
+  assert.equal(moved.operatory_id, a.operatory_id, 'the same chair');
+
+  // Faster than any render: the whole burst in one go (M, then Shift+→ ×2, Shift+←, ↓, Enter) — each key acts on
+  // the target the one before left, so it lands a day on and one step later.
+  await put(`/appointments/${a.id}`, { start_time: `${DAY} 13:00`, end_time: `${DAY} 13:30` });
+  await openDay(DAY);
+  await page.waitForSelector(`${card(a.id)}:not(.pending)`);
+  await page.focus(card(a.id));
+  await page.keyboard.press('m');
+  await page.waitForSelector('.cal-ghost.carry');
+  await page.evaluate(() => {
+    const send = (key, shiftKey = false) => document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key, shiftKey, bubbles: true, cancelable: true }));
+    send('ArrowRight', true);
+    send('ArrowRight', true);
+    send('ArrowLeft', true);
+    send('ArrowDown');
+    send('Enter');
+  });
+  await until(async () => (await s.get(`/appointments/${a.id}`)).start_time === `${NEXT} 13:10`, 'the burst move');
+  assert.equal((await s.get(`/appointments/${a.id}`)).operatory_id, a.operatory_id, 'still the same chair');
   assert.deepEqual(s.errors, []);
 });
 
