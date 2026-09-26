@@ -269,6 +269,11 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .public-main { width: 100%; max-width: 720px; margin: 0 auto; padding: 24px 16px 40px; flex: 1; }
 .public-main .card { margin-bottom: 16px; }
 .public-main .card + .card { margin-top: 0; }
+/* A page meant to fill a computer screen (a treatment plan presented across the desk). */
+.public-page.wide .public-main { max-width: 1760px; padding: 28px clamp(16px, 3vw, 56px) 48px; }
+.public-title-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; }
+.public-title-row h1 { margin: 0; }
+.public-title-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .public-footer { text-align: center; color: var(--muted); font-size: 12px; padding: 16px; }
 .public-notice { background: var(--info-soft); color: #1e3a8a; padding: 14px 16px; border-radius: 10px; line-height: 1.5; word-break: break-word; }
 .public-notice.ok { background: var(--ok-soft); color: #14532d; }
@@ -1472,3 +1477,8 @@ select.compact { width: auto; padding: 3px 6px; font-size: 13px; min-height: 0; 
 .identity-edit { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 4px 0; }
 .identity-edit input { width: auto; min-width: 140px; }
 .form-actions.sticky-save { position: sticky; bottom: 0; z-index: 5; background: var(--panel); border-top: 1px solid var(--border); padding: 10px 12px; margin: 0 -12px; box-shadow: 0 -6px 16px rgba(15, 23, 42, 0.08); align-items: center; }
+/* The printable treatment plan (PrintDocs.jsx): the plan drawn on the teeth above the table; phases kept whole. */
+.tp-print-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.tp-print-chart { margin: 8px 0 14px; }
+.tp-print .tp-print-phase { break-inside: avoid; }
+@media print { .tp-print-chart { break-inside: avoid; } .tp-print .pc-legend { font-size: 10.5px; } }

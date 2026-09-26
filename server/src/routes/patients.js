@@ -7,6 +7,7 @@ import { emitPatient } from '../webhooks.js';
 import { patientBalance, primaryPolicy } from '../services.js';
 import { isOptedOutAddress, clearOptOut } from '../messaging.js';
 import { patientScope, checkOffice } from '../officeaccess.js';
+import { plansProgress, planNotes, notesView } from '../planprogress.js';
 
 const FIELDS = [
   'first_name', 'last_name', 'preferred_name', 'dob', 'gender', 'email', 'phone', 'address', 'city', 'state', 'zip',
@@ -405,8 +406,22 @@ export default function patientRoutes({ db }) {
       guarantor: patient.guarantor_id ? await db.get('SELECT id, first_name, last_name FROM patients WHERE id = ?', patient.guarantor_id) : null,
       family_size: (await db.get('SELECT COUNT(*) AS n FROM patients WHERE practice_id = ? AND status != \'archived\' AND (id = ? OR guarantor_id = ?)', pid, patient.guarantor_id || patient.id, patient.guarantor_id || patient.id)).n,
       open_lab_cases: await db.all("SELECT id, lab_name, description, status, due_date FROM lab_cases WHERE practice_id = ? AND patient_id = ? AND status IN ('sent','returned_for_adjustment','received') ORDER BY due_date", pid, patient.id),
+      plan_status: can(req.user, 'clinical:read') ? await planStatusChip(pid, patient.id) : null,
     });
   });
+
+  // The newest treatment plan still in process, for the chip in the patient header: where it stands and when to
+  // follow up (planprogress.js). Declined, expired and paid plans don't show.
+  async function planStatusChip(pid, patientId) {
+    const plans = await db.all("SELECT * FROM treatment_plans WHERE practice_id = ? AND patient_id = ? AND status != 'rejected' ORDER BY id DESC LIMIT 10", pid, patientId);
+    if (!plans.length) return null;
+    const progress = await plansProgress(db, pid, patientId, plans, (await practiceNow(db, pid)).slice(0, 10));
+    const plan = plans.find((x) => progress.get(x.id).open);
+    if (!plan) return null;
+    const g = progress.get(plan.id);
+    const { follow_up: followUp, latest } = notesView(await planNotes(db, pid, [plan.id]));
+    return { plan_id: plan.id, name: plan.name, stage: g.stage, label: g.label, detail: g.detail, follow_up: followUp, latest_note: latest?.note || null };
+  }
 
   r.put('/patients/:id', requirePermission('patients:write'), async (req, res) => {
     const existing = await findOr404(db, 'patients', req.params.id, req.user.practice_id, 'Patient');

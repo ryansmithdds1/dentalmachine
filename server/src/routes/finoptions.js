@@ -45,6 +45,7 @@ export function plainName(p) {
   if (/^D4/.test(c)) return 'Gum treatment';
   if (/^D5[1-2]/.test(c)) return 'Denture';
   if (/^D5/.test(c)) return 'Partial denture';
+  if (/^D60(5[89]|6[0-7])|^D6094|^D6194/.test(c)) return 'Implant crown';
   if (/^D60|^D61/.test(c)) return 'Implant';
   if (/^D6/.test(c)) return 'Bridge';
   if (/^D71|^D72/.test(c)) return 'Tooth removal';

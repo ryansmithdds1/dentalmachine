@@ -23,47 +23,129 @@
 .fin-note { font-size: 12px; color: var(--muted); padding: 0 16px 12px; line-height: 1.4; }
 
 /* The tooth map */
-.tooth-map { max-width: 100%; height: auto; display: block; }
-.tm-tooth { fill: var(--tooth); stroke: var(--tooth-line-faint); stroke-width: 1.2; }
-.tm-tooth.on { fill: var(--primary); stroke: var(--primary-hover); }
-.tm-num { font-size: 8px; fill: var(--primary-ink); font-weight: 700; }
+.tooth-map-wrap { width: 100%; }
 
-/* Patient presentation (F2) */
-.cp-hero { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 18px; align-items: center; }
-.cp-hero .cp-cost { text-align: right; }
-.cp-cost .fin-big { font-size: 34px; }
-.cp-cost .muted { font-size: 13px; }
-.cp-save { display: inline-flex; align-items: center; gap: 6px; background: var(--ok-soft); color: var(--ok); border-radius: 999px; padding: 4px 10px; font-size: 13px; font-weight: 600; margin-top: 6px; }
-.cp-meta { display: flex; flex-wrap: wrap; gap: 14px; color: var(--muted); font-size: 13px; margin-top: 10px; }
-.cp-meta span { display: inline-flex; align-items: center; gap: 5px; }
-@media (max-width: 560px) { .cp-hero { grid-template-columns: 1fr; } .cp-hero .cp-cost { text-align: left; } }
+/* Patient presentation (F2): made to be shown on a computer screen across the desk — the mouth on the left (it
+   stays in view), what's planned and the cost on the right; one column on a tablet in portrait and on a phone. */
+.cp-layout { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(380px, 1fr); gap: 24px; align-items: start; }
+.cp-visual { position: sticky; top: 16px; display: grid; gap: 16px; }
+.cp-visual .card, .cp-details .card { margin-bottom: 0; }
+.cp-details { display: grid; gap: 16px; min-width: 0; }
+.cp-close { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(380px, 1fr); gap: 24px; align-items: start; margin-top: 24px; }
+.cp-close .card { margin-bottom: 0; }
+.cp-close .cp-accept:only-child { grid-column: 1 / -1; max-width: 760px; }
+.public-page.wide h1 { font-size: clamp(24px, 2.2vw, 34px); }
+.tpv-h { margin: 0 0 12px; font-size: 18px; }
+.cp-options-card { margin-bottom: 24px !important; }
 
-.cp-alts { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
-.cp-alt { all: unset; box-sizing: border-box; cursor: pointer; border: 1.5px solid var(--border); border-radius: var(--radius); padding: 14px 16px; background: var(--panel); display: flex; flex-direction: column; gap: 4px; }
+.cp-chart-card { padding: clamp(16px, 1.6vw, 26px); }
+.cp-chart-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px 18px; flex-wrap: wrap; margin-bottom: 14px; }
+.cp-chart-head h2 { margin: 0; font-size: clamp(19px, 1.5vw, 24px); }
+.cp-meta { display: flex; flex-wrap: wrap; gap: 8px 16px; color: var(--text-2); font-size: 14.5px; }
+.cp-meta span { display: inline-flex; align-items: center; gap: 6px; }
+.cp-chart-hint { margin: 10px 0 0; text-align: center; font-size: 13px; color: var(--muted); }
+
+.tpv-summary { padding: clamp(16px, 1.6vw, 24px); }
+.cp-sum-top { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+.cp-sum-label { font-size: 14px; color: var(--muted); font-weight: 600; }
+.cp-total { font-size: clamp(34px, 3.2vw, 48px); font-weight: 750; letter-spacing: -0.02em; line-height: 1.1; font-variant-numeric: tabular-nums; color: var(--text); }
+.cp-sum-rows { margin: 14px 0 0; display: grid; gap: 0; font-size: 15px; }
+.cp-sum-rows > div { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; border-top: 1px solid var(--border); }
+.cp-sum-rows dt { color: var(--text-2); }
+.cp-sum-rows dd { margin: 0; font-variant-numeric: tabular-nums; font-weight: 600; }
+.cp-sum-rows .total { border-top: 2px solid var(--text); font-size: 16.5px; }
+.cp-sum-rows .total dt, .cp-sum-rows .total dd { color: var(--text); font-weight: 750; }
+.cp-note { font-size: 13px; margin-top: 8px; }
+.cp-save { display: inline-flex; align-items: center; gap: 6px; background: var(--ok-soft); color: var(--ok); border-radius: 999px; padding: 5px 12px; font-size: 13.5px; font-weight: 650; }
+
+.cp-alts { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.cp-alt { all: unset; box-sizing: border-box; cursor: pointer; border: 1.5px solid var(--border); border-radius: var(--radius); padding: 14px 16px; background: var(--panel); display: flex; flex-direction: column; gap: 6px; }
 .cp-alt.on { border-color: var(--primary); box-shadow: var(--ring); }
 .cp-alt:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 .cp-alt .cp-alt-label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--primary-ink); font-weight: 700; }
 .cp-alt .cp-alt-what { font-weight: 600; }
 .cp-alt .fin-big { font-size: 24px; }
 
-.cp-phases { display: grid; gap: 12px; }
-.cp-phase { border: 1.5px solid var(--border); border-radius: var(--radius); background: var(--panel); padding: 14px 16px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 14px; align-items: start; }
-.cp-phase.off { opacity: 0.55; }
-.cp-phase .cp-step { width: 30px; height: 30px; border-radius: 50%; background: var(--primary-soft); color: var(--primary-ink); display: grid; place-items: center; font-weight: 700; }
-.cp-phase h3 { margin: 2px 0 2px; font-size: 15px; }
-.cp-phase .cp-why { color: var(--text-2); font-size: 13.5px; }
-.cp-phase .cp-what { color: var(--muted); font-size: 13px; margin-top: 4px; }
-.cp-phase .cp-price { text-align: right; }
-.cp-phase .cp-price strong { font-size: 20px; font-variant-numeric: tabular-nums; }
-.cp-phase img { width: 84px; height: 64px; object-fit: cover; border-radius: var(--radius-sm); border: 1px solid var(--border); margin-top: 8px; }
-.cp-toggle { font-size: 12.5px; border-radius: 999px; padding: 3px 10px; border: 1px solid var(--border); background: var(--subtle); color: var(--text-2); cursor: pointer; margin-top: 8px; }
+.cp-phases { display: grid; gap: 14px; }
+.cp-phase { --ph: var(--primary); border: 1px solid var(--border); border-left: 5px solid var(--ph); border-radius: var(--radius); background: var(--panel); padding: 16px 18px 12px; box-shadow: var(--shadow); }
+.cp-phase.off { opacity: 0.6; border-left-style: dashed; }
+.cp-phase-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 14px; align-items: start; }
+.cp-phase .cp-step { width: 32px; height: 32px; border-radius: 50%; background: var(--ph); color: #fff; display: grid; place-items: center; font-weight: 750; font-size: 15px; }
+.cp-phase h3 { margin: 3px 0 3px; font-size: 17px; }
+.cp-phase .cp-why { color: var(--text-2); font-size: 14.5px; line-height: 1.45; }
+.cp-phase .cp-price { text-align: right; font-size: 12.5px; }
+.cp-phase .cp-price strong { display: block; font-size: 22px; font-variant-numeric: tabular-nums; line-height: 1.2; }
+.cp-lines { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 2px; }
+.cp-line { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 6px 8px; border-radius: 10px; transition: background-color 0.12s ease, box-shadow 0.12s ease; }
+.cp-line + .cp-line { border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent); }
+.cp-line.hl { background: color-mix(in srgb, var(--ph, var(--primary)) 10%, transparent); box-shadow: inset 3px 0 0 var(--ph, var(--primary)); }
+.cp-line-what { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; font-size: 15px; }
+.cp-line-what strong { font-weight: 600; }
+.cp-tooth { color: var(--muted); font-size: 13.5px; font-variant-numeric: tabular-nums; }
+.cp-line-pay { font-variant-numeric: tabular-nums; font-weight: 600; font-size: 15px; }
+.cp-phase-foot { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; margin-top: 10px; font-size: 13.5px; }
+.cp-phase img { width: 120px; height: 90px; object-fit: cover; border-radius: var(--radius-sm); border: 1px solid var(--border); margin-top: 10px; }
+.cp-toggle { font-size: 13px; border-radius: 999px; padding: 4px 12px; border: 1px solid var(--border); background: var(--subtle); color: var(--text-2); cursor: pointer; margin-left: auto; }
 .cp-toggle[aria-pressed='true'] { background: var(--primary-soft); border-color: var(--primary); color: var(--primary-ink); }
-.cp-detail { margin-top: 8px; font-size: 13px; }
-.cp-detail div { display: flex; justify-content: space-between; gap: 10px; padding: 3px 0; border-bottom: 1px dashed var(--border); }
-.cp-detail div span:last-child { font-variant-numeric: tabular-nums; }
-.cp-linkbtn { background: none; border: none; color: var(--primary-hover); padding: 0; cursor: pointer; font-size: 12.5px; margin-left: 10px; }
+.cp-detail { margin-top: 10px; font-size: 13.5px; }
+.cp-detail div { display: flex; justify-content: space-between; gap: 10px; padding: 4px 0; border-bottom: 1px dashed var(--border); }
+.cp-detail div span:last-child { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cp-linkbtn { background: none; border: none; color: var(--primary-hover); padding: 0; cursor: pointer; font-size: 13.5px; font-weight: 600; }
+.cp-linkbtn:hover { text-decoration: underline; }
+.cp-accept h2 { margin-top: 0; }
 .cp-done { display: grid; gap: 6px; }
 .cp-done .fin-big { font-size: 26px; }
+.cp-print-doc { display: none; }
+
+@media (max-width: 1100px) {
+  .cp-layout, .cp-close { grid-template-columns: minmax(0, 1.05fr) minmax(340px, 1fr); gap: 16px; }
+}
+@media (max-width: 900px) {
+  .cp-layout, .cp-close { grid-template-columns: 1fr; }
+  .cp-visual { position: static; }
+}
+@media (max-width: 560px) {
+  .cp-phase { padding: 14px 12px 10px; }
+  .cp-phase-head { grid-template-columns: auto minmax(0, 1fr); }
+  .cp-phase .cp-price { grid-column: 2; text-align: left; }
+  .cp-line { grid-template-columns: 24px minmax(0, 1fr) auto; gap: 8px; padding: 6px 4px; }
+  .cp-toggle { margin-left: 0; }
+}
+
+/* Printing the plan (the Print button, or Ctrl/⌘P): a compact letter-size document, black-and-white friendly — the
+   drawing of the teeth, then every procedure by phase with the fee, the insurance estimate and the patient's share,
+   and a line to sign. Everything interactive stays on screen. */
+@media print {
+  @page { size: letter; margin: 0.5in; }
+  .public-page.wide .public-main { max-width: none; padding: 0; }
+  .public-page { background: #fff; min-height: 0; }
+  .public-header { padding: 0 0 8px; border-bottom: 2px solid #000; }
+  .public-header .lang-toggle, .public-footer, .public-title-actions, .cmp-fullscreen, .handoff-back, .no-print { display: none !important; }
+  .public-title-row { margin-bottom: 6px; }
+  .public-page.wide h1 { font-size: 20px; }
+  .cp-layout { display: block; }
+  .cp-details, .cp-close { display: none !important; }
+  .cp-visual { position: static; display: block; }
+  .cp-chart-card, .xr-plan { border: none !important; box-shadow: none !important; padding: 0 !important; break-inside: avoid; }
+  .xr-plan { margin-top: 8px; font-size: 12px; }
+  .cp-chart-head { margin-bottom: 6px; }
+  .cp-chart-head h2 { font-size: 16px; }
+  .cp-meta { font-size: 12px; color: #000; }
+  .plan-chart { max-width: 7.5in; }
+  .pc-legend { font-size: 11px; color: #000; }
+  .cp-print-doc { display: block; margin-top: 12px; font-size: 11.5px; color: #000; }
+  .cp-print-meta { margin: 0 0 6px; }
+  .cp-print-table { width: 100%; border-collapse: collapse; }
+  .cp-print-table th { text-align: left; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.04em; border-bottom: 1.5px solid #000; padding: 4px 6px; background: none; color: #000; }
+  .cp-print-table td { padding: 4px 6px; border-bottom: 1px solid #bbb; vertical-align: top; }
+  .cp-print-table .num { text-align: right; white-space: nowrap; }
+  .cp-print-table tbody { break-inside: avoid; }
+  .cp-print-phase td { font-weight: 700; padding-top: 10px; border-bottom: 1px solid #000; }
+  .cp-print-table tfoot td { font-weight: 700; border-top: 2px solid #000; border-bottom: none; }
+  .cp-print-table .muted { color: #555; font-size: 10px; }
+  .cp-print-small { font-size: 10px; color: #333; margin: 8px 0 0; }
+  .cp-print-sign { margin-top: 36px; break-inside: avoid; }
+}
 
 /* Desk (F1/F3/F4 staff side) */
 .fin-desk { margin-top: 14px; border-top: 1px solid var(--border); padding-top: 14px; }

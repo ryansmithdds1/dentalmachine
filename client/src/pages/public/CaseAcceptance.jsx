@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { CalendarDays, ShieldCheck, Smile, ExternalLink, Maximize } from 'lucide-react';
+import { CalendarDays, ShieldCheck, Smile, ExternalLink, Maximize, Printer, Download } from 'lucide-react';
 import { money } from '../../format.js';
 import { ErrorBox, useSubmit } from '../../components/ui.jsx';
 import SignaturePad from '../../components/SignaturePad.jsx';
 import ToothMap from '../../components/patient/ToothMap.jsx';
+import PlanChart, { ToothThumb, phaseColor } from '../../components/patient/PlanChart.jsx';
 import FinOptionCards, { LENDER_NAMES } from '../../components/patient/FinOptionCards.jsx';
 import CompareBoard from '../../components/patient/CompareBoard.jsx';
 import PublicLayout, { PublicError } from './PublicLayout.jsx';
@@ -16,9 +17,11 @@ import '../../components/xray/xray.css';
 
 const call = (method, path, body, pass) => publicCall(method, path, body, 'X-Plan-Pass', pass);
 
-// The patient's treatment plan (F2): the teeth involved, each phase as a card in plain words, other options side
-// by side, and ways to pay (F3) — then choose and sign (F4). Details only on tap. Choosing how to pay is
-// optional: signing the plan alone still works (workflow 22).
+// The patient's treatment plan (F2), laid out to be presented on a computer screen across the desk: their mouth
+// with the plan drawn on it on one side (PlanChart), what's planned and what it costs on the other — the estimate,
+// each phase in plain words with its procedures, other options side by side — then ways to pay (F3), and choose
+// and sign (F4). Cost details only on tap. Choosing how to pay is optional: signing the plan alone still works
+// (workflow 22). Print gives a compact letter-size copy (print stylesheet); Download PDF, the office's PDF.
 export default function CaseAcceptance() {
   const t = useT();
   const lang = useLang();
@@ -39,6 +42,8 @@ export default function CaseAcceptance() {
   const [alt, setAlt] = useState(null);
   const [open, setOpen] = useState({});
   const [changed, setChanged] = useState(false);
+  // The tooth being pointed at, on the drawing or in the list: both light up together.
+  const [active, setActive] = useState(null);
   // Comparing options (F6). ?compare=<plan id>: this is the patient's window on the second screen, opened and
   // pointed at by the staff screen on the same computer (BroadcastChannel keeps the two in step).
   const [compare, setCompare] = useState(null);
@@ -147,146 +152,230 @@ export default function CaseAcceptance() {
     await requote(null, next);
   };
   const visits = q ? q.phases.filter((p) => chosen.has(p.phase)).reduce((n, p) => n + p.visits, 0) : 0;
+  const count = q ? q.phases.filter((p) => chosen.has(p.phase)).reduce((n, p) => n + p.count, 0) : planned.length;
   const imgSrc = (n) => `/api/public/tp/${token}/phase-image/${n}?${new URLSearchParams({ ...(usePass ? { pass: usePass } : {}), ...(alt ? { plan: alt } : {}) })}`;
+  const planName = (alt && plan.alternatives.find((a) => a.id === alt)?.name) || plan.name;
+  // Every line of the plan with its phase (for the colours on the drawing); phases not chosen now are left off it.
+  const lines = q
+    ? q.phases.flatMap((p) => p.lines.map((l) => ({ ...l, phase: p.phase, off: !chosen.has(p.phase) })))
+    : planned.map((p, i) => ({ ...p, plain: p.description, phase: 1, you_pay: e.items[i]?.patient ?? p.fee, insurance: e.items[i]?.insurance ?? 0 }));
+  const phaseNames = q ? q.phases.filter((p) => chosen.has(p.phase)).map((p) => ({ phase: p.phase, name: p.name })) : [];
+  // A tapped tooth brings its first procedure into view.
+  const pickTooth = (n) => document.querySelector(`.cp-line[data-tooth="${n}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  const hover = (tooth) => ({ onMouseEnter: () => tooth && setActive(tooth), onMouseLeave: () => setActive(null) });
+  const totals = q?.totals || { fee: e.total_fee, write_off: e.total_write_off || 0, insurance: e.total_insurance, discount: 0, you_pay: e.total_patient };
+  const amount = q ? q.amount : e.total_patient;
+  const actions = (
+    <>
+      <button type="button" onClick={() => window.print()}><Printer size={16} aria-hidden="true" /> {t('Print')}</button>
+      <a className="button" href={pdf} download><Download size={16} aria-hidden="true" /> {t('Download PDF')}</a>
+    </>
+  );
 
   return (
-    <PublicLayout title={t('Your treatment plan, {name}', { name: plan.first_name })} practice={plan.practice}>
+    <PublicLayout title={t('Your treatment plan, {name}', { name: plan.first_name })} practice={plan.practice} wide actions={actions}>
       {screenFor && <CompareScreen t={t} />}
       {changed && <div className="public-notice" style={{ marginBottom: 12 }}>{t('The office just updated your plan — here are the new numbers. Please choose again.')}</div>}
-      {q ? (
-        <div className="card">
-          <div className="cp-hero">
-            <div>
-              <h2 style={{ marginBottom: 6 }}>{(alt && plan.alternatives.find((a) => a.id === alt)?.name) || plan.name}</h2>
-              <ToothMap teeth={q.teeth} />
-              <div className="cp-meta">
-                <span><Smile size={15} aria-hidden="true" /> {t('{n} treatments', { n: q.phases.filter((p) => chosen.has(p.phase)).reduce((n, p) => n + p.count, 0) })}</span>
-                <span><CalendarDays size={15} aria-hidden="true" /> {visits === 1 ? t('about 1 visit') : t('about {n} visits', { n: visits })}</span>
-                {q.policy && <span><ShieldCheck size={15} aria-hidden="true" /> {q.policy.carrier_name}</span>}
-              </div>
-            </div>
-            <div className="cp-cost">
-              <div className="muted">{t('Your estimated cost')}</div>
-              <div className="fin-big">{money(q.amount)}</div>
-              {q.totals.insurance > 0 && <div className="muted">{t('after {amount} from insurance', { amount: money(q.totals.insurance) })}</div>}
-              {q.ppo_savings > 0 && <div className="cp-save">{t('Your in-network savings: {amount}', { amount: money(q.ppo_savings) })}</div>}
-            </div>
-          </div>
-        </div>
-      ) : (
-        <div className="card">
-          <h2>{plan.name}</h2>
-          {planned.map((p, i) => (
-            <div key={i} className="tp-line">
-              <div><strong>{p.description}</strong>{p.tooth ? <span className="muted"> · {t('tooth #{n}', { n: p.tooth })}</span> : ''}</div>
-              <div className="num">{money(e.items[i]?.patient ?? p.fee)}</div>
-            </div>
-          ))}
-        </div>
-      )}
 
-      {/* XR3: what the x-rays showed on the plan's teeth — only what the dentist confirmed. */}
-      {plan.xray_findings?.length > 0 && (
-        <div className="card xr-plan">
-          <h3 style={{ marginTop: 0 }}>{t('What your x-rays showed')}</h3>
-          <div className="muted" style={{ fontSize: 13 }}>{t('Your dentist reviewed your x-rays and confirmed:')}</div>
-          <ul>
-            {plan.xray_findings.map((f, i) => <li key={i}><strong>{t(f.label)}</strong>{f.where ? <span className="muted"> · {f.where}</span> : null}</li>)}
-          </ul>
-        </div>
-      )}
-
-      {compare?.options?.length > 1 ? (
-        <div className="card">
-          <h3 style={{ marginTop: 0 }}>{t('Your options')}</h3>
+      {compare?.options?.length > 1 && (
+        <section className="card cp-options-card no-print" aria-labelledby="cp-options-h">
+          <h2 id="cp-options-h" className="tpv-h">{t('Your options')}</h2>
           <CompareBoard options={compare.options} t={t} highlight={pointed} chosen={picked}
             onChoose={async (id) => { setPicked(id); tell({ type: 'picked', plan_id: id }); await pickAlt(id, true); document.querySelector('.cp-accept')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); nameBox.current?.focus({ preventScroll: true }); }} />
-        </div>
-      ) : plan.alternatives?.length > 1 ? (
-        <div className="card">
-          <h3 style={{ marginTop: 0 }}>{t('Your options')}</h3>
-          <div className="cp-alts">
-            {plan.alternatives.map((a) => {
-              const on = alt ? a.id === alt : a.current;
-              return (
-                <button key={a.id} type="button" className={`cp-alt${on ? ' on' : ''}`} aria-pressed={on} onClick={() => pickAlt(a.id)}>
-                  <span className="cp-alt-label">{a.label}</span>
-                  <span className="cp-alt-what">{[...new Set(a.procedures.map((p) => t(p.plain)))].join(' + ')}</span>
-                  <span className="fin-big">{money(a.you_pay)}</span>
-                  <span className="muted" style={{ fontSize: 12.5 }}>{a.visits === 1 ? t('about 1 visit') : t('about {n} visits', { n: a.visits })}{a.from_monthly ? ` · ${t('from {amount}/mo', { amount: money(a.from_monthly) })}` : ''}</span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      ) : null}
+        </section>
+      )}
 
-      {q && (
-        <div className="cp-phases" style={{ marginBottom: 16 }}>
-          {q.phases.map((p, i) => {
-            const on = chosen.has(p.phase);
-            return (
-              <div key={p.phase} className={`cp-phase${on ? '' : ' off'}`}>
-                <div className="cp-step">{i + 1}</div>
-                <div>
-                  <h3>{t(p.name)}</h3>
-                  {p.why && <div className="cp-why">{t(p.why)}</div>}
-                  <div className="cp-what">
-                    {[...new Set(p.lines.map((l) => `${t(l.plain)}${l.tooth ? ` #${l.tooth}` : ''}`))].join(' · ')} · {p.visits === 1 ? t('1 visit') : t('{n} visits', { n: p.visits })}
-                    <button type="button" className="cp-linkbtn" aria-expanded={!!open[p.phase]} onClick={() => setOpen({ ...open, [p.phase]: !open[p.phase] })}>{open[p.phase] ? t('Hide details') : t('Details')}</button>
-                  </div>
-                  {p.has_image && <img src={imgSrc(p.phase)} alt={t('X-ray or photo for {name}', { name: t(p.name) })} loading="lazy" />}
-                  {open[p.phase] && (
-                    <div className="cp-detail">
-                      {p.lines.map((l, k) => (
-                        <div key={k}><span>{l.description}{l.tooth ? ` · #${l.tooth}` : ''}{l.surfaces ? ` ${l.surfaces}` : ''} <span className="muted">({l.code})</span></span><span>{money(l.fee)}{l.insurance ? ` − ${money(l.insurance)} ${t('insurance')}` : ''}{l.write_off ? ` − ${money(l.write_off)} ${t('in-network')}` : ''} = <strong>{money(l.you_pay)}</strong></span></div>
-                      ))}
-                    </div>
-                  )}
-                  {q.phases.length > 1 && (
-                    <button type="button" className="cp-toggle" aria-pressed={on} onClick={() => togglePhase(p.phase)}>{on ? t('Included now') : t('Add to what I’m doing now')}</button>
-                  )}
-                </div>
-                <div className="cp-price">
-                  <div className="muted" style={{ fontSize: 12 }}>{t('You pay')}</div>
-                  <strong>{money(p.you_pay)}</strong>
-                  {p.insurance > 0 && <div className="muted" style={{ fontSize: 12 }}>{t('insurance {amount}', { amount: money(p.insurance) })}</div>}
-                </div>
+      <div className="cp-layout">
+        <section className="cp-visual" aria-label={t('Your teeth')}>
+          <div className="card cp-chart-card">
+            <div className="cp-chart-head">
+              <h2>{planName}</h2>
+              <div className="cp-meta">
+                <span><Smile size={16} aria-hidden="true" /> {count === 1 ? t('1 treatment') : t('{n} treatments', { n: count })}</span>
+                {q && <span><CalendarDays size={16} aria-hidden="true" /> {visits === 1 ? t('about 1 visit') : t('about {n} visits', { n: visits })}</span>}
+                {q?.policy && <span><ShieldCheck size={16} aria-hidden="true" /> {q.policy.carrier_name}</span>}
               </div>
-            );
-          })}
-          {q.years.length > 1 && <div className="muted" style={{ fontSize: 12.5 }}>{t('Spread over two benefit years so your insurance pays more.')}</div>}
-        </div>
-      )}
+            </div>
+            <PlanChart lines={lines.filter((l) => !l.off)} existing={plan.chart?.existing || []} done={plan.chart?.done || []} phases={phaseNames}
+              active={active} onActive={setActive} onPick={pickTooth} t={t} />
+            <p className="cp-chart-hint no-print">{t('Point to a tooth to see what’s planned for it.')}</p>
+          </div>
+          {/* XR3: what the x-rays showed on the plan's teeth — only what the dentist confirmed. */}
+          {plan.xray_findings?.length > 0 && (
+            <div className="card xr-plan">
+              <h3 style={{ marginTop: 0 }}>{t('What your x-rays showed')}</h3>
+              <div className="muted" style={{ fontSize: 13 }}>{t('Your dentist reviewed your x-rays and confirmed:')}</div>
+              <ul>
+                {plan.xray_findings.map((f, i) => <li key={i}><strong>{t(f.label)}</strong>{f.where ? <span className="muted"> · {f.where}</span> : null}</li>)}
+              </ul>
+            </div>
+          )}
+        </section>
 
-      {q?.options?.length > 0 && (
-        <div className="card">
-          <h3 style={{ marginTop: 0 }}>{t('Ways to pay your {amount}', { amount: money(q.amount) })}</h3>
-          <FinOptionCards options={q.options} picked={option} onPick={(k) => setOption(k === option ? null : k)} t={t} />
-          <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>{t('Insurance amounts are estimates and not a guarantee of payment. Financing is subject to the lender’s approval.')}</p>
-        </div>
-      )}
-      {!q && plan.financing && (
-        <div className="card">
-          <h3 style={{ marginTop: 0 }}>{t('Ways to pay your {amount}', { amount: money(plan.financing.amount) })}</h3>
-          {plan.financing.links.length > 0 && <p>{t('Or apply for financing:')} {plan.financing.links.map((l) => <a key={l.url} href={l.url} target="_blank" rel="noreferrer" style={{ marginRight: 12 }}>{l.name} ↗</a>)}</p>}
-        </div>
-      )}
-      <form className="card cp-accept" onSubmit={(ev) => { ev.preventDefault(); submit(); }}>
-        <h2>{t('Accept your plan')}</h2>
-        <label className="checkbox" style={{ color: 'var(--text)', fontSize: 14, alignItems: 'flex-start' }}>
-          <input type="checkbox" checked={consent} onChange={(ev) => setConsent(ev.target.checked)} style={{ marginTop: 3 }} />
-          {t('I have reviewed this treatment plan, my questions have been answered, and I understand the estimated costs are my responsibility if insurance pays less.')}
-        </label>
-        <label style={{ marginTop: 12 }}>{t('Type your full name')}<input required value={name} onChange={(ev) => setName(ev.target.value)} autoComplete="name" ref={nameBox} /></label>
-        <div style={{ marginTop: 10 }}><SignaturePad onChange={setImage} /></div>
-        <ErrorBox error={error} />
-        <button className="primary big" style={{ marginTop: 12 }} disabled={busy || !consent || name.trim().length < 2 || (compare?.options?.length > 1 && !picked)}>{t('Accept & sign')}</button>
-        {compare?.options?.length > 1 && !picked && <div className="muted" style={{ fontSize: 12.5, marginTop: 6 }}>{t('Choose one of the options above first.')}</div>}
-        {option && q && <div className="muted" style={{ fontSize: 12.5, marginTop: 6 }}>{t('With: {option}', { option: (() => { const o = q.options.find((x) => x.key === option); return o ? `${o.kind === 'lender' ? `${LENDER_NAMES[o.lender]} — ` : ''}${t(o.title)}` : ''; })() })}</div>}
-      </form>
+        <section className="cp-details" aria-label={t('What’s planned and what it costs')}>
+          <div className="card tpv-summary">
+            <div className="cp-sum-top">
+              <div>
+                <div className="cp-sum-label">{t('Your estimated cost')}</div>
+                <div className="cp-total">{money(amount)}</div>
+              </div>
+              {q?.ppo_savings > 0 && <div className="cp-save">{t('Your in-network savings: {amount}', { amount: money(q.ppo_savings) })}</div>}
+            </div>
+            <dl className="cp-sum-rows">
+              <div><dt>{t('Treatment fees')}</dt><dd>{money(q && !(q.ppo_savings > 0) ? totals.fee - totals.write_off : totals.fee)}</dd></div>
+              {q?.ppo_savings > 0 && totals.write_off > 0 && <div><dt>{t('In-network savings')}</dt><dd>−{money(totals.write_off)}</dd></div>}
+              {totals.insurance > 0 && <div><dt>{t('Insurance pays (estimate)')}</dt><dd>−{money(totals.insurance)}</dd></div>}
+              {totals.discount > 0 && <div><dt>{t('Discount')}</dt><dd>−{money(totals.discount)}</dd></div>}
+              <div className="total"><dt>{t('Your portion')}</dt><dd>{money(amount)}</dd></div>
+            </dl>
+            {q?.years.length > 1 && <div className="muted cp-note">{t('Spread over two benefit years so your insurance pays more.')}</div>}
+          </div>
+
+          {!compare?.options?.length && plan.alternatives?.length > 1 && (
+            <div className="card no-print">
+              <h2 className="tpv-h">{t('Your options')}</h2>
+              <div className="cp-alts">
+                {plan.alternatives.map((a) => {
+                  const on = alt ? a.id === alt : a.current;
+                  return (
+                    <button key={a.id} type="button" className={`cp-alt${on ? ' on' : ''}`} aria-pressed={on} onClick={() => pickAlt(a.id)}>
+                      <span className="cp-alt-label">{a.label}</span>
+                      <span className="cp-alt-what">{[...new Set(a.procedures.map((p) => t(p.plain)))].join(' + ')}</span>
+                      <ToothMap teeth={a.procedures.map((p) => p.tooth).filter(Boolean)} size={240} t={t} />
+                      <span className="fin-big">{money(a.you_pay)}</span>
+                      <span className="muted" style={{ fontSize: 12.5 }}>{a.visits === 1 ? t('about 1 visit') : t('about {n} visits', { n: a.visits })}{a.from_monthly ? ` · ${t('from {amount}/mo', { amount: money(a.from_monthly) })}` : ''}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {q ? (
+            <div className="cp-phases">
+              {q.phases.map((p, i) => {
+                const on = chosen.has(p.phase);
+                return (
+                  <article key={p.phase} className={`cp-phase${on ? '' : ' off'}`} style={{ '--ph': phaseColor(p.phase) }}>
+                    <header className="cp-phase-head">
+                      <div className="cp-step" aria-hidden="true">{i + 1}</div>
+                      <div className="cp-phase-title">
+                        <h3>{t(p.name)}</h3>
+                        {p.why && <div className="cp-why">{t(p.why)}</div>}
+                      </div>
+                      <div className="cp-price">
+                        <div className="muted">{t('You pay')}</div>
+                        <strong>{money(p.you_pay)}</strong>
+                        {p.insurance > 0 && <div className="muted">{t('insurance {amount}', { amount: money(p.insurance) })}</div>}
+                      </div>
+                    </header>
+                    <ul className="cp-lines">
+                      {p.lines.map((l, k) => (
+                        <li key={k} className={`cp-line${active && l.tooth && String(l.tooth).toUpperCase() === active ? ' hl' : ''}`} data-tooth={l.tooth ? String(l.tooth).toUpperCase() : undefined} {...hover(l.tooth ? String(l.tooth).toUpperCase() : null)}>
+                          <ToothThumb line={{ ...l, phase: p.phase }} size={30} />
+                          <span className="cp-line-what">
+                            <strong>{t(l.plain)}</strong>
+                            {l.tooth ? <span className="cp-tooth">{t('tooth #{n}', { n: l.tooth })}{l.surfaces ? ` · ${l.surfaces}` : ''}</span> : null}
+                          </span>
+                          <span className="cp-line-pay">{money(l.you_pay)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                    <footer className="cp-phase-foot">
+                      <span className="muted">{p.visits === 1 ? t('1 visit') : t('{n} visits', { n: p.visits })}</span>
+                      <button type="button" className="cp-linkbtn no-print" aria-expanded={!!open[p.phase]} onClick={() => setOpen({ ...open, [p.phase]: !open[p.phase] })}>{open[p.phase] ? t('Hide cost details') : t('Cost details')}</button>
+                      {q.phases.length > 1 && (
+                        <button type="button" className="cp-toggle no-print" aria-pressed={on} onClick={() => togglePhase(p.phase)}>{on ? t('Included now') : t('Add to what I’m doing now')}</button>
+                      )}
+                    </footer>
+                    {p.has_image && <img src={imgSrc(p.phase)} alt={t('X-ray or photo for {name}', { name: t(p.name) })} loading="lazy" />}
+                    {open[p.phase] && (
+                      <div className="cp-detail">
+                        {p.lines.map((l, k) => (
+                          <div key={k}><span>{l.description}{l.tooth ? ` · #${l.tooth}` : ''}{l.surfaces ? ` ${l.surfaces}` : ''} <span className="muted">({l.code})</span></span><span>{money(l.fee)}{l.insurance ? ` − ${money(l.insurance)} ${t('insurance')}` : ''}{l.write_off ? ` − ${money(l.write_off)} ${t('in-network')}` : ''} = <strong>{money(l.you_pay)}</strong></span></div>
+                        ))}
+                      </div>
+                    )}
+                  </article>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="card">
+              <ul className="cp-lines">
+                {lines.map((l, i) => (
+                  <li key={i} className={`cp-line${active && l.tooth && String(l.tooth).toUpperCase() === active ? ' hl' : ''}`} data-tooth={l.tooth || undefined} {...hover(l.tooth ? String(l.tooth).toUpperCase() : null)}>
+                    <ToothThumb line={l} size={30} />
+                    <span className="cp-line-what"><strong>{l.description}</strong>{l.tooth ? <span className="cp-tooth">{t('tooth #{n}', { n: l.tooth })}</span> : null}</span>
+                    <span className="cp-line-pay">{money(l.you_pay)}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </section>
+      </div>
+
+      <div className="cp-close">
+        {q?.options?.length > 0 && (
+          <div className="card cp-pay no-print">
+            <h2 className="tpv-h">{t('Ways to pay your {amount}', { amount: money(q.amount) })}</h2>
+            <FinOptionCards options={q.options} picked={option} onPick={(k) => setOption(k === option ? null : k)} t={t} />
+            <p className="muted" style={{ fontSize: 12.5, marginBottom: 0 }}>{t('Insurance amounts are estimates and not a guarantee of payment. Financing is subject to the lender’s approval.')}</p>
+          </div>
+        )}
+        {!q && plan.financing && (
+          <div className="card cp-pay no-print">
+            <h2 className="tpv-h">{t('Ways to pay your {amount}', { amount: money(plan.financing.amount) })}</h2>
+            {plan.financing.links.length > 0 && <p>{t('Or apply for financing:')} {plan.financing.links.map((l) => <a key={l.url} href={l.url} target="_blank" rel="noreferrer" style={{ marginRight: 12 }}>{l.name} ↗</a>)}</p>}
+          </div>
+        )}
+        <form className="card cp-accept no-print" onSubmit={(ev) => { ev.preventDefault(); submit(); }}>
+          <h2>{t('Accept your plan')}</h2>
+          <label className="checkbox" style={{ color: 'var(--text)', fontSize: 15, alignItems: 'flex-start' }}>
+            <input type="checkbox" checked={consent} onChange={(ev) => setConsent(ev.target.checked)} style={{ marginTop: 3 }} />
+            {t('I have reviewed this treatment plan, my questions have been answered, and I understand the estimated costs are my responsibility if insurance pays less.')}
+          </label>
+          <label style={{ marginTop: 12 }}>{t('Type your full name')}<input required value={name} onChange={(ev) => setName(ev.target.value)} autoComplete="name" ref={nameBox} /></label>
+          <div style={{ marginTop: 10 }}><SignaturePad onChange={setImage} /></div>
+          <ErrorBox error={error} />
+          <button className="primary big" style={{ marginTop: 12 }} disabled={busy || !consent || name.trim().length < 2 || (compare?.options?.length > 1 && !picked)}>{t('Accept & sign')}</button>
+          {compare?.options?.length > 1 && !picked && <div className="muted" style={{ fontSize: 12.5, marginTop: 6 }}>{t('Choose one of the options above first.')}</div>}
+          {option && q && <div className="muted" style={{ fontSize: 12.5, marginTop: 6 }}>{t('With: {option}', { option: (() => { const o = q.options.find((x) => x.key === option); return o ? `${o.kind === 'lender' ? `${LENDER_NAMES[o.lender]} — ` : ''}${t(o.title)}` : ''; })() })}</div>}
+        </form>
+      </div>
+
+      {/* The printed copy: the plan as a compact document (letter size, black-and-white friendly), with a line to sign. */}
+      <PrintedPlan t={t} plan={plan} q={q} lines={lines} totals={totals} amount={amount} name={planName} lang={lang} />
       <BackToOffice back={hand.back} />
     </PublicLayout>
+  );
+}
+
+// What prints: every procedure by phase with the fee, the insurance estimate and the patient's share, the totals,
+// the estimate's small print and a signature line. Hidden on screen.
+function PrintedPlan({ t, plan, q, lines, totals, amount, name, lang }) {
+  const groups = q ? q.phases.filter((p) => q.chosen.includes(p.phase)).map((p) => ({ key: p.phase, name: p.name, lines: p.lines, you_pay: p.you_pay })) : [{ key: 1, name: null, lines, you_pay: amount }];
+  return (
+    <div className="cp-print-doc" aria-hidden="true">
+      <p className="cp-print-meta"><strong>{name}</strong> · {new Date().toLocaleDateString(locale(lang))}{q?.policy ? ` · ${q.policy.carrier_name}` : ''}</p>
+      <table className="cp-print-table">
+        <thead><tr><th>{t('Treatment')}</th><th>{t('Tooth')}</th><th className="num">{t('Fee')}</th><th className="num">{t('Insurance (est.)')}</th><th className="num">{t('You pay')}</th></tr></thead>
+        {groups.map((g, i) => (
+          <tbody key={g.key}>
+            {groups.length > 1 && <tr className="cp-print-phase"><td colSpan={5}>{i + 1}. {t(g.name)}</td></tr>}
+            {g.lines.map((l, k) => (
+              <tr key={k}><td>{t(l.plain || l.description)} <span className="muted">{l.code}</span></td><td>{l.tooth ? `#${l.tooth}` : ''}{l.surfaces ? ` ${l.surfaces}` : ''}</td>
+                <td className="num">{money(l.fee)}</td><td className="num">{money(l.insurance || 0)}</td><td className="num">{money(l.you_pay)}</td></tr>
+            ))}
+          </tbody>
+        ))}
+        <tfoot><tr><td colSpan={2}>{t('Total')}</td><td className="num">{money(totals.fee)}</td><td className="num">{money(totals.insurance || 0)}</td><td className="num">{money(amount)}</td></tr></tfoot>
+      </table>
+      <p className="cp-print-small">{t('Insurance amounts are estimates and not a guarantee of payment. Financing is subject to the lender’s approval.')}</p>
+      <div className="cp-print-sign">{t('Patient signature')} ______________________________ &nbsp; {t('Date')} ______________</div>
+      {plan.practice?.phone && <p className="cp-print-small">{t('Questions? Call us at {phone}.', { phone: plan.practice.phone })}</p>}
+    </div>
   );
 }
 

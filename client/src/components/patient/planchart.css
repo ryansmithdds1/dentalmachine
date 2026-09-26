@@ -1,0 +1,59 @@
+/* The patient's plan on a drawing of their mouth (PlanChart.jsx). Tooth colours come from odontogram.css. */
+.plan-chart { margin: 0; display: flex; flex-direction: column; gap: 10px; }
+.pc-mouth {
+  position: relative; display: flex; flex-direction: column; gap: 0; padding: 10px 26px 8px; border-radius: 16px;
+  background: radial-gradient(120% 100% at 50% 50%, var(--odo-bg-1), var(--odo-bg-2));
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.pc-arch { display: grid; align-items: stretch; position: relative; }
+.pc-arch::after { content: ''; position: absolute; top: 14%; bottom: 14%; left: 50%; border-left: 1px dashed color-mix(in srgb, var(--muted) 40%, transparent); pointer-events: none; }
+.pc-bite { height: 1px; margin: 4px 6%; background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--muted) 45%, transparent), transparent); }
+.pc-label { font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); text-align: center; }
+.pc-side span { position: absolute; top: 50%; writing-mode: vertical-rl; pointer-events: none; font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.pc-side span:first-child { left: 6px; transform: translateY(-50%) rotate(180deg); }
+.pc-side span:last-child { right: 6px; transform: translateY(-50%); }
+
+.pc-tooth {
+  all: unset; box-sizing: border-box; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 3px 1px; border-radius: 10px;
+  position: relative; transition: transform 0.15s ease, opacity 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
+}
+.pc-tooth .tooth-svg { display: block; width: 100%; height: auto; overflow: visible; opacity: 0.55; filter: saturate(0.6); transition: opacity 0.15s ease, filter 0.15s ease; }
+.pc-tooth.on .tooth-svg { opacity: 1; filter: drop-shadow(0 2px 3px rgba(15, 23, 42, 0.18)); }
+.pc-num { font: 600 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); padding: 3px 5px; border-radius: 999px; font-variant-numeric: tabular-nums; }
+.pc-tooth.on .pc-num { color: #fff; background: var(--pc-c); }
+.pc-tooth.on { background: color-mix(in srgb, var(--pc-c) 9%, transparent); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--pc-c) 45%, transparent); }
+button.pc-tooth { cursor: pointer; }
+.pc-tooth.active, button.pc-tooth:hover { background: color-mix(in srgb, var(--pc-c) 18%, transparent); box-shadow: inset 0 0 0 2px var(--pc-c), 0 0 18px 2px color-mix(in srgb, var(--pc-c) 30%, transparent); }
+.pc-arch.upper .pc-tooth.active { transform: translateY(3px); }
+.pc-arch.lower .pc-tooth.active { transform: translateY(-3px); }
+.pc-tooth.faded { opacity: 0.45; }
+button.pc-tooth:focus-visible { outline: 3px solid var(--primary); outline-offset: 2px; }
+.pc-dots { display: flex; gap: 2px; height: 4px; }
+.pc-dots i { width: 4px; height: 4px; border-radius: 50%; }
+.plan-chart.compact .pc-mouth { padding: 6px 8px; border-radius: 10px; }
+.plan-chart.compact .pc-num, .plan-chart.compact .pc-label, .plan-chart.compact .pc-side { display: none; }
+.plan-chart.compact .pc-tooth { padding: 1px 0; border-radius: 5px; }
+
+.pc-areas { display: flex; flex-wrap: wrap; gap: 6px; }
+.pc-area { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; padding: 4px 10px; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--pc-c) 45%, var(--border)); background: color-mix(in srgb, var(--pc-c) 8%, var(--panel)); }
+.pc-area i { width: 8px; height: 8px; border-radius: 50%; background: var(--pc-c); }
+.pc-legend { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 16px; font-size: 13px; color: var(--text-2); }
+.pc-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.pc-legend .sw { width: 12px; height: 12px; border-radius: 4px; display: inline-block; }
+.pc-legend .pc-mark { color: var(--muted); }
+.pc-mi { flex: none; }
+
+/* One tooth beside a procedure. */
+.pc-thumb { --thumb: 30px; display: inline-flex; align-items: center; justify-content: center; flex: none; width: var(--thumb); height: calc(var(--thumb) * 1.3); line-height: 0; }
+.pc-thumb .tooth-svg { width: auto; height: 100%; max-width: 100%; overflow: hidden; filter: drop-shadow(0 1px 1px rgba(15, 23, 42, 0.15)); }
+.pc-thumb.top .tooth-svg { height: 70%; }
+.pc-thumb.none { height: 1px; }
+
+@media (prefers-reduced-motion: reduce) { .pc-tooth, .pc-tooth .tooth-svg { transition: none; } .pc-arch .pc-tooth.active { transform: none; } }
+@media (max-width: 560px) { .pc-mouth { padding: 6px 14px; } .pc-num { font-size: 9px; padding: 2px 2px; } .pc-legend { font-size: 12px; } }
+@media print {
+  .pc-mouth { background: none; box-shadow: inset 0 0 0 1px #999; }
+  .pc-tooth, .pc-tooth.on { background: none !important; box-shadow: none !important; transform: none !important; }
+  .pc-tooth.on .pc-num { color: #000; background: none; border: 1.5px solid #000; }
+  .pc-tooth .tooth-svg { opacity: 1; filter: none; }
+}

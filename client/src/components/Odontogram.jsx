@@ -74,10 +74,11 @@ export function toothState(tooth, conditions, procedures) {
   const ordered = [...procedures.filter((p) => p.tooth === tooth)].sort((a, b) => (a.status === b.status ? 0 : a.status === 'planned' ? 1 : -1));
   for (const p of ordered) {
     notes.push(`${p.code}${p.surfaces ? ` ${p.surfaces}` : ''} ${p.status}`);
-    const color = p.status === 'planned' ? STATUS_COLORS.planned : STATUS_COLORS.completed;
+    // p.color: a caller's own colour for the work (the patient's plan colours each phase, PlanChart.jsx).
+    const color = p.color || (p.status === 'planned' ? STATUS_COLORS.planned : STATUS_COLORS.completed);
     const kind = overlayFor(p.code);
     if (kind === 'extraction') {
-      if (p.status === 'planned') planX = true;
+      if (p.status === 'planned') planX = p.color || true;
       else missing = true;
     } else if (kind) overlays.push({ kind, color });
     if (p.surfaces && !['crown', 'veneer', 'sealant'].includes(kind)) for (const s of p.surfaces) fills[s] = color;
@@ -155,7 +156,8 @@ function topOutline(cls, w) {
 
 const tint = (color, a) => `color-mix(in srgb, ${color} ${Math.round(a * 100)}%, transparent)`;
 
-function ToothSvg({ tooth, state, uid }) {
+// view: 'side' or 'top' draws only that half (a small picture beside a procedure, PlanChart.jsx).
+export function ToothSvg({ tooth, state, uid, view = null }) {
   const upper = isUpper(tooth);
   const cls = toothClass(tooth);
   const w = toothWidth(tooth);
@@ -198,7 +200,7 @@ function ToothSvg({ tooth, state, uid }) {
   };
   const line = ghost ? 'var(--tooth-line-faint)' : 'var(--tooth-line)';
   return (
-    <svg viewBox={`-4 0 ${w + 8} ${H}`} className="tooth-svg" aria-hidden="true">
+    <svg viewBox={view === 'side' ? `-4 ${sideY} ${w + 8} ${SIDE_H}` : view === 'top' ? `-4 ${topY - 3} ${w + 8} ${TOP_H + 6}` : `-4 0 ${w + 8} ${H}`} className="tooth-svg" aria-hidden="true">
       <defs>
         <clipPath id={clipSide}><path d={crown} /></clipPath>
         <clipPath id={clipTop}><path d={o.d} /></clipPath>
@@ -248,7 +250,7 @@ function ToothSvg({ tooth, state, uid }) {
           )}
           {impacted && <path d={crown} fill="none" stroke={impacted.color} strokeWidth="1.4" strokeDasharray="3 2" />}
         </g>
-        {planX && <path d={`M-2 6 L${w + 2} ${SIDE_H - 2} M${w + 2} 6 L-2 ${SIDE_H - 2}`} stroke={STATUS_COLORS.planned} strokeWidth="3" strokeLinecap="round" className="plan-x" />}
+        {planX && <path d={`M-2 6 L${w + 2} ${SIDE_H - 2} M${w + 2} 6 L-2 ${SIDE_H - 2}`} stroke={typeof planX === 'string' ? planX : STATUS_COLORS.planned} strokeWidth="3" strokeLinecap="round" className="plan-x" />}
       </g>
       {/* ---- top view ---- */}
       <g transform={`translate(0 ${topY})`} className={ghost ? 'ghost' : undefined}>

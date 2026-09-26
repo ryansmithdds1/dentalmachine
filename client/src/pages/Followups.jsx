@@ -11,6 +11,7 @@ import AppointmentForm from '../components/AppointmentForm.jsx';
 import { brokenLabel } from '../components/calendar/BrokenPicker.jsx';
 import RecallBoard from '../components/RecallBoard.jsx';
 import MailingLabelsButton from '../components/MailingLabels.jsx';
+import { StageBadge, PlanMoneyChip } from '../components/patient/PlanNotes.jsx';
 import './followups.css';
 
 const OUTCOMES = [['left_voicemail', 'Left voicemail'], ['texted', 'Texted'], ['emailed', 'Emailed'], ['spoke_scheduled', 'Spoke — scheduled'], ['spoke_will_call', 'Spoke — will call back'], ['declined', 'Declined'], ['wrong_number', 'Wrong number'], ['note', 'Note']];
@@ -21,6 +22,7 @@ const minutesBetween = (a, b) => (Date.parse(`${b.replace(' ', 'T')}:00Z`) - Dat
 export default function Followups() {
   const [params, setParams] = useSearchParams();
   const tab = params.get('tab') || 'recall';
+  const { can } = useAuth();
   const { data: unsched, reload: reloadUnsched } = useApi('/followups/unscheduled');
   const { data: broken, reload: reloadBroken } = useApi('/followups/broken');
   return (
@@ -36,6 +38,7 @@ export default function Followups() {
         <button className={tab === 'recall' ? 'active' : ''} onClick={() => setParams({ tab: 'recall' })}>Recall</button>
         <button className={tab === 'board' ? 'active' : ''} onClick={() => setParams({ tab: 'board' })}>Recall board</button>
         <button className={tab === 'unscheduled' ? 'active' : ''} onClick={() => setParams({ tab: 'unscheduled' })}>Unscheduled treatment {unsched ? <span className="count">{unsched.length}</span> : null}</button>
+        {can('clinical:read') && <button className={tab === 'plans' ? 'active' : ''} onClick={() => setParams({ tab: 'plans' })}>Plans in process</button>}
         <button className={tab === 'broken' ? 'active' : ''} onClick={() => setParams({ tab: 'broken' })}>Broken appointments {broken ? <span className="count">{broken.length}</span> : null}</button>
       </div>
       {tab === 'unconfirmed' && <Unconfirmed />}
@@ -43,6 +46,50 @@ export default function Followups() {
       {tab === 'board' && <RecallBoard />}
       {tab === 'unscheduled' && <CallList kind="unscheduled" rows={unsched} onChange={reloadUnsched} />}
       {tab === 'broken' && <CallList kind="broken" rows={broken} onChange={reloadBroken} />}
+      {tab === 'plans' && <PlansInProcess />}
+    </>
+  );
+}
+
+// Treatment plans the office is still working (planprogress.js): where each stands, the latest note and the
+// follow-up date — soonest follow-up first. A stage chip narrows the list; "Show closed" adds declined, expired
+// and paid plans. The row opens the patient's Treatment plans tab, where the notes are.
+function PlansInProcess() {
+  const [stage, setStage] = useState(null);
+  const [closed, setClosed] = useState(false);
+  const { data } = useApi(`/followups/plans${stage ? `?stage=${stage}` : closed ? '?all=1' : ''}`);
+  const { data: all } = useApi('/followups/plans');
+  if (!data) return <div className="empty">Loading…</div>;
+  const counts = all?.counts || {};
+  return (
+    <>
+      <div className="chips plans-stage-chips" role="group" aria-label="Where the plan stands">
+        <button type="button" className={`chip${!stage ? ' active' : ''}`} aria-pressed={!stage} onClick={() => setStage(null)}>All open <span className="count">{Object.values(counts).reduce((a, b) => a + b, 0)}</span></button>
+        {(all?.open_stages || []).filter((k) => counts[k]).map((k) => (
+          <button key={k} type="button" className={`chip${stage === k ? ' active' : ''}`} aria-pressed={stage === k} onClick={() => setStage(stage === k ? null : k)}>{all.stages[k]} <span className="count">{counts[k]}</span></button>
+        ))}
+        {!stage && <label className="checkbox" style={{ fontSize: 13, marginLeft: 8 }}><input type="checkbox" checked={closed} onChange={(e) => setClosed(e.target.checked)} /> Show closed</label>}
+      </div>
+      <div className="card" style={{ padding: 0 }}>
+        <div className="table-wrap">
+          <table className="plans-in-process">
+            <thead><tr><th>Patient</th><th>Plan</th><th>Where it stands</th><th>Latest note</th><th>Follow up</th><th className="num">Planned</th></tr></thead>
+            <tbody>
+              {data.rows.map((r) => (
+                <tr key={r.plan_id} data-plan={r.plan_id}>
+                  <td><Link to={`/patients/${r.patient_id}?tab=treatment`}><strong>{r.first_name} {r.last_name}</strong></Link><div className="muted">{r.phone ? <a href={`tel:${r.phone}`}>{r.phone}</a> : r.email || 'no phone'}</div></td>
+                  <td>{r.name}{r.option_label ? <span className="badge info" style={{ marginLeft: 6 }}>{r.option_label}</span> : null}<div className="muted" style={{ fontSize: 12 }}>{r.presented_at ? `Presented ${fmtDate(r.presented_at.slice(0, 10))}` : `Made ${fmtDate(String(r.created_at).slice(0, 10))}`}</div></td>
+                  <td><StageBadge progress={r} /> <PlanMoneyChip progress={r} /></td>
+                  <td style={{ maxWidth: 320 }}>{r.latest_note ? <><div>{r.latest_note.text}</div><div className="muted" style={{ fontSize: 11 }}>{r.latest_note.by?.split(' ')[0] || 'staff'} · {fmtDate(r.latest_note.at.slice(0, 10))}</div></> : <span className="muted">—</span>}</td>
+                  <td>{r.follow_up ? <strong className={r.follow_up.date <= practiceToday() ? 'due-now' : ''}>{fmtDate(r.follow_up.date)}</strong> : <span className="muted">—</span>}</td>
+                  <td className="num">{r.planned_fee ? money(r.planned_fee) : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {data.rows.length === 0 && <div className="empty">No plans here. 🎉</div>}
+        </div>
+      </div>
     </>
   );
 }
@@ -411,7 +458,8 @@ function CallList({ kind, rows, onChange }) {
                       <td className="num">{r.planned_amount ? money(r.planned_amount) : '—'}</td>
                     </>
                   )}
-                  <td>{r.last_contact ? <><div>{outcomeLabel(r.last_contact.outcome)}</div><div className="muted" style={{ fontSize: 11 }}>{fmtDate(r.last_contact.created_at)}</div></> : <span className="muted">Never</span>}</td>
+                  <td>{r.last_contact ? <><div>{outcomeLabel(r.last_contact.outcome)}{r.last_contact.outcome === 'note' && r.last_contact.note ? `: ${r.last_contact.note}` : ''}</div><div className="muted" style={{ fontSize: 11 }}>{fmtDate(r.last_contact.created_at)}</div></> : <span className="muted">Never</span>}
+                    {r.follow_up && <div className="plan-followup-due" style={{ fontSize: 12, fontWeight: 600 }}>Follow up {fmtDate(r.follow_up)}</div>}</td>
                   <td style={{ whiteSpace: 'nowrap' }}>
                     {can('patients:write') && <button className="small" onClick={() => setLogFor({ patient_id: r.patient_id, name: `${r.first_name} ${r.last_name}` })}>Log call</button>}{' '}
                     {can('schedule:write') && (

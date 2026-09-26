@@ -4,6 +4,8 @@ import { useApi } from '../hooks.js';
 import QRCode from 'qrcode';
 import { money, fmtDate, fmtUtcDate } from '../format.js';
 import { useAuth } from '../auth.jsx';
+import PlanChart from '../components/patient/PlanChart.jsx';
+import { StageBadge, PlanMoneyChip } from '../components/patient/PlanNotes.jsx';
 
 const useAutoPrint = (ready) => {
   useEffect(() => {
@@ -11,7 +13,9 @@ const useAutoPrint = (ready) => {
   }, [ready]);
 };
 
-// Printable treatment plan / case presentation.
+// Printable treatment plan: a letter-size document, black-and-white friendly — the plan drawn on the teeth, then
+// every procedure by phase with the fee, the insurance estimate and the patient's share, and a signature line.
+// Staff see where the plan stands above it (never printed, and the office's notes are never on it).
 export function TreatmentPlanPrint() {
   const { id } = useParams();
   const { data: live } = useApi(`/treatment-plans/${id}`);
@@ -22,26 +26,42 @@ export function TreatmentPlanPrint() {
   // The signed copy prints exactly what the patient signed, even if the plan changed afterwards.
   const t = signedCopy && live.signed_version ? { ...live, procedures: live.signed_version.procedures, estimate: live.signed_version.estimate } : { ...live, signed_at: live.signed_version?.changed ? null : live.signed_at };
   const est = Object.fromEntries(t.estimate.items.map((i) => [i.procedure_id, i]));
+  const planned = t.procedures.filter((p) => p.status === 'planned');
+  const phaseOf = (p) => p.phase || live.procedures.find((x) => x.id === p.id)?.phase || 1;
+  const phases = [...new Set(planned.map(phaseOf))].sort((a, b) => a - b);
+  const sum = (list, f) => list.reduce((n, p) => n + f(p), 0);
   return (
-    <div className="print-doc">
-      <div className="no-print" style={{ marginBottom: 12 }}><Link to={`/patients/${t.patient.id}`}>← Back</Link> <button onClick={() => window.print()}>Print</button></div>
+    <div className="print-doc tp-print">
+      <div className="no-print tp-print-bar">
+        <Link to={`/patients/${t.patient.id}?tab=treatment`}>← Back</Link> <button onClick={() => window.print()}>Print</button>
+        {live.progress && <span className="muted">Where it stands: <StageBadge progress={live.progress} /> <PlanMoneyChip progress={live.progress} /> <small>(not printed)</small></span>}
+      </div>
       <header className="doc-head">
         <div><h1>{t.practice.name}</h1><div>{t.practice.address}, {t.practice.city}, {t.practice.state} {t.practice.zip} · {t.practice.phone}</div></div>
         <div style={{ textAlign: 'right' }}><h2>Treatment plan</h2><div>{fmtUtcDate(t.created_at, tz)}</div></div>
       </header>
       <p><strong>{t.patient.first_name} {t.patient.last_name}</strong> · DOB {t.patient.dob ? fmtDate(t.patient.dob) : '—'} · {t.name}{t.option_label ? ` (${t.option_label})` : ''}</p>
+      <div className="tp-print-chart">
+        <PlanChart lines={t.procedures.map((p) => ({ ...p, phase: phaseOf(p), plain: p.description }))} phases={phases.length > 1 ? phases.map((n) => ({ phase: n, name: `Phase ${n}` })) : []} />
+      </div>
       <table>
         <thead><tr><th>Code</th><th>Procedure</th><th>Tooth</th><th className="num">Fee</th><th className="num">Est. insurance</th><th className="num">Your estimate</th></tr></thead>
-        <tbody>
-          {t.procedures.filter((p) => p.status === 'planned').map((p, i, list) => [
-            new Set(list.map((x) => x.phase || 1)).size > 1 && (i === 0 || (list[i - 1].phase || 1) !== (p.phase || 1))
-              ? <tr key={`ph${p.phase}`} className="phase-row"><td colSpan={6}><strong>Phase {p.phase || 1}</strong></td></tr> : null,
-            <tr key={p.id}><td>{p.code}</td><td>{p.description}</td><td>{p.tooth ? `#${p.tooth}` : ''} {p.surfaces || ''}{p.area || ''}</td>
-              <td className="num">{money(p.fee)}</td><td className="num">{money(est[p.id]?.insurance || 0)}</td><td className="num">{money(est[p.id]?.patient ?? p.fee)}</td></tr>,
-          ])}
+        {phases.map((n) => {
+          const list = planned.filter((p) => phaseOf(p) === n);
+          return (
+            <tbody key={n} className="tp-print-phase">
+              {phases.length > 1 && <tr className="phase-row"><td colSpan={3}><strong>Phase {n}</strong></td><td className="num">{money(sum(list, (p) => p.fee))}</td><td className="num">{money(sum(list, (p) => est[p.id]?.insurance || 0))}</td><td className="num"><strong>{money(sum(list, (p) => est[p.id]?.patient ?? p.fee))}</strong></td></tr>}
+              {list.map((p) => (
+                <tr key={p.id}><td>{p.code}</td><td>{p.description}</td><td>{p.tooth ? `#${p.tooth}` : ''} {p.surfaces || ''}{p.area || ''}</td>
+                  <td className="num">{money(p.fee)}</td><td className="num">{money(est[p.id]?.insurance || 0)}</td><td className="num">{money(est[p.id]?.patient ?? p.fee)}</td></tr>
+              ))}
+            </tbody>
+          );
+        })}
+        <tfoot>
           <tr className="totals-row"><td colSpan={3}>Total{t.estimate.total_write_off ? ` (after ${money(t.estimate.total_write_off)} in-network discount)` : ''}</td>
             <td className="num">{money(t.estimate.total_fee)}</td><td className="num">{money(t.estimate.total_insurance)}</td><td className="num">{money(t.estimate.total_patient)}</td></tr>
-        </tbody>
+        </tfoot>
       </table>
       {t.estimate.discount > 0 && <p><strong>{t.discount_pct}% discount:</strong> −{money(t.estimate.discount)} · your estimate after discount {money(t.estimate.patient_after_discount)}</p>}
       <p className="muted" style={{ fontSize: 12 }}>Insurance amounts are estimates based on the benefits on file{t.estimate.policy ? ` with ${t.estimate.policy.carrier_name}` : ''} and are not a guarantee of payment. You are responsible for any amount insurance does not pay.</p>

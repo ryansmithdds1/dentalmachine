@@ -6363,6 +6363,17 @@ const COLUMNS = [
   // The training patient (training.js): a pretend chart per practice that guided walkthroughs run on. Nothing done
   // to it leaves the office, and it (with everything recorded against it) is left out of every report and list.
   ['patients', 'is_training', 'INTEGER NOT NULL DEFAULT 0'],
+  // Where a treatment plan stands (planprogress.js): the one human state staff set with a note ("thinking it
+  // over"; declined is status 'rejected'), and the staff-only notes on a plan, kept as unscheduled-treatment
+  // follow-ups: which plan, the quick-note chip, the follow-up date and the task it made, the note it corrects
+  // (notes are never edited), and where the plan stood when the note was written.
+  ['treatment_plans', 'decision', 'TEXT'],
+  ['followups', 'treatment_plan_id', 'INTEGER REFERENCES treatment_plans(id)'],
+  ['followups', 'tag', 'TEXT'],
+  ['followups', 'follow_up_date', 'TEXT'],
+  ['followups', 'task_id', 'INTEGER REFERENCES tasks(id)'],
+  ['followups', 'corrects_id', 'INTEGER REFERENCES followups(id)'],
+  ['followups', 'plan_stage', 'TEXT'],
 ];
 
 // Read-only views that leave the training patient out (training.js). Reports, totals, dashboards, audiences and
@@ -6413,6 +6424,9 @@ BEGIN SELECT RAISE(ABORT, 'A signed consent cannot be changed: a new version nee
 CREATE TRIGGER IF NOT EXISTS patient_form_signed_fixed BEFORE UPDATE OF data, fields, signature_name, signature_image, signed_at, content_hash ON patient_forms
 WHEN OLD.data IS NOT NEW.data OR OLD.fields IS NOT NEW.fields OR OLD.signature_name IS NOT NEW.signature_name OR OLD.signature_image IS NOT NEW.signature_image OR OLD.signed_at IS NOT NEW.signed_at OR OLD.content_hash IS NOT NEW.content_hash
 BEGIN SELECT RAISE(ABORT, 'A signed form cannot be changed'); END;
+CREATE TRIGGER IF NOT EXISTS followup_note_fixed BEFORE UPDATE OF note, outcome, tag, created_by, created_at ON followups
+WHEN OLD.note IS NOT NEW.note OR OLD.outcome IS NOT NEW.outcome OR OLD.tag IS NOT NEW.tag OR OLD.created_by IS NOT NEW.created_by OR OLD.created_at IS NOT NEW.created_at
+BEGIN SELECT RAISE(ABORT, 'A follow-up note cannot be changed: add a correction'); END;
 `;
 const GUARDS_PG = [
   `CREATE OR REPLACE FUNCTION dm_audit_append_only() RETURNS trigger LANGUAGE plpgsql AS $f$ BEGIN RAISE EXCEPTION 'The audit log cannot be changed'; END $f$`,
@@ -6430,6 +6444,10 @@ const GUARDS_PG = [
   `CREATE OR REPLACE FUNCTION dm_form_fixed() RETURNS trigger LANGUAGE plpgsql AS $f$ BEGIN RAISE EXCEPTION 'A signed form cannot be changed'; END $f$`,
   'DROP TRIGGER IF EXISTS patient_form_signed_fixed ON patient_forms',
   'CREATE TRIGGER patient_form_signed_fixed BEFORE UPDATE ON patient_forms FOR EACH ROW WHEN (OLD.data IS DISTINCT FROM NEW.data OR OLD.fields IS DISTINCT FROM NEW.fields OR OLD.signature_name IS DISTINCT FROM NEW.signature_name OR OLD.signature_image IS DISTINCT FROM NEW.signature_image OR OLD.signed_at IS DISTINCT FROM NEW.signed_at OR OLD.content_hash IS DISTINCT FROM NEW.content_hash) EXECUTE FUNCTION dm_form_fixed()',
+  // Follow-up notes (plan notes among them, planprogress.js) are never edited: a correction is a new note.
+  `CREATE OR REPLACE FUNCTION dm_followup_fixed() RETURNS trigger LANGUAGE plpgsql AS $f$ BEGIN RAISE EXCEPTION 'A follow-up note cannot be changed: add a correction'; END $f$`,
+  'DROP TRIGGER IF EXISTS followup_note_fixed ON followups',
+  'CREATE TRIGGER followup_note_fixed BEFORE UPDATE ON followups FOR EACH ROW WHEN (OLD.note IS DISTINCT FROM NEW.note OR OLD.outcome IS DISTINCT FROM NEW.outcome OR OLD.tag IS DISTINCT FROM NEW.tag OR OLD.created_by IS DISTINCT FROM NEW.created_by OR OLD.created_at IS DISTINCT FROM NEW.created_at) EXECUTE FUNCTION dm_followup_fixed()',
 ];
 
 const INDEXES = `
@@ -6477,6 +6495,7 @@ CREATE INDEX IF NOT EXISTS idx_tp_patient ON treatment_plans(patient_id);
 CREATE INDEX IF NOT EXISTS idx_notes_patient ON clinical_notes(patient_id);
 CREATE INDEX IF NOT EXISTS idx_conditions_patient ON tooth_conditions(patient_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(practice_id, status);
+CREATE INDEX IF NOT EXISTS idx_followups_plan ON followups(treatment_plan_id);
 CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(practice_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_perio_patient ON perio_exams(patient_id);
 CREATE INDEX IF NOT EXISTS idx_recall_contacts ON recall_contacts(recall_id);

@@ -1,12 +1,13 @@
 import { setLang, useLang, useT } from './i18n.js';
 
 // Shell for patient-facing pages: friendly, mobile-first, no staff navigation. logo: the practice's own (online
-// booking); compact: inside another site (the booking widget), with less chrome.
-export default function PublicLayout({ title, practice, children, logo = null, compact = false }) {
+// booking); compact: inside another site (the booking widget), with less chrome. wide: a page meant to fill a
+// computer screen (a treatment plan presented across the desk); actions: buttons beside the title (Print).
+export default function PublicLayout({ title, practice, children, logo = null, compact = false, wide = false, actions = null }) {
   const t = useT();
   const lang = useLang();
   return (
-    <div className={`public-page${compact ? ' compact' : ''}`}>
+    <div className={`public-page${compact ? ' compact' : ''}${wide ? ' wide' : ''}`}>
       <header className="public-header">
         <div className="public-brand">{logo ? <img src={logo} alt="" className="public-logo" /> : '🦷'} {practice?.name || t('Your dental office')}</div>
         <div className="inline" style={{ gap: 12 }}>
@@ -17,7 +18,9 @@ export default function PublicLayout({ title, practice, children, logo = null, c
         </div>
       </header>
       <main className="public-main">
-        {title && <h1 style={{ marginBottom: 16 }}>{title}</h1>}
+        {title && (actions
+          ? <div className="public-title-row"><h1>{title}</h1><div className="public-title-actions">{actions}</div></div>
+          : <h1 style={{ marginBottom: 16 }}>{title}</h1>)}
         {children}
       </main>
       {!compact && <footer className="public-footer">{t('Secured by Dental Machine')}</footer>}

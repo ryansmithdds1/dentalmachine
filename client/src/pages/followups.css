@@ -16,3 +16,4 @@
 .logcall-inline .chip kbd, .logcall-inline button kbd { margin-left: 4px; font-size: 10px; opacity: .7; }
 .logcall-inline textarea { min-height: 34px; }
 .logcall-history { font-size: 12px; }
+.plans-stage-chips { margin-bottom: 10px; align-items: center; } .plans-stage-chips .count { margin-left: 4px; font-weight: 700; } .plans-in-process .due-now { color: var(--danger); }

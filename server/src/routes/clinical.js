@@ -7,6 +7,7 @@ import { signedVersion } from './casepres.js';
 import { memberSavings } from '../memberships.js';
 import { officeFee } from '../fees.js';
 import { undoRecallResets } from '../recallsync.js';
+import { plansProgress, planNotes, notesView } from '../planprogress.js';
 
 export const CONDITIONS = [
   'caries', 'missing', 'filling', 'crown', 'root_canal', 'implant', 'bridge_pontic', 'fracture',
@@ -273,7 +274,15 @@ export default function clinicalRoutes({ db }) {
   r.get('/patients/:id/treatment-plans', requirePermission('clinical:read'), async (req, res) => {
     const patient = await patientOr404(req);
     const plans = await db.all('SELECT * FROM treatment_plans WHERE patient_id = ? AND practice_id = ? ORDER BY created_at DESC, id DESC', patient.id, req.user.practice_id);
-    res.json(await mapSeq(plans, planWithDetails));
+    // Where each plan stands (planprogress.js) and the office's notes on it — staff-only, like this whole route.
+    const progress = await plansProgress(db, req.user.practice_id, patient.id, plans, (await practiceNow(db, req.user.practice_id)).slice(0, 10));
+    const notes = await planNotes(db, req.user.practice_id, plans.map((p) => p.id));
+    const money = can(req.user, 'billing:read');
+    res.json(await mapSeq(plans, async (p) => {
+      const g = progress.get(p.id);
+      const v = notesView(notes.filter((n) => n.treatment_plan_id === p.id));
+      return { ...(await planWithDetails(p)), progress: money ? g : { ...g, balance: undefined, charged: undefined }, staff_notes: v.notes, follow_up: v.follow_up };
+    }));
   });
 
   r.post('/patients/:id/treatment-plans', requirePermission('clinical:write'), async (req, res) => {

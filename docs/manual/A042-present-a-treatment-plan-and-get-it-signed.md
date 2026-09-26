@@ -35,4 +35,4 @@ Treatment plans tab → “Present here for … to sign”. The patient ticks �
 - [How do I dictate a note by voice?](A052-dictate-a-note-by-voice.md)
 
 ---
-[All how-tos](README.md) · Action A042 · screenshots from the robot run of 2026-09-25
+[All how-tos](README.md) · Action A042 · screenshots from the robot run of 2026-09-26

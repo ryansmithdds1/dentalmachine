@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { refuseTraining } from '../training.js';
 import { messageText, patientLang, subjectFor } from '../templates.js';
-import { requirePermission, HttpError, rateLimit, signToken, verifyToken } from '../auth.js';
+import { requirePermission, HttpError, rateLimit, signToken, verifyToken, can } from '../auth.js';
 import { pick, requireFields, insert, findOr404, audit, newToken, hashToken, recorded } from '../util.js';
 import { estimateCoverage, primaryPolicy, benefitYear, withPlan } from '../services.js';
 import { practiceNow } from '../util.js';
@@ -17,6 +17,8 @@ import { makeThumbnail } from '../thumbnails.js';
 import { acceptedForPlan } from '../xrayai.js';
 import finOptionRoutes, { planQuote, publicQuote, alternativesOf, acceptChoice, agreementView, phaseList } from './finoptions.js';
 import treatmentOptionRoutes, { compareFor, publicCompare } from './treatmentoptions.js';
+import planNoteRoutes from './plannotes.js';
+import { plansProgress } from '../planprogress.js';
 
 // Common dental prescriptions for one-click entry.
 export const RX_FAVORITES = [
@@ -55,6 +57,8 @@ const planView = async (db, plan) => {
   };
 };
 const SIGN_LINK_DAYS = 14;
+// What the patient's plan page draws as already in their mouth (not findings like decay: those are what the plan treats).
+const EXISTING_WORK = ['missing', 'filling', 'crown', 'root_canal', 'implant', 'bridge_pontic', 'sealant', 'veneer'];
 // Wrong birth dates before a plan link stops working.
 const MAX_DOB_TRIES = 5;
 
@@ -112,6 +116,8 @@ export default function casePresentationRoutes({ db, messenger, config, erx, sec
   r.use(finOptionRoutes({ db }));
   // Comparing 2–3 options for one problem, and making them in one call (routes/treatmentoptions.js).
   r.use(treatmentOptionRoutes({ db }));
+  // Where each plan stands and the office's own notes on it (routes/plannotes.js; staff-only).
+  r.use(planNoteRoutes({ db }));
 
   // Staff: send the plan to the patient to review and sign remotely, or get a link for a chairside tablet.
   r.post('/treatment-plans/:tid/present', requirePermission('clinical:write'), async (req, res) => {
@@ -219,8 +225,10 @@ export default function casePresentationRoutes({ db, messenger, config, erx, sec
   r.get('/treatment-plans/:tid', requirePermission('clinical:read'), async (req, res) => {
     const plan = await findOr404(db, 'treatment_plans', req.params.tid, req.user.practice_id, 'Treatment plan');
     const view = await planView(db, plan);
+    // Where the plan stands, for the staff bar on the printable page (never printed; no notes here).
+    const progress = (await plansProgress(db, plan.practice_id, plan.patient_id, [plan], (await practiceNow(db, plan.practice_id)).slice(0, 10))).get(plan.id);
     res.json({
-      ...view,
+      ...view, progress: can(req.user, 'billing:read') ? progress : { ...progress, balance: undefined, charged: undefined },
       financing: financingOptions(await db.get('SELECT financing FROM practices WHERE id = ?', req.user.practice_id), view.estimate.total_patient),
       patient: await db.get('SELECT id, first_name, last_name, dob, address, city, state, zip, phone FROM patients WHERE id = ?', plan.patient_id),
       practice: await db.get('SELECT name, address, city, state, zip, phone FROM practices WHERE id = ?', req.user.practice_id),
@@ -398,6 +406,12 @@ export function publicCasePresentation({ db, storage, secret }) {
       estimate: { ...v.estimate, items: v.estimate.items.map(({ procedure_id: _, ...rest }) => rest) },
       // What the x-rays showed on the plan's teeth — only findings the dentist confirmed (XR3, xrayai.js).
       xray_findings: await acceptedForPlan(db, plan, v.procedures),
+      // What's already in their mouth, so the drawing of the plan looks like their teeth: restorations and missing
+      // teeth on the chart, and work already done (tooth, code, surfaces only — no notes, dates or providers).
+      chart: plan.signed_at ? null : {
+        existing: await db.all(`SELECT tooth, condition, surfaces FROM tooth_conditions WHERE practice_id = ? AND patient_id = ? AND resolved = 0 AND condition IN (${EXISTING_WORK.map(() => '?').join(',')}) ORDER BY id LIMIT 200`, plan.practice_id, plan.patient_id, ...EXISTING_WORK),
+        done: await db.all("SELECT tooth, code, surfaces FROM procedures WHERE practice_id = ? AND patient_id = ? AND status = 'completed' AND tooth IS NOT NULL AND (treatment_plan_id IS NULL OR treatment_plan_id != ?) ORDER BY id LIMIT 200", plan.practice_id, plan.patient_id, plan.id),
+      },
     };
   };
 

@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import RecallStatus from '../components/RecallStatus.jsx';
+import { StageBadge } from '../components/patient/PlanNotes.jsx';
+import { CalendarClock } from 'lucide-react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useApi, useLookup } from '../hooks.js';
 import { useAuth } from '../auth.jsx';
@@ -126,6 +128,13 @@ export default function PatientDetail() {
                 )}
                 {p.guarantor && <button className="link" style={{ fontSize: 12 }} onClick={() => setTab('family')}>Guarantor: {p.guarantor.first_name} {p.guarantor.last_name}</button>}
                 {!p.guarantor && p.family_size > 1 && <button className="link" style={{ fontSize: 12 }} onClick={() => setTab('family')}>Head of household · {p.family_size} in family</button>}
+                {/* The treatment plan in process: where it stands and when to follow up (planprogress.js). */}
+                {p.plan_status && (
+                  <button type="button" className="plan-status-chip" onClick={() => setTab('treatment')} title={`${p.plan_status.name}${p.plan_status.latest_note ? ` — “${p.plan_status.latest_note}”` : ''}${p.plan_status.follow_up ? ` · follow up ${fmtDate(p.plan_status.follow_up.date)}` : ''}`}>
+                    <span className="muted">Tx plan</span> <StageBadge progress={{ ...p.plan_status, detail: null }} />
+                    {p.plan_status.follow_up && <CalendarClock size={13} className="plan-followup" aria-label={`Follow up ${fmtDate(p.plan_status.follow_up.date)}`} />}
+                  </button>
+                )}
                 {/* Preferences (urgent first), "moved by us" strikes and the latest personal note — always here (PP1, PP2, S8). */}
                 <ConnectionChips patientId={p.id} />
               </div>

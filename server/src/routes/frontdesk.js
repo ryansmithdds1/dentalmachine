@@ -329,7 +329,11 @@ export default function frontDeskRoutes({ db, messenger }) {
        GROUP BY p.id ORDER BY accepted DESC, amount DESC`, pid, await practiceNow(db, pid),
     )), async (x) => ({
       ...x,
-      last_contact: await lastContact(x.patient_id, 'unscheduled')
+      last_contact: await lastContact(x.patient_id, 'unscheduled'),
+      // The soonest open follow-up someone set on one of their plans (a plan note's task, planprogress.js).
+      follow_up: (await db.get(
+        "SELECT MIN(t.due_date) AS d FROM followups f JOIN tasks t ON t.id = f.task_id WHERE f.practice_id = ? AND f.patient_id = ? AND f.treatment_plan_id IS NOT NULL AND t.status = 'open'", pid, x.patient_id,
+      ))?.d || null,
     }));
     // Patients who declined drop off the list (until something new is planned or they're asked for).
     res.json(req.query.all ? rows : rows.filter((x) => x.last_contact?.outcome !== 'declined' || x.planned_since > x.last_contact.created_at));

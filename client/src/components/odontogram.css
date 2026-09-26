@@ -21,12 +21,8 @@
   --odo-grid: rgba(125, 211, 252, 0.05);
   --odo-glow: rgba(45, 212, 191, 0.4);
 }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) {
-    --enamel-1: #e9eef6; --enamel-2: #c9d2df; --enamel-3: #9aa6b8; --root-1: #b3a88f; --root-2: #7a705b;
-    --odo-bg-1: #111a2a; --odo-bg-2: #0c1320; --odo-grid: rgba(125, 211, 252, 0.05); --odo-glow: rgba(45, 212, 191, 0.4);
-  }
-}
+/* Only the app's own dark theme: patient pages and printouts have no data-theme and stay light (theme.js), so the
+   teeth drawn on a patient's plan must not turn dark with the computer's setting. */
 
 .odonto-wrap { position: relative; }
 .odontogram2 {

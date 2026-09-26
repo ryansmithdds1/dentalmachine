@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api } from '../../api.js';
 import { fmtTime, fmtDateTime, fmtUtcDateTime, money, eligibilityBadge } from '../../format.js';
 import { useAuth } from '../../auth.jsx';
@@ -234,6 +235,9 @@ export default function AppointmentDrawer({ appt: a, can, onClose, onStatus, onS
           {w && active && <button onClick={onEdit}>Edit</button>}
           {w && active && ['scheduled', 'confirmed'].includes(a.status) && <button onClick={onReminder}>Send reminder</button>}
           {w && active && <button onClick={onToggleAsap}>{a.asap ? 'Remove from ASAP' : 'Add to ASAP list'}</button>}
+          {!['cancelled', 'no_show'].includes(a.status) && (
+            <Link to={`/appointments/${a.id}/route-slip`} data-tour="route-slip"><button type="button" tabIndex={-1}>Route slip</button></Link>
+          )}
         </div>
         {moveWarn && (
           <div className="confirm-box move-warning" role="alert">

@@ -14,6 +14,7 @@ import { useShortcuts } from '../../shortcuts.js';
 import { toast, undoable } from '../../toast.js';
 import { Settings2, GripVertical, ChevronUp, ChevronDown, Plus } from 'lucide-react';
 import FinDesk from './FinDesk.jsx';
+import PlanNotes, { StageBadge, PlanMoneyChip } from './PlanNotes.jsx';
 import { sendPreauth } from '../preauthSend.js';
 import StaffCompare from './StaffCompare.jsx';
 import FinOptionsSettings from '../FinOptionsSettings.jsx';
@@ -117,7 +118,7 @@ export default function TreatmentTab({ patient, onChange }) {
         <div className="card" key={plan.id} data-plan={plan.id}>
           <div className="page-header" style={{ marginBottom: 10 }}>
             <div>
-              <h3 style={{ margin: 0 }}>{plan.name}{plan.option_label ? <span className="badge info" style={{ marginLeft: 6 }}>{plan.option_label}</span> : null} <Badge value={plan.status} />{plan.discount_pct > 0 && <span className="badge ok" style={{ marginLeft: 6 }}>{plan.discount_pct}% discount</span>}</h3>
+              <h3 style={{ margin: 0 }}>{plan.name}{plan.option_label ? <span className="badge info" style={{ marginLeft: 6 }}>{plan.option_label}</span> : null} {plan.progress ? <><StageBadge progress={plan.progress} /> <PlanMoneyChip progress={plan.progress} /></> : <Badge value={plan.status} />}{plan.discount_pct > 0 && <span className="badge ok" style={{ marginLeft: 6 }}>{plan.discount_pct}% discount</span>}</h3>
               <div className="muted">
                 Created {fmtDate(plan.created_at)}{plan.accepted_at ? ` · Accepted ${fmtDate(plan.accepted_at)}` : ''}
                 {plan.signed_at && <> · <span className="badge ok">✍ Signed by {plan.signature_name}</span> <a href={`/treatment-plans/${plan.id}/print?signed=1`} target="_blank" rel="noreferrer">signed copy</a> · <a href="#" onClick={(e) => { e.preventDefault(); download(`/treatment-plans/${plan.id}/pdf`, 'treatment-plan.pdf'); }}>PDF</a></>}
@@ -168,6 +169,7 @@ export default function TreatmentTab({ patient, onChange }) {
               </div>
             )}
           </div>
+          <PlanNotes plan={plan} onChange={refresh} />
           {plan.option_group && plans.find((x) => x.option_group === plan.option_group) === plan && quotes[plan.id]?.alternatives?.length > 1 && <StaffCompare plan={plan} onChange={refresh} />}
           <PlanTable plan={plan} quote={quotes[plan.id]} codes={codes} canEdit={canWrite && !['completed', 'rejected'].includes(plan.status)} act={act} withUndo={withUndo}
             onBook={(procs) => setBooking({ plan, procs })} canBook={can('schedule:write')} onQuote={(q) => setQuotes((all) => ({ ...all, [plan.id]: q }))} />

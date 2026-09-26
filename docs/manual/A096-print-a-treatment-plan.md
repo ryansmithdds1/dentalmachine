@@ -27,4 +27,4 @@ Prints the treatment plan with fees, insurance estimates and the patient’s sha
 - [How do I write a prescription?](A062-write-a-prescription.md)
 
 ---
-[All how-tos](README.md) · Action A096 · screenshots from the robot run of 2026-09-25
+[All how-tos](README.md) · Action A096 · screenshots from the robot run of 2026-09-26
