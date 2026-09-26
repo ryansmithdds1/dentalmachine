@@ -288,6 +288,21 @@ test('PX4 mailed birthday card for kids arrives by the day (Lob, via the engine)
   assert.equal(mailer.letters.length, letters + 1, 'mailed once');
 });
 
+test('PX4 the birthday card looks ahead across New Year: a Jan 2 birthday is mailed on Dec 28', async () => {
+  const { staff, pid, api, provider } = await setUp();
+  await on(staff, 'birthday_card');
+  const kid = await addPatient(api, { first_name: 'Noel', dob: '2024-01-02', address: '9 Elm', city: 'Austin', state: 'TX', zip: '78704' });
+  await appt(pid, kid.id, provider.id, '2030-10-30 09:00', 'completed');
+  const letters = mailer.letters.length;
+  await run(pid, at('2030-12-28')); // five days before, as the card is timed
+  const mailed = mailer.letters.slice(letters);
+  assert.equal(mailed.length, 1, 'next year’s birthday, not this year’s (already past)');
+  assert.equal(mailed[0].to.address, '9 Elm');
+  assert.match(mailed[0].html, /Happy birthday, Noel!/);
+  const e = await h.db.get('SELECT anchor_date FROM cadence_enrollments WHERE patient_id = ?', kid.id);
+  assert.equal(e?.anchor_date, '2031-01-02');
+});
+
 test('PX3 post-op check-in: the evening after surgery, nothing clinical in it; 3 and 2 alert the doctor and Needs attention, 1 doesn’t', async () => {
   const { staff, pid, patient, provider, adminId } = await setUp();
   await on(staff, 'postop');

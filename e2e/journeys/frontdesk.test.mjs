@@ -54,8 +54,10 @@ async function book(date, time) {
 test('book today and a visit later on', async () => {
   DAY = addDays(j.today, 150);
   while (new Date(`${DAY}T12:00:00Z`).getUTCDay() !== 2) DAY = addDays(DAY, 1); // a quiet Tuesday
-  // Late in the day so it's still ahead of "now" whenever this runs (the unconfirmed list leaves out visits
-  // that have started); "Book it anyway" covers it being after hours.
+  // Late in the day so it's still ahead of "now" (the unconfirmed list leaves out visits that have started);
+  // "Book it anyway" covers it being after hours. Past 10 pm office time that's no longer ahead, so the visit is
+  // tomorrow's and the day's screens below follow it.
+  if (j.nowTime >= '22:00') j.today = addDays(j.today, 1);
   await j.step('book today', () => book(j.today, '22:30'));
   await j.step('book later', () => book(DAY, '10:00'));
   const visits = await j.s.get(`/appointments?patient_id=${patientId}&from=${j.today}&to=${addDays(DAY, 1)}`);

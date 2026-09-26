@@ -524,7 +524,9 @@ export const journeyCadence = {
       for (const p of rows) {
         const prefs = await prefsFor(db, p.id);
         if (prefs.no_celebrations) continue;
-        const bday = birthdayIn(p.dob, Number(today.slice(0, 4)));
+        let bday = birthdayIn(p.dob, Number(today.slice(0, 4)));
+        // The card looks up to a week ahead: from late December that's an early-January birthday, next year's.
+        if (bday < today) bday = birthdayIn(p.dob, Number(today.slice(0, 4)) + 1);
         const current = (p.last_visit && p.last_visit >= since) || p.created_at >= since.slice(0, 10);
         if (on('birthday') && bday === today && current) out.push({ patient_id: p.id, subtype: 'birthday', source_type: 'patient', source_id: p.id, anchor_date: bday, location_id: p.location_id });
         if (on('birthday_card') && bday >= today && bday <= days.at(-1)) {

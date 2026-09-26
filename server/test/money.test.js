@@ -4,6 +4,7 @@ import { harness } from './helpers.js';
 import { benefitYear, deductibleMet } from '../src/services.js';
 import { parse835, sandbox835 } from '../src/x12.js';
 import { planStatus } from '../src/routes/family.js';
+import { localNow } from '../src/util.js';
 
 const h = harness({ config: { payments: 'sandbox' } });
 
@@ -63,7 +64,7 @@ test('deductibles start again each benefit year; benefits are counted by date of
   let est = (await ctx.api.post(`/patients/${ctx.patient.id}/estimate`, { patient_insurance_id: primary.id, procedure_ids: [proc.id] })).data;
   assert.equal(est.total_deductible, 0);
   // …but that was last benefit year: it no longer counts.
-  const lastYear = `${Number(new Date().toISOString().slice(0, 4)) - 1}-01-01`;
+  const lastYear = `${Number(localNow('America/New_York').slice(0, 4)) - 1}-01-01`; // the office's year, not UTC's
   await h.db.run('UPDATE patient_insurance SET deductible_year = ? WHERE id = ?', lastYear, primary.id);
   est = (await ctx.api.post(`/patients/${ctx.patient.id}/estimate`, { patient_insurance_id: primary.id, procedure_ids: [proc.id] })).data;
   assert.equal(est.total_deductible, 5000);

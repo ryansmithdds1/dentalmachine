@@ -41,6 +41,9 @@ const SECRET = 'test-secret';
 const APP = 'https://app.example.com';
 const D0 = new Date().toISOString().slice(0, 10); // links are checked against the real clock
 const at = (date, hm = '15:00') => new Date(`${date}T${hm}:00Z`);
+// Birthdays well away from every day these tests run (D0 to D0 + 120, and D0 + 400): the birthday journey is on by
+// default, and its text would be counted with the treatment follow-ups (a Jan 1 birth date broke this on Dec 31).
+const DOB = `1972${addDays(D0, 200).slice(4)}`;
 const dir = mkdtempSync(join(tmpdir(), 'dm-txf-'));
 const storage = createStorage({ dir, key: 'txfollow-test-key', s3: null });
 
@@ -83,6 +86,7 @@ async function setUp() {
   const p = await h.practice({ timezone: 'UTC' });
   const pid = (await h.db.get('SELECT practice_id FROM patients WHERE id = ?', p.patient.id)).practice_id;
   const staff = call(p.token);
+  await h.db.run('UPDATE patients SET dob = ? WHERE id = ?', DOB, p.patient.id);
   const on = await staff('PUT', '/txfollow/settings', { enabled: true, from_date: '2000-01-01' });
   assert.equal(on.status, 200, JSON.stringify(on.data));
   return { ...p, pid, staff };
@@ -98,7 +102,7 @@ async function makePlan(pid, patientId, { codes = ['D2740'], tooth = '30', creat
   }
   return planId;
 }
-const newPatient = async (api, first, extra = {}) => (await api.post('/patients', { first_name: first, last_name: 'Tx', dob: '1970-01-01', phone: '(512) 555-0177', email: `${first.toLowerCase()}@example.com`, address: '1 Oak', city: 'Austin', state: 'TX', zip: '78701', ...extra })).data;
+const newPatient = async (api, first, extra = {}) => (await api.post('/patients', { first_name: first, last_name: 'Tx', dob: DOB, phone: '(512) 555-0177', email: `${first.toLowerCase()}@example.com`, address: '1 Oak', city: 'Austin', state: 'TX', zip: '78701', ...extra })).data;
 const run = (pid, date, hm) => runCadences(h.db, { messenger, mailer, appUrl: APP, secret: SECRET, now: at(date, hm), practiceIds: [pid] });
 const enrollmentOf = (planId) => h.db.get("SELECT e.*, s.subtype FROM cadence_enrollments e JOIN cadence_sequences s ON s.id = e.sequence_id WHERE e.source_type = 'treatment_plan' AND e.source_id = ? ORDER BY e.id DESC LIMIT 1", planId);
 

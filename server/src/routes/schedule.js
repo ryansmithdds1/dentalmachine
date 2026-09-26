@@ -580,8 +580,21 @@ export default function scheduleRoutes({ db }) {
     if ('location_id' in changes) checkOffice(req.user, changes.location_id);
     if (changes.patient_id && !(await canSeePatient(db, req.user, changes.patient_id))) throw new HttpError(404, 'Patient not found');
     let checked = null;
-    if (!['cancelled', 'no_show'].includes(merged.status)) checked = await validateAppt(db, req.user.practice_id, merged, { overrideBlockout: !!req.body.override_blockout });
-    else {
+    // Office hours and blocked time are a booking rule: they're checked when a visit is booked, moved or put back
+    // on the schedule — not when someone only checks it in, completes it or edits its notes. Otherwise a visit
+    // booked outside hours on purpose (a Saturday emergency) couldn't be marked done without "overriding" again.
+    // Times are compared the way they're stored ('YYYY-MM-DD HH:MM'); anything that doesn't normalize counts as a
+    // change, so it's validated (and rejected) below.
+    const asTime = (v) => { try { return normalizeDateTime(v, 'time'); } catch { return null; } };
+    const same = (k) => (k.endsWith('_time')
+      ? asTime(changes[k]) !== null && asTime(changes[k]) === asTime(existing[k])
+      : String(changes[k] ?? '') === String(existing[k] ?? ''));
+    const rebooked = ['start_time', 'end_time', 'provider_id', 'operatory_id', 'location_id', 'appointment_type_id'].some((k) => k in changes && !same(k))
+      || ['cancelled', 'no_show'].includes(existing.status);
+    if (!['cancelled', 'no_show'].includes(merged.status)) {
+      checked = await validateAppt(db, req.user.practice_id, merged, { overrideBlockout: !!req.body.override_blockout || !rebooked });
+      if (!rebooked && !req.body.override_blockout) checked = { dayBlock: null };
+    } else {
       requireOneOf(merged.status, STATUSES, 'status');
       await checkApptRefs(db, req.user.practice_id, merged);
     }

@@ -8,7 +8,7 @@ import { PERMISSION_CATALOG } from '../src/auth.js';
 import { roundFee, increaseFee, resolveFee, ensureBaseline } from '../src/feeversions.js';
 import { createFeeReader, parseXlsx, rowsToItems, runFeeSchedules } from '../src/feeimport.js';
 import { buildZip } from '../src/zip.js';
-import { zonedToUtc } from '../src/util.js';
+import { zonedToUtc, localNow } from '../src/util.js';
 import { MIGRATIONS } from '../src/migrations.js';
 import feeScheduleRoutes from '../src/routes/feeschedules.js';
 
@@ -265,14 +265,16 @@ test('a PDF is read by the AI into a draft (recorded as the AI’s reading, with
   const ctx = await h.practice();
   const { api, practiceId } = ctx;
   const fs = await ppo(api, 'MetLife PDP', { D0120: 3500 });
-  reply = { payer_name: 'MetLife', effective_date: '2027-01-01', items: [{ code: 'd0120', fee: 36.5 }, { code: 'D1110', fee: 71 }], unreadable: ['D4910 row smudged'] };
+  // Next New Year's Day (the office's year): a date that's always still ahead, so approving it schedules it.
+  const nextYear = `${Number(localNow('America/New_York').slice(0, 4)) + 1}-01-01`;
+  reply = { payer_name: 'MetLife', effective_date: nextYear, items: [{ code: 'd0120', fee: 36.5 }, { code: 'D1110', fee: 71 }], unreadable: ['D4910 row smudged'] };
   const pdf = Buffer.from('%PDF-1.4 fee schedule').toString('base64');
   const up = await api.post('/fees/imports', { fee_schedule_id: fs.id, file_base64: pdf, mime: 'application/pdf', file_name: 'metlife.pdf' });
   assert.equal(up.status, 201, JSON.stringify(up.data));
   assert.equal(seen.at(-1).tools[0].name, 'fee_schedule');
   assert.equal(seen.at(-1).messages[0].content[0].type, 'document');
   assert.equal(up.data.reader, 'ai');
-  assert.equal(up.data.effective_date, '2027-01-01', 'the date printed on the schedule');
+  assert.equal(up.data.effective_date, nextYear, 'the date printed on the schedule');
   assert.match(up.data.ai_reason, /AI read 2 codes/);
   assert.ok(up.data.summary.warnings.some((w) => /D4910/.test(w)));
   assert.deepEqual(up.data.items.map((i) => [i.code, i.flag, i.new_fee]), [['D0120', 'changed', 3650], ['D1110', 'new', 7100]]);

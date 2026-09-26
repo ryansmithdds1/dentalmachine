@@ -145,7 +145,9 @@ test('emails carry the least patient detail: first name and last initial, counts
   const hyg = (await c.api.post('/providers', { name: 'Hyg. Bea', type: 'hygienist' })).data;
   // Jane Doe had a cleaning last week and left without her next visit booked; she's overdue for recall too.
   const d = (n) => new Date(Date.now() - n * 86400_000).toISOString().slice(0, 10);
-  await h.db.run("INSERT INTO appointments (practice_id, patient_id, provider_id, start_time, end_time, status) VALUES (?, ?, ?, ?, ?, 'completed')", c.pid, c.patient.id, hyg.id, `${d(8)} 09:00`, `${d(8)} 10:00`);
+  // The Tuesday of the week the digest covers (Monday to Sunday before): "8 days ago" left it out on Mondays.
+  const visitDay = new Date(Date.parse(`${digestRange('weekly', d(0)).from}T12:00:00Z`) + 86400_000).toISOString().slice(0, 10);
+  await h.db.run("INSERT INTO appointments (practice_id, patient_id, provider_id, start_time, end_time, status) VALUES (?, ?, ?, ?, ?, 'completed')", c.pid, c.patient.id, hyg.id, `${visitDay} 09:00`, `${visitDay} 10:00`);
   await h.db.run("INSERT INTO recalls (practice_id, patient_id, due_date, status) VALUES (?, ?, ?, 'due')", c.pid, c.patient.id, d(20));
   await c.api.put('/metric-goals', { metric: 'hygiene_reappointment', value: 90 });
   const today = d(0);

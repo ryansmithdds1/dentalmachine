@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { harness } from './helpers.js';
+import { localNow } from '../src/util.js';
 
 const h = harness();
 
@@ -21,7 +22,7 @@ test('treatment plan: this year vs next — splitting at the annual maximum gets
   assert.deepEqual(r.split.next_year.procedures.map((p) => p.tooth), ['14']);
   assert.equal(r.split.insurance, 135000);
   assert.equal(r.split.saves, 35000);
-  assert.ok(r.split.next_year.from > new Date().toISOString().slice(0, 10));
+  assert.ok(r.split.next_year.from > localNow('America/New_York').slice(0, 10)); // the office's today, not UTC's
 
   // Under the maximum: nothing to split.
   const small = (await api.post(`/patients/${patient.id}/treatment-plans`, { name: 'Filling', procedures: [{ code: 'D2392', tooth: '30', surfaces: 'MO', provider_id: provider.id }] })).data;

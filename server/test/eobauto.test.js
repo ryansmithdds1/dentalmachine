@@ -451,6 +451,26 @@ test('A4: below the minimum, on the hold list or opened link — no bill or no p
   assert.equal((await fetch(`${h.origin}/api/public/pay-balance/1.AAAAAAAAAAAAAAAAAAAAAA`)).status, 404);
 });
 
+test('A4: "closed on" is the office’s date — an evening payment (next day in UTC) is billed that day, not the next', async () => {
+  const ctx = await setup({ settings: { billing: true, min_balance: 500, wait_days: 0, paper_days: 10 } });
+  const deps = (iso) => ({ practiceIds: [ctx.pid], mailer: createMailer({ env: { MAIL_DRIVER: 'log' } }), appUrl: 'https://app.example.com', now: new Date(iso) });
+  const s = JSON.parse((await h.db.get('SELECT eob_autopilot FROM practices WHERE id = ?', ctx.pid)).eob_autopilot);
+  await h.db.run('UPDATE practices SET eob_autopilot = ? WHERE id = ?', JSON.stringify({ ...s, billing_since: '2030-03-01' }), ctx.pid);
+  // Paid Feb 28 at 10 pm New York time (Mar 1 in UTC): before billing was turned on, so never billed.
+  const early = await claimFor(ctx, ['D2392']);
+  await ctx.api.post('/era/import', e835({ claims: [clean(early)] }));
+  await h.db.run("UPDATE claims SET paid_at = '2030-03-01 03:00:00' WHERE id = ?", early.id);
+  // Paid Mar 4 at 9 pm New York time (Mar 5 02:00 UTC), no wait: billed on the evening's run, closed Mar 4.
+  const c = await claimFor(ctx, ['D2392']);
+  await ctx.api.post('/era/import', e835({ claims: [clean(c)] }));
+  await h.db.run("UPDATE claims SET paid_at = '2030-03-05 02:00:00' WHERE id = ?", c.id);
+  await runEobAutopilot(h.db, deps('2030-03-05T02:30:00Z'));
+  assert.equal(await h.db.get('SELECT id FROM balance_bills WHERE claim_id = ?', early.id), undefined, 'closed before billing was on');
+  const bill = await h.db.get('SELECT * FROM balance_bills WHERE claim_id = ?', c.id);
+  assert.ok(bill, 'billed the same office day');
+  assert.deepEqual([bill.closed_on, bill.anchor_date], ['2030-03-04', '2030-03-04']);
+});
+
 test('A5: reconciliation lists ERA vs posted vs deposited and claims billed vs paid vs written off vs patient, and raises/resolves gaps', async () => {
   const ctx = await setup({ settings: { autopost: true } });
   const c = await claimFor(ctx, ['D2392']);

@@ -1,6 +1,6 @@
 import { HttpError } from './auth.js';
 import { coverageTier } from './defaults.js';
-import { insert, addMonths, practiceNow, mapSeq, recorded } from './util.js';
+import { insert, addMonths, practiceNow, mapSeq, recorded, localNow, zonedToUtc } from './util.js';
 import { resolveFee } from './feeversions.js';
 
 // ---- Insurance plans ----
@@ -352,9 +352,12 @@ export async function estimateCoverage(db, rawPolicy, procedures, { primary = nu
 async function payerMaxRemaining(db, policy, today) {
   if (!policy.id) return null;
   const { start, end } = benefitYear(policy, today);
+  // created_at is UTC; the benefit year is in office dates. A figure taken on a New Year's Eve evening (already
+  // January in UTC) belongs to the year that's ending, not the next one.
+  const tz = (await db.get('SELECT timezone FROM practices WHERE id = ?', policy.practice_id))?.timezone || 'America/New_York';
   let rows;
   try {
-    rows = await db.all("SELECT patient_detail, created_at FROM benefit_verifications WHERE patient_insurance_id = ? AND patient_detail IS NOT NULL AND created_at >= ? AND created_at < ? ORDER BY created_at DESC, id DESC LIMIT 5", policy.id, start, end);
+    rows = await db.all("SELECT patient_detail, created_at FROM benefit_verifications WHERE patient_insurance_id = ? AND patient_detail IS NOT NULL AND created_at >= ? AND created_at < ? ORDER BY created_at DESC, id DESC LIMIT 5", policy.id, zonedToUtc(tz, start), zonedToUtc(tz, end));
   } catch (err) {
     if (/benefit_verifications/.test(String(err?.message))) return null; // older database without the table
     throw err;
@@ -363,7 +366,7 @@ async function payerMaxRemaining(db, policy, today) {
     let d;
     try { d = JSON.parse(r.patient_detail); } catch { continue; }
     const v = Number(d?.max_remaining);
-    if (d?.max_remaining != null && Number.isFinite(v) && v >= 0) return { max_remaining: Math.round(v), as_of: String(r.created_at).slice(0, 10) };
+    if (d?.max_remaining != null && Number.isFinite(v) && v >= 0) return { max_remaining: Math.round(v), as_of: localNow(tz, new Date(`${String(r.created_at).slice(0, 19).replace(' ', 'T')}Z`)).slice(0, 10) };
   }
   return null;
 }

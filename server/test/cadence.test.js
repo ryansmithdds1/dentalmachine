@@ -32,6 +32,8 @@ const h = harness({ messenger });
 const SECRET = 'test-secret';
 const TODAY = new Date().toISOString().slice(0, 10);
 const at = (date, hm = '15:00') => new Date(`${date}T${hm}:00Z`);
+// A birth date that isn't today: on the patient's birthday the (on by default) birthday journey enrolls them too.
+const DOB = TODAY.slice(5) === '01-01' ? '1970-07-01' : '1970-01-01';
 
 let origin;
 let server;
@@ -192,7 +194,7 @@ test('a visit booked while the job is running stops the step right before it is 
 
 test('skip rules: pre-appointed, inactive, deceased (hold) and opted out of everything are never enrolled', async () => {
   const { pid, patient, provider, api } = await setUp();
-  const mk = async (first) => (await api.post('/patients', { first_name: first, last_name: 'Skip', dob: '1970-01-01', phone: '(512) 555-0199', email: `${first.toLowerCase()}@example.com` })).data;
+  const mk = async (first) => (await api.post('/patients', { first_name: first, last_name: 'Skip', dob: DOB, phone: '(512) 555-0199', email: `${first.toLowerCase()}@example.com` })).data;
   const booked = await mk('Booked');
   const gone = await mk('Gone');
   const passed = await mk('Passed');
@@ -317,7 +319,7 @@ test('AI call step is placed and labelled ai; without calling it becomes a team 
   assert.equal(audit.actor, 'AI recall call');
 
   // Another patient, calls not working: the team gets the call on its list, with the script.
-  const sam = (await api.post('/patients', { first_name: 'Sam', last_name: 'Roe', dob: '1970-01-01', phone: '(512) 555-0111' })).data;
+  const sam = (await api.post('/patients', { first_name: 'Sam', last_name: 'Roe', dob: DOB, phone: '(512) 555-0111' })).data;
   await addRecall(pid, sam.id, addDays(TODAY, -30));
   box.noCall = true;
   await run(pid, at(TODAY));

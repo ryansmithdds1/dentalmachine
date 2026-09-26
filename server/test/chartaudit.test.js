@@ -291,15 +291,25 @@ test('nightly pass: finds, is idempotent, resolves what was fixed and keeps it; 
 test('report: provider visibility, practice isolation, office scope, filters, CSV, rules and acknowledge', async () => {
   const s = await setUp();
   const other = await otherPractice();
-  const aA = await s.appt({ date: '2026-09-01' });
+  // "Run now" (below) looks back from the real today, so this visit history is dated relative to it: the audit day
+  // is two days ago, and the visits, sign-offs and history keep the distances the fixed dates had (Sep 1 & 2, audited
+  // Sep 10) — fixed 2026 dates fall out of the one-year look-back by September 2027.
+  const shiftDay = (base, n) => new Date(Date.parse(`${base}T12:00:00Z`) + n * 86400_000).toISOString().slice(0, 10);
+  const auditDay = shiftDay(new Date().toISOString().slice(0, 10), -2); // clear of the office's today in any time zone
+  const on = (fixed) => shiftDay(auditDay, Math.round((Date.parse(`${fixed}T12:00:00Z`) - Date.parse('2026-09-10T12:00:00Z')) / 86400_000));
+  await h.db.run('UPDATE patients SET medical_reviewed_at = ? WHERE id = ?', `${on('2026-08-15')} 10:00:00`, s.patient.id);
+  await h.db.run('UPDATE perio_exams SET exam_date = ? WHERE patient_id = ?', on('2026-06-01'), s.patient.id);
+  const aA = await s.appt({ date: on('2026-09-01') });
   await s.procedure({ c: 'D2392', appointmentId: aA, tooth: '14', surfaces: 'MO' });
-  const aB = await s.appt({ date: '2026-09-02', provider: s.provB.id });
+  const aB = await s.appt({ date: on('2026-09-02'), provider: s.provB.id });
   await s.procedure({ c: 'D7140', appointmentId: aB, tooth: '1', provider: s.provB.id });
   await s.note({ appointmentId: aB, body: 'Extracted #1.', signer: s.drB.id, provider: s.provB.id });
-  const oa = await other.appt({ date: '2026-09-01' });
+  const oa = await other.appt({ date: on('2026-09-01') });
   await other.procedure({ c: 'D2392', appointmentId: oa, tooth: '3', surfaces: 'O' });
-  await runPracticeAudit(h.db, s.pid, { today: '2026-09-10' });
-  await runPracticeAudit(h.db, other.pid, { today: '2026-09-10' });
+  await h.db.run("UPDATE procedures SET completed_at = ? WHERE practice_id IN (?, ?) AND completed_at = '2026-09-01 15:00:00'", `${on('2026-09-01')} 15:00:00`, s.pid, other.pid);
+  await h.db.run("UPDATE clinical_notes SET signed_at = ? WHERE practice_id IN (?, ?) AND signed_at = '2026-09-01 16:00:00'", `${on('2026-09-01')} 16:00:00`, s.pid, other.pid);
+  await runPracticeAudit(h.db, s.pid, { today: on('2026-09-10') });
+  await runPracticeAudit(h.db, other.pid, { today: on('2026-09-10') });
 
   const admin = call(s.adminToken);
   const all = (await admin('GET', '/chart-audit/findings')).data;
@@ -324,7 +334,7 @@ test('report: provider visibility, practice isolation, office scope, filters, CS
   const consent = (await admin('GET', '/chart-audit/findings?check=consent_missing')).data.findings;
   assert.deepEqual(consent.map((f) => f.check_code), ['consent_missing']);
   assert.equal((await admin('GET', '/chart-audit/findings?severity=bad')).status, 400);
-  assert.equal((await admin('GET', '/chart-audit/findings?from=2026-09-02&to=2026-09-02')).data.findings.every((f) => f.visit_date === '2026-09-02'), true);
+  assert.equal((await admin('GET', `/chart-audit/findings?from=${on('2026-09-02')}&to=${on('2026-09-02')}`)).data.findings.every((f) => f.visit_date === on('2026-09-02')), true);
   // CSV export is audited.
   const csv = await admin('GET', '/chart-audit/findings.csv');
   assert.match(csv.data, /Why it matters/);
@@ -374,10 +384,16 @@ test('office scope: someone limited to one office sees only that office’s find
 test('Check my chart → ready for doctor → doctor queue → coaching', async () => {
   const s = await setUp();
   const db = h.db;
-  const a = await s.appt({ date: '2026-09-01' });
+  // The doctor's queue looks back at most 90 days from today, so these visits are recent ones (fixed dates here
+  // fell out of it by December 2026); the history and perio dates keep their distance from the visit.
+  const day = (base, n) => new Date(Date.parse(`${base}T12:00:00Z`) + n * 86400_000).toISOString().slice(0, 10);
+  const visitDay = day(new Date().toISOString().slice(0, 10), -20); // the practice is on UTC
+  await db.run('UPDATE patients SET medical_reviewed_at = ? WHERE id = ?', `${day(visitDay, -17)} 10:00:00`, s.patient.id);
+  await db.run('UPDATE perio_exams SET exam_date = ? WHERE patient_id = ?', day(visitDay, -92), s.patient.id);
+  const a = await s.appt({ date: visitDay });
   await s.procedure({ c: 'D2391', appointmentId: a, tooth: '3', surfaces: 'O' });
   const n = await s.note({ appointmentId: a, body: 'Composite #3 O. 2 carpels of articane, infiltration. [[Shade: A1|A2]]', signed: false });
-  const b = await s.appt({ date: '2026-09-02' });
+  const b = await s.appt({ date: day(visitDay, 1) });
   await s.procedure({ c: 'D1110', appointmentId: b });
   const asst = call(await s.asst.token);
 
@@ -422,7 +438,7 @@ test('Check my chart → ready for doctor → doctor queue → coaching', async 
   // Another provider's queue is a manager's to see.
   assert.equal((await call(await s.drB.token)('GET', `/chart-audit/doctor-queue?provider_id=${s.provider.id}`)).status, 403);
   // Not checked: a visit with a note nobody checked.
-  const c = await s.appt({ date: '2026-09-03' });
+  const c = await s.appt({ date: day(visitDay, 2) });
   await s.note({ appointmentId: c, body: 'Exam.', signed: false });
   await s.procedure({ c: 'D0120', appointmentId: c });
   assert.equal((await call(await s.drA.token)('GET', '/chart-audit/doctor-queue?days=90')).data.find((q) => q.visit_key === `a${c}`).state, 'not_checked');

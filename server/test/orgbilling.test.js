@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { harness } from './helpers.js';
+import { localNow } from '../src/util.js';
 
 const h = harness();
 
@@ -168,7 +169,7 @@ test('cross-practice patient lookup: group only, needs enough to identify someon
 
 test('group reports: per-practice numbers with totals that add up, CSV export audited', async () => {
   const { north, south, outsider } = await world();
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localNow('America/New_York').slice(0, 10); // the offices' today (ledger dates are theirs), not UTC's
   const from = `${today.slice(0, 4)}-01-01`;
   assert.equal((await outsider.api.get('/org/reports')).status, 403);
   assert.equal((await north.api.get('/org/reports?from=2026-05-01&to=2026-04-01')).status, 400);

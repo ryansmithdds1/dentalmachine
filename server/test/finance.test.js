@@ -145,9 +145,10 @@ test('QuickBooks: connect, the chart of accounts sorted into dental categories, 
   assert.ok(sent.every((x) => x.qbo_id));
   assert.equal((await api.del(`/finance/bank/transactions/${sent[0].id}/match`)).status, 409, 'already in QuickBooks');
 
-  // The numbers: this month's costs come from QuickBooks.
+  // The numbers: the costs of the month with the latest payments come from QuickBooks (early in a month that's
+  // last month — the sandbox's profit and loss has a month only once money was collected in it).
   const o = (await api.get('/finance/overview?months=3')).data;
-  const month = o.months.at(-1);
+  const month = o.months.find((m) => m.month === ago(6).slice(0, 7));
   assert.equal(month.source, 'quickbooks');
   assert.ok(month.costs.lab > 0 && month.costs.staff > 0);
   assert.ok(month.costs.facility > 0, 'rent');
@@ -158,8 +159,9 @@ test('QuickBooks: connect, the chart of accounts sorted into dental categories, 
 
 test('the numbers from the bank alone: overhead, cost per visit and per chair hour, against the typical ranges', async () => {
   const { api, practiceId, patient, provider } = await practiceWithMoney();
-  // A month of visits so there are chair hours.
-  const lastMonth = localNow('America/New_York', new Date(Date.now() - 35 * DAY)).slice(0, 7);
+  // A month of visits so there are chair hours — a month with none of the setup's payments (those are 6 to 12
+  // days ago, which early in a month is last month; 45 days ago is always an earlier month than that).
+  const lastMonth = localNow('America/New_York', new Date(Date.now() - 45 * DAY)).slice(0, 7);
   for (let d = 1; d <= 20; d++) {
     const date = `${lastMonth}-${String(d).padStart(2, '0')}`;
     await insert(h.db, 'appointments', { practice_id: practiceId, patient_id: patient.id, provider_id: provider.id, start_time: `${date} 09:00`, end_time: `${date} 11:00`, status: 'completed' });

@@ -8,9 +8,10 @@ test('hygiene report: production, reappointment, perio vs prophy, recall follow-
   const { api, patient } = await h.practice({ timezone: 'UTC' });
   const hyg = (await api.post('/providers', { name: 'Hyg. Anne', type: 'hygienist' })).data;
   const today = new Date().toISOString().slice(0, 10);
-  const visit = (await api.post('/appointments', { patient_id: patient.id, provider_id: hyg.id, start_time: `${today} 08:00`, end_time: `${today} 09:00` })).data;
+  const visit = (await api.post('/appointments', { patient_id: patient.id, provider_id: hyg.id, start_time: `${today} 08:00`, end_time: `${today} 09:00`, override_blockout: true })).data;
   // Booked their next cleaning before leaving.
-  const next = `${Number(today.slice(0, 4)) + 1}${today.slice(4)}`;
+  // Six months on (a real date: "same day next year" doesn't exist on Feb 29).
+  const next = new Date(Date.parse(`${today}T12:00:00Z`) + 182 * 86400_000).toISOString().slice(0, 10);
   await api.post('/appointments', { patient_id: patient.id, provider_id: hyg.id, start_time: `${next} 08:00`, end_time: `${next} 09:00`, override_hours: true, override_blockout: true });
   for (const code of ['D1110', 'D4910']) {
     const pr = (await api.post(`/patients/${patient.id}/procedures`, { code, provider_id: hyg.id, appointment_id: visit.id, ...(code === 'D4910' ? {} : {}) })).data;

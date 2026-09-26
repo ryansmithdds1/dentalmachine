@@ -108,6 +108,35 @@ test('office hours apply to every provider unless overridden; phone search ignor
   assert.equal(evening.status, 409);
   assert.equal((await api.post('/appointments', { patient_id: patient.id, provider_id: provider.id, start_time: `${MON} 18:00`, end_time: `${MON} 18:30`, override_blockout: true })).status, 201);
 
+  // A Saturday emergency booked outside hours on purpose can be checked in, completed and noted without
+  // "overriding" again; moving it (still outside hours) or putting it back after a cancel is checked again.
+  const sat = (await api.post('/appointments', { patient_id: patient.id, provider_id: provider.id, start_time: '2031-01-04 10:00', end_time: '2031-01-04 11:00', override_blockout: true })).data;
+  // The edit form sends the unchanged time back (in any format it parses): not a move.
+  assert.equal((await api.put(`/appointments/${sat.id}`, { status: 'checked_in', start_time: '2031-01-04T10:00', end_time: '2031-01-04 11:00:00' })).status, 200);
+  assert.equal((await api.put(`/appointments/${sat.id}`, { notes: 'Broken molar' })).status, 200);
+  const moved = await api.put(`/appointments/${sat.id}`, { start_time: '2031-01-04 12:00', end_time: '2031-01-04 13:00' });
+  assert.equal(moved.status, 409);
+  assert.match(moved.data.error, /outside office hours/);
+  // Another dentist is a re-booking too, and so is a time that isn't one.
+  const other = (await api.post('/providers', { name: 'Dr. Other', type: 'dentist' })).data;
+  assert.equal((await api.put(`/appointments/${sat.id}`, { provider_id: other.id })).status, 409);
+  assert.equal((await api.put(`/appointments/${sat.id}`, { start_time: 'soon' })).status, 400);
+  assert.equal((await h.db.get('SELECT start_time, provider_id FROM appointments WHERE id = ?', sat.id)).provider_id, provider.id);
+  assert.equal((await api.put(`/appointments/${sat.id}`, { status: 'completed' })).status, 200);
+  // The schedule's keyboard move, Undo, then a move to the next day (workflow #10): each is a re-booking,
+  // validated, and each succeeds inside hours.
+  const kb = (await api.post('/appointments', { patient_id: patient.id, provider_id: provider.id, start_time: `${MON} 14:00`, end_time: `${MON} 14:50` })).data;
+  const tue = new Date(Date.parse(`${MON}T12:00:00Z`) + 86400_000).toISOString().slice(0, 10);
+  assert.equal((await api.put(`/appointments/${kb.id}`, { start_time: `${MON} 14:10`, end_time: `${MON} 15:00` })).status, 200);
+  assert.equal((await api.put(`/appointments/${kb.id}`, { start_time: `${MON} 14:00`, end_time: `${MON} 14:50`, provider_id: provider.id, override_blockout: true })).status, 200);
+  const nextDay = await api.put(`/appointments/${kb.id}`, { start_time: `${tue} 14:00`, end_time: `${tue} 14:50` });
+  assert.equal(nextDay.status, 200, JSON.stringify(nextDay.data));
+  assert.equal(nextDay.data.start_time, `${tue} 14:00`);
+  assert.equal((await api.put(`/appointments/${kb.id}`, { start_time: `${tue} 19:00`, end_time: `${tue} 19:50` })).status, 409, 'a move out of hours still asks');
+  const sat2 = (await api.post('/appointments', { patient_id: patient.id, provider_id: provider.id, start_time: '2031-01-04 14:00', end_time: '2031-01-04 15:00', override_blockout: true })).data;
+  assert.equal((await api.put(`/appointments/${sat2.id}`, { status: 'cancelled' })).status, 200);
+  assert.equal((await api.put(`/appointments/${sat2.id}`, { status: 'scheduled' })).status, 409);
+
   for (const q of ['5125550100', '512-555-0100', '555 0100', '(512) 555']) {
     const found = (await api.get(`/patients?q=${encodeURIComponent(q)}`)).data.rows;
     assert.ok(found.some((p) => p.id === patient.id), q);

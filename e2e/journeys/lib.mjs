@@ -23,6 +23,9 @@ export function journey(name, email, setup) {
     j.w = watch(j.page, { base: j.app.base });
     await j.s.ctx.tracing.start({ screenshots: true, snapshots: true });
     j.today = (await j.s.get('/dashboard')).today; // the practice's date, whatever this machine's clock says
+    // …and its time of day ('HH:MM'), for steps that need a visit still ahead of "now" today.
+    const tz = (await j.s.get('/practice')).timezone || 'America/New_York';
+    j.nowTime = new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date());
     if (setup) await setup(j);
   });
   after(async () => {

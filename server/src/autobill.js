@@ -1,6 +1,6 @@
 import { HttpError } from './auth.js';
 import { NOT_TRAINING } from './training.js';
-import { insert, audit, localNow, recorded } from './util.js';
+import { insert, audit, localNow, recorded, zonedToUtc } from './util.js';
 import { raiseIssue, resolveIssue } from './issues.js';
 import { pendingInsurance } from './services.js';
 import { registerCadenceType, activeHold, skipReason, verifyLink, addDays, daysBetween } from './cadence.js';
@@ -105,23 +105,30 @@ export async function runAutoBilling(db, practice, deps = {}) {
   const stats = { started: 0, merged: 0, skipped: 0, paid: 0, stopped: 0, paper: 0, done: 0 };
   if (!s.billing) return stats;
   const pid = practice.id;
-  const today = localNow(practice.timezone || 'America/New_York', deps.now || new Date()).slice(0, 10);
+  const tz = practice.timezone || 'America/New_York';
+  const today = localNow(tz, deps.now || new Date()).slice(0, 10);
   const since = s.billing_since || today;
   const lastClose = addDays(today, -Number(s.wait_days || 0));
+  // paid_at / resolved_at are UTC timestamps; since, today and lastClose are practice-local dates. Compare in UTC
+  // (from the start of `since` to the end of `lastClose`, office time) — comparing the UTC date to a local date
+  // put an evening payment on the next day, so it was billed a day late (and wait_days 0 waited a day).
+  const [fromUtc, toUtc] = [zonedToUtc(tz, since), zonedToUtc(tz, addDays(lastClose, 1))];
 
   // 1. Claims that closed (paid, or denied and sent to the patient by a person) since billing was turned on,
   //    at least wait_days ago, not looked at yet. Closed = when the payment was posted (paid_at), not the
   //    payer's check date.
   const closed = await db.all(
-    `SELECT c.*, substr(c.paid_at, 1, 10) AS closed_on FROM claims c WHERE c.practice_id = ? AND ${NOT_TRAINING('c.patient_id')} AND c.status = 'paid' AND substr(c.paid_at, 1, 10) >= ? AND substr(c.paid_at, 1, 10) <= ?
+    `SELECT c.*, c.paid_at AS closed_at FROM claims c WHERE c.practice_id = ? AND ${NOT_TRAINING('c.patient_id')} AND c.status = 'paid' AND c.paid_at >= ? AND c.paid_at < ?
        AND NOT EXISTS (SELECT 1 FROM balance_bills b WHERE b.claim_id = c.id)
      UNION
-     SELECT c.*, substr(MAX(r.resolved_at), 1, 10) AS closed_on FROM claims c JOIN remit_lines r ON r.claim_id = c.id AND r.resolution = 'bill_patient'
-     WHERE c.practice_id = ? AND ${NOT_TRAINING('c.patient_id')} AND c.status = 'denied' AND substr(r.resolved_at, 1, 10) >= ? AND substr(r.resolved_at, 1, 10) <= ?
+     SELECT c.*, MAX(r.resolved_at) AS closed_at FROM claims c JOIN remit_lines r ON r.claim_id = c.id AND r.resolution = 'bill_patient'
+     WHERE c.practice_id = ? AND ${NOT_TRAINING('c.patient_id')} AND c.status = 'denied' AND r.resolved_at >= ? AND r.resolved_at < ?
        AND NOT EXISTS (SELECT 1 FROM balance_bills b WHERE b.claim_id = c.id)
      GROUP BY c.id`,
-    pid, since, lastClose, pid, since, lastClose,
+    pid, fromUtc, toUtc, pid, fromUtc, toUtc,
   );
+  // The office's date the claim closed on.
+  for (const c of closed) c.closed_on = localNow(tz, new Date(`${String(c.closed_at).slice(0, 19).replace(' ', 'T')}Z`)).slice(0, 10);
   closed.sort((a, b) => String(a.closed_on).localeCompare(String(b.closed_on)) || a.id - b.id);
   for (const claim of closed) {
     const patient = await db.get('SELECT * FROM patients WHERE id = ?', claim.patient_id);

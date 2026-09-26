@@ -125,7 +125,7 @@ test('RV1: outside sending hours a request waits for the morning; automatic afte
   // A completed visit today: no automatic request unless the office turned it on.
   const other = await newPatient(api, 'Visit');
   const d = new Date().toISOString().slice(0, 10);
-  const a = (await api.post('/appointments', { patient_id: other.id, provider_id: provider.id, start_time: `${d} 09:00`, end_time: `${d} 09:30` })).data;
+  const a = (await api.post('/appointments', { patient_id: other.id, provider_id: provider.id, start_time: `${d} 09:00`, end_time: `${d} 09:30`, override_blockout: true })).data;
   assert.ok(a.id, JSON.stringify(a));
   await api.put(`/appointments/${a.id}`, { status: 'completed' });
   await api.put('/practice', { send_from: '00:00', send_until: '00:00' });

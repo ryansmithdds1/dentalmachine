@@ -22,7 +22,7 @@ test('patient portal: code sign-in, household view, confirm/cancel, pay, forms a
   const { api, provider, patient, token: staffToken } = await h.practice({ slug, timezone: 'UTC' });
   const kid = (await api.post(`/patients/${patient.id}/family`, { first_name: 'Kid', dob: '2015-06-01' })).data;
   await api.post(`/patients/${patient.id}/procedures`, { code: 'D0150', provider_id: provider.id, complete: true });
-  const far = (await api.post('/appointments', { patient_id: kid.id, provider_id: provider.id, start_time: `${day(5)} 09:00`, end_time: `${day(5)} 10:00` })).data;
+  const far = (await api.post('/appointments', { patient_id: kid.id, provider_id: provider.id, start_time: `${day(5)} 09:00`, end_time: `${day(5)} 10:00`, override_blockout: true })).data; // may be a weekend
   const nearRes = (await api.post('/appointments', { patient_id: patient.id, provider_id: provider.id, ...soon(), override_blockout: true }));
   assert.equal(nearRes.status, 201, JSON.stringify(nearRes.data));
   const near = nearRes.data;

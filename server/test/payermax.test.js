@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { harness } from './helpers.js';
-import { insert } from '../src/util.js';
+import { insert, localNow, zonedToUtc } from '../src/util.js';
 import { estimateCoverage } from '../src/benefits.js';
 
 const h = harness();
@@ -49,11 +49,24 @@ test('the payer says more is left than our claims do: our (lower) figure stands'
 
 test('a figure from an earlier benefit year is ignored; a bad figure is skipped', async () => {
   const { policy, crown, verified } = await setUp();
-  const lastYear = `${Number(new Date().toISOString().slice(0, 4)) - 1}-01-15 10:00:00`;
+  // The office's year (New York), not UTC's: on a New Year's Eve evening UTC is already in the next year.
+  const lastYear = `${Number(localNow('America/New_York').slice(0, 4)) - 1}-01-15 10:00:00`;
   await verified(1000, lastYear);
   let est = await estimateCoverage(h.db, policy, [crown]);
   assert.equal(est.items[0].insurance, 67500);
   await verified('not a number');
   est = await estimateCoverage(h.db, policy, [crown]);
   assert.equal(est.items[0].insurance, 67500);
+});
+
+test('the benefit year of a payer figure is the office’s: New Year’s Eve evening belongs to the year that’s ending', async () => {
+  const year = localNow('America/New_York').slice(0, 4);
+  // 10 pm on Dec 31 last year, New York time — already Jan 1 of this year in UTC: last year's figure, ignored.
+  const a = await setUp();
+  await a.verified(1000, zonedToUtc('America/New_York', `${Number(year) - 1}-12-31`, '22:00'));
+  assert.equal((await estimateCoverage(h.db, a.policy, [a.crown])).items[0].insurance, 67500);
+  // 9 pm on Dec 31 this year, New York time (Jan 1 next year in UTC): this year's figure, used.
+  const b = await setUp();
+  await b.verified(30000, zonedToUtc('America/New_York', `${year}-12-31`, '21:00'));
+  assert.equal((await estimateCoverage(h.db, b.policy, [b.crown])).items[0].insurance, 30000);
 });

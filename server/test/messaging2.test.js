@@ -21,7 +21,7 @@ test('every automated message has an editable template with checked merge fields
 
 async function visitToday(api, patient, provider, when = '09:00') {
   const d = new Date().toISOString().slice(0, 10);
-  const a = (await api.post('/appointments', { patient_id: patient.id, provider_id: provider.id, start_time: `${d} ${when}`, end_time: `${d} ${when.slice(0, 3)}30` })).data;
+  const a = (await api.post('/appointments', { patient_id: patient.id, provider_id: provider.id, start_time: `${d} ${when}`, end_time: `${d} ${when.slice(0, 3)}30`, override_blockout: true })).data;
   await api.put(`/appointments/${a.id}`, { status: 'completed' });
   return { d, a };
 }

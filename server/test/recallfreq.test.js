@@ -235,14 +235,16 @@ test('switching to perio maintenance retires the prophy (not deleted); voiding i
 test('age rule: child prophy becomes prophy at 14, automatically', async () => {
   const s = await setUp();
   // 13 and a half: a child's cleaning.
-  const teen = await s.patient(null, { dob: addMonths(s.today, -(13 * 12 + 6)) });
+  const dob = addMonths(s.today, -(13 * 12 + 6));
+  const teen = await s.patient(null, { dob });
   await s.complete(teen, 'D1120');
   const child = await s.recall(teen, 'child_prophy');
   assert.equal(child.due_date, addMonths(s.today, 6));
   assert.equal(await applyAgeRules(h.db, s.pid, s.today), 0, 'not yet 14');
-  // On the day they're 14 (six months on), the adult recall takes over the due date and last visit.
-  const later = addMonths(s.today, 6);
-  assert.equal(ageOn(addMonths(s.today, -(13 * 12 + 6)), later), 14);
+  // On the day they're 14 (about six months on — counted from the birth date: at a month's end "today + 6 months"
+  // and "today - 13.5 years" roll over by different amounts), the adult recall takes over the due date and last visit.
+  const later = addMonths(dob, 14 * 12);
+  assert.equal(ageOn(dob, later), 14);
   assert.equal(await applyAgeRules(h.db, s.pid, later), 1);
   const adult = await s.recall(teen, 'prophy');
   assert.equal(adult.due_date, child.due_date);
@@ -395,7 +397,8 @@ test('insurance-eligible date from the plan frequency limits', async () => {
   const pt = await s.patient(40);
   const pol = await s.api.post(`/patients/${pt.id}/insurance`, { carrier_id: carrier.id, plan_id: plan.id, subscriber_name: 'Pat', subscriber_id: 'X1' });
   assert.equal(pol.status, 201, JSON.stringify(pol.data));
-  const bwxDone = addMonths(s.today, -11);
+  // Due again in about 20 days (not "11 months ago": a month later can be 31 days off, past the 30-day due-soon window).
+  const bwxDone = addDays(addMonths(s.today, -12), 20);
   await s.doneOn(pt, 'D0274', bwxDone);
   await s.doneOn(pt, 'D0330', addMonths(s.today, -30));
   const st = await s.status(pt);
@@ -413,8 +416,10 @@ test('insurance-eligible date from the plan frequency limits', async () => {
 test('bundling: due x-rays, exam and fluoride are suggested for the hygiene visit and attach once', async () => {
   const s = await setUp();
   const pt = await s.patient(30);
-  await s.doneOn(pt, 'D1110', addMonths(s.today, -6));
-  await s.doneOn(pt, 'D0120', addMonths(s.today, -6));
+  // Seven months ago, not six: on the 31st "six months ago" can roll forward to the 1st (Apr 31 → May 1), and
+  // the exam wouldn't be due until tomorrow.
+  await s.doneOn(pt, 'D1110', addMonths(s.today, -7));
+  await s.doneOn(pt, 'D0120', addMonths(s.today, -7));
   await s.doneOn(pt, 'D0274', addMonths(s.today, -13));
   await s.doneOn(pt, 'D0210', addMonths(s.today, -20));
   const b = await s.rf.get(`/patients/${pt.id}/recall-bundle?date=${s.today}&provider_id=${s.hyg.id}`);

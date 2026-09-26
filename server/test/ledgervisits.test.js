@@ -5,10 +5,17 @@ import assert from 'node:assert/strict';
 import { harness } from './helpers.js';
 import { groupByVisit, entryKind, linkProblem } from '../src/ledgervisits.js';
 import { allocate } from '../src/allocation.js';
+import { localNow } from '../src/util.js';
 
 const h = harness();
 
-const daysAgo = (n) => new Date(Date.now() - n * 86400_000).toISOString().slice(0, 10);
+// Days before today in the practice's time zone (the test practices are in New York): the server checks lock
+// and entry dates against the office's today, and the UTC date is already tomorrow on a US evening.
+const daysAgo = (n) => {
+  const d = new Date(`${localNow('America/New_York').slice(0, 10)}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - n);
+  return d.toISOString().slice(0, 10);
+};
 
 // Two visits: a cleaning (Aug 1) and a filling (Sep 1) with a claim the insurer paid part of, plus a patient
 // payment nobody applied to a visit.

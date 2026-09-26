@@ -13,8 +13,17 @@ test("open today's patient from the schedule", async () => {
   const { page } = j;
   const me = (await j.s.get('/providers?active=true')).find((p) => /Chen/.test(p.name));
   const today = await j.s.get(`/appointments?date=${j.today}`);
-  visit = today.find((a) => a.provider_id === me.id && !['cancelled', 'no_show', 'completed'].includes(a.status)) || today[0];
-  assert.ok(visit, 'Dr. Chen has patients today');
+  visit = today.find((a) => a.provider_id === me.id && !['cancelled', 'no_show', 'completed'].includes(a.status));
+  if (!visit) {
+    // A weekend, a holiday or just after midnight: the demo has nobody booked with Dr. Chen today, so book a
+    // patient who isn't in today (outside office hours on purpose, as an emergency would be).
+    const busy = new Set(today.map((a) => a.patient_id));
+    const { rows } = await j.s.get('/patients?limit=50');
+    const who = rows.find((p) => !busy.has(p.id));
+    assert.ok(who, 'a patient to see');
+    visit = await j.s.post('/appointments', { patient_id: who.id, provider_id: me.id, start_time: `${j.today} 10:00`, end_time: `${j.today} 11:00`, reason: 'Emergency exam', override_blockout: true });
+  }
+  assert.ok(visit?.id, `Dr. Chen has a patient today: ${JSON.stringify(visit)}`);
   patient = await j.s.get(`/patients/${visit.patient_id}`);
   await j.step('schedule', async () => {
     await j.goto(`/schedule?date=${j.today}`, `.cal [data-appt-id="${visit.id}"]`);

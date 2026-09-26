@@ -74,7 +74,10 @@ test('every way a visit is cancelled records when; putting it back clears it; ca
   assert.equal((await row(a2.id)).cancelled_at, null, 'cleared, and never taken from the client');
 
   // 3. A series: "this and following".
-  const series = (await api.post('/appointments', { patient_id: patient.id, provider_id: provider.id, start_time: `${addDays(day, 1)} 08:00`, end_time: `${addDays(day, 1)} 08:30`, override_blockout: true, repeat: { every: 1, unit: 'week', count: 3 } }));
+  // On a weekday: the later visits of a series are booked only inside office hours (the override is for the first).
+  let sd = addDays(day, 1);
+  while ([0, 6].includes(new Date(`${sd}T12:00:00Z`).getUTCDay())) sd = addDays(sd, 1);
+  const series = (await api.post('/appointments', { patient_id: patient.id, provider_id: provider.id, start_time: `${sd} 08:00`, end_time: `${sd} 08:30`, override_blockout: true, repeat: { every: 1, unit: 'week', count: 3 } }));
   const occ = await h.db.all('SELECT id FROM appointments WHERE practice_id = ? AND series_id IS NOT NULL ORDER BY start_time', practiceId);
   assert.equal(series.status, 201, JSON.stringify(series.data));
   assert.equal(occ.length, 3);

@@ -86,7 +86,7 @@ test('practice on the training patient changes no report, total, dashboard, audi
   for (const code of ['D0120', 'D1110']) done.push((await api.post(`/patients/${patient.id}/procedures`, { code, provider_id: provider.id, complete: true })).data);
   assert.equal((await api.post('/claims', { patient_insurance_id: policy.id, procedure_ids: done.map((p) => p.id) })).status, 201);
   assert.equal((await api.post(`/patients/${patient.id}/payments`, { amount: 2500, method: 'cash' })).status, 201);
-  assert.equal((await api.post('/appointments', { patient_id: patient.id, provider_id: provider.id, start_time: `${today} 09:00`, end_time: `${today} 10:00` })).status, 201);
+  assert.equal((await api.post('/appointments', { patient_id: patient.id, provider_id: provider.id, start_time: `${today} 09:00`, end_time: `${today} 10:00`, override_blockout: true })).status, 201); // today may be a weekend
 
   const library = (await api.get('/report-library')).data;
   const reportIds = (Array.isArray(library) ? library : library.reports || library.groups?.flatMap((g) => g.reports) || []).map((r) => r.id).filter(Boolean);
