@@ -41,7 +41,6 @@ export const ALLOW = [
   { known: true, route: /^\/business$/, viewport: /tablet/, screen: /scrolls sideways/, why: 'KNOWN BUG: Business: the status chips overflow by ~20px at 1024px (components/business/BusinessView.jsx)' },
   { known: true, route: /^\/timeclock$/, viewport: /phone/, screen: /scrolls sideways/, why: 'KNOWN BUG: Time clock manager tabs (settings, reports, pay period, export, corrections) are wider than a phone' },
   { known: true, route: /^\/reviews$/, viewport: /phone/, screen: /scrolls sideways/, why: 'KNOWN BUG: Reviews → Settings form is wider than a phone' },
-  { known: true, route: /^\/phones$/, viewport: /phone/, screen: /scrolls sideways/, why: 'KNOWN BUG: Phones → Why they didn’t book: the reason buttons don’t wrap on a phone' },
   { route: /\/(print|ada|slip|letter|walkout|route-slip)$|\/attachments\/print$|^\/checklists\/log\/print$/, viewport: /phone|tablet/, screen: /scrolls sideways/, why: 'Printable documents are laid out on a fixed-width sheet of paper (letter / ADA form), not for a phone screen' },
 ];
 // A page the role's menu offers, or a screen under one (a patient's chart is under /patients).

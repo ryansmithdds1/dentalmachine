@@ -27,7 +27,9 @@
 .heatmap td, .heatmap th { width: 26px; height: 22px; text-align: center; padding: 0; border: 1px solid var(--border); }
 .heatmap th { font-weight: 500; color: var(--muted); }
 .bar { height: 8px; background: var(--primary); border-radius: 4px; min-width: 2px; }
-.phones-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 12px; }
+.phones-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 12px; }
+.phones-grid > .card { min-width: 0; }
+.phones-no-book button.link { white-space: normal; text-align: left; }
 .protocol-step { display: grid; grid-template-columns: 1fr 70px 90px 28px; gap: 6px; align-items: center; margin-bottom: 4px; }
 @media (max-width: 640px) { .protocol-step { grid-template-columns: 1fr 60px; } }
 

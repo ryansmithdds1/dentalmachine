@@ -38,21 +38,23 @@ export default function FormTemplates() {
         {admin && <button className="primary" onClick={() => setEditing({ name: '', kind: 'consent', procedure_codes: '', auto_send: false, renew_months: 0, active: true, fields: [{ type: 'paragraph', text: '' }, { type: 'signature', label: 'Patient (or parent/guardian) signature', required: true }] })}>+ New form</button>}
       </div>
       {!list ? <div className="empty">Loading…</div> : (
-        <table className="form-template-list">
-          <thead><tr><th>Form</th><th>Type</th><th>For procedures</th><th>Sent</th><th>Version</th><th /></tr></thead>
-          <tbody>
-            {list.map((t) => (
-              <tr key={t.id} style={{ opacity: t.active ? 1 : 0.55 }}>
-                <td><strong>{t.name}</strong>{!t.active && <> <Badge value="inactive" /></>}</td>
-                <td>{KINDS.find(([k]) => k === t.kind)?.[1]}</td>
-                <td>{t.procedure_codes || <span className="muted">—</span>}</td>
-                <td>{t.auto_send ? `Automatically · ${RENEW.find(([m]) => m === t.renew_months)?.[1]?.toLowerCase() || `every ${t.renew_months} months`}` : <span className="muted">When sent</span>}</td>
-                <td>v{t.version}</td>
-                <td>{admin && <button className="small" onClick={() => edit(t)}>Edit</button>}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className="table-wrap" role="region" aria-label="Forms and consents" tabIndex={0}>
+          <table className="form-template-list">
+            <thead><tr><th>Form</th><th>Type</th><th>For procedures</th><th>Sent</th><th>Version</th><th /></tr></thead>
+            <tbody>
+              {list.map((t) => (
+                <tr key={t.id} style={{ opacity: t.active ? 1 : 0.55 }}>
+                  <td><strong>{t.name}</strong>{!t.active && <> <Badge value="inactive" /></>}</td>
+                  <td>{KINDS.find(([k]) => k === t.kind)?.[1]}</td>
+                  <td>{t.procedure_codes || <span className="muted">—</span>}</td>
+                  <td>{t.auto_send ? `Automatically · ${RENEW.find(([m]) => m === t.renew_months)?.[1]?.toLowerCase() || `every ${t.renew_months} months`}` : <span className="muted">When sent</span>}</td>
+                  <td>v{t.version}</td>
+                  <td>{admin && <button className="small" onClick={() => edit(t)}>Edit</button>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
       {editing && <Editor template={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); reload(); invalidateLookup('/form-templates'); }} />}
     </div>

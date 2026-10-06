@@ -653,36 +653,38 @@ function Users() {
       </div>
       <InviteLine key={inviteKey} onDone={() => { setInviteKey((k) => k + 1); reload(); }} />
       <ErrorBox error={err} />
-      <table>
-        <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>2FA</th><th>Last login</th><th /></tr></thead>
-        <tbody>
-          {users?.map((u) => (
-            <Fragment key={u.id}>
-              <tr>
-                <td>{u.name}{u.id === me.id && <span className="muted"> (you)</span>}</td>
-                <td>{u.email}</td>
-                <td>
-                  {u.id === me.id || u.custom_role_id
-                    ? roleName(u)
-                    : <select className="compact" aria-label={`Role for ${u.name}`} value={u.role} onChange={(e) => setRole(u, e.target.value)}>{ROLES.map((r) => <option key={r} value={r}>{label(r)}</option>)}</select>}
-                  <span className="muted" style={{ fontSize: 12 }}>{overrides(u)}</span>
-                </td>
-                <td><span className={`badge ${u.active ? 'ok' : 'danger'}`}>{u.active ? 'Active' : 'Disabled'}</span></td>
-                <td>{u.mfa_enabled ? <span className="badge ok">On</span> : <span className="muted">Off</span>}</td>
-                <td>{u.last_login_at ? fmtDateTime(u.last_login_at) : 'Never'}</td>
-                <td><button className="small" aria-expanded={editing === u.id} onClick={() => setEditing(editing === u.id ? null : u.id)}>{editing === u.id ? 'Close' : 'Edit'}</button></td>
-              </tr>
-              {editing === u.id && (
-                <tr className="inline-editor-row">
-                  <td colSpan={7} onKeyDown={(e) => { if (e.key === 'Escape') setEditing(null); }}>
-                    <UserForm user={u} roles={roles || []} perms={perms} onDone={() => { setEditing(null); reload(); toast(`Saved ${u.name}`); }} onCancel={() => setEditing(null)} />
+      <div className="table-wrap" role="region" aria-label="Users and roles" tabIndex={0}>
+        <table>
+          <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>2FA</th><th>Last login</th><th /></tr></thead>
+          <tbody>
+            {users?.map((u) => (
+              <Fragment key={u.id}>
+                <tr>
+                  <td>{u.name}{u.id === me.id && <span className="muted"> (you)</span>}</td>
+                  <td>{u.email}</td>
+                  <td>
+                    {u.id === me.id || u.custom_role_id
+                      ? roleName(u)
+                      : <select className="compact" aria-label={`Role for ${u.name}`} value={u.role} onChange={(e) => setRole(u, e.target.value)}>{ROLES.map((r) => <option key={r} value={r}>{label(r)}</option>)}</select>}
+                    <span className="muted" style={{ fontSize: 12 }}>{overrides(u)}</span>
                   </td>
+                  <td><span className={`badge ${u.active ? 'ok' : 'danger'}`}>{u.active ? 'Active' : 'Disabled'}</span></td>
+                  <td>{u.mfa_enabled ? <span className="badge ok">On</span> : <span className="muted">Off</span>}</td>
+                  <td>{u.last_login_at ? fmtDateTime(u.last_login_at) : 'Never'}</td>
+                  <td><button className="small" aria-expanded={editing === u.id} onClick={() => setEditing(editing === u.id ? null : u.id)}>{editing === u.id ? 'Close' : 'Edit'}</button></td>
                 </tr>
-              )}
-            </Fragment>
-          ))}
-        </tbody>
-      </table>
+                {editing === u.id && (
+                  <tr className="inline-editor-row">
+                    <td colSpan={7} onKeyDown={(e) => { if (e.key === 'Escape') setEditing(null); }}>
+                      <UserForm user={u} roles={roles || []} perms={perms} onDone={() => { setEditing(null); reload(); toast(`Saved ${u.name}`); }} onCancel={() => setEditing(null)} />
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
     <div className="card" style={{ padding: 0 }}>
       <div className="page-header" style={{ padding: '14px 16px', marginBottom: 0 }}>

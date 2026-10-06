@@ -49,7 +49,13 @@
 .showme-list li { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border); }
 .showme-list li:last-child { border-bottom: none; }
 .showme-list .showme-q { flex: 1; min-width: 0; }
+.showme-list .showme-q button.link { white-space: normal; text-align: left; overflow-wrap: anywhere; }
 .showme-list .done-mark { color: var(--ok); }
+@media (max-width: 640px) {
+  .showme-list li { flex-wrap: wrap; }
+  .showme-list .showme-q { flex-basis: calc(100% - 24px); }
+  .showme-list li > svg { flex: none; }
+}
 .showme-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 10px 0; }
 .training-badge { display: inline-flex; align-items: center; gap: 3px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.02em; text-transform: uppercase; padding: 1px 6px; border-radius: 999px; background: var(--warn-soft); color: var(--warn); vertical-align: 1px; }
 .tour-welcome { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 0 0 12px; padding: 10px 14px; border-radius: 12px; background: var(--primary-soft); color: var(--primary-ink); border: 1px solid var(--border); }
