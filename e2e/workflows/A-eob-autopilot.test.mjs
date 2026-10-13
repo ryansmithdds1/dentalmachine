@@ -155,6 +155,8 @@ test('33 manual check: carrier, check # Enter, amount — matched to the claim i
   // Posting the same check again is caught (idempotent money): the form says so instead of posting twice.
   await page.click('button:has-text("Post an insurance check")');
   await page.locator('.modal label:has-text("Carrier") select').selectOption(String(carrier.id));
+  // Selecting the carrier schedules focus; don't type the check number into the select.
+  await page.waitForFunction(() => document.activeElement?.closest('label')?.textContent?.startsWith('Check / EFT #'));
   await page.keyboard.type('55001');
   await page.keyboard.press('Enter');
   await page.keyboard.type(d(b.estimated_amount)); // the same check (number, amount, payer) typed in again

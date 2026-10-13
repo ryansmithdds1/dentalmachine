@@ -94,4 +94,8 @@
   .prod-meter { flex-basis: 100%; max-width: none; }
   .prod-side { margin-left: 0; width: 100%; justify-content: space-between; }
 }
+/* Keep breakdowns below the sticky phone menu, while retaining their scrolling and tap toggle. */
+@media (max-width: 800px) {
+  .prod-pop { z-index: 35; }
+}
 @media print { .prod-bar, .cal-lane { display: none; } }

@@ -452,6 +452,8 @@ test('NAV phone: a Menu button opens the modules, then their extras, in a bottom
   await sheet.locator('.rail-sheet-group[data-module="family"] a[data-page="/patients"]').click();
   await page.waitForURL(/\/patients$/);
   await sheet.waitFor({ state: 'detached' });
+  // The sheet closes before React has rendered the new route's menu label.
+  await menu.filter({ hasText: 'Patients list' }).waitFor();
   assert.match(await menu.innerText(), /Patients list/);
   await menu.click();
   await sheet.locator('.rail-sheet-group[data-module="schedule"] .rail-sheet-mod').click();
