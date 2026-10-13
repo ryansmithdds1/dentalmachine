@@ -829,22 +829,24 @@ function Reports() {
           )}
           <section className="card">
             <h2 className="tc-h2">Hours and punctuality by person</h2>
-            <table className="compact-table tc-table">
-              <thead><tr><th>Person</th><th className="num">Regular</th><th className="num">Overtime</th><th className="num">Double</th><th className="num">PTO</th><th className="num">Holiday</th><th className="num">Late</th><th className="num">Avg late</th><th className="num">Left early</th><th className="num">Unscheduled</th><th className="num">Fixes</th>{data.rates && <th className="num">Cost</th>}</tr></thead>
-              <tbody>
-                {data.people.map((p) => (
-                  <tr key={p.user_id}>
-                    <td>{p.name}</td>
-                    {['regular', 'overtime', 'doubletime', 'pto', 'holiday'].map((k) => <td key={k} className="num">{p.minutes[k] ? hrs(p.minutes[k]) : '—'}</td>)}
-                    <td className={`num${p.late_count ? ' tc-warn-text' : ''}`}>{p.late_count || '—'}</td>
-                    <td className="num">{p.late_count ? `${Math.round(p.late_minutes / p.late_count)}m` : '—'}</td>
-                    <td className="num">{p.early_out_count || '—'}</td><td className="num">{p.unscheduled_count || '—'}</td><td className="num">{p.corrected_count || '—'}</td>
-                    {data.rates && <td className="num">{p.cost_cents == null ? <span className="muted">no rate</span> : money(p.cost_cents)}</td>}
-                  </tr>
-                ))}
-                {!data.people.length && <tr><td colSpan={12} className="muted">No hours in these dates.</td></tr>}
-              </tbody>
-            </table>
+            <div className="table-wrap" role="region" aria-label="Hours and punctuality by person" tabIndex={0}>
+              <table className="compact-table tc-table">
+                <thead><tr><th>Person</th><th className="num">Regular</th><th className="num">Overtime</th><th className="num">Double</th><th className="num">PTO</th><th className="num">Holiday</th><th className="num">Late</th><th className="num">Avg late</th><th className="num">Left early</th><th className="num">Unscheduled</th><th className="num">Fixes</th>{data.rates && <th className="num">Cost</th>}</tr></thead>
+                <tbody>
+                  {data.people.map((p) => (
+                    <tr key={p.user_id}>
+                      <td>{p.name}</td>
+                      {['regular', 'overtime', 'doubletime', 'pto', 'holiday'].map((k) => <td key={k} className="num">{p.minutes[k] ? hrs(p.minutes[k]) : '—'}</td>)}
+                      <td className={`num${p.late_count ? ' tc-warn-text' : ''}`}>{p.late_count || '—'}</td>
+                      <td className="num">{p.late_count ? `${Math.round(p.late_minutes / p.late_count)}m` : '—'}</td>
+                      <td className="num">{p.early_out_count || '—'}</td><td className="num">{p.unscheduled_count || '—'}</td><td className="num">{p.corrected_count || '—'}</td>
+                      {data.rates && <td className="num">{p.cost_cents == null ? <span className="muted">no rate</span> : money(p.cost_cents)}</td>}
+                    </tr>
+                  ))}
+                  {!data.people.length && <tr><td colSpan={12} className="muted">No hours in these dates.</td></tr>}
+                </tbody>
+              </table>
+            </div>
           </section>
           <div className="tc-two">
             <section className="card">
@@ -867,17 +869,19 @@ function Reports() {
             </section>
             <section className="card">
               <h2 className="tc-h2">By office</h2>
-              <table className="compact-table">
-                <thead><tr><th>Office</th><th className="num">Worked</th><th className="num">Overtime</th>{data.rates && <><th className="num">Labor</th><th className="num">Production</th><th className="num">Labor %</th></>}</tr></thead>
-                <tbody>
-                  {data.offices.map((o) => (
-                    <tr key={o.location_id ?? 0}><td>{o.name}</td><td className="num">{hrs(o.worked)}</td><td className="num">{hrs(o.overtime + o.doubletime)}</td>
-                      {data.rates && <><td className="num">{money(o.cost_cents)}</td><td className="num">{money(o.production_cents)}</td><td className="num">{o.labor_percent == null ? '—' : `${o.labor_percent}%`}</td></>}
-                    </tr>
-                  ))}
-                  {!data.offices.length && <tr><td colSpan={6} className="muted">No hours yet.</td></tr>}
-                </tbody>
-              </table>
+              <div className="table-wrap" role="region" aria-label="Hours by office" tabIndex={0}>
+                <table className="compact-table">
+                  <thead><tr><th>Office</th><th className="num">Worked</th><th className="num">Overtime</th>{data.rates && <><th className="num">Labor</th><th className="num">Production</th><th className="num">Labor %</th></>}</tr></thead>
+                  <tbody>
+                    {data.offices.map((o) => (
+                      <tr key={o.location_id ?? 0}><td>{o.name}</td><td className="num">{hrs(o.worked)}</td><td className="num">{hrs(o.overtime + o.doubletime)}</td>
+                        {data.rates && <><td className="num">{money(o.cost_cents)}</td><td className="num">{money(o.production_cents)}</td><td className="num">{o.labor_percent == null ? '—' : `${o.labor_percent}%`}</td></>}
+                      </tr>
+                    ))}
+                    {!data.offices.length && <tr><td colSpan={6} className="muted">No hours yet.</td></tr>}
+                  </tbody>
+                </table>
+              </div>
               {data.rates && <p className="muted tc-small">Worked time only — paid time off and holidays aren’t tied to an office, so they’re in the total above but not here.</p>}
             </section>
           </div>

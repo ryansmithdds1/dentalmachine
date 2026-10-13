@@ -163,7 +163,7 @@ function NoBook({ from, to }) {
   if (!data) return <div className="empty">Loading…</div>;
   const max = Math.max(1, ...data.reasons.map((r) => r.count));
   return (
-    <div className="phones-grid">
+    <div className="phones-grid phones-no-book">
       <div className="card">
         <h3 style={{ marginTop: 0 }}>Why callers didn’t book</h3>
         <p className="muted" style={{ fontSize: 12 }}>{data.total} calls with a confirmed reason{data.waiting ? ` · ${data.waiting} waiting for someone to confirm (Calls → Didn’t book)` : ''}. Click a reason to see its calls.</p>
@@ -179,8 +179,10 @@ function NoBook({ from, to }) {
       </div>
       <div className="card">
         <h3 style={{ marginTop: 0 }}>Week by week</h3>
-        <table><thead><tr><th>Week of</th><th className="num">Total</th>{data.reasons.map((r) => <th key={r.reason} className="num">{r.label}</th>)}</tr></thead>
-          <tbody>{data.trend.map((w) => <tr key={w.week}><td>{w.week}</td><td className="num">{w.total}</td>{data.reasons.map((r) => <td key={r.reason} className="num">{w[r.reason] || ''}</td>)}</tr>)}</tbody></table>
+        <div className="table-wrap" role="region" aria-label="Weekly reasons for not booking" tabIndex={0}>
+          <table><thead><tr><th>Week of</th><th className="num">Total</th>{data.reasons.map((r) => <th key={r.reason} className="num">{r.label}</th>)}</tr></thead>
+            <tbody>{data.trend.map((w) => <tr key={w.week}><td>{w.week}</td><td className="num">{w.total}</td>{data.reasons.map((r) => <td key={r.reason} className="num">{w[r.reason] || ''}</td>)}</tr>)}</tbody></table>
+        </div>
         {!data.trend.length && <div className="muted">Nothing yet.</div>}
       </div>
       {reason && (

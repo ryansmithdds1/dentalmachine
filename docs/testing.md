@@ -68,12 +68,16 @@ screen. A new page is swept automatically.
   you receive phone alerts (403 = you don't, and the tab says so); the time-clock kiosk needs a kiosk key (401)
   in a staff browser; printable documents are paper-width on a phone;
 - `known: true` — real bugs found by the first sweep that haven't been fixed yet (sideways scrolling on phones
-  on Billing → Eligibility, Ask your data, Time clock manager tabs, Reviews settings, Phones → Why they didn't
-  book, and Business at tablet width). **Remove an entry when its page is fixed.**
+  on Billing → Eligibility, Ask your data, Time clock manager tabs, Reviews settings, and Business at tablet
+  width). **Remove an entry when its page is fixed.**
 
 Run everything: `npm run e2e:sweep` (about 15–20 minutes with 4 workers). A slice while you work:
 `SWEEP_ROLES=billing SWEEP_VIEWPORTS=phone SWEEP_THEMES=dark SWEEP_VERBOSE=1 npm run e2e:sweep`.
 With `E2E_SHOTS` it writes `sweep-report.json` (every finding, what was tolerated and why, the routes).
+
+The focused responsive regression is `node --test e2e/responsive-layout.test.mjs` (also included in `npm run e2e`).
+It checks Phones → Why they didn’t book, Help → Show me, checkout, Settings users/forms and Time clock reports
+at 375, 390, 414, 768, 1024 and 1400 px in both themes, with no layout allowlist and no clipped walkthrough titles.
 
 ## Chaos: a misbehaving browser (`e2e/chaos/`)
 

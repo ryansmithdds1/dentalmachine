@@ -25,8 +25,8 @@ before(async () => {
   assert.ok(hyg, 'the demo practice has a hygienist');
   pt = await s.post('/patients', { first_name: `Rena${tag}`, last_name: 'Recall', dob: '1981-05-05', phone: '(512) 555-0177', primary_hygienist_id: hyg.id });
   assert.ok(pt.id, JSON.stringify(pt));
-  // Their history came from their last dentist: cleaning and exam seven months ago, bitewings thirteen.
-  for (const [code, date] of [['D1110', monthsAgo(today, 7)], ['D0120', monthsAgo(today, 7)], ['D0274', monthsAgo(today, 13)]]) {
+  // Their history came from their last dentist: cleaning and exam seven months ago, bitewings fourteen (beyond the 30-day overdue grace period in every month).
+  for (const [code, date] of [['D1110', monthsAgo(today, 7)], ['D0120', monthsAgo(today, 7)], ['D0274', monthsAgo(today, 14)]]) {
     const r = await s.post(`/patients/${pt.id}/outside-procedures`, { code, date, office_name: 'Previous dentist' });
     assert.ok(r.id, JSON.stringify(r));
   }
